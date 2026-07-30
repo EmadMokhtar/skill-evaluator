@@ -1,0 +1,9 @@
+cases:
+  - name: fake runner echoes the skill name
+    task: greet Ada
+    tags: [smoke]
+    assertions:
+      - kind: contains
+        value: greeting
+      - kind: not_contains
+        value: traceback
