@@ -24,6 +24,12 @@ def render_console(report: RunReport, gate: GateResult | None = None) -> str:
         lines.append("")
         lines.append(f"Skipped (no eval cases): {', '.join(report.skipped_skills)}")
 
+    if report.tag_filtered_skills:
+        lines.append("")
+        lines.append(
+            f"Skipped (no cases matched --tag filter): {', '.join(report.tag_filtered_skills)}"
+        )
+
     lines.append("")
     lines.append(
         f"{report.passed} passed, {report.failed} failed, "

@@ -27,7 +27,21 @@ def evaluate_gate(
     """Apply thresholds to a report. Errored cases fail the gate by default."""
     reasons: list[str] = []
 
-    if report.total and report.pass_rate < min_pass_rate:
+    if report.total == 0:
+        if report.tag_filtered_skills:
+            names = ", ".join(report.tag_filtered_skills)
+            reasons.append(
+                f"no eval cases ran: the --tag filter excluded every case for skill(s): {names}"
+            )
+        elif report.skipped_skills:
+            names = ", ".join(report.skipped_skills)
+            reasons.append(
+                "no eval cases ran: all discovered skill(s) were skipped for "
+                f"having no eval cases: {names}"
+            )
+        else:
+            reasons.append("no eval cases ran: no skills were found")
+    elif report.pass_rate < min_pass_rate:
         reasons.append(
             f"pass rate {report.pass_rate:.0%} is below the required {min_pass_rate:.0%}"
         )

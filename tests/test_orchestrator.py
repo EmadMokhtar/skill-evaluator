@@ -82,6 +82,21 @@ def test_tag_filter_selects_matching_cases(tmp_path):
     assert report.outcomes[0].case_name == "passes"
 
 
+def test_tag_filter_excluding_all_cases_is_tag_filtered_not_skipped(tmp_path):
+    """A skill that HAS eval cases, none matching --tag, is not the same as a
+    skill with zero eval cases at all. Item 2: distinguish the two so the
+    console/gate can report the real cause instead of a misleading "skipped
+    (no eval cases)" message.
+    """
+    yaml_text = "cases:\n  - name: no tags here\n    task: good\n"
+    report = run_evals(
+        [_skill_with_cases(tmp_path, yaml_text=yaml_text)], [_runner()], tag="nonexistent-tag"
+    )
+    assert report.total == 0
+    assert report.skipped_skills == []
+    assert report.tag_filtered_skills == ["pdf"]
+
+
 def test_errored_case_still_records_the_result(tmp_path):
     yaml_text = "cases:\n  - name: boom\n    task: explodes\n"
     report = run_evals([_skill_with_cases(tmp_path, yaml_text=yaml_text)], [_runner()])

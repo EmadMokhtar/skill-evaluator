@@ -54,14 +54,18 @@ def run_evals(
     evaluators = evaluators if evaluators is not None else [AssertionEvaluator()]
     outcomes: list[CaseOutcome] = []
     skipped: list[str] = []
+    tag_filtered: list[str] = []
     for skill in skills:
         cases = load_cases_for_skill(skill, evals_path=evals_path)
-        if tag is not None:
-            cases = [c for c in cases if tag in c.tags]
         if not cases:
             skipped.append(skill.name)
             continue
+        if tag is not None:
+            cases = [c for c in cases if tag in c.tags]
+            if not cases:
+                tag_filtered.append(skill.name)
+                continue
         for case in cases:
             for runner in runners:
                 outcomes.append(_run_one(skill, case, runner, evaluators))
-    return RunReport(outcomes=outcomes, skipped_skills=skipped)
+    return RunReport(outcomes=outcomes, skipped_skills=skipped, tag_filtered_skills=tag_filtered)

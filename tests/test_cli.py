@@ -89,10 +89,14 @@ def test_run_on_missing_path_exits_with_error(tmp_path):
 
 
 def test_skill_without_cases_is_reported_as_skipped(tmp_path):
+    """Item 1: a run where every skill is skipped executed zero cases, so it
+    must fail the gate rather than silently exiting 0.
+    """
     _make_skill(tmp_path, cases=None)
     result = runner.invoke(app, ["run", str(tmp_path)])
     assert "Skipped" in result.stdout
-    assert result.exit_code == 0
+    assert result.exit_code == 1
+    assert "Gate FAILED" in result.stdout
 
 
 def test_list_command_shows_skills_and_case_counts(tmp_path):

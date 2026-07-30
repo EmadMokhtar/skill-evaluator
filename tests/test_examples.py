@@ -21,4 +21,4 @@ def test_example_skills_are_discoverable():
 def test_examples_run_green_end_to_end():
     result = runner.invoke(app, ["run", str(EXAMPLES)])
     assert result.exit_code == 0, result.stdout
-    assert "0 failed" in result.stdout
+    assert "1 passed" in result.stdout

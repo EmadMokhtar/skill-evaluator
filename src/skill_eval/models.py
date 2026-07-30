@@ -84,6 +84,7 @@ class RunReport(BaseModel):
 
     outcomes: list[CaseOutcome] = Field(default_factory=list)
     skipped_skills: list[str] = Field(default_factory=list)
+    tag_filtered_skills: list[str] = Field(default_factory=list)
 
     @property
     def total(self) -> int:

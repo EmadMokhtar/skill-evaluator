@@ -52,10 +52,39 @@ def test_per_skill_threshold_fails_only_the_offending_skill():
     assert any("b" in r for r in gate.reasons)
 
 
-def test_empty_report_passes_and_is_not_an_error():
+def test_empty_report_fails_the_gate():
+    """Item 1: a run where zero cases executed must FAIL the gate.
+
+    Previously ``if report.total and ...`` guarded the pass-rate check, so a
+    run that executed nothing silently exited 0. A mistyped path, a moved
+    directory, or a --tag matching nothing must not report success.
+    """
     gate = evaluate_gate(RunReport())
-    assert gate.passed is True
-    assert gate.exit_code == EXIT_OK
+    assert gate.passed is False
+    assert gate.exit_code == EXIT_FAILED
+    assert any("no eval cases ran" in r or "no cases ran" in r for r in gate.reasons)
+
+
+def test_empty_report_with_no_skills_at_all_names_the_cause():
+    gate = evaluate_gate(RunReport())
+    assert gate.passed is False
+    assert any("no skills were found" in r for r in gate.reasons)
+
+
+def test_empty_report_because_all_skills_skipped_names_the_cause():
+    report = RunReport(outcomes=[], skipped_skills=["pdf", "xlsx"])
+    gate = evaluate_gate(report)
+    assert gate.passed is False
+    assert any(
+        "skipped" in r and "no eval cases" in r and "pdf" in r and "xlsx" in r for r in gate.reasons
+    )
+
+
+def test_empty_report_because_tag_filtered_everything_names_the_cause():
+    report = RunReport(outcomes=[], tag_filtered_skills=["pdf"])
+    gate = evaluate_gate(report)
+    assert gate.passed is False
+    assert any("--tag" in r and "pdf" in r for r in gate.reasons)
 
 
 def test_per_skill_min_with_no_outcomes_fails_the_gate():
