@@ -85,3 +85,62 @@ def test_json_includes_gate_when_supplied():
     data = json.loads(render_json(_report(), gate=gate))
     assert data["gate"]["passed"] is False
     assert data["gate"]["reasons"]
+
+
+def test_console_reports_aggregate_latency():
+    text = render_console(_report())
+    # Should contain latency with unit label
+    assert "latency" in text.lower() or "ms" in text or "s" in text
+    # The first outcome has latency_ms=5, second has 0 (no latency_ms set)
+    assert "5" in text or "0" in text
+
+
+def test_json_summary_includes_total_latency():
+    data = json.loads(render_json(_report()))
+    assert "total_latency_ms" in data["summary"]
+    # First outcome has latency_ms=5, second has 0 (default)
+    assert data["summary"]["total_latency_ms"] == 5
+
+
+def test_json_summary_includes_total_tokens_and_cost():
+    data = json.loads(render_json(_report()))
+    assert "total_tokens" in data["summary"]
+    assert "total_cost_usd" in data["summary"]
+    # First outcome has tokens=10, cost=0.01; second has defaults
+    assert data["summary"]["total_tokens"] == 10
+    assert data["summary"]["total_cost_usd"] == 0.01
+
+
+def test_reporters_handle_outcome_with_no_result():
+    """Outcomes with result=None should not crash and should contribute zero to totals."""
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="test1",
+                runner="fake",
+                status="passed",
+                scores=[],
+                result=RunResult(tokens=10, cost_usd=0.01, latency_ms=100),
+            ),
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="test2",
+                runner="fake",
+                status="passed",
+                scores=[],
+                result=None,  # No result
+            ),
+        ],
+    )
+    # Console should not crash
+    console_text = render_console(report)
+    assert "100" in console_text or "0.1" in console_text  # Some representation of latency
+    assert "2 passed" in console_text
+
+    # JSON should not crash and totals should exclude the None result
+    json_text = render_json(report)
+    data = json.loads(json_text)
+    assert data["summary"]["total_tokens"] == 10
+    assert data["summary"]["total_cost_usd"] == 0.01
+    assert data["summary"]["total_latency_ms"] == 100

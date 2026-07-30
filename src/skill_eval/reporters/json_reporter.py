@@ -10,6 +10,10 @@ from skill_eval.models import RunReport
 
 def render_json(report: RunReport, gate: GateResult | None = None) -> str:
     """Render a report as indented JSON for CI artifacts and tooling."""
+    total_tokens = sum(o.result.tokens for o in report.outcomes if o.result)
+    total_cost_usd = sum(o.result.cost_usd for o in report.outcomes if o.result)
+    total_latency_ms = sum(o.result.latency_ms for o in report.outcomes if o.result)
+
     payload: dict = {
         "summary": {
             "total": report.total,
@@ -18,6 +22,9 @@ def render_json(report: RunReport, gate: GateResult | None = None) -> str:
             "errored": report.errored,
             "pass_rate": report.pass_rate,
             "pass_rate_by_skill": report.pass_rate_by_skill(),
+            "total_tokens": total_tokens,
+            "total_cost_usd": total_cost_usd,
+            "total_latency_ms": total_latency_ms,
         },
         "skipped_skills": report.skipped_skills,
         "outcomes": [

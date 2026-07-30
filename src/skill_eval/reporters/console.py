@@ -31,8 +31,20 @@ def render_console(report: RunReport, gate: GateResult | None = None) -> str:
     )
 
     total_cost = sum(o.result.cost_usd for o in report.outcomes if o.result)
+    total_latency_ms = sum(o.result.latency_ms for o in report.outcomes if o.result)
+
+    # Build totals line with cost and latency
+    totals_parts = []
     if total_cost:
-        lines.append(f"Total cost: ${total_cost:.4f}")
+        totals_parts.append(f"Total cost: ${total_cost:.4f}")
+    if total_latency_ms:
+        if total_latency_ms >= 1000:
+            totals_parts.append(f"Total latency: {total_latency_ms / 1000:.2f}s")
+        else:
+            totals_parts.append(f"Total latency: {total_latency_ms}ms")
+
+    if totals_parts:
+        lines.append(" | ".join(totals_parts))
 
     if gate is not None and not gate.passed:
         lines.append("")
