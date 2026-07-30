@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
 
 from skill_eval.models import EvalCase, Skill
+from skill_eval.yaml_loading import safe_load
 
 EVALS_DIRNAME = "evals"
 EVAL_SUFFIX = ".eval.yaml"
@@ -18,32 +18,11 @@ class CaseParseError(Exception):
     """Raised when an eval file is missing or cannot be parsed."""
 
 
-class _StrictBoolLoader(yaml.SafeLoader):
-    """SafeLoader that only treats true/false as booleans.
-
-    Plain YAML 1.1 (what PyYAML implements) also resolves bare yes/no/on/off
-    to booleans, which silently corrupts eval assertion values like
-    ``value: yes`` into ``True``. Eval authors write those as plain strings,
-    so narrow the implicit bool resolver to the unambiguous true/false forms.
-    """
-
-
-_StrictBoolLoader.yaml_implicit_resolvers = {
-    first_char: [(tag, regexp) for tag, regexp in resolvers if tag != "tag:yaml.org,2002:bool"]
-    for first_char, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
-}
-_StrictBoolLoader.add_implicit_resolver(
-    "tag:yaml.org,2002:bool",
-    re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
-    list("tTfF"),
-)
-
-
 def parse_cases_file(path: Path) -> list[EvalCase]:
     """Parse one YAML file into EvalCase models."""
     path = Path(path)
     try:
-        data = yaml.load(path.read_text(), Loader=_StrictBoolLoader) or {}
+        data = safe_load(path.read_text()) or {}
     except yaml.YAMLError as exc:
         raise CaseParseError(f"invalid YAML in {path}: {exc}") from exc
     if not isinstance(data, dict) or "cases" not in data:

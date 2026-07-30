@@ -61,3 +61,17 @@ def test_malformed_frontmatter_raises_with_file_path(tmp_path):
     _write_skill(tmp_path, "bad", "---\nname: [unclosed\n---\n\nBody.\n")
     with pytest.raises(SkillParseError, match="bad/SKILL.md"):
         load_skills(tmp_path / "bad")
+
+
+def test_bare_on_frontmatter_name_parses_as_string_not_bool(tmp_path):
+    # Regression test: PyYAML's YAML-1.1 implicit bool resolver treats bare
+    # `on`/`off`/`yes`/`no` as booleans. Without the shared StrictBoolLoader,
+    # `name: on` would parse to the Python bool True and then get stringified
+    # to "True" by parse_skill_file's `str(...)` fallback, instead of "on".
+    _write_skill(
+        tmp_path,
+        "onskill",
+        "---\nname: on\ndescription: bare bool-like name\n---\n\nBody.\n",
+    )
+    skills = load_skills(tmp_path / "onskill")
+    assert skills[0].name == "on"

@@ -108,3 +108,33 @@ def test_cases_empty_list_returns_empty(tmp_path):
     path.write_text("cases: []\n")
     cases = parse_cases_file(path)
     assert cases == []
+
+
+def test_bare_yes_no_on_off_assertion_values_parse_as_strings(tmp_path):
+    path = tmp_path / "bools.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: bare bool-like literals\n"
+        "    task: check literals\n"
+        "    assertions:\n"
+        "      - kind: contains\n"
+        "        value: yes\n"
+        "      - kind: contains\n"
+        "        value: no\n"
+        "      - kind: contains\n"
+        "        value: on\n"
+        "      - kind: contains\n"
+        "        value: off\n"
+    )
+    cases = parse_cases_file(path)
+    values = [assertion.value for assertion in cases[0].assertions]
+    assert values == ["yes", "no", "on", "off"]
+    assert all(isinstance(v, str) for v in values)
+
+
+def test_genuine_true_false_still_parse_as_bool_via_shared_loader():
+    from skill_eval.yaml_loading import safe_load
+
+    data = safe_load("flag_true: true\nflag_false: false\n")
+    assert data["flag_true"] is True
+    assert data["flag_false"] is False

@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from skill_eval.models import Skill
+from skill_eval.yaml_loading import safe_load
 
 SKILL_FILENAME = "SKILL.md"
 
@@ -22,7 +23,7 @@ def _split_frontmatter(text: str) -> tuple[dict, str]:
     parts = text.split("---", 2)
     if len(parts) < 3:
         return {}, text
-    return yaml.safe_load(parts[1]) or {}, parts[2]
+    return safe_load(parts[1]) or {}, parts[2]
 
 
 def parse_skill_file(skill_md: Path) -> Skill:
