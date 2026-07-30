@@ -36,7 +36,7 @@ Everything else — loading, orchestrating, reporting, gating — is plumbing ar
 ## 3. Architecture & components
 
 ```
-src/skill_eval/                # import module (underscore required by Python)
+src/skill_eval/                # import module (hyphens invalid in identifiers, so underscore)
   models.py        # Pydantic v2: Skill, EvalCase, RunResult, EvalScore, RunReport
   skills/loader.py # walk a path for SKILL.md files → [Skill] (frontmatter, body, scripts)
   cases/loader.py  # discover & parse evals (*.eval.yaml / evals/) → [EvalCase]
@@ -92,13 +92,13 @@ skill-eval init <skill-dir>     # scaffold an eval file next to a skill
 
 - `<path>` — a single skill dir (`SKILL.md`) **or** a parent dir containing many skill dirs. Discovery is recursive; the everyday CI call is simply `skill-eval run ./skills`.
 - `--evals` — optional explicit eval file/dir; otherwise discovered beside each skill.
-- `--config` — optional `skill-eval.toml`; otherwise discovered from CWD.
+- `--config` — optional `skill-eval.toml`; otherwise discovered by searching upward from CWD (see §6).
 - Resolution order for runner/judge/thresholds: **CLI flag > config file > built-in default**.
 - Skills with **no eval files** are reported as **skipped** (visible, never silently ignored).
 
 ## 6. Configuration
 
-`skill-eval.toml` at repo root (all optional; CLI overrides):
+`skill-eval.toml` (all optional; CLI overrides). Located via `--config`, or otherwise discovered by searching upward from the current working directory — repo root is the conventional home, not a hard requirement:
 - `default_runner`, `judge_model`, `concurrency`, `retry` policy.
 - Threshold defaults: `min_pass_rate` (overall) and optional per-skill thresholds.
 - Which reporters to emit.
@@ -120,7 +120,7 @@ skill-eval init <skill-dir>     # scaffold an eval file next to a skill
 - **`FakeRunner` is the backbone:** it returns scripted `RunResult`s so the whole pipeline (loaders → evaluators → orchestrator → reporters → gating) is tested in CI with **zero API cost and full determinism**.
 - Unit tests for loaders, each evaluator (fed synthetic `RunResult`s), reporters, and gating logic.
 - Integration tests that hit real providers live behind an opt-in pytest marker (not run by default CI).
-- Development follows TDD (per superpowers:test-driven-development).
+- Development follows test-driven development: write the failing test first, then the implementation.
 
 ## 9. Roadmap / milestones
 
