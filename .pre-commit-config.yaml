@@ -1,0 +1,8 @@
+# Install once per clone:  uv run pre-commit install --hook-type commit-msg
+# Rejects non-Conventional-Commit messages at write time, before they reach a branch.
+repos:
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.6.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]

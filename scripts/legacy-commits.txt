@@ -1,0 +1,6 @@
+# Commits that predate the adoption of Conventional Commits.
+# Exempt from scripts/check_commits.py. This list should only ever shrink —
+# never add to it. Reword new commits instead.
+
+d441140c6014ecc09c6e011976df7bdcdb9c3971  # Add skill-eval design doc
+c66b3bbcd53d98ba35821f93b57ccc59f4e78c75  # Address review: fix module-naming rationale ...
