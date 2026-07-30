@@ -8,7 +8,6 @@ TOML = """
 default_runner = "fake"
 min_pass_rate = 0.8
 fail_on_error = false
-reporters = ["console", "json"]
 
 [per_skill_min]
 pdf = 1.0
@@ -29,7 +28,6 @@ def test_loads_values_from_an_explicit_path(tmp_path):
     config = load_config(path=path)
     assert config.min_pass_rate == 0.8
     assert config.fail_on_error is False
-    assert config.reporters == ["console", "json"]
     assert config.per_skill_min == {"pdf": 1.0}
 
 
@@ -61,6 +59,20 @@ def test_unknown_keys_are_rejected(tmp_path):
     path = tmp_path / "skill-eval.toml"
     path.write_text('mistyped_key = "x"\n')
     with pytest.raises(ConfigError, match="mistyped_key"):
+        load_config(path=path)
+
+
+def test_reporters_field_was_removed_and_is_now_rejected(tmp_path):
+    """Item 6: Config.reporters was validated but completely ignored -- the
+    CLI hardcodes console output and keys JSON off --json-output. Rather
+    than leave a validated-but-inert config key that silently misleads
+    users, it is removed until M4 reintroduces it behind a real reporter
+    registry. A config file that still sets it must now be rejected as an
+    unknown key, same as any other typo.
+    """
+    path = tmp_path / "skill-eval.toml"
+    path.write_text('reporters = ["console", "json"]\n')
+    with pytest.raises(ConfigError, match="reporters"):
         load_config(path=path)
 
 

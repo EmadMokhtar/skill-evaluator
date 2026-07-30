@@ -23,7 +23,6 @@ class Config(BaseModel):
     min_pass_rate: float = 1.0
     fail_on_error: bool = True
     per_skill_min: dict[str, float] = Field(default_factory=dict)
-    reporters: list[str] = Field(default_factory=lambda: ["console"])
 
 
 def find_config_file(start: Path) -> Path | None:
