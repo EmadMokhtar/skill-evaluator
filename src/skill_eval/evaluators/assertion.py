@@ -11,13 +11,20 @@ class UnknownAssertionKind(Exception):
     """Raised when an eval file uses an assertion kind we do not support."""
 
 
+class InvalidAssertionValue(Exception):
+    """Raised when an assertion's value is malformed (e.g. an invalid regex)."""
+
+
 def _check(spec: AssertionSpec, output: str) -> bool:
     if spec.kind == "contains":
         return spec.value in output
     if spec.kind == "not_contains":
         return spec.value not in output
     if spec.kind == "regex":
-        return re.search(spec.value, output) is not None
+        try:
+            return re.search(spec.value, output) is not None
+        except re.error as exc:
+            raise InvalidAssertionValue(f"invalid regex pattern {spec.value!r}: {exc}") from exc
     if spec.kind == "equals":
         return output.strip() == spec.value
     raise UnknownAssertionKind(f"unknown assertion kind: {spec.kind!r}")

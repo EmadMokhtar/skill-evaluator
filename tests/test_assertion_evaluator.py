@@ -88,3 +88,12 @@ def test_unknown_kind_raises():
         AssertionEvaluator().evaluate(
             _case(AssertionSpec(kind="nonsense", value="x")), RunResult(output="y")
         )
+
+
+def test_invalid_regex_raises_invalid_assertion_value():
+    from skill_eval.evaluators.assertion import InvalidAssertionValue
+
+    with pytest.raises(InvalidAssertionValue, match=r"\[unclosed"):
+        AssertionEvaluator().evaluate(
+            _case(AssertionSpec(kind="regex", value="[unclosed")), RunResult(output="x")
+        )
