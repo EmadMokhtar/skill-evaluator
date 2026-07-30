@@ -114,3 +114,51 @@ def test_run_with_unknown_assertion_kind_exits_with_error_not_traceback(tmp_path
     result = runner.invoke(app, ["run", str(tmp_path)])
     assert result.exit_code == 2
     assert "nonsense" in result.stdout
+
+
+def test_json_output_to_nested_nonexistent_directory_creates_it(tmp_path):
+    """--json-output to a nested non-existent path creates parent dirs and writes JSON.
+
+    When the parent directory of the JSON output file does not exist, the CLI
+    should create it (including intermediate directories) and write the report,
+    rather than crashing with a traceback.
+    """
+    _make_skill(tmp_path / "skills")
+    out = tmp_path / "reports" / "nested" / "report.json"
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--json-output", str(out)])
+    assert result.exit_code == 0
+    assert out.exists()
+    assert json.loads(out.read_text())["summary"]["total"] == 1
+
+
+def test_json_output_to_path_with_file_as_parent_exits_with_error(tmp_path):
+    """--json-output whose parent is a regular file exits with code 2 and prints message.
+
+    When the parent of the JSON output path is a regular file (not a directory),
+    directory creation must fail. The CLI should print a clear error message
+    naming the path and exit with code 2, not raise a raw traceback.
+    """
+    _make_skill(tmp_path / "skills")
+    # Create a file where we want a directory
+    blocking_file = tmp_path / "blocking"
+    blocking_file.write_text("I am a file")
+    out = blocking_file / "report.json"
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--json-output", str(out)])
+    assert result.exit_code == 2
+    assert str(out) in result.stdout
+
+
+def test_json_output_with_failing_gate_writes_report_and_exits_one(tmp_path):
+    """--json-output combined with a failing gate writes the report and exits 1.
+
+    When the gate fails (exit code 1), the JSON report should still be written
+    before the exit. Previously this combination was untested.
+    """
+    _make_skill(tmp_path / "skills", cases=FAILING_CASES_YAML)
+    out = tmp_path / "report.json"
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--json-output", str(out)])
+    assert result.exit_code == 1
+    assert out.exists()
+    report = json.loads(out.read_text())
+    assert report["summary"]["total"] == 1
+    assert report["summary"]["failed"] == 1

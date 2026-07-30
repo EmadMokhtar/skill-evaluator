@@ -64,7 +64,7 @@ def run(
     try:
         settings = load_config(path=config)
         skills = load_skills(path)
-        runner_name = runner or settings.default_runner
+        runner_name = runner if runner is not None else settings.default_runner
         if runner_name not in _RUNNERS:
             raise typer.BadParameter(f"unknown runner: {runner_name}")
         report = run_evals(skills, [_RUNNERS[runner_name]()], evals_path=evals, tag=tag)
@@ -81,7 +81,12 @@ def run(
 
     typer.echo(render_console(report, gate=gate))
     if json_output is not None:
-        json_output.write_text(render_json(report, gate=gate))
+        try:
+            json_output.parent.mkdir(parents=True, exist_ok=True)
+            json_output.write_text(render_json(report, gate=gate))
+        except OSError as exc:
+            typer.echo(f"Failed to write JSON report to {json_output}: {exc}")
+            raise typer.Exit(code=2) from exc
 
     raise typer.Exit(code=gate.exit_code)
 
