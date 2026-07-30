@@ -63,6 +63,23 @@ def test_malformed_frontmatter_raises_with_file_path(tmp_path):
         load_skills(tmp_path / "bad")
 
 
+def test_frontmatter_value_containing_triple_dash_is_preserved(tmp_path):
+    """Item 7: text.split("---", 2) matches "---" anywhere, including inside
+    a value, silently truncating a description like "a---b" to "a" and
+    mangling the body. A line-anchored split must treat only a "---" line
+    on its own as a delimiter, so an embedded "---" inside a value is left
+    alone.
+    """
+    _write_skill(
+        tmp_path,
+        "dashy",
+        "---\nname: dashy\ndescription: a---b\n---\n\nBody text.\n",
+    )
+    skills = load_skills(tmp_path / "dashy")
+    assert skills[0].description == "a---b"
+    assert "Body text." in skills[0].instructions
+
+
 def test_unreadable_non_utf8_skill_md_raises_skill_parse_error(tmp_path):
     """Item 4: a non-UTF-8 byte must fail fast with a precise message naming
     the file, not escape as a raw UnicodeDecodeError traceback.

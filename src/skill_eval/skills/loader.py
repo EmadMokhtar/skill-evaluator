@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -11,16 +12,24 @@ from skill_eval.yaml_loading import safe_load
 
 SKILL_FILENAME = "SKILL.md"
 
+_FRONTMATTER_DELIMITER = re.compile(r"^---\s*$", re.MULTILINE)
+
 
 class SkillParseError(Exception):
     """Raised when a skill path is missing or a SKILL.md cannot be parsed."""
 
 
 def _split_frontmatter(text: str) -> tuple[dict, str]:
-    """Return (frontmatter, body). Missing frontmatter yields ({}, whole text)."""
+    """Return (frontmatter, body). Missing frontmatter yields ({}, whole text).
+
+    The delimiter must be a line containing only ``---`` (optionally
+    trailing whitespace); a "---" occurring inside a value on an otherwise
+    non-delimiter line (e.g. ``description: a---b``) is left alone instead
+    of being treated as a frontmatter boundary.
+    """
     if not text.startswith("---"):
         return {}, text
-    parts = text.split("---", 2)
+    parts = _FRONTMATTER_DELIMITER.split(text, maxsplit=2)
     if len(parts) < 3:
         return {}, text
     return safe_load(parts[1]) or {}, parts[2]
