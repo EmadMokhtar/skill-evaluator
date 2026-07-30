@@ -89,10 +89,9 @@ def test_json_includes_gate_when_supplied():
 
 def test_console_reports_aggregate_latency():
     text = render_console(_report())
-    # Should contain latency with unit label
-    assert "latency" in text.lower() or "ms" in text or "s" in text
-    # The first outcome has latency_ms=5, second has 0 (no latency_ms set)
-    assert "5" in text or "0" in text
+    # The first outcome has latency_ms=5, second has latency_ms defaulting to 0
+    # Total is 5ms, which should appear as the exact substring from the console implementation
+    assert "Total latency: 5ms" in text
 
 
 def test_json_summary_includes_total_latency():
