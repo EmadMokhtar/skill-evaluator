@@ -5,7 +5,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 CONFIG_FILENAME = "skill-eval.toml"
 
@@ -17,7 +17,7 @@ class ConfigError(Exception):
 class Config(BaseModel):
     """Run defaults; every field is overridable by a CLI flag."""
 
-    model_config = {"extra": "forbid"}
+    model_config = ConfigDict(extra="forbid")
 
     default_runner: str = "fake"
     min_pass_rate: float = 1.0
@@ -42,6 +42,8 @@ def load_config(path: Path | None = None, start: Path | None = None) -> Config:
         path = Path(path)
         if not path.exists():
             raise ConfigError(f"config file does not exist: {path}")
+        if not path.is_file():
+            raise ConfigError(f"config file is not a file: {path}")
     else:
         path = find_config_file(start or Path.cwd())
         if path is None:

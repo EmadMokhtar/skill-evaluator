@@ -60,3 +60,10 @@ def test_unknown_keys_are_rejected(tmp_path):
     path.write_text('mistyped_key = "x"\n')
     with pytest.raises(ConfigError, match="mistyped_key"):
         load_config(path=path)
+
+
+def test_explicit_directory_path_raises_config_error(tmp_path):
+    directory = tmp_path / "config_dir"
+    directory.mkdir()
+    with pytest.raises(ConfigError, match="is not a file"):
+        load_config(path=directory)
