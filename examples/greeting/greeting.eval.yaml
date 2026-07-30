@@ -1,3 +1,7 @@
+# These assertions intentionally match FakeRunner's echo output (it just
+# echoes the skill name back), since M1 ships no real runner. M2 replaces
+# FakeRunner with an actual agent runner and these assertions should be
+# rewritten to check real behavior.
 cases:
   - name: fake runner echoes the skill name
     task: greet Ada

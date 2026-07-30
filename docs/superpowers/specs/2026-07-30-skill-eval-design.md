@@ -93,7 +93,7 @@ aggregate ─▶ RunReport (grouped by skill) ─▶ reporters + gating ─▶ e
 The tool is a **standalone evaluator**; skills and evals are external inputs.
 
 ```
-skill-eval run <path> [--evals <path>] [--runner <name>] [--filter <tag>] \
+skill-eval run <path> [--evals <path>] [--runner <name>] [--tag <tag>] \
                       [--report console,json,junit,md] [--min-pass-rate <f>] \
                       [--config <file>]
 skill-eval list <path>          # discover skills + their eval cases, no execution

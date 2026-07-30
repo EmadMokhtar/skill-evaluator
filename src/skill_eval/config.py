@@ -15,7 +15,12 @@ class ConfigError(Exception):
 
 
 class Config(BaseModel):
-    """Run defaults; every field is overridable by a CLI flag."""
+    """Run defaults for `skill-eval run`.
+
+    Only `default_runner` (via `--runner`) and `min_pass_rate` (via
+    `--min-pass-rate`) can be overridden by a CLI flag; `fail_on_error` and
+    `per_skill_min` have no corresponding flag and can only be set here.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
