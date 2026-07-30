@@ -44,7 +44,13 @@ def run_evals(
     evaluators: list[Evaluator] | None = None,
     tag: str | None = None,
 ) -> RunReport:
-    """Run every (skill, case, runner) combination and aggregate the results."""
+    """Run every (skill, case, runner) combination and aggregate the results.
+
+    Evaluator exceptions (e.g. ``UnknownAssertionKind``, ``InvalidAssertionValue``
+    from `skill_eval.evaluators.assertion`) propagate out of this function by
+    design: a malformed assertion is an authoring error in the eval YAML, not a
+    skill failure, so the run aborts rather than silently reporting a red eval.
+    """
     evaluators = evaluators if evaluators is not None else [AssertionEvaluator()]
     outcomes: list[CaseOutcome] = []
     skipped: list[str] = []

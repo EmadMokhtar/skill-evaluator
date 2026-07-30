@@ -1,3 +1,6 @@
+import pytest
+
+from skill_eval.evaluators.assertion import UnknownAssertionKind
 from skill_eval.models import RunResult, Skill
 from skill_eval.orchestrator import run_evals
 from skill_eval.runners.fake import FakeRunner
@@ -92,3 +95,22 @@ def test_evaluator_is_not_run_for_errored_cases(tmp_path):
     )
     report = run_evals([_skill_with_cases(tmp_path, yaml_text=yaml_text)], [_runner()])
     assert report.outcomes[0].scores == []
+
+
+def test_unknown_assertion_kind_aborts_the_run(tmp_path):
+    """Characterization test: a malformed assertion aborts run_evals by design.
+
+    An unknown `kind:` in an eval YAML is an authoring error in the user's
+    eval file, not a skill failure. The owner decided this should abort the
+    whole matrix (propagate out of run_evals) rather than be caught and
+    reported as a red eval outcome, so the orchestrator deliberately has no
+    try/except around evaluator.evaluate(...). This test locks in that
+    behavior; the CLI is expected to turn this exception into a clean exit
+    code in a later task.
+    """
+    yaml_text = (
+        "cases:\n  - name: bad kind\n    task: good\n"
+        "    assertions:\n      - kind: nonsense\n        value: whatever\n"
+    )
+    with pytest.raises(UnknownAssertionKind):
+        run_evals([_skill_with_cases(tmp_path, yaml_text=yaml_text)], [_runner()])
