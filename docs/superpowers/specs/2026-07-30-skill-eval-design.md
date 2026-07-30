@@ -35,26 +35,31 @@ Everything else — loading, orchestrating, reporting, gating — is plumbing ar
 
 ## 3. Architecture & components
 
+This is the **target** architecture. Entries marked `(M2+)` are not built yet — §9 defines
+what lands in each milestone.
+
 ```
 src/skill_eval/                # import module (hyphens invalid in identifiers, so underscore)
   models.py        # Pydantic v2: Skill, EvalCase, RunResult, EvalScore, RunReport
+  yaml_loading.py  # shared strict-bool YAML loader (bare yes/no/on/off stay strings)
   skills/loader.py # walk a path for SKILL.md files → [Skill] (frontmatter, body, scripts)
   cases/loader.py  # discover & parse evals (*.eval.yaml / evals/) → [EvalCase]
   runners/
     base.py        # Runner protocol: run(skill, task) -> RunResult
     fake.py        # deterministic, no-API runner (backbone of our own tests)
-    pydantic_ai.py # adapter #1 (real, primary — provider-flexible)
-    langchain.py   # adapter #2 (optional, deferred)
+    pydantic_ai.py # (M2+) adapter #1 (real, primary — provider-flexible)
+    langchain.py   # (M6, optional) adapter #2 — only if it slots in cleanly
   evaluators/
     base.py        # Evaluator protocol: evaluate(case, result) -> EvalScore
-    assertion.py   # contains / regex / equals / json-schema / file-produced
-    trajectory.py  # tool called, order, forbidden tools, skill-triggered
-    judge.py       # LLM-as-judge: rubric -> score + rationale (structured output)
-  orchestrator.py  # matrix (skill × case × runner), concurrency, retries → RunReport
-  reporters/       # console, json, junit, markdown/html
+    assertion.py   # contains / not_contains / regex / equals
+                   #   (M2+) json-schema / file-produced
+    trajectory.py  # (M2+) tool called, order, forbidden tools, skill-triggered
+    judge.py       # (M3+) LLM-as-judge: rubric -> score + rationale (structured output)
+  orchestrator.py  # matrix (skill × case × runner) → RunReport; (M2+) concurrency, retries
+  reporters/       # console, json; (M4+) junit, markdown/html
   gating.py        # thresholds -> exit code
-  config.py        # skill-eval.toml: default runner, judge model, thresholds, concurrency
-  cli.py           # Typer: run / list / init
+  config.py        # skill-eval.toml: default runner, thresholds; (M3+) judge model, concurrency
+  cli.py           # Typer: run / list; (M5+) init
 ```
 
 Repo-level (outside the package):
@@ -120,9 +125,12 @@ skill-eval init <skill-dir>     # scaffold an eval file next to a skill
   - **failed** — case ran but scored below bar (an *eval* signal).
   - **errored** — the runner blew up (API 5xx, timeout, missing key — an *infra* signal).
   - Both are tracked separately in the report. **Errored cases fail the gate by default** so CI never goes green on a broken run.
+- **A run that executed zero cases fails the gate.** "Nothing ran" is a broken run, not a pass — otherwise a mistyped path or a renamed directory reports success forever. The reason distinguishes the causes: no skills found, all skills skipped (no eval cases), or all cases filtered out by `--tag`.
+- **Authoring errors abort the run** rather than scoring as failures. An unsupported assertion `kind:`, a malformed regex, or an unknown key in an eval file is a mistake in the user's YAML, not a signal about the skill — so the orchestrator lets these propagate and the CLI reports them cleanly. Unknown keys are rejected (`extra="forbid"`) so a typo like `assertion:` can't yield a vacuously-passing case.
+- **Exit codes are a contract:** gate pass → `0`, gate fail → `1`, user/authoring error → `2`.
 - Transient runner errors get **retries with backoff**.
 - A **preflight check** verifies required API keys before spending anything.
-- Skill/YAML parse errors **fail fast** with a precise message (which file, which field).
+- Skill/YAML/config parse errors **fail fast** with a precise message (which file, which field). This includes unreadable and non-UTF-8 files — all file IO pins `encoding="utf-8"` rather than inheriting a platform default.
 - **Judge reliability:** temperature 0 + Pydantic structured output. Optional N-sample majority vote is deferred.
 
 ## 8. Testing strategy (the tool's own tests)

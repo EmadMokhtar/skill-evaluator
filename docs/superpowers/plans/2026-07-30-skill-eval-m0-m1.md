@@ -1,5 +1,27 @@
 # skill-eval M0+M1 Implementation Plan
 
+> ## ⚠️ Historical record — the code is the source of truth
+>
+> This is the plan **as approved on 2026-07-30**, kept unedited so the review trail stays
+> legible. M0+M1 shipped, and review found real defects in the plan's own code blocks.
+> **Do not copy code from this document without checking `src/` first.** The notable
+> supersessions, all of which shipped differently:
+>
+> | Plan snippet | What shipped instead |
+> |---|---|
+> | `FakeRunner.run` returns stored objects | Returns `model_copy(deep=True)` — the plan's version lets a caller corrupt scripted state (Task 5) |
+> | Empty report passes the gate | A run executing **zero cases fails** the gate (Task 8 / final review) |
+> | `raw_cases = data["cases"] or []` | Rejects non-list and null `cases:` with `CaseParseError` (Task 4) |
+> | Unguarded `re.search(spec.value, ...)` | Raises `InvalidAssertionValue` on a malformed regex (Task 6) |
+> | `EvalCase` / `AssertionSpec` with no `model_config` | `extra="forbid"` — a typo'd key silently produced a vacuously-passing case (final review) |
+> | Bare `read_text()` / `write_text()` | All file IO pins `encoding="utf-8"` and re-raises as a typed parse error |
+> | `Config.reporters` | Removed — it was validated but never honoured; returns in M4 with a real registry |
+> | CLI catches 3 exception types | Also catches evaluator authoring errors; `--json-output` creates parent dirs |
+> | `per_skill_min` skips absent skills | A configured minimum for a skill that never ran fails the gate (Task 8) |
+>
+> Two of these are also annotated inline where they appear. See §7 of the design doc for
+> the error-handling and exit-code contracts as they actually shipped.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the scaffolding (M0) and the complete deterministic, zero-cost eval engine (M1) — so `skill-eval run <path>` discovers skills, runs their eval cases through a `FakeRunner`, scores them with assertions, reports results, and gates CI with an exit code.
@@ -960,6 +982,13 @@ class FakeRunner:
         return RunResult(output=f"[fake] {skill.name} handled: {task}")
 ```
 
+> **⚠️ Superseded during review — do not copy this `run` body.** It returns the stored
+> `RunResult` objects *by reference*. `RunResult` is a non-frozen Pydantic model with
+> mutable list fields, so any caller that mutates a result it received corrupts the
+> runner's scripted state and breaks determinism for later calls — which Tasks 7, 11 and
+> 12 all depend on. The shipped implementation returns `.model_copy(deep=True)` of both
+> the scripted response and the default. See `src/skill_eval/runners/fake.py`.
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_fake_runner.py -v`
@@ -1451,6 +1480,15 @@ def test_empty_report_passes_and_is_not_an_error():
     assert gate.passed is True
     assert gate.exit_code == EXIT_OK
 ```
+
+> **⚠️ Superseded during review — this test encodes the opposite of the shipped contract.**
+> Letting an empty report pass means a mistyped path, a renamed directory, or a `--tag`
+> matching nothing reports success forever — and it made the CI dogfood step vacuous (it
+> passed even with the example eval file deleted). The shipped behaviour is that a run
+> which executed **zero cases fails the gate**, with a reason distinguishing "no skills
+> found" / "all skipped (no eval cases)" / "all filtered out by `--tag`". The test was
+> renamed to `test_empty_report_fails_the_gate`. See `src/skill_eval/gating.py` and §7 of
+> the design doc.
 
 - [ ] **Step 2: Run test to verify it fails**
 
