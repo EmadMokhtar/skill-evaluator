@@ -98,3 +98,12 @@ def test_default_discovery_with_no_explicit_start_uses_isolated_cwd():
     since cwd has been chdir'd into an empty per-test directory.
     """
     assert load_config() == Config()
+
+
+def test_non_ascii_config_loads_regardless_of_platform_encoding(tmp_path):
+    # Regression test: config files are UTF-8; read_text() must pin the encoding
+    # so a non-ASCII value doesn't fail under a non-UTF-8 platform default.
+    path = tmp_path / "skill-eval.toml"
+    path.write_text('default_runner = "fake"\n\n[per_skill_min]\n"café" = 1.0\n', encoding="utf-8")
+    config = load_config(path=path)
+    assert config.per_skill_min == {"café": 1.0}

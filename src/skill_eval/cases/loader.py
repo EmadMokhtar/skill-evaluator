@@ -22,7 +22,7 @@ def parse_cases_file(path: Path) -> list[EvalCase]:
     """Parse one YAML file into EvalCase models."""
     path = Path(path)
     try:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise CaseParseError(f"cannot read {path}: {exc}") from exc
     try:

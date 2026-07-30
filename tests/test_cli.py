@@ -182,3 +182,25 @@ def test_json_output_with_failing_gate_writes_report_and_exits_one(tmp_path):
     report = json.loads(out.read_text())
     assert report["summary"]["total"] == 1
     assert report["summary"]["failed"] == 1
+
+
+def test_json_output_with_non_ascii_is_written_as_utf8(tmp_path):
+    # Regression test: the JSON report is a machine-readable CI artifact and must
+    # be UTF-8 regardless of the platform's default encoding, or non-ASCII skill
+    # names and assertion details come back as mojibake (or fail to encode).
+    skill_dir = tmp_path / "café"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: café\ndescription: accented\n---\n\nBody.\n", encoding="utf-8"
+    )
+    (skill_dir / "café.eval.yaml").write_text(
+        "cases:\n  - name: 日本語 case\n    task: anything\n"
+        "    assertions:\n      - kind: contains\n        value: café\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "report.json"
+    result = runner.invoke(app, ["run", str(tmp_path), "--json-output", str(out)])
+    assert result.exit_code == 0, result.stdout
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["outcomes"][0]["skill_name"] == "café"
+    assert data["outcomes"][0]["case_name"] == "日本語 case"

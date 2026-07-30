@@ -170,3 +170,18 @@ def test_typoed_assertion_key_singular_raises_instead_of_silently_passing(tmp_pa
         parse_cases_file(path)
     assert "typo.eval.yaml" in str(exc.value)
     assert "assertion" in str(exc.value)
+
+
+def test_non_ascii_eval_yaml_loads_regardless_of_platform_encoding(tmp_path):
+    # Regression test: eval YAML is always UTF-8; read_text() must pin the
+    # encoding rather than inherit a platform default that would mangle it.
+    path = tmp_path / "accented.eval.yaml"
+    path.write_text(
+        "cases:\n  - name: café test\n    task: décrire\n"
+        "    assertions:\n      - kind: contains\n        value: 日本語\n",
+        encoding="utf-8",
+    )
+    cases = parse_cases_file(path)
+    assert cases[0].name == "café test"
+    assert cases[0].task == "décrire"
+    assert cases[0].assertions[0].value == "日本語"

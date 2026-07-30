@@ -55,9 +55,15 @@ def evaluate_gate(
         actual = pass_rates.get(skill_name)
         if actual is None:
             if skill_name in report.skipped_skills:
-                msg = f"skill {skill_name!r} was skipped; minimum not enforced"
+                msg = (
+                    f"skill {skill_name!r} requires a pass rate of {minimum:.0%} "
+                    f"but was skipped (no eval cases)"
+                )
             else:
-                msg = f"skill {skill_name!r} had no results; minimum not enforced"
+                msg = (
+                    f"skill {skill_name!r} requires a pass rate of {minimum:.0%} "
+                    f"but produced no results"
+                )
             reasons.append(msg)
         elif actual < minimum:
             reasons.append(

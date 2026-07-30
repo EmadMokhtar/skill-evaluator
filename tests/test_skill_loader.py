@@ -14,7 +14,7 @@ Use pdfplumber to extract text.
 def _write_skill(root, name, body=SKILL_MD):
     skill_dir = root / name
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text(body)
+    (skill_dir / "SKILL.md").write_text(body, encoding="utf-8")
     return skill_dir
 
 
@@ -103,3 +103,18 @@ def test_bare_on_frontmatter_name_parses_as_string_not_bool(tmp_path):
     )
     skills = load_skills(tmp_path / "onskill")
     assert skills[0].name == "on"
+
+
+def test_non_ascii_skill_md_loads_regardless_of_platform_encoding(tmp_path):
+    # Regression test: read_text() without an explicit encoding uses the platform
+    # default (e.g. cp1252 on Windows, ASCII under LC_ALL=C), which mojibakes or
+    # raises on UTF-8 content. SKILL.md is always UTF-8, so the loader pins it.
+    _write_skill(
+        tmp_path,
+        "accented",
+        "---\nname: café\ndescription: naïve — 日本語\n---\n\nBody with émojis: 🎯\n",
+    )
+    skills = load_skills(tmp_path / "accented")
+    assert skills[0].name == "café"
+    assert skills[0].description == "naïve — 日本語"
+    assert "🎯" in skills[0].instructions
