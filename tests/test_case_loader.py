@@ -138,3 +138,25 @@ def test_genuine_true_false_still_parse_as_bool_via_shared_loader():
     data = safe_load("flag_true: true\nflag_false: false\n")
     assert data["flag_true"] is True
     assert data["flag_false"] is False
+
+
+def test_typoed_assertion_key_singular_raises_instead_of_silently_passing(tmp_path):
+    """Item 3: a typo'd `assertion:` (singular) instead of `assertions:` used
+    to be silently dropped by Pydantic (no model_config), producing a case
+    with zero assertions that AssertionEvaluator treats as vacuously passing.
+    With extra="forbid" on EvalCase, this must now raise a CaseParseError
+    naming the file.
+    """
+    path = tmp_path / "typo.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: typo'd key\n"
+        "    task: do it\n"
+        "    assertion:\n"
+        "      - kind: contains\n"
+        "        value: x\n"
+    )
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "typo.eval.yaml" in str(exc.value)
+    assert "assertion" in str(exc.value)

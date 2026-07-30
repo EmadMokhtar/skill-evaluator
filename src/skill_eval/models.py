@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 CaseStatus = Literal["passed", "failed", "errored"]
 
@@ -55,12 +55,16 @@ class EvalScore(BaseModel):
 class AssertionSpec(BaseModel):
     """A declarative assertion from an eval YAML file."""
 
+    model_config = ConfigDict(extra="forbid")
+
     kind: str
     value: str
 
 
 class EvalCase(BaseModel):
     """A single eval case: a task prompt plus how to score it."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     task: str
