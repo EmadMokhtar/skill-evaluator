@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from skill_eval.config import Config, ConfigError, find_config_file, load_config
@@ -67,3 +69,20 @@ def test_explicit_directory_path_raises_config_error(tmp_path):
     directory.mkdir()
     with pytest.raises(ConfigError, match="is not a file"):
         load_config(path=directory)
+
+
+def test_isolate_cwd_fixture_chdirs_into_a_fresh_tmp_path(tmp_path):
+    """Item 5: an autouse fixture in tests/conftest.py must chdir into an
+    empty tmp_path before every test, so load_config's upward-search fallback
+    (Path.cwd() to /) never depends on ambient files in whatever directory
+    pytest happened to be invoked from.
+    """
+    assert Path.cwd() == tmp_path.resolve()
+
+
+def test_default_discovery_with_no_explicit_start_uses_isolated_cwd():
+    """With the isolation fixture active, load_config() with no explicit
+    path/start must not see any real skill-eval.toml on the actual machine,
+    since cwd has been chdir'd into an empty per-test directory.
+    """
+    assert load_config() == Config()
