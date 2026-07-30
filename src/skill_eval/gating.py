@@ -33,11 +33,19 @@ def evaluate_gate(
         )
 
     if fail_on_error and report.errored:
-        reasons.append(f"{report.errored} case(s) errored")
+        case_word = "case" if report.errored == 1 else "cases"
+        reasons.append(f"{report.errored} {case_word} errored")
 
+    pass_rates = report.pass_rate_by_skill()
     for skill_name, minimum in (per_skill_min or {}).items():
-        actual = report.pass_rate_by_skill().get(skill_name)
-        if actual is not None and actual < minimum:
+        actual = pass_rates.get(skill_name)
+        if actual is None:
+            if skill_name in report.skipped_skills:
+                msg = f"skill {skill_name!r} was skipped; minimum not enforced"
+            else:
+                msg = f"skill {skill_name!r} had no results; minimum not enforced"
+            reasons.append(msg)
+        elif actual < minimum:
             reasons.append(
                 f"skill {skill_name!r} pass rate {actual:.0%} is below its required {minimum:.0%}"
             )
