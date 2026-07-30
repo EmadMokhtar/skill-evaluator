@@ -6,6 +6,39 @@ on:
   pull_request:
 
 jobs:
+  conventional-commits:
+    # A squash-merge turns the PR title into the commit on main, so the title is
+    # what release automation (cz bump) actually parses. Both it and the branch's
+    # own commits are checked.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Check PR title
+        env:
+          # Passed via env, never interpolated into the script body, so a crafted
+          # PR title cannot inject shell commands.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          echo "PR title: $PR_TITLE"
+          printf '%s' "$PR_TITLE" | uv run cz check --commit-msg-file /dev/stdin
+
+      - name: Check branch commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: uv run python scripts/check_commits.py "$BASE_SHA" HEAD
+
   test:
     runs-on: ubuntu-latest
     steps:

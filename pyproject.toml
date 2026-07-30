@@ -19,6 +19,7 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
     "commitizen>=3.29",
+    "pre-commit>=4.6.1",
 ]
 
 [build-system]
