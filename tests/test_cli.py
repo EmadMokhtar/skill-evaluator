@@ -152,6 +152,22 @@ def test_json_output_to_path_with_file_as_parent_exits_with_error(tmp_path):
     assert str(out) in result.stdout
 
 
+def test_json_write_failure_does_not_mask_a_failing_gate(tmp_path):
+    """Item 9: if the gate already failed (exit 1) and the JSON write also
+    fails, the process must still exit 1. Exit codes are the CI contract --
+    a failing gate must stay visible, not get masked by an unrelated write
+    problem turning into exit 2. The write problem is still reported.
+    """
+    _make_skill(tmp_path / "skills", cases=FAILING_CASES_YAML)
+    blocking_file = tmp_path / "blocking"
+    blocking_file.write_text("I am a file")
+    out = blocking_file / "report.json"
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--json-output", str(out)])
+    assert result.exit_code == 1
+    assert "Failed to write JSON report" in result.stdout
+    assert "Gate FAILED" in result.stdout
+
+
 def test_json_output_with_failing_gate_writes_report_and_exits_one(tmp_path):
     """--json-output combined with a failing gate writes the report and exits 1.
 

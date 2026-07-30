@@ -11,7 +11,7 @@ from skill_eval import __version__
 from skill_eval.cases.loader import CaseParseError, load_cases_for_skill
 from skill_eval.config import ConfigError, load_config
 from skill_eval.evaluators.assertion import InvalidAssertionValue, UnknownAssertionKind
-from skill_eval.gating import evaluate_gate
+from skill_eval.gating import EXIT_OK, evaluate_gate
 from skill_eval.orchestrator import run_evals
 from skill_eval.reporters.console import render_console
 from skill_eval.reporters.json_reporter import render_json
@@ -86,7 +86,13 @@ def run(
             json_output.write_text(render_json(report, gate=gate))
         except OSError as exc:
             typer.echo(f"Failed to write JSON report to {json_output}: {exc}")
-            raise typer.Exit(code=2) from exc
+            # Exit codes are the CI contract: a gate that already failed (1)
+            # must stay visible rather than being masked by an unrelated
+            # write problem escalating to 2. Only elevate to 2 when the gate
+            # itself passed, so the write failure doesn't silently look like
+            # success.
+            if gate.exit_code == EXIT_OK:
+                raise typer.Exit(code=2) from exc
 
     raise typer.Exit(code=gate.exit_code)
 
