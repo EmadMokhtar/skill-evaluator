@@ -29,7 +29,11 @@ def _split_frontmatter(text: str) -> tuple[dict, str]:
 def parse_skill_file(skill_md: Path) -> Skill:
     """Parse one SKILL.md into a Skill, falling back to the dir name."""
     try:
-        frontmatter, body = _split_frontmatter(skill_md.read_text())
+        text = skill_md.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SkillParseError(f"cannot read {skill_md}: {exc}") from exc
+    try:
+        frontmatter, body = _split_frontmatter(text)
     except yaml.YAMLError as exc:
         raise SkillParseError(f"invalid frontmatter in {skill_md}: {exc}") from exc
     if not isinstance(frontmatter, dict):

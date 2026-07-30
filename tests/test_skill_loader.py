@@ -63,6 +63,17 @@ def test_malformed_frontmatter_raises_with_file_path(tmp_path):
         load_skills(tmp_path / "bad")
 
 
+def test_unreadable_non_utf8_skill_md_raises_skill_parse_error(tmp_path):
+    """Item 4: a non-UTF-8 byte must fail fast with a precise message naming
+    the file, not escape as a raw UnicodeDecodeError traceback.
+    """
+    skill_dir = tmp_path / "broken"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_bytes(b"\xff\xfe invalid")
+    with pytest.raises(SkillParseError, match="SKILL.md"):
+        load_skills(skill_dir)
+
+
 def test_bare_on_frontmatter_name_parses_as_string_not_bool(tmp_path):
     # Regression test: PyYAML's YAML-1.1 implicit bool resolver treats bare
     # `on`/`off`/`yes`/`no` as booleans. Without the shared StrictBoolLoader,

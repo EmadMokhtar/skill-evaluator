@@ -140,6 +140,16 @@ def test_genuine_true_false_still_parse_as_bool_via_shared_loader():
     assert data["flag_false"] is False
 
 
+def test_unreadable_non_utf8_eval_file_raises_case_parse_error(tmp_path):
+    """Item 4: a non-UTF-8 byte must fail fast with a precise message naming
+    the file, not escape as a raw UnicodeDecodeError traceback.
+    """
+    path = tmp_path / "broken.eval.yaml"
+    path.write_bytes(b"\xff\xfe invalid")
+    with pytest.raises(CaseParseError, match="broken.eval.yaml"):
+        parse_cases_file(path)
+
+
 def test_typoed_assertion_key_singular_raises_instead_of_silently_passing(tmp_path):
     """Item 3: a typo'd `assertion:` (singular) instead of `assertions:` used
     to be silently dropped by Pydantic (no model_config), producing a case

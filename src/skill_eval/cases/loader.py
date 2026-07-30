@@ -22,7 +22,11 @@ def parse_cases_file(path: Path) -> list[EvalCase]:
     """Parse one YAML file into EvalCase models."""
     path = Path(path)
     try:
-        data = safe_load(path.read_text()) or {}
+        text = path.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CaseParseError(f"cannot read {path}: {exc}") from exc
+    try:
+        data = safe_load(text) or {}
     except yaml.YAMLError as exc:
         raise CaseParseError(f"invalid YAML in {path}: {exc}") from exc
     if not isinstance(data, dict) or "cases" not in data:
