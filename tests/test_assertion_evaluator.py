@@ -1,11 +1,20 @@
 import pytest
 
 from skill_eval.evaluators.assertion import AssertionEvaluator, UnknownAssertionKind
+from skill_eval.evaluators.base import Evaluator
 from skill_eval.models import AssertionSpec, EvalCase, RunResult
 
 
 def _case(*specs):
     return EvalCase(name="c", task="t", assertions=list(specs))
+
+
+def test_assertion_evaluator_satisfies_the_evaluator_protocol():
+    """Item 8: Evaluator is @runtime_checkable but nothing exercised isinstance
+    against it, so protocol drift would not be caught when M2's adapters
+    land. Lock in that AssertionEvaluator actually satisfies the protocol.
+    """
+    assert isinstance(AssertionEvaluator(), Evaluator)
 
 
 def test_contains_passes_when_substring_present():

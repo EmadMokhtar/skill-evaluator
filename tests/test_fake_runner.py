@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from skill_eval.models import RunResult, Skill, ToolCall
+from skill_eval.runners.base import Runner
 from skill_eval.runners.fake import FakeRunner
 
 SKILL = Skill(name="pdf", description="", instructions="Use pdfplumber.", path=Path("/s/pdf"))
@@ -58,3 +59,11 @@ def test_carries_tool_calls_through():
 
 def test_runner_exposes_name():
     assert FakeRunner().name == "fake"
+
+
+def test_fake_runner_satisfies_the_runner_protocol():
+    """Item 8: Runner is @runtime_checkable but nothing exercised isinstance
+    against it, so protocol drift would not be caught when M2's adapters
+    land. Lock in that FakeRunner actually satisfies the protocol.
+    """
+    assert isinstance(FakeRunner(), Runner)
