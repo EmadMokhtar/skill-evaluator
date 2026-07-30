@@ -54,7 +54,12 @@ def load_config(path: Path | None = None, start: Path | None = None) -> Config:
             return Config()
 
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ConfigError(f"cannot read {path}: {exc}") from exc
+
+    try:
+        data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"invalid TOML in {path}: {exc}") from exc
 

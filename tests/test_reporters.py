@@ -134,7 +134,9 @@ def test_reporters_handle_outcome_with_no_result():
     )
     # Console should not crash
     console_text = render_console(report)
-    assert "100" in console_text or "0.1" in console_text  # Some representation of latency
+    # Assert the exact latency substring: a loose check like `"100" in text` also
+    # matches the "pass rate 100%" line, so it would pass with no latency output.
+    assert "Total latency: 100ms" in console_text
     assert "2 passed" in console_text
 
     # JSON should not crash and totals should exclude the None result
@@ -143,3 +145,13 @@ def test_reporters_handle_outcome_with_no_result():
     assert data["summary"]["total_tokens"] == 10
     assert data["summary"]["total_cost_usd"] == 0.01
     assert data["summary"]["total_latency_ms"] == 100
+
+
+def test_json_includes_tag_filtered_skills():
+    # The console reporter distinguishes "skipped (no eval cases)" from "no cases
+    # matched --tag"; the JSON payload must carry the same field so CI tooling can
+    # explain why a run executed zero cases.
+    report = RunReport(outcomes=[], skipped_skills=["pdf"], tag_filtered_skills=["xlsx"])
+    data = json.loads(render_json(report))
+    assert data["skipped_skills"] == ["pdf"]
+    assert data["tag_filtered_skills"] == ["xlsx"]

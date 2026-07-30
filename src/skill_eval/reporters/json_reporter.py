@@ -27,6 +27,7 @@ def render_json(report: RunReport, gate: GateResult | None = None) -> str:
             "total_latency_ms": total_latency_ms,
         },
         "skipped_skills": report.skipped_skills,
+        "tag_filtered_skills": report.tag_filtered_skills,
         "outcomes": [
             {
                 "skill_name": o.skill_name,

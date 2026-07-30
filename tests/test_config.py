@@ -107,3 +107,13 @@ def test_non_ascii_config_loads_regardless_of_platform_encoding(tmp_path):
     path.write_text('default_runner = "fake"\n\n[per_skill_min]\n"café" = 1.0\n', encoding="utf-8")
     config = load_config(path=path)
     assert config.per_skill_min == {"café": 1.0}
+
+
+def test_non_utf8_config_raises_config_error_not_raw_decode_error(tmp_path):
+    # Regression test: read_text() sits outside the TOMLDecodeError guard, so an
+    # unreadable or non-UTF-8 config surfaced a raw UnicodeDecodeError traceback
+    # instead of the clean exit-2 authoring error the loaders already produce.
+    path = tmp_path / "skill-eval.toml"
+    path.write_bytes(b'default_runner = "\xff\xfe"\n')
+    with pytest.raises(ConfigError, match="cannot read"):
+        load_config(path=path)
