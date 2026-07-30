@@ -26,7 +26,9 @@ def parse_cases_file(path: Path) -> list[EvalCase]:
         raise CaseParseError(f"invalid YAML in {path}: {exc}") from exc
     if not isinstance(data, dict) or "cases" not in data:
         raise CaseParseError(f"{path}: expected a top-level 'cases' list")
-    raw_cases = data["cases"] or []
+    raw_cases = data["cases"]
+    if not isinstance(raw_cases, list):
+        raise CaseParseError(f"{path}: 'cases' must be a list")
     cases: list[EvalCase] = []
     for index, raw in enumerate(raw_cases):
         try:

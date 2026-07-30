@@ -83,3 +83,28 @@ def test_malformed_yaml_raises_with_path(tmp_path):
 def test_missing_explicit_path_raises(tmp_path):
     with pytest.raises(CaseParseError, match="does not exist"):
         load_cases_for_skill(_skill(tmp_path), evals_path=Path(tmp_path / "nope.yaml"))
+
+
+def test_cases_non_list_scalar_raises_with_file_and_field(tmp_path):
+    path = tmp_path / "nonlist.eval.yaml"
+    path.write_text("cases: true\n")
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "nonlist.eval.yaml" in str(exc.value)
+    assert "cases" in str(exc.value)
+
+
+def test_cases_explicit_null_raises_with_file_and_field(tmp_path):
+    path = tmp_path / "null_cases.eval.yaml"
+    path.write_text("cases:\n")
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "null_cases.eval.yaml" in str(exc.value)
+    assert "cases" in str(exc.value)
+
+
+def test_cases_empty_list_returns_empty(tmp_path):
+    path = tmp_path / "empty.eval.yaml"
+    path.write_text("cases: []\n")
+    cases = parse_cases_file(path)
+    assert cases == []
