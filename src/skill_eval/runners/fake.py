@@ -20,7 +20,7 @@ class FakeRunner:
 
     def run(self, skill: Skill, task: str) -> RunResult:
         if task in self._responses:
-            return self._responses[task]
+            return self._responses[task].model_copy(deep=True)
         if self._default is not None:
-            return self._default
+            return self._default.model_copy(deep=True)
         return RunResult(output=f"[fake] {skill.name} handled: {task}")

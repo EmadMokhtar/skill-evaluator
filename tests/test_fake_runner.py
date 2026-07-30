@@ -16,6 +16,23 @@ def test_fake_runner_is_deterministic():
     assert runner.run(SKILL, "extract") == runner.run(SKILL, "extract")
 
 
+def test_fake_runner_returns_defensive_copies():
+    """Mutating a result should not corrupt the runner's internal state."""
+    original_result = RunResult(output="immutable", tool_calls=[])
+    runner = FakeRunner(responses={"task": original_result})
+
+    # First call: get result and mutate it
+    result1 = runner.run(SKILL, "task")
+    assert result1.output == "immutable"
+    result1.tool_calls.append(ToolCall(name="mutated"))
+    result1.output = "corrupted"
+
+    # Second call: should still be the original scripted values
+    result2 = runner.run(SKILL, "task")
+    assert result2.output == "immutable"
+    assert len(result2.tool_calls) == 0
+
+
 def test_unknown_task_returns_default():
     runner = FakeRunner(default=RunResult(output="fallback"))
     assert runner.run(SKILL, "anything").output == "fallback"
