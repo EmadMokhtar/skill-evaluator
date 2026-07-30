@@ -168,7 +168,7 @@ Each milestone is independently shippable and leaves the tool working end-to-end
 
 **Conventional commits + Commitizen.**
 - All commits follow Conventional Commits; a `commit-msg` git hook runs `cz check` to reject non-conforming messages.
-- **Single source of version:** `[project].version` in `pyproject.toml`, with `[tool.commitizen] version_provider = "pep621"`. Runtime reads it via `importlib.metadata.version("skill-eval")` so `skill_eval.__version__` never drifts.
+- **Single source of version:** `[project].version` in `pyproject.toml`, with `[tool.commitizen] version_provider = "uv"` — bumps the version **and** keeps `uv.lock` in sync in the same step (which `pep621` would not). Runtime reads it via `importlib.metadata.version("skill-eval")` so `skill_eval.__version__` never drifts.
 - `cz bump` computes the SemVer bump from the commits since the last tag, updates the version, regenerates `CHANGELOG.md`, and creates the `vX.Y.Z` tag.
 
 **Automated release on merge to main.**
