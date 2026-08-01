@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -24,3 +26,45 @@ def isolate_cwd(tmp_path, monkeypatch):
     path, which this fixture does not interfere with.
     """
     monkeypatch.chdir(tmp_path)
+
+
+CASSETTE_DIR = Path(__file__).parent / "cassettes"
+
+
+@pytest.fixture(scope="module")
+def vcr_config():
+    """Replay-only by default, with every credential scrubbed on record.
+
+    Matching on the body as well as the URL matters here: every request goes to
+    the same chat-completions path, so the body is the only thing that tells one
+    turn of a conversation from the next.
+    """
+    return {
+        "filter_headers": [
+            "authorization",
+            "api-key",
+            "x-api-key",
+            "openai-organization",
+            "openai-project",
+            "cookie",
+            "set-cookie",
+        ],
+        "match_on": ["method", "scheme", "host", "port", "path", "body"],
+        "decode_compressed_response": True,
+    }
+
+
+@pytest.fixture
+def replay(request, monkeypatch):
+    """Set up a cassette-backed test: dummy key, and skip if never recorded.
+
+    Provider clients refuse to construct without a key even when every response
+    is replayed, so a placeholder is required. A fresh clone with no cassettes
+    must not look like a broken build, hence the skip -- but a *mismatched*
+    request still fails loudly rather than reaching the network, which is the
+    behaviour the tier exists for.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-replay")
+    cassette = CASSETTE_DIR / request.node.module.__name__ / f"{request.node.name}.yaml"
+    if not cassette.is_file():
+        pytest.skip(f"cassette {cassette.name} not recorded; see the recording command in the plan")

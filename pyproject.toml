@@ -39,6 +39,7 @@ packages = ["src/skill_eval"]
 testpaths = ["tests"]
 markers = [
     "integration: hits real provider APIs; requires an API key (deselected by default)",
+    "cassette: replays recorded provider traffic; no network, no key needed",
 ]
 addopts = "-m 'not integration'"
 filterwarnings = [
