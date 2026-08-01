@@ -1050,6 +1050,8 @@ Create `tests/test_tools.py`:
 ```python
 """Mock tools: the agent's environment, declared by the eval case."""
 
+from pathlib import Path
+
 import skill_eval.runners.tools as tools_module
 from skill_eval.models import ToolSpec
 from skill_eval.runners.tools import build_mock_tool
@@ -1098,7 +1100,7 @@ def test_a_tool_with_no_return_value_yields_an_empty_string():
 
 def test_module_does_not_import_an_agent_framework():
     # No agent-framework type may appear outside runners/pydantic_ai.py.
-    source = open(tools_module.__file__, encoding="utf-8").read()
+    source = Path(tools_module.__file__).read_text(encoding="utf-8")
     assert "pydantic_ai" not in source
 ```
 
