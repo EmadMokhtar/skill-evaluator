@@ -9,9 +9,12 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M0+M1**: the full pipeline exists but the only runner is `FakeRunner`
-(scripted, offline). No network calls anywhere yet. Milestones are defined in
-`docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9.
+Currently at **M2**: the pipeline runs real agents through `PydanticAIRunner`
+(provider-flexible, via PydanticAI), scores tool use and efficiency as well as
+output text, and is tested against recorded provider traffic. `FakeRunner`
+remains the default and the backbone of the zero-cost test tier. Milestones are
+defined in `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2
+design is in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`.
 
 ## Commands
 
@@ -19,10 +22,11 @@ Currently at **M0+M1**: the full pipeline exists but the only runner is `FakeRun
 uv sync                              # install (dev deps included)
 uv run pytest                        # test suite (integration marker deselected by default)
 uv run pytest tests/test_gating.py::test_name -v   # single test
-uv run pytest -m integration         # opt-in tier that hits real APIs (none exist yet)
+uv run pytest -m integration          # opt-in tier; needs OPENAI_API_KEY, costs real money
+uv run pytest tests/test_cassettes.py --record-mode=once   # re-record cassettes (needs a key)
 uv run ruff check .                  # lint
 uv run ruff format .                 # format (CI runs --check)
-uv run skill-eval run ./examples     # dogfood the CLI; CI runs this as a self-check
+uv run skill-eval list ./examples     # dogfood discovery; CI runs this as a self-check
 uv run pre-commit install --hook-type commit-msg   # once per clone
 ```
 
@@ -30,7 +34,7 @@ uv run pre-commit install --hook-type commit-msg   # once per clone
 
 Two protocols carry the whole design; everything else is plumbing around those seams:
 
-- **`Runner`** (`runners/base.py`) — `run(skill, task) -> RunResult`. The seam every agent
+- **`Runner`** (`runners/base.py`) — `run(skill, case) -> RunResult`. The seam every agent
   framework plugs into. **No agent-framework type may appear in the core** — frameworks
   live only inside runner adapters.
 - **`Evaluator`** (`evaluators/base.py`) — `evaluate(case, result) -> EvalScore`. The seam
@@ -77,6 +81,18 @@ them, and expect a test asserting each.
 - **`skill_eval` (underscore) never appears in user-facing output.** The user-facing name is
   `skill-eval` everywhere: command, config file, distribution.
 - **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
+- **No agent-framework type may appear outside `runners/pydantic_ai.py`.** `runners/tools.py`
+  builds framework-neutral `MockTool`s (name + JSON schema + callable); the adapter wraps them.
+  A test asserts `pydantic_ai` does not appear in `tools.py`.
+- **`RunResult.tokens` is derived**, not stored — `extra="forbid"` makes writing it a loud
+  error rather than a total that silently disagrees with the input/output split it was priced from.
+- **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` plus a
+  `cost_note`; pricing is reporting metadata and must never be why a run errors.
+- **Mock tools accept any arguments.** A model hallucinating an argument must not raise, or an
+  eval signal would surface as an infra error.
+- **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act;
+  a missing cassette skips rather than fails, but a mismatched request fails rather than
+  reaching the network.
 
 ## Conventions
 
