@@ -87,7 +87,9 @@ them, and expect a test asserting each.
 - **`RunResult.tokens` is derived**, not stored — `extra="forbid"` makes writing it a loud
   error rather than a total that silently disagrees with the input/output split it was priced from.
 - **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` plus a
-  `cost_note`; pricing is reporting metadata and must never be why a run errors.
+  `cost_note`; pricing is reporting metadata and must never be why a run errors. An unpriceable
+  cost limit is skipped in `BudgetEvaluator` — not counted as passed — so an unpriced cost limit
+  as the only budget check causes the case to fail (nothing was verified).
 - **Mock tools accept any arguments.** A model hallucinating an argument must not raise, or an
   eval signal would surface as an infra error.
 - **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act;

@@ -158,6 +158,19 @@ cases:
 `order` is a relative subsequence: unrelated calls may appear in between, but the
 listed tools must not appear out of sequence.
 
+### Budget limits and pricing
+
+The `budget` block sets ceilings on tokens, cost, and latency. Pricing comes from
+`genai-prices`, which carries data for widely-used models but not every provider — for
+example, Groq and Mistral models have no pricing entry yet. When a model cannot be priced,
+`cost_usd` degrades to `0.0` and a note is recorded explaining why; the note appears in both
+console output and the JSON report. An unpriceable cost limit is **skipped rather than
+silently passed**, so a case with an unpriced cost limit and no other budget checks will fail,
+because nothing was actually verified. If other budget limits are declared alongside (tokens,
+latency), they are still evaluated normally, and only the cost limit is skipped. To adopt
+`skill-eval` against a provider without pricing data, simply omit `max_cost_usd` from the budget
+block for that provider.
+
 ## Configuration
 
 `skill-eval.toml` is optional. It is located via `--config`, or otherwise discovered by
