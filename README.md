@@ -40,6 +40,12 @@ cases:
         value: Ada
       - kind: not_contains
         value: Traceback
+      # SKILL.md asks for "one short sentence"; this regex only checks "one line,
+      # under 120 chars, ending in . ! or ?" -- it doesn't (and can't, with a
+      # regex) verify single-sentence-ness. It's deliberately looser than that
+      # prose because real model output legitimately varies (e.g. two short
+      # clauses joined by a comma), so don't tighten it without re-recording
+      # against a real provider.
       - kind: regex
         value: "^[^\\n]{1,120}[.!?]\"?\\s*$"
 ```
@@ -141,6 +147,11 @@ cases:
         parameters:
           order_id: string
         returns: '{"id": "1234", "days_since_delivery": 45}'
+      - name: issue_refund
+        description: Issue a refund for an order
+        parameters:
+          order_id: string
+        returns: '{"ok": true}'
     trajectory:
       called: [lookup_order]        # each of these ran
       forbidden: [issue_refund]     # none of these ran
@@ -158,14 +169,26 @@ cases:
 `order` is a relative subsequence: unrelated calls may appear in between, but the
 listed tools must not appear out of sequence.
 
+Every tool name in `called`, `forbidden`, or `order` must be declared in that case's
+`tools:` — including `forbidden`, since forbidding a tool the agent was never offered in
+the first place is a check that can never fire. A name that isn't declared is an
+authoring error (the run aborts, exit `2`), not a failing case, because a check that can
+never pass tells you nothing about the skill.
+
 ### Budget limits and pricing
 
 The `budget` block sets ceilings on tokens, cost, and latency. Pricing comes from
 `genai-prices`, which carries data for widely-used models but not every provider — for
 example, Groq and Mistral models have no pricing entry yet. When a model cannot be priced,
-`cost_usd` degrades to `0.0` and a note is recorded explaining why; the note appears in both
-console output and the JSON report. An unpriceable cost limit is **skipped rather than
-silently passed**, so a case with an unpriced cost limit and no other budget checks will fail,
+`cost_usd` degrades to `0.0` and a note is recorded explaining why; the note always appears
+in the JSON report. On the console it surfaces as budget-evaluator failure detail, which is
+only printed for a case that fails — so if the cost limit is the only budget check declared,
+the skip fails the case and the note prints; if token or latency limits are declared
+alongside and pass, the case passes and the note is silent on screen. Either way, an aggregate
+line ("some costs not priced" / "Total cost: not priced") appears in the console totals
+whenever any outcome's pricing degraded, pointing you at the JSON for the per-case detail.
+An unpriceable cost limit is **skipped rather than silently passed**, so a case with an
+unpriced cost limit and no other budget checks will fail,
 because nothing was actually verified. If other budget limits are declared alongside (tokens,
 latency), they are still evaluated normally, and only the cost limit is skipped. To adopt
 `skill-eval` against a provider without pricing data, simply omit `max_cost_usd` from the budget
