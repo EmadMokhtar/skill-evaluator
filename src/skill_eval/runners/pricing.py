@@ -24,9 +24,10 @@ def calculate_cost(usage: Any, model_name: str, provider_id: str) -> tuple[float
         return 0.0, "genai-prices is not installed; cost not calculated"
 
     try:
+        # Pass provider_id as-is; do NOT use `provider_id or None`. An empty provider
+        # must fail closed and be reported, not let genai-prices guess the provider.
         calculation = calc_price(usage, model_name, provider_id=provider_id)
+        return float(calculation.total_price), ""
     except Exception as exc:
         label = f"{provider_id}:{model_name}" if provider_id else model_name
         return 0.0, f"no price data for {label} ({type(exc).__name__})"
-
-    return float(calculation.total_price), ""

@@ -36,3 +36,10 @@ def test_an_unknown_provider_is_not_blocked():
 
 def test_a_model_without_a_provider_prefix_is_not_blocked():
     check_api_key("gpt-4o-mini", {})
+
+
+def test_a_google_model_is_checked_rather_than_silently_skipped():
+    # The provider prefix here must match what pydantic-ai actually accepts.
+    # A stale prefix makes check_api_key a no-op and defeats the whole point.
+    with pytest.raises(MissingAPIKey):
+        check_api_key("google:gemini-1.5-flash", {})

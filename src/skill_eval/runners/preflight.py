@@ -9,7 +9,7 @@ from skill_eval.runners.pricing import provider_of
 PROVIDER_ENV_VARS = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
-    "google-gla": "GOOGLE_API_KEY",
+    "google": "GOOGLE_API_KEY",
     "groq": "GROQ_API_KEY",
     "mistral": "MISTRAL_API_KEY",
     "cohere": "CO_API_KEY",
