@@ -65,4 +65,8 @@ jobs:
         run: uv run pytest -v
 
       - name: Self-check (dogfood the CLI on examples/)
-        run: uv run skill-eval run ./examples
+        # The examples now assert real model behaviour, so they cannot be run
+        # with FakeRunner. `list` still exercises discovery, YAML parsing and
+        # tool/trajectory/budget schema validation on real files at zero cost;
+        # the full run path is covered every PR by the cassette tier.
+        run: uv run skill-eval list ./examples

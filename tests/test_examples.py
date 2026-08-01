@@ -1,24 +1,37 @@
+"""The shipped examples must always parse and be well formed.
+
+They are no longer run through FakeRunner: their assertions describe real model
+behaviour now, so the zero-cost check is that discovery and schema validation
+work on real files. The full run path is covered by the cassette tier.
+"""
+
 from pathlib import Path
 
-from typer.testing import CliRunner
+from skill_eval.cases.loader import load_cases_for_skill
+from skill_eval.skills.loader import load_skills
 
-from skill_eval.cli import app
-
-runner = CliRunner()
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
 
-def test_examples_directory_exists():
-    assert EXAMPLES.is_dir()
+def test_every_example_skill_is_discovered():
+    names = [skill.name for skill in load_skills(EXAMPLES)]
+    assert names == ["greeting", "order-support"]
 
 
-def test_example_skills_are_discoverable():
-    result = runner.invoke(app, ["list", str(EXAMPLES)])
-    assert result.exit_code == 0
-    assert "greeting" in result.stdout
+def test_every_example_skill_has_at_least_one_case():
+    for skill in load_skills(EXAMPLES):
+        assert load_cases_for_skill(skill), f"{skill.name} has no eval cases"
 
 
-def test_examples_run_green_end_to_end():
-    result = runner.invoke(app, ["run", str(EXAMPLES)])
-    assert result.exit_code == 0, result.stdout
-    assert "1 passed" in result.stdout
+def test_declared_trajectory_tools_are_actually_declared_as_tools():
+    # A trajectory check naming a tool the case never declares can never pass,
+    # and would look like a skill failure rather than the typo it is.
+    for skill in load_skills(EXAMPLES):
+        for case in load_cases_for_skill(skill):
+            declared = {tool.name for tool in case.tools}
+            if case.trajectory is None:
+                continue
+            referenced = set(
+                case.trajectory.called + case.trajectory.forbidden + case.trajectory.order
+            )
+            assert referenced <= declared, f"{skill.name}/{case.name}: {referenced - declared}"
