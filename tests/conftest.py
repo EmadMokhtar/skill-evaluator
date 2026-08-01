@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -93,21 +94,36 @@ def vcr_config():
 
 @pytest.fixture
 def replay(request, monkeypatch, record_mode):
-    """Set up a cassette-backed test: dummy key, and skip if never recorded.
+    """Set up a cassette-backed test: dummy key for replay, skip if never recorded.
 
     Provider clients refuse to construct without a key even when every response
-    is replayed, so a placeholder is required. A fresh clone with no cassettes
-    must not look like a broken build, hence the skip -- but a *mismatched*
-    request still fails loudly rather than reaching the network, which is the
-    behaviour the tier exists for.
+    is replayed, so a placeholder is required in replay-only mode. However, when
+    recording cassettes (--record-mode=once), the real API key must survive so
+    the recording request succeeds.
 
-    The skip only fires in replay-only mode (`record_mode == "none"`, the
-    default `pytest-recording` falls back to). `pytest-recording`'s autouse,
-    function-scoped `vcr` fixture always sets up before this one regardless of
-    mode, so without this guard the skip would fire even under
-    `--record-mode=once` and re-recording would be impossible for anyone.
+    In replay-only mode (`record_mode == "none"`, the default), a dummy key is
+    set. The skip only fires in replay-only mode: if a cassette doesn't exist,
+    re-recording is impossible anyway.
+
+    When recording (`record_mode != "none"`), a real OPENAI_API_KEY must be
+    exported in the environment. If not present, the test fails with a clear
+    message. This prevents the confusing scenario where the fixture clobbered
+    a real key during an attempted recording.
+
+    `pytest-recording`'s autouse, function-scoped `vcr` fixture always sets up
+    before this one regardless of mode, so the skip check respects mode exactly.
     """
-    monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-replay")
+    if record_mode == "none":
+        # Replay-only: use a dummy key since clients need *something*
+        monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-replay")
+    else:
+        # Recording mode: require a real key in the environment
+        if "OPENAI_API_KEY" not in os.environ:
+            pytest.fail(
+                "Recording mode (--record-mode=once) requires a real OPENAI_API_KEY "
+                "in the environment. Run: export OPENAI_API_KEY=<your-key>"
+            )
+
     cassette = CASSETTE_DIR / request.node.module.__name__ / f"{request.node.name}.yaml"
     if record_mode == "none" and not cassette.is_file():
         pytest.skip(
