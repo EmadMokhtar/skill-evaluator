@@ -41,10 +41,8 @@ class BudgetEvaluator:
 
     def evaluate(self, case: EvalCase, result: RunResult) -> EvalScore:
         spec = case.budget
-        if spec is None:
-            return EvalScore(evaluator=self.name, passed=True, score=1.0, detail="no budget checks")
-        total, failures = _check(spec, result)
-        if total == 0:
+        total, failures = _check(spec, result) if spec is not None else (0, [])
+        if spec is None or total == 0:
             return EvalScore(evaluator=self.name, passed=True, score=1.0, detail="no budget checks")
         detail = "within budget" if not failures else "; ".join(failures)
         return EvalScore(

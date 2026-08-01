@@ -61,3 +61,26 @@ def test_a_blown_budget_is_a_failure_not_an_error():
 
 def test_evaluator_reports_its_name():
     assert EVALUATOR.evaluate(case(max_tokens=10), RunResult()).evaluator == "budget"
+
+
+def test_a_zero_limit_is_still_a_declared_limit():
+    # 0 is falsy. If declaredness were decided by truthiness instead of
+    # `is not None`, these limits would silently vanish and the case would pass.
+    result = RunResult(input_tokens=1, cost_usd=0.01, latency_ms=1)
+    score = EVALUATOR.evaluate(case(max_tokens=0, max_cost_usd=0.0, max_latency_ms=0), result)
+    assert score.passed is False
+    assert score.score == 0.0
+
+
+def test_a_zero_limit_passes_when_nothing_was_spent():
+    score = EVALUATOR.evaluate(case(max_tokens=0, max_cost_usd=0.0, max_latency_ms=0), RunResult())
+    assert score.passed is True
+    assert score.score == 1.0
+
+
+def test_cost_budget_passes_at_the_limit():
+    assert EVALUATOR.evaluate(case(max_cost_usd=0.01), RunResult(cost_usd=0.01)).passed is True
+
+
+def test_latency_budget_passes_at_the_limit():
+    assert EVALUATOR.evaluate(case(max_latency_ms=1000), RunResult(latency_ms=1000)).passed is True
