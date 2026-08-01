@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -306,6 +307,22 @@ def test_a_5xx_failure_is_retried_and_can_succeed():
     assert result.output == "recovered"
     assert result.errored is False
     assert slept == [0.01]
+
+
+def test_a_missing_optional_extra_propagates_rather_than_becoming_an_errored_case(monkeypatch):
+    # RunnerDependencyError means the caller's environment is missing the
+    # optional extra -- it's a user/setup error the CLI turns into a clean
+    # exit 2 (see _AUTHORING_ERRORS in cli.py), not something the runner
+    # should swallow into RunResult.error like a provider failure.
+    import skill_eval.runners.pydantic_ai as adapter
+
+    def explode() -> None:
+        raise adapter.RunnerDependencyError("the 'pydantic-ai' runner needs its optional extra")
+
+    monkeypatch.setattr(adapter, "_require_pydantic_ai", explode)
+    runner = PydanticAIRunner(model=scripted(text("done")))
+    with pytest.raises(adapter.RunnerDependencyError):
+        runner.run(SKILL, case())
 
 
 def test_pydantic_ai_runner_satisfies_the_runner_protocol():

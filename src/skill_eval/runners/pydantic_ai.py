@@ -187,8 +187,6 @@ class PydanticAIRunner:
                 cost_note=cost_note,
                 model=model_name,
             )
-        except RunnerDependencyError:
-            raise
         except Exception as exc:
             return RunResult(
                 error=f"{type(exc).__name__}: {exc}",
