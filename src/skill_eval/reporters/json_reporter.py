@@ -40,6 +40,8 @@ def render_json(report: RunReport, gate: GateResult | None = None) -> str:
                 "tokens": o.result.tokens if o.result else 0,
                 "latency_ms": o.result.latency_ms if o.result else 0,
                 "cost_usd": o.result.cost_usd if o.result else 0.0,
+                "model": o.result.model if o.result else "",
+                "cost_note": o.result.cost_note if o.result else "",
             }
             for o in report.outcomes
         ],

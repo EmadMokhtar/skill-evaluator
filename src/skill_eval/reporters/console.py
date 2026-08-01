@@ -38,11 +38,19 @@ def render_console(report: RunReport, gate: GateResult | None = None) -> str:
 
     total_cost = sum(o.result.cost_usd for o in report.outcomes if o.result)
     total_latency_ms = sum(o.result.latency_ms for o in report.outcomes if o.result)
+    pricing_degraded = any(o.result.cost_note for o in report.outcomes if o.result)
 
-    # Build totals line with cost and latency
+    # Build totals line with cost and latency. `total_cost` is 0.0 both when a
+    # run genuinely cost nothing and when pricing failed for every outcome --
+    # `if total_cost:` alone can't tell those apart, so a degraded note is
+    # surfaced explicitly rather than leaving the line silent either way.
     totals_parts = []
     if total_cost:
         totals_parts.append(f"Total cost: ${total_cost:.4f}")
+        if pricing_degraded:
+            totals_parts.append("some costs not priced (see per-case cost_note)")
+    elif pricing_degraded:
+        totals_parts.append("Total cost: not priced (see per-case cost_note)")
     if total_latency_ms:
         if total_latency_ms >= 1000:
             totals_parts.append(f"Total latency: {total_latency_ms / 1000:.2f}s")
