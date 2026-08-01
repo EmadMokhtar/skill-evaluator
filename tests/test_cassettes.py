@@ -6,11 +6,11 @@ what a provider actually sends.
 
 Note on failure mode: if a test's request stops matching its cassette (body
 changed, case reordered, etc.), vcrpy raises `CannotOverwriteExistingCassetteException`.
-httpx/openai re-wrap that, the adapter classifies it as transient, retries twice
-with backoff, and it surfaces here as `ModelAPIError: Connection error` -- not as
-an obvious cassette error. No network is involved and the "no network" contract
-still holds; if you hit this, suspect a stale/mismatched cassette before you
-suspect your network.
+The runner is constructed with `retries=0` here specifically so that error surfaces
+immediately as that vcr exception instead of being retried and re-wrapped into a
+misleading `ModelAPIError: Connection error` after two backoff sleeps. No network is
+involved and the "no network" contract still holds; if you hit this, suspect a
+stale/mismatched cassette before you suspect your network.
 """
 
 from pathlib import Path

@@ -48,9 +48,9 @@ def render_console(report: RunReport, gate: GateResult | None = None) -> str:
     if total_cost:
         totals_parts.append(f"Total cost: ${total_cost:.4f}")
         if pricing_degraded:
-            totals_parts.append("some costs not priced (see per-case cost_note)")
+            totals_parts.append("some costs not priced (see per-case cost_note in the JSON report)")
     elif pricing_degraded:
-        totals_parts.append("Total cost: not priced (see per-case cost_note)")
+        totals_parts.append("Total cost: not priced (see per-case cost_note in the JSON report)")
     if total_latency_ms:
         if total_latency_ms >= 1000:
             totals_parts.append(f"Total latency: {total_latency_ms / 1000:.2f}s")

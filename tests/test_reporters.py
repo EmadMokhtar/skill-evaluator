@@ -164,7 +164,7 @@ def test_console_notes_when_pricing_degraded_even_at_zero_total_cost():
         ],
     )
     text = render_console(report)
-    assert "pricing" in text.lower() or "cost not" in text.lower() or "not priced" in text.lower()
+    assert "Total cost: not priced (see per-case cost_note in the JSON report)" in text
 
 
 def test_console_totals_line_stays_silent_when_cost_is_genuinely_zero():
@@ -182,7 +182,10 @@ def test_console_totals_line_stays_silent_when_cost_is_genuinely_zero():
     )
     text = render_console(report)
     assert "Total cost" not in text
-    assert "pricing" not in text.lower()
+    # cost_usd and latency_ms are both zero here, so the totals line has nothing
+    # to report at all -- not even a latency figure -- and must not appear.
+    assert "Total latency" not in text
+    assert "not priced" not in text.lower()
 
 
 def test_json_carries_model_and_cost_note_per_outcome():
