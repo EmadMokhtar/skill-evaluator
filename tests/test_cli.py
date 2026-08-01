@@ -247,6 +247,7 @@ def test_model_flag_beats_the_config_file(tmp_path, monkeypatch):
             str(config_file),
         ],
     )
+    assert result.exit_code == 2
     assert "OPENAI_API_KEY" in result.output
     assert "ANTHROPIC_API_KEY" not in result.output
 

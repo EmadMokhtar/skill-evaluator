@@ -58,11 +58,18 @@ CASE = EvalCase(
 @pytest.mark.cassette
 @pytest.mark.vcr
 def test_real_traffic_drives_the_whole_loop(replay):
-    result = PydanticAIRunner(model="openai:gpt-4o-mini").run(SKILL, CASE)
+    # This is the one thing offline tests (FunctionModel, tests/test_pydantic_ai_runner.py)
+    # cannot prove: a real provider sends tool-call arguments back as a JSON
+    # *string*, not a dict, which is exactly what `_arguments()`'s normalisation
+    # in the adapter exists to handle. `retries=0` makes a stale/mismatched
+    # cassette fail fast as a clear vcr error instead of surfacing, after two
+    # backoff sleeps, as a misleading `ModelAPIError: Connection error`.
+    result = PydanticAIRunner(model="openai:gpt-4o-mini", retries=0).run(SKILL, CASE)
 
     assert result.errored is False
     assert result.output != ""
     assert [call.name for call in result.tool_calls] == ["lookup_order"]
+    assert isinstance(result.tool_calls[0].arguments, dict)
     assert result.tool_calls[0].arguments == {"order_id": "1234"}
     assert result.input_tokens > 0
     assert result.output_tokens > 0
@@ -73,13 +80,3 @@ def test_real_traffic_drives_the_whole_loop(replay):
     assert TrajectoryEvaluator().evaluate(CASE, result).passed is True
     assert BudgetEvaluator().evaluate(CASE, result).passed is True
     assert AssertionEvaluator().evaluate(CASE, result).passed is True
-
-
-@pytest.mark.cassette
-@pytest.mark.vcr
-def test_arguments_from_a_real_provider_arrive_as_a_dict(replay):
-    # Providers send tool arguments as a JSON *string*; the adapter normalises
-    # them. Only real traffic can prove that, which is why it lives here.
-    result = PydanticAIRunner(model="openai:gpt-4o-mini").run(SKILL, CASE)
-    assert isinstance(result.tool_calls[0].arguments, dict)
-    assert result.tool_calls[0].arguments["order_id"] == "1234"
