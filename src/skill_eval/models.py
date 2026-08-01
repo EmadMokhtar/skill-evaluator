@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 CaseStatus = Literal["passed", "failed", "errored"]
+ToolParamType = Literal["string", "integer", "number", "boolean"]
 
 
 class Skill(BaseModel):
@@ -29,13 +30,23 @@ class ToolCall(BaseModel):
 class RunResult(BaseModel):
     """The outcome of running one task against one skill with one runner."""
 
+    model_config = ConfigDict(extra="forbid")
+
     output: str = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
     transcript: list[dict[str, Any]] = Field(default_factory=list)
-    tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     latency_ms: int = 0
     cost_usd: float = 0.0
+    cost_note: str = ""
+    model: str = ""
     error: str | None = None
+
+    @property
+    def tokens(self) -> int:
+        """Total tokens. Derived, so it can never disagree with the split."""
+        return self.input_tokens + self.output_tokens
 
     @property
     def errored(self) -> bool:
@@ -61,14 +72,61 @@ class AssertionSpec(BaseModel):
     value: str
 
 
+class ToolSpec(BaseModel):
+    """A mock tool an eval case makes available to the agent.
+
+    Nothing executes: calling the tool records the call and returns `returns`
+    verbatim, so the trajectory is genuinely the model's choice and a run has
+    no side effects.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str = ""
+    parameters: dict[str, ToolParamType] = Field(default_factory=dict)
+    returns: str = ""
+
+    @field_validator("name")
+    @classmethod
+    def _must_be_an_identifier(cls, value: str) -> str:
+        if not value.isidentifier():
+            raise ValueError(f"tool name must be a valid identifier, got {value!r}")
+        return value
+
+
+class TrajectorySpec(BaseModel):
+    """What the agent should (and should not) have done to get its answer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    called: list[str] = Field(default_factory=list)
+    forbidden: list[str] = Field(default_factory=list)
+    order: list[str] = Field(default_factory=list)
+    max_calls: int | None = None
+
+
+class BudgetSpec(BaseModel):
+    """Efficiency ceilings for one case."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_tokens: int | None = None
+    max_cost_usd: float | None = None
+    max_latency_ms: int | None = None
+
+
 class EvalCase(BaseModel):
-    """A single eval case: a task prompt plus how to score it."""
+    """A single eval case: a task prompt, the environment it runs in, and how to score it."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
     task: str
+    tools: list[ToolSpec] = Field(default_factory=list)
     assertions: list[AssertionSpec] = Field(default_factory=list)
+    trajectory: TrajectorySpec | None = None
+    budget: BudgetSpec | None = None
     tags: list[str] = Field(default_factory=list)
 
 

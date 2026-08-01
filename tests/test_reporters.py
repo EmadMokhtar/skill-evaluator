@@ -15,7 +15,7 @@ def _report():
                 runner="fake",
                 status="passed",
                 scores=[EvalScore(evaluator="assertion", passed=True, score=1.0, detail="ok")],
-                result=RunResult(output="yes", tokens=10, cost_usd=0.01, latency_ms=5),
+                result=RunResult(output="yes", output_tokens=10, cost_usd=0.01, latency_ms=5),
             ),
             CaseOutcome(
                 skill_name="pdf",
@@ -105,7 +105,7 @@ def test_json_summary_includes_total_tokens_and_cost():
     data = json.loads(render_json(_report()))
     assert "total_tokens" in data["summary"]
     assert "total_cost_usd" in data["summary"]
-    # First outcome has tokens=10, cost=0.01; second has defaults
+    # First outcome has output_tokens=10, cost=0.01; second has defaults
     assert data["summary"]["total_tokens"] == 10
     assert data["summary"]["total_cost_usd"] == 0.01
 
@@ -120,7 +120,7 @@ def test_reporters_handle_outcome_with_no_result():
                 runner="fake",
                 status="passed",
                 scores=[],
-                result=RunResult(tokens=10, cost_usd=0.01, latency_ms=100),
+                result=RunResult(output_tokens=10, cost_usd=0.01, latency_ms=100),
             ),
             CaseOutcome(
                 skill_name="pdf",
