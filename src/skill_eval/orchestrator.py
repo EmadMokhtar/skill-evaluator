@@ -15,7 +15,7 @@ def _run_one(
     skill: Skill, case: EvalCase, runner: Runner, evaluators: list[Evaluator]
 ) -> CaseOutcome:
     """Run a single combination and score it, keeping errored distinct from failed."""
-    result = runner.run(skill, case.task)
+    result = runner.run(skill, case)
     if result.errored:
         return CaseOutcome(
             skill_name=skill.name,
