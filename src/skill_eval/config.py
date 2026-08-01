@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 CONFIG_FILENAME = "skill-eval.toml"
+DEFAULT_MODEL = "openai:gpt-4o-mini"
 
 
 class ConfigError(Exception):
@@ -17,14 +19,19 @@ class ConfigError(Exception):
 class Config(BaseModel):
     """Run defaults for `skill-eval run`.
 
-    Only `default_runner` (via `--runner`) and `min_pass_rate` (via
-    `--min-pass-rate`) can be overridden by a CLI flag; `fail_on_error` and
-    `per_skill_min` have no corresponding flag and can only be set here.
+    `default_runner` (`--runner`), `model` (`--model`) and `min_pass_rate`
+    (`--min-pass-rate`) can be overridden by a CLI flag; the rest can only be
+    set here. Secrets are never read from this file -- API keys come from the
+    environment only.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     default_runner: str = "fake"
+    model: str = DEFAULT_MODEL
+    temperature: float | Literal["unset"] = 0.0
+    retries: int = 2
+    retry_backoff_seconds: float = 1.0
     min_pass_rate: float = 1.0
     fail_on_error: bool = True
     per_skill_min: dict[str, float] = Field(default_factory=dict)

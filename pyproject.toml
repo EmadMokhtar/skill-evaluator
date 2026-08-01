@@ -14,12 +14,18 @@ dependencies = [
 [project.scripts]
 skill-eval = "skill_eval.cli:app"
 
+[project.optional-dependencies]
+pydantic-ai = ["pydantic-ai-slim[openai]>=2.22"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
     "commitizen>=3.29",
     "pre-commit>=4.6.1",
+    "pytest-recording>=0.13",
+    "vcrpy>=8.0",
+    "pydantic-ai-slim[openai]>=2.22",
 ]
 
 [build-system]

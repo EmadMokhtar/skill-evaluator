@@ -117,3 +117,45 @@ def test_non_utf8_config_raises_config_error_not_raw_decode_error(tmp_path):
     path.write_bytes(b'default_runner = "\xff\xfe"\n')
     with pytest.raises(ConfigError, match="cannot read"):
         load_config(path=path)
+
+
+def test_config_reads_model_and_retry_settings(tmp_path):
+    config_file = tmp_path / "skill-eval.toml"
+    config_file.write_text(
+        'default_runner = "pydantic-ai"\n'
+        'model = "openai:gpt-4.1-mini"\n'
+        "temperature = 0.2\n"
+        "retries = 3\n"
+        "retry_backoff_seconds = 0.5\n",
+        encoding="utf-8",
+    )
+    settings = load_config(path=config_file)
+    assert settings.default_runner == "pydantic-ai"
+    assert settings.model == "openai:gpt-4.1-mini"
+    assert settings.temperature == 0.2
+    assert settings.retries == 3
+    assert settings.retry_backoff_seconds == 0.5
+
+
+def test_config_defaults_never_spend_money():
+    settings = Config()
+    assert settings.default_runner == "fake"
+    assert settings.model == "openai:gpt-4o-mini"
+    assert settings.temperature == 0.0
+    assert settings.retries == 2
+
+
+def test_config_temperature_accepts_unset_for_reasoning_models(tmp_path):
+    # TOML has no null literal, and omitting the key must keep meaning "use the
+    # default", so "unset" is the only way to say "send no temperature at all" --
+    # which GPT-5-family and o-series models require.
+    config_file = tmp_path / "skill-eval.toml"
+    config_file.write_text('temperature = "unset"\n', encoding="utf-8")
+    assert load_config(path=config_file).temperature == "unset"
+
+
+def test_config_rejects_a_nonsense_temperature(tmp_path):
+    config_file = tmp_path / "skill-eval.toml"
+    config_file.write_text('temperature = "hot"\n', encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(path=config_file)
