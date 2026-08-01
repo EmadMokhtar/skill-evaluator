@@ -84,3 +84,47 @@ def test_cost_budget_passes_at_the_limit():
 
 def test_latency_budget_passes_at_the_limit():
     assert EVALUATOR.evaluate(case(max_latency_ms=1000), RunResult(latency_ms=1000)).passed is True
+
+
+def test_unpriced_cost_budget_is_not_reported_as_within_budget():
+    # calculate_cost degrades to (0.0, "no price data for ...") for an unpriced
+    # model. 0.0 > max_cost_usd is always False, so the naive check would report
+    # "within budget" for a limit that was never actually verified. The evaluator
+    # must not silently score this 1.0 as though the limit held.
+    result = RunResult(cost_usd=0.0, cost_note="no price data for groq:llama (KeyError)")
+    score = EVALUATOR.evaluate(case(max_cost_usd=0.01), result)
+    assert score.passed is False
+    assert score.score == 0.0
+    assert "not evaluated" in score.detail
+    assert "no price data" in score.detail
+
+
+def test_unpriced_cost_is_excluded_from_the_denominator_when_other_limits_pass():
+    # Only the token limit is actually evaluated; the skipped cost check must
+    # not inflate or deflate that fraction.
+    result = RunResult(input_tokens=100, cost_usd=0.0, cost_note="no price data for x (KeyError)")
+    score = EVALUATOR.evaluate(case(max_tokens=1000, max_cost_usd=0.01), result)
+    assert score.passed is True
+    assert score.score == 1.0
+    assert "not evaluated" in score.detail
+
+
+def test_unpriced_cost_is_excluded_from_the_denominator_when_other_limits_fail():
+    result = RunResult(input_tokens=100, cost_usd=0.0, cost_note="no price data for x (KeyError)")
+    score = EVALUATOR.evaluate(case(max_tokens=10, max_cost_usd=0.01), result)
+    assert score.passed is False
+    assert score.score == 0.0
+    assert "not evaluated" in score.detail
+    assert "100" in score.detail
+
+
+def test_token_and_latency_budgets_are_unaffected_by_an_unrelated_cost_note():
+    # A cost_note on the result must not touch token/latency checks that have
+    # nothing to do with pricing.
+    result = RunResult(
+        input_tokens=600, output_tokens=500, latency_ms=2500, cost_note="no price data for x"
+    )
+    score = EVALUATOR.evaluate(case(max_tokens=1000, max_latency_ms=1000), result)
+    assert score.passed is False
+    assert "1100" in score.detail
+    assert "2500" in score.detail
