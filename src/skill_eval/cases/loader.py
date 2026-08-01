@@ -37,11 +37,42 @@ def parse_cases_file(path: Path) -> list[EvalCase]:
     cases: list[EvalCase] = []
     for index, raw in enumerate(raw_cases):
         try:
-            cases.append(EvalCase.model_validate(raw))
+            case = EvalCase.model_validate(raw)
         except ValidationError as exc:
             fields = ", ".join(str(e["loc"][0]) for e in exc.errors() if e["loc"])
             raise CaseParseError(f"{path}: case #{index + 1} invalid ({fields}): {exc}") from exc
+        _validate_cross_references(path, case)
+        cases.append(case)
     return cases
+
+
+def _validate_cross_references(path: Path, case: EvalCase) -> None:
+    """Catch case-file mistakes that pass schema validation but can never be
+    honoured at run time: they are authoring errors, not signals about the
+    skill under test, and must abort the run rather than score as a failure.
+    """
+    seen: set[str] = set()
+    for tool in case.tools:
+        if tool.name in seen:
+            raise CaseParseError(
+                f"{path}: case {case.name!r} declares tool {tool.name!r} more than once"
+            )
+        seen.add(tool.name)
+
+    declared = {tool.name for tool in case.tools}
+    if case.trajectory is None:
+        return
+    for field_name, names in (
+        ("called", case.trajectory.called),
+        ("forbidden", case.trajectory.forbidden),
+        ("order", case.trajectory.order),
+    ):
+        for name in names:
+            if name not in declared:
+                raise CaseParseError(
+                    f"{path}: case {case.name!r} trajectory.{field_name} names "
+                    f"{name!r}, which is not declared in this case's tools"
+                )
 
 
 def _discover_paths(skill: Skill) -> list[Path]:

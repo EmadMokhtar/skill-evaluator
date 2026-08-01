@@ -19,19 +19,9 @@ def test_every_example_skill_is_discovered():
 
 
 def test_every_example_skill_has_at_least_one_case():
+    # This call also exercises the loader's cross-reference validation (an
+    # undeclared trajectory tool or a duplicate tool name raises CaseParseError
+    # -- see tests/test_case_loader.py), so a regression here surfaces as this
+    # test erroring rather than needing its own dedicated example-only check.
     for skill in load_skills(EXAMPLES):
         assert load_cases_for_skill(skill), f"{skill.name} has no eval cases"
-
-
-def test_declared_trajectory_tools_are_actually_declared_as_tools():
-    # A trajectory check naming a tool the case never declares can never pass,
-    # and would look like a skill failure rather than the typo it is.
-    for skill in load_skills(EXAMPLES):
-        for case in load_cases_for_skill(skill):
-            declared = {tool.name for tool in case.tools}
-            if case.trajectory is None:
-                continue
-            referenced = set(
-                case.trajectory.called + case.trajectory.forbidden + case.trajectory.order
-            )
-            assert referenced <= declared, f"{skill.name}/{case.name}: {referenced - declared}"

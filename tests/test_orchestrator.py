@@ -140,6 +140,8 @@ def test_default_evaluators_include_trajectory_and_budget(tmp_path):
         "cases:\n"
         "  - name: c\n"
         "    task: t\n"
+        "    tools:\n"
+        "      - name: lookup_order\n"
         "    trajectory:\n"
         "      called: [lookup_order]\n"
         "    budget:\n"
@@ -164,7 +166,13 @@ def test_a_trajectory_violation_fails_the_case(tmp_path):
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text("---\nname: s\n---\nbody\n", encoding="utf-8")
     (skill_dir / "s.eval.yaml").write_text(
-        "cases:\n  - name: c\n    task: t\n    trajectory:\n      forbidden: [issue_refund]\n",
+        "cases:\n"
+        "  - name: c\n"
+        "    task: t\n"
+        "    tools:\n"
+        "      - name: issue_refund\n"
+        "    trajectory:\n"
+        "      forbidden: [issue_refund]\n",
         encoding="utf-8",
     )
     runner = FakeRunner(default=RunResult(tool_calls=[ToolCall(name="issue_refund")]))
