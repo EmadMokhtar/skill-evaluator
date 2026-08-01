@@ -115,9 +115,11 @@ Mock-tool construction lives in `runners/tools.py`, not in the adapter: turning 
 into a callable with a typed signature is framework-independent, and M6's real-execution
 toolset will register through the same seam.
 
-`temperature` is nullable and omitted from the request when unset, because the GPT-5-family
-and o-series reasoning models reject any temperature other than 1 — a hardcoded 0 would make
-the tool unusable on exactly the models a user is most likely to reach for next.
+`temperature` defaults to `0.0` but accepts the literal string `"unset"`, in which case no
+temperature is sent at all. GPT-5-family and o-series reasoning models reject any temperature
+other than 1, so a hardcoded 0 would make the tool unusable on exactly the models a user is
+most likely to reach for next. It is a sentinel string rather than a null because TOML has no
+null literal, and omitting the key has to keep meaning "use the default".
 
 **Trajectory capture** reads `ToolCallPart`s out of `result.all_messages()` in order, rather
 than recording inside the mock tool bodies — the message history is the authoritative record
@@ -221,7 +223,7 @@ A project opting into real runs writes:
 ```toml
 default_runner = "pydantic-ai"   # built-in default stays "fake"
 model = "openai:gpt-4o-mini"
-temperature = 0.0                # omit or set to null on reasoning models
+temperature = 0.0                # or "unset" on reasoning models
 retries = 2
 retry_backoff_seconds = 1.0
 ```
