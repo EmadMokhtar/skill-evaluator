@@ -12,5 +12,12 @@ cases:
         value: Ada
       - kind: not_contains
         value: Traceback
+      # SKILL.md asks for "one short sentence"; this regex only checks "one
+      # line, under 120 chars, ending in . ! or ?" -- it doesn't (and can't,
+      # with a regex) verify single-sentence-ness. It was deliberately
+      # relaxed from a stricter single-sentence pattern because real
+      # gpt-4o-mini output legitimately failed that stricter form (e.g. two
+      # short clauses joined by a comma). Don't tighten this without
+      # re-recording against a real provider.
       - kind: regex
         value: "^[^\\n]{1,120}[.!?]\"?\\s*$"
