@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from skill_eval.models import EvalCase, RunResult, Skill, ToolCall
+from skill_eval.runners.base import Runner
 from skill_eval.runners.fake import FakeRunner
 
 SKILL = Skill(name="pdf", description="", instructions="", path=Path("."))
@@ -50,3 +51,14 @@ def test_a_scripted_error_is_reported_not_raised():
 def test_scripted_tool_calls_survive_the_round_trip():
     runner = FakeRunner(responses={"t": RunResult(tool_calls=[ToolCall(name="read_pdf")])})
     assert runner.run(SKILL, case("t")).tool_calls[0].name == "read_pdf"
+
+
+def test_the_runner_exposes_its_name():
+    assert FakeRunner().name == "fake"
+
+
+def test_fake_runner_satisfies_the_runner_protocol():
+    """Runner is @runtime_checkable; this is the only thing that exercises isinstance
+    against it, so a protocol drift (a renamed run, a dropped name) would otherwise
+    go undetected."""
+    assert isinstance(FakeRunner(), Runner)
