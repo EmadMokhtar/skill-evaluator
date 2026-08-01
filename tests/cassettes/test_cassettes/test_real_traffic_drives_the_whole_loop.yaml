@@ -86,16 +86,10 @@ interactions:
         0\n    },\n    \"total_tokens\": 128\n  },\n  \"user\": null,\n  \"metadata\":
         {}\n}"
     headers:
-      access-control-expose-headers:
-      - X-Request-ID
-      - CF-Ray
-      - CF-Ray
       alt-svc:
       - h3=":443"; ma=86400
       cf-cache-status:
       - DYNAMIC
-      cf-ray:
-      - a2478f830ecae40e-OTP
       connection:
       - keep-alive
       content-length:
@@ -104,20 +98,12 @@ interactions:
       - application/json
       date:
       - Sat, 01 Aug 2026 20:23:27 GMT
-      openai-organization:
-      - user-7iukkr5kj0slddwjmmzggdqe
       openai-processing-ms:
       - '928'
-      openai-project:
-      - proj_ha4YjiyfJmV74ce5gV0VjOfW
       openai-version:
       - '2020-10-01'
       server:
       - cloudflare
-      set-cookie:
-      - __cf_bm=Diu_QgT16ZeM4.3noQpMwsf8ge_PnBrmKMBhIgJsC5U-1785615805.9258127-1.0.1.1-PgAc5uILKQLuiENc9Nihj1L0XbQ3VhX1bfiRssOWcBQritywV71po3_n_Y0VE9YBirVEk6r0XTS48.fNAi9yv3bWNZ75M5l71AUtTr8ZTEBtcP_bzAGd_BeR1c3YKHEF;
-        HttpOnly; SameSite=None; Secure; Path=/; Domain=api.openai.com; Expires=Sat,
-        01 Aug 2026 20:53:27 GMT
       strict-transport-security:
       - max-age=31536000; includeSubDomains; preload
       transfer-encoding:
@@ -136,8 +122,6 @@ interactions:
       - 8.64s
       x-ratelimit-reset-tokens:
       - 98ms
-      x-request-id:
-      - req_1c01640a55034d62a707999ba1bda542
     status:
       code: 200
       message: OK
@@ -232,16 +216,10 @@ interactions:
         0\n    },\n    \"total_tokens\": 196\n  },\n  \"user\": null,\n  \"metadata\":
         {}\n}"
     headers:
-      access-control-expose-headers:
-      - X-Request-ID
-      - CF-Ray
-      - CF-Ray
       alt-svc:
       - h3=":443"; ma=86400
       cf-cache-status:
       - DYNAMIC
-      cf-ray:
-      - a2478f912fd5e40e-OTP
       connection:
       - keep-alive
       content-length:
@@ -250,12 +228,8 @@ interactions:
       - application/json
       date:
       - Sat, 01 Aug 2026 20:23:30 GMT
-      openai-organization:
-      - user-7iukkr5kj0slddwjmmzggdqe
       openai-processing-ms:
       - '1642'
-      openai-project:
-      - proj_ha4YjiyfJmV74ce5gV0VjOfW
       openai-version:
       - '2020-10-01'
       server:
@@ -278,8 +252,6 @@ interactions:
       - 15.288s
       x-ratelimit-reset-tokens:
       - 111ms
-      x-request-id:
-      - req_e6c2cd18b4c04546b9d2364656d323e5
     status:
       code: 200
       message: OK

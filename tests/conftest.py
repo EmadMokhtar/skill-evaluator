@@ -31,6 +31,39 @@ def isolate_cwd(tmp_path, monkeypatch):
 CASSETTE_DIR = Path(__file__).parent / "cassettes"
 
 
+def _scrub_response(response):
+    """Strip account-identifying response headers before they hit disk.
+
+    `filter_headers` only ever touches the *request* side in vcrpy -- it is
+    wired solely into the request path, so response headers pass through
+    untouched regardless of what's listed there. Recorded responses carry
+    `openai-organization`, `openai-project`, and a `set-cookie` (`__cf_bm`)
+    that are permanently tied to whichever account did the recording, plus
+    `x-request-id`/`cf-ray` which are harmless but noisy. This is the other
+    half of the scrub: response headers, applied via `before_record_response`.
+    Header keys in cassettes recorded through the httpx transport come out
+    lower-cased already, but this pops case-insensitively so it stays correct
+    if that ever changes. `access-control-expose-headers` is scrubbed too since
+    its value is just the *names* of the headers above (`X-Request-ID`,
+    `CF-Ray`) -- leaving it would both re-leak those names in its value list
+    and advertise exposure of headers that are no longer present.
+    """
+    scrub = {
+        "openai-organization",
+        "openai-project",
+        "set-cookie",
+        "x-request-id",
+        "cf-ray",
+        "access-control-expose-headers",
+    }
+    headers = response.get("headers")
+    if headers:
+        for key in list(headers):
+            if key.lower() in scrub:
+                del headers[key]
+    return response
+
+
 @pytest.fixture(scope="module")
 def vcr_config():
     """Replay-only by default, with every credential scrubbed on record.
@@ -38,24 +71,28 @@ def vcr_config():
     Matching on the body as well as the URL matters here: every request goes to
     the same chat-completions path, so the body is the only thing that tells one
     turn of a conversation from the next.
+
+    Scrubbing is split across two hooks because vcrpy wires them into two
+    different sides of the exchange: `filter_headers` only ever touches
+    *request* headers (auth tokens, cookies sent by us), while
+    `before_record_response` (see `_scrub_response` above) strips
+    account-identifying headers the *provider* sends back.
     """
     return {
         "filter_headers": [
             "authorization",
             "api-key",
             "x-api-key",
-            "openai-organization",
-            "openai-project",
             "cookie",
-            "set-cookie",
         ],
+        "before_record_response": _scrub_response,
         "match_on": ["method", "scheme", "host", "port", "path", "body"],
         "decode_compressed_response": True,
     }
 
 
 @pytest.fixture
-def replay(request, monkeypatch):
+def replay(request, monkeypatch, record_mode):
     """Set up a cassette-backed test: dummy key, and skip if never recorded.
 
     Provider clients refuse to construct without a key even when every response
@@ -63,8 +100,18 @@ def replay(request, monkeypatch):
     must not look like a broken build, hence the skip -- but a *mismatched*
     request still fails loudly rather than reaching the network, which is the
     behaviour the tier exists for.
+
+    The skip only fires in replay-only mode (`record_mode == "none"`, the
+    default `pytest-recording` falls back to). `pytest-recording`'s autouse,
+    function-scoped `vcr` fixture always sets up before this one regardless of
+    mode, so without this guard the skip would fire even under
+    `--record-mode=once` and re-recording would be impossible for anyone.
     """
     monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-replay")
     cassette = CASSETTE_DIR / request.node.module.__name__ / f"{request.node.name}.yaml"
-    if not cassette.is_file():
-        pytest.skip(f"cassette {cassette.name} not recorded; see the recording command in the plan")
+    if record_mode == "none" and not cassette.is_file():
+        pytest.skip(
+            f"cassette {cassette.name} not recorded; run "
+            "`uv run pytest tests/test_cassettes.py --record-mode=once` with a real "
+            "OPENAI_API_KEY exported to record it"
+        )

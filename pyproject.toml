@@ -41,7 +41,7 @@ markers = [
     "integration: hits real provider APIs; requires an API key (deselected by default)",
     "cassette: replays recorded provider traffic; no network, no key needed",
 ]
-addopts = "-m 'not integration'"
+addopts = "-m 'not integration' --block-network"
 filterwarnings = [
     "ignore:There is no current event loop:DeprecationWarning:pydantic_graph._utils",
 ]

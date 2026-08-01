@@ -3,6 +3,14 @@
 Tier 2 of the strategy in the design spec: real wire fidelity, zero cost, every
 PR. Tier 1 (FunctionModel) proves the mapping; this proves the mapping matches
 what a provider actually sends.
+
+Note on failure mode: if a test's request stops matching its cassette (body
+changed, case reordered, etc.), vcrpy raises `CannotOverwriteExistingCassetteException`.
+httpx/openai re-wrap that, the adapter classifies it as transient, retries twice
+with backoff, and it surfaces here as `ModelAPIError: Connection error` -- not as
+an obvious cassette error. No network is involved and the "no network" contract
+still holds; if you hit this, suspect a stale/mismatched cassette before you
+suspect your network.
 """
 
 from pathlib import Path
