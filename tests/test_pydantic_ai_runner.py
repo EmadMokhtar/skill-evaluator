@@ -7,6 +7,7 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from skill_eval.models import EvalCase, Skill, ToolSpec
+from skill_eval.runners.base import Runner
 from skill_eval.runners.pydantic_ai import PydanticAIRunner
 
 SKILL = Skill(
@@ -237,3 +238,77 @@ def test_a_model_omitting_a_required_tool_argument_does_not_error_the_case():
     assert result.tool_calls[0].name == "lookup_order"
     assert result.tool_calls[0].arguments == {}
     assert result.output == "done"
+    # Pin the actual claim: no retry-prompt part anywhere in the transcript.
+    # If PydanticAI HAD rejected the call, a RetryPromptPart (serialised with
+    # part_kind == "retry-prompt") would show up in a request message's parts.
+    retry_parts = [
+        part
+        for message in result.transcript
+        for part in message.get("parts", [])
+        if part.get("part_kind") == "retry-prompt"
+    ]
+    assert retry_parts == []
+
+
+def test_a_failure_while_capturing_the_result_is_reported_not_raised(monkeypatch):
+    # The never-raise contract covers our own capture code, not just the
+    # provider. A real provider can emit message shapes FunctionModel never
+    # does, and a serialisation failure must not crash the run.
+    import skill_eval.runners.pydantic_ai as adapter
+
+    def boom(messages):
+        raise RuntimeError("transcript exploded")
+
+    monkeypatch.setattr(adapter, "_transcript", boom)
+    result = PydanticAIRunner(model=scripted(text("done"))).run(SKILL, case())
+    assert result.errored is True
+    assert "transcript exploded" in result.error
+
+
+def test_a_numeric_temperature_is_sent_to_the_model():
+    seen = {}
+
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        seen["settings"] = info.model_settings
+        return text("done")
+
+    PydanticAIRunner(model=FunctionModel(reply), temperature=0.7).run(SKILL, case())
+    assert seen["settings"] == {"temperature": 0.7}
+
+
+def test_an_unset_temperature_sends_no_temperature_at_all():
+    # Reasoning models reject any temperature but 1, so "unset" must mean no
+    # model_settings at all rather than an omitted key inside one.
+    seen = {}
+
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        seen["settings"] = info.model_settings
+        return text("done")
+
+    PydanticAIRunner(model=FunctionModel(reply), temperature="unset").run(SKILL, case())
+    assert seen["settings"] is None
+
+
+def test_a_5xx_failure_is_retried_and_can_succeed():
+    attempts = {"n": 0}
+
+    def flaky(messages, info: AgentInfo) -> ModelResponse:
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise ModelHTTPError(status_code=503, model_name="scripted", body=None)
+        return text("recovered")
+
+    slept = []
+    runner = PydanticAIRunner(
+        model=FunctionModel(flaky), retries=2, retry_backoff_seconds=0.01, sleep=slept.append
+    )
+    result = runner.run(SKILL, case())
+    assert result.output == "recovered"
+    assert result.errored is False
+    assert slept == [0.01]
+
+
+def test_pydantic_ai_runner_satisfies_the_runner_protocol():
+    """Runner is @runtime_checkable; this guards the seam the whole design rests
+    on (Runner.run(skill, case) -> RunResult) against signature drift."""
+    assert isinstance(PydanticAIRunner(model=scripted(text("x"))), Runner)

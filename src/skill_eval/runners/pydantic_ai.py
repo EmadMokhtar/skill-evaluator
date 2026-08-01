@@ -172,6 +172,21 @@ class PydanticAIRunner:
         try:
             agent = self._build_agent(skill, case)
             result = self._run_with_retries(agent, case.task)
+            messages = result.all_messages()
+            usage = result.usage
+            model_name = _model_name(messages, configured)
+            cost_usd, cost_note = calculate_cost(usage, model_name, provider_of(configured))
+            run_result = RunResult(
+                output=result.output if isinstance(result.output, str) else str(result.output),
+                tool_calls=_tool_calls(messages),
+                transcript=_transcript(messages),
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                latency_ms=int((time.monotonic() - started) * 1000),
+                cost_usd=cost_usd,
+                cost_note=cost_note,
+                model=model_name,
+            )
         except RunnerDependencyError:
             raise
         except Exception as exc:
@@ -181,19 +196,4 @@ class PydanticAIRunner:
                 model=configured,
             )
 
-        latency_ms = int((time.monotonic() - started) * 1000)
-        messages = result.all_messages()
-        usage = result.usage
-        model_name = _model_name(messages, configured)
-        cost_usd, cost_note = calculate_cost(usage, model_name, provider_of(configured))
-        return RunResult(
-            output=result.output if isinstance(result.output, str) else str(result.output),
-            tool_calls=_tool_calls(messages),
-            transcript=_transcript(messages),
-            input_tokens=usage.input_tokens,
-            output_tokens=usage.output_tokens,
-            latency_ms=latency_ms,
-            cost_usd=cost_usd,
-            cost_note=cost_note,
-            model=model_name,
-        )
+        return run_result

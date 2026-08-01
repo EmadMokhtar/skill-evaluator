@@ -41,6 +41,9 @@ markers = [
     "integration: hits real provider APIs; requires an API key (deselected by default)",
 ]
 addopts = "-m 'not integration'"
+filterwarnings = [
+    "ignore:There is no current event loop:DeprecationWarning:pydantic_graph._utils",
+]
 
 [tool.ruff]
 line-length = 100
