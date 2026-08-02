@@ -8,6 +8,7 @@ import yaml
 from pydantic import ValidationError
 
 from skill_eval.models import EvalCase, Skill
+from skill_eval.runners.tools import skill_tool_name
 from skill_eval.yaml_loading import safe_load
 
 EVALS_DIRNAME = "evals"
@@ -18,8 +19,13 @@ class CaseParseError(Exception):
     """Raised when an eval file is missing or cannot be parsed."""
 
 
-def parse_cases_file(path: Path) -> list[EvalCase]:
-    """Parse one YAML file into EvalCase models."""
+def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
+    """Parse one YAML file into EvalCase models.
+
+    `skill` is optional because a case file can be parsed on its own; it is
+    only needed for the checks that depend on what the skill would be offered
+    as (see `_validate_cross_references`).
+    """
     path = Path(path)
     try:
         text = path.read_text(encoding="utf-8")
@@ -41,12 +47,12 @@ def parse_cases_file(path: Path) -> list[EvalCase]:
         except ValidationError as exc:
             fields = ", ".join(str(e["loc"][0]) for e in exc.errors() if e["loc"])
             raise CaseParseError(f"{path}: case #{index + 1} invalid ({fields}): {exc}") from exc
-        _validate_cross_references(path, case)
+        _validate_cross_references(path, case, skill)
         cases.append(case)
     return cases
 
 
-def _validate_cross_references(path: Path, case: EvalCase) -> None:
+def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None = None) -> None:
     """Catch case-file mistakes that pass schema validation but can never be
     honoured at run time: they are authoring errors, not signals about the
     skill under test, and must abort the run rather than score as a failure.
@@ -60,8 +66,33 @@ def _validate_cross_references(path: Path, case: EvalCase) -> None:
         seen.add(tool.name)
 
     declared = {tool.name for tool in case.tools}
+
+    if case.judge is not None and not case.judge.rubric:
+        raise CaseParseError(
+            f"{path}: case {case.name!r} declares a judge block with an empty rubric. "
+            f"Give the judge something to check, or remove the block -- an "
+            f"unchecked rubric would score as a pass nobody verified."
+        )
+
+    if case.mode == "offered" and skill is not None:
+        offered = skill_tool_name(skill.name)
+        if offered in declared:
+            raise CaseParseError(
+                f"{path}: case {case.name!r} declares a tool named {offered!r}, which "
+                f"collides with the name skill {skill.name!r} is offered under in "
+                f"mode: offered. Rename the case's tool."
+            )
+
     if case.trajectory is None:
         return
+
+    if case.trajectory.skill_triggered is not None and case.mode != "offered":
+        raise CaseParseError(
+            f"{path}: case {case.name!r} sets trajectory.skill_triggered but runs in "
+            f"mode {case.mode!r}. A loaded skill is always in force, so the check "
+            f"could never be false -- set 'mode: offered'."
+        )
+
     for field_name, names in (
         ("called", case.trajectory.called),
         ("forbidden", case.trajectory.forbidden),
@@ -98,5 +129,5 @@ def load_cases_for_skill(skill: Skill, evals_path: Path | None = None) -> list[E
         paths = _discover_paths(skill)
     cases: list[EvalCase] = []
     for path in paths:
-        cases.extend(parse_cases_file(path))
+        cases.extend(parse_cases_file(path, skill))
     return cases
