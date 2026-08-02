@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+    # `labeled`/`unlabeled` are not default trigger types, but the docs-freshness
+    # job's `no-docs-needed` escape hatch is worthless without them: without a
+    # rerun, adding the label leaves the already-failed check red.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 jobs:
   conventional-commits:
