@@ -22,12 +22,14 @@ The design rests on two protocols. Everything else is plumbing around them.
 ```python
 class Runner(Protocol):
     name: str
+
     def run(self, skill: Skill, case: EvalCase) -> RunResult: ...
 ```
 
 ```python
 class Evaluator(Protocol):
     name: str
+
     def evaluate(self, case: EvalCase, result: RunResult) -> EvalScore: ...
 ```
 
