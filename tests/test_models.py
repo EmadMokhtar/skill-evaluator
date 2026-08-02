@@ -6,8 +6,13 @@ from pydantic import ValidationError
 from skill_eval.models import (
     BudgetSpec,
     CaseOutcome,
+    CheckResult,
     EvalCase,
     EvalScore,
+    JudgeRequest,
+    JudgeSpec,
+    JudgeVerdict,
+    RubricCheck,
     RunReport,
     RunResult,
     Skill,
@@ -155,3 +160,85 @@ def test_run_result_rejects_writing_tokens_directly():
     # total that disagrees with the split it was priced from.
     with pytest.raises(ValidationError):
         RunResult(tokens=127)
+
+
+def test_a_case_defaults_to_loaded_mode_with_no_judge():
+    case = EvalCase(name="c", task="t")
+    assert case.mode == "loaded"
+    assert case.judge is None
+
+
+def test_a_case_can_declare_offered_mode_and_a_rubric():
+    case = EvalCase(
+        name="c",
+        task="t",
+        mode="offered",
+        judge=JudgeSpec(expected="a plain answer", rubric=["names the order id"]),
+        trajectory=TrajectorySpec(skill_triggered=True),
+    )
+    assert case.mode == "offered"
+    assert case.judge.rubric == ["names the order id"]
+    assert case.trajectory.skill_triggered is True
+
+
+def test_an_unknown_mode_is_rejected():
+    with pytest.raises(ValidationError):
+        EvalCase(name="c", task="t", mode="offerred")
+
+
+def test_a_judge_spec_forbids_unknown_keys():
+    # Without extra="forbid" a typo like `rubrics:` yields a vacuously-passing case.
+    with pytest.raises(ValidationError):
+        JudgeSpec(rubrics=["oops"])
+
+
+def test_a_result_reports_no_triggering_decision_by_default():
+    # None means "this run was not an offered run", which is distinct from False.
+    assert RunResult().skill_triggered is None
+
+
+def test_a_verdict_knows_when_it_errored():
+    assert JudgeVerdict().errored is False
+    assert JudgeVerdict(error="boom").errored is True
+
+
+def test_a_request_carries_the_checks_it_wants_graded():
+    request = JudgeRequest(
+        task="why?",
+        output="because",
+        checks=[RubricCheck(id="r1", text="explains why")],
+    )
+    assert [check.id for check in request.checks] == ["r1"]
+
+
+def test_an_errored_score_cannot_also_be_passed():
+    # The two must never disagree: an infra failure is not a green case.
+    with pytest.raises(ValidationError):
+        EvalScore(evaluator="judge", passed=True, errored=True)
+
+
+def test_a_score_carries_per_check_evidence():
+    score = EvalScore(
+        evaluator="judge",
+        passed=False,
+        checks=[CheckResult(id="r1", passed=False, evidence="never mentions the window")],
+    )
+    assert score.checks[0].evidence == "never mentions the window"
+    assert score.cost_usd == 0.0
+
+
+def test_judge_cost_is_summed_across_outcomes_and_kept_off_the_run_cost():
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="s",
+                case_name="c",
+                runner="fake",
+                status="passed",
+                scores=[EvalScore(evaluator="judge", passed=True, cost_usd=0.002)],
+                result=RunResult(cost_usd=0.01),
+            )
+        ]
+    )
+    assert report.judge_cost_usd == pytest.approx(0.002)
+    assert report.outcomes[0].result.cost_usd == pytest.approx(0.01)
