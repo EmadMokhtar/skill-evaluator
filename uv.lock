@@ -1315,8 +1315,8 @@ dev = [
     { name = "vcrpy", specifier = ">=8.0" },
 ]
 docs = [
-    { name = "mkdocs", specifier = ">=1.6" },
-    { name = "mkdocs-material", specifier = ">=9.5" },
+    { name = "mkdocs", specifier = ">=1.6,<2" },
+    { name = "mkdocs-material", specifier = ">=9.5,<10" },
 ]
 
 [[package]]

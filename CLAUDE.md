@@ -75,8 +75,9 @@ form, that file is the explanation.
 - **Exit codes are the CI contract:** gate pass `0`, gate fail `1`, user/authoring error `2`.
   In `cli.py`, a JSON-write failure only escalates to 2 when the gate itself passed — it must
   not mask an already-failing gate.
-- **`extra="forbid"`** on `EvalCase` / `AssertionSpec` / `Config`. Without it a typo like
-  `assertion:` yields a vacuously-passing case.
+- **`extra="forbid"`** on `EvalCase` / `AssertionSpec` / `ToolSpec` / `TrajectorySpec` /
+  `BudgetSpec` / `Config` / `RunResult`. Without it a typo like `assertion:` yields a
+  vacuously-passing case.
 - **All file IO pins `encoding="utf-8"`** and re-raises as a typed parse error
   (`SkillParseError` / `CaseParseError` / `ConfigError`) naming the file and field.
 - **YAML goes through `yaml_loading.safe_load`**, never `yaml.safe_load`. The custom loader
@@ -122,12 +123,16 @@ it in the README, and do not duplicate `ARCHITECTURE.md` into `docs/architecture
 Before pushing:
 
 ```bash
+uv sync --group docs           # mkdocs lives in the docs group; plain `uv sync` skips it
 uv run mkdocs build --strict
 uv run pytest tests/test_docs.py
 ```
 
 `docs/superpowers/` is a historical archive of specs and plans. It is excluded from the
 published site and does **not** count as documenting a change.
+
+When a change genuinely needs no documentation — a pure refactor, a dependency bump — add
+the `no-docs-needed` label to the PR to satisfy the `docs-freshness` gate.
 
 ## Conventions
 

@@ -19,15 +19,21 @@ embedding it.
 
 ## Install
 
+No release has shipped yet (see the [roadmap](roadmap.md)), so install from source:
+
 ```bash
+git clone https://github.com/EmadMokhtar/skill-evaluator.git
+cd skill-evaluator
 uv sync
 ```
 
 For evaluating against a real agent, install the extra:
 
 ```bash
-pip install 'skill-eval[pydantic-ai]'
+uv sync --extra pydantic-ai
 ```
+
+Once a release ships, `pip install skill-eval` (or `skill-eval[pydantic-ai]`) will work too.
 
 ## Where to go next
 

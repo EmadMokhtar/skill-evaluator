@@ -29,21 +29,6 @@ examples/
     greeting.eval.yaml
 ```
 
-```yaml
-# greeting.eval.yaml
-cases:
-  - name: greets the named person in one sentence
-    task: greet Ada
-    tags: [smoke]
-    budget:
-      max_tokens: 500
-    assertions:
-      - kind: contains
-        value: Ada
-      - kind: not_contains
-        value: Traceback
-```
-
 Point the CLI at a single skill directory or at a parent directory of many — discovery is
 recursive:
 
@@ -57,7 +42,9 @@ order-support	2 case(s)	examples/order-support
 ```
 
 `list` discovers skills and validates every eval file without calling a runner — free, and
-no API key required.
+no API key required. For a full walkthrough — writing an eval case, the assertion kinds,
+and running the examples against a real agent — see
+[Getting started](https://emadmokhtar.github.io/skill-evaluator/getting-started/).
 
 ## Documentation
 
@@ -71,6 +58,7 @@ no API key required.
 | Exit codes and CI | [Gating](https://emadmokhtar.github.io/skill-evaluator/gating/) |
 | How it is built | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Contributing | [Contributing](https://emadmokhtar.github.io/skill-evaluator/contributing/) |
+| What's shipped, what's next | [Roadmap](https://emadmokhtar.github.io/skill-evaluator/roadmap/) |
 
 ## License
 

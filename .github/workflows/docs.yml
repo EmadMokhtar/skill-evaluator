@@ -1,5 +1,9 @@
 name: Docs
 
+# Requires a one-time manual setting: Settings -> Pages -> Source = "GitHub Actions".
+# Until that is set, `deploy` fails with an opaque error even though `build` succeeds,
+# and every https://emadmokhtar.github.io/skill-evaluator/... link in README.md stays dead.
+
 on:
   push:
     branches: [main]

@@ -65,3 +65,15 @@ CI enforces the same rules on every PR: the title is checked with `cz check`, an
 every commit on the branch with `scripts/check_commits.py`. Two docs-only commits
 predating the convention are exempted in `scripts/legacy-commits.txt`; that list
 should only ever shrink.
+
+## One-time repository settings
+
+Two settings live in the GitHub UI, not in this repo, so they are easy to miss when
+standing up a fork or a new instance of this project:
+
+- **Settings -> Pages -> Source = "GitHub Actions".** Without it, `docs.yml`'s `build`
+  job succeeds but `deploy` fails with an opaque error, and every published docs link
+  (including the ones in `README.md`) stays dead.
+- **Copilot code review enabled** on the repository. Without it, `.github/copilot-instructions.md`
+  and `.github/instructions/*` are never read, so Copilot's PR reviews ignore this
+  project's conventions.

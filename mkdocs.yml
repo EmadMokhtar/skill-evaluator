@@ -5,6 +5,10 @@ repo_url: https://github.com/EmadMokhtar/skill-evaluator
 repo_name: EmadMokhtar/skill-evaluator
 edit_uri: edit/main/docs/
 
+validation:
+  anchors: warn
+  absolute_links: warn
+
 # docs/superpowers/ is a historical record of design specs and plans. It lives
 # in the repo but is not part of the published site.
 exclude_docs: |

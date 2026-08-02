@@ -28,8 +28,10 @@ dev = [
     "pydantic-ai-slim[openai]>=2.22",
 ]
 docs = [
-    "mkdocs>=1.6",
-    "mkdocs-material>=9.5",
+    # Capped below 2.0: MkDocs 2.0 removes the plugin system entirely, with no
+    # migration path, which would break mkdocs-material and the docs build outright.
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.5,<10",
 ]
 
 [build-system]

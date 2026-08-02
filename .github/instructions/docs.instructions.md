@@ -10,6 +10,10 @@ applyTo: "docs/**,*.md,mkdocs.yml"
 - **`ARCHITECTURE.md` has exactly one copy**, at the repository root.
   `docs/architecture.md` includes it with a `pymdownx.snippets` directive. Flag any
   duplication of its content.
+- **`ARCHITECTURE.md` must use absolute links only (full URLs), never relative links.**
+  `tests/test_docs.py` resolves its relative links from the repo root, but mkdocs resolves
+  them from `docs/` because the file is inlined into `docs/architecture.md` by a snippet —
+  a relative link can pass the test and still fail `mkdocs build --strict`.
 - **A new page must be added to `nav:` in `mkdocs.yml`.** `tests/test_docs.py` fails on an
   orphan page, and `mkdocs build --strict` fails on a nav entry with no file.
 - **`docs/superpowers/` is a historical archive** of specs and plans. It is excluded from
