@@ -92,4 +92,4 @@ class PydanticAIJudge:
                 model=model_name,
             )
         except Exception as exc:
-            return JudgeVerdict(error=f"{type(exc).__name__}: {exc}")
+            return JudgeVerdict(error=f"{type(exc).__name__}: {exc}", model=configured)

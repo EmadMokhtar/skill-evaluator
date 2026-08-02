@@ -32,7 +32,7 @@ def _require_pydantic_ai() -> None:
         import pydantic_ai  # noqa: F401
     except ImportError as exc:
         raise RunnerDependencyError(
-            "the 'pydantic-ai' runner needs its optional extra: "
+            "the 'pydantic-ai' optional extra is required for this runner or judge: "
             "pip install 'skill-eval[pydantic-ai]'"
         ) from exc
 
