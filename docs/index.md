@@ -15,7 +15,7 @@ embedding it.
     The full pipeline — discovery, scoring, reporting, gating — runs offline against
     `FakeRunner` (the default, scripted, free) and against real agents through
     `pydantic-ai`. It scores output text, tool-use trajectories, and efficiency
-    budgets. See the roadmap.
+    budgets. See the [roadmap](roadmap.md).
 
 ## Install
 
@@ -34,3 +34,8 @@ pip install 'skill-eval[pydantic-ai]'
 | If you want to | Read |
 | --- | --- |
 | Write your first eval and run it | [Getting started](getting-started.md) |
+| Look up an eval YAML field or assertion kind | [Eval files](eval-files.md) |
+| Look up a command or flag | [CLI](cli.md) |
+| Configure defaults for a repo | [Configuration](configuration.md) |
+| Evaluate against a real agent, with tools and budgets | [Runners](runners.md) |
+| Understand exit codes and CI behavior | [Gating](gating.md) |

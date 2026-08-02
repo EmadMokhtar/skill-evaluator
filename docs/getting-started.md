@@ -46,5 +46,8 @@ order-support	2 case(s)	examples/order-support
 
 `list` discovers skills and validates every eval file without calling a runner — free, and no
 API key required. The shipped examples assert real model behavior, so actually running them
-(`skill-eval run`) needs the `pydantic-ai` runner — see running against a real agent below. The
+(`skill-eval run`) needs the `pydantic-ai` runner — see [running against a real agent](runners.md) below. The
 zero-cost `fake` runner (the default) is what the test suite itself runs on.
+
+Next: the full [eval file reference](eval-files.md), or
+[running against a real agent](runners.md).

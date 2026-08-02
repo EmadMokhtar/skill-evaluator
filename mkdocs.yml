@@ -44,3 +44,10 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
+  - Reference:
+      - Eval files: eval-files.md
+      - CLI: cli.md
+      - Configuration: configuration.md
+      - Runners: runners.md
+      - Gating and exit codes: gating.md
+  - Roadmap: roadmap.md
