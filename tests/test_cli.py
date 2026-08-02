@@ -3,6 +3,8 @@ import json
 from typer.testing import CliRunner
 
 from skill_eval.cli import app
+from skill_eval.judges.pydantic_ai import PydanticAIJudge
+from skill_eval.runners.pydantic_ai import PydanticAIRunner
 
 runner = CliRunner()
 
@@ -310,3 +312,50 @@ def test_json_output_with_non_ascii_is_written_as_utf8(tmp_path):
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["outcomes"][0]["skill_name"] == "café"
     assert data["outcomes"][0]["case_name"] == "日本語 case"
+
+
+def test_runner_preflight_wins_the_race_against_construction(tmp_path, monkeypatch):
+    """A missing key must be caught before `PydanticAIRunner(...)` ever runs.
+
+    If `check_api_key` moved to *after* construction, a future runner whose
+    `__init__` does real work (builds a client, etc.) would spend before the
+    key check ever fires. Pin the ordering directly: make construction itself
+    blow up, and prove the CLI still reports the missing key rather than the
+    construction crash.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+
+    def _boom(self, *args, **kwargs):
+        raise AssertionError("PydanticAIRunner constructed before preflight")
+
+    monkeypatch.setattr(PydanticAIRunner, "__init__", _boom)
+    result = runner.invoke(
+        app,
+        ["run", str(skill_dir), "--runner", "pydantic-ai", "--model", "openai:gpt-4o-mini"],
+    )
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+    assert "constructed before preflight" not in result.output
+
+
+def test_judge_preflight_wins_the_race_against_construction(tmp_path, monkeypatch):
+    """Same guarantee as above, for the judge: preflight must run before
+    `PydanticAIJudge(...)` is ever called.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text(
+        'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\n', encoding="utf-8"
+    )
+
+    def _boom(self, *args, **kwargs):
+        raise AssertionError("PydanticAIJudge constructed before preflight")
+
+    monkeypatch.setattr(PydanticAIJudge, "__init__", _boom)
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+    )
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+    assert "constructed before preflight" not in result.output
