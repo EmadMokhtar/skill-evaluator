@@ -132,6 +132,15 @@ def test_a_runner_that_reported_no_decision_errors_rather_than_failing():
     assert "does not support" in score.detail
 
 
+def test_a_negative_control_on_an_unsupported_runner_errors_too():
+    # A truthy guard would misreport this as a plain failure (did not trigger
+    # when expected), not an infra error (runner does not support offered mode).
+    score = TrajectoryEvaluator().evaluate(triggering_case(False), RunResult(skill_triggered=None))
+    assert score.errored is True
+    assert score.passed is False
+    assert "does not support" in score.detail
+
+
 def test_the_triggering_check_counts_toward_the_score_fraction():
     case = EvalCase(
         name="c",
