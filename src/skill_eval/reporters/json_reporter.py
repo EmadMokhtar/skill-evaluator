@@ -25,6 +25,9 @@ def render_json(report: RunReport, gate: GateResult | None = None) -> str:
             "total_tokens": total_tokens,
             "total_cost_usd": total_cost_usd,
             "total_latency_ms": total_latency_ms,
+            # Kept apart from total_cost_usd: judging is harness overhead and is
+            # never charged to the skill's budget.
+            "judge_cost_usd": report.judge_cost_usd,
         },
         "skipped_skills": report.skipped_skills,
         "tag_filtered_skills": report.tag_filtered_skills,

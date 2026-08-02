@@ -1,7 +1,7 @@
 import json
 
 from skill_eval.gating import evaluate_gate
-from skill_eval.models import CaseOutcome, EvalScore, RunReport, RunResult
+from skill_eval.models import CaseOutcome, CheckResult, EvalScore, RunReport, RunResult
 from skill_eval.reporters.console import render_console
 from skill_eval.reporters.json_reporter import render_json
 
@@ -235,3 +235,54 @@ def test_json_includes_tag_filtered_skills():
     data = json.loads(render_json(report))
     assert data["skipped_skills"] == ["pdf"]
     assert data["tag_filtered_skills"] == ["xlsx"]
+
+
+def judged_report(**score_kwargs) -> RunReport:
+    score = EvalScore(
+        evaluator="judge",
+        passed=False,
+        score=0.5,
+        detail="1 of 2 rubric checks held",
+        checks=[
+            CheckResult(id="r1", passed=True, evidence="'30 days'"),
+            CheckResult(id="r2", passed=False, evidence="uses the word 'RMA'"),
+        ],
+        **score_kwargs,
+    )
+    return RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="order-support",
+                case_name="explains plainly",
+                runner="pydantic-ai",
+                status="failed",
+                scores=[score],
+                result=RunResult(output="o", cost_usd=0.01),
+            )
+        ]
+    )
+
+
+def test_the_console_shows_the_evidence_for_each_failed_check():
+    text = render_console(judged_report())
+    assert "1 of 2 rubric checks held" in text
+    assert "r2" in text
+    assert "uses the word 'RMA'" in text
+
+
+def test_the_console_does_not_repeat_evidence_for_checks_that_held():
+    assert "'30 days'" not in render_console(judged_report())
+
+
+def test_the_console_reports_judge_overhead_apart_from_the_run_cost():
+    text = render_console(judged_report(cost_usd=0.002))
+    assert "Total cost: $0.0100" in text
+    assert "Judge overhead: $0.0020" in text
+
+
+def test_the_json_report_carries_per_check_verdicts_and_judge_cost():
+    payload = json.loads(render_json(judged_report(cost_usd=0.002)))
+    assert payload["summary"]["judge_cost_usd"] == 0.002
+    checks = payload["outcomes"][0]["scores"][0]["checks"]
+    assert [c["id"] for c in checks] == ["r1", "r2"]
+    assert checks[1]["evidence"] == "uses the word 'RMA'"
