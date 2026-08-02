@@ -1,7 +1,16 @@
 import pytest
 
 from skill_eval.evaluators.assertion import UnknownAssertionKind
-from skill_eval.models import EvalCase, EvalScore, RunResult, Skill, ToolCall
+from skill_eval.judges.fake import FakeJudge
+from skill_eval.models import (
+    CheckResult,
+    EvalCase,
+    EvalScore,
+    JudgeVerdict,
+    RunResult,
+    Skill,
+    ToolCall,
+)
 from skill_eval.orchestrator import run_evals
 from skill_eval.runners.fake import FakeRunner
 from skill_eval.skills.loader import load_skills
@@ -241,3 +250,37 @@ def test_a_trajectory_violation_fails_the_case(tmp_path):
     report = run_evals(load_skills(skill_dir), [runner])
     assert report.outcomes[0].status == "failed"
     assert report.outcomes[0].result.errored is False
+
+
+def test_the_caller_supplied_judge_is_actually_used(tmp_path):
+    """`judge=` must reach `JudgeEvaluator`, not be silently discarded.
+
+    An unscripted default `FakeJudge()` always errors a rubric-bearing case
+    (see `FakeJudge.NOT_CONFIGURED`). Passing a `FakeJudge` scripted to pass
+    the rubric makes the outcome flip to "passed" -- a status a default judge
+    could never produce here. That makes the two outcomes unmistakable: if
+    `judge` were ignored in favor of a fresh `FakeJudge()`, this would go
+    "errored" instead.
+    """
+    yaml_text = "cases:\n  - name: c\n    task: t\n    judge:\n      rubric:\n        - is polite\n"
+    skill = _skill_with_cases(tmp_path, yaml_text=yaml_text)
+    configured_judge = FakeJudge(
+        default=JudgeVerdict(checks=[CheckResult(id="r1", passed=True, evidence="polite tone")])
+    )
+    report = run_evals([skill], [FakeRunner()], judge=configured_judge)
+    assert report.outcomes[0].status == "passed"
+
+
+def test_passing_both_evaluators_and_judge_raises(tmp_path):
+    """`evaluators` and `judge` are mutually exclusive -- pin the guard."""
+    yaml_text = "cases:\n  - name: c\n    task: t\n"
+    skill = _skill_with_cases(tmp_path, yaml_text=yaml_text)
+    with pytest.raises(ValueError) as excinfo:
+        run_evals(
+            [skill],
+            [FakeRunner()],
+            evaluators=[PassingEvaluator()],
+            judge=FakeJudge(),
+        )
+    assert "evaluators" in str(excinfo.value)
+    assert "judge" in str(excinfo.value)
