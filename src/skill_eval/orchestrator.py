@@ -8,7 +8,9 @@ from skill_eval.cases.loader import load_cases_for_skill
 from skill_eval.evaluators.assertion import AssertionEvaluator
 from skill_eval.evaluators.base import Evaluator
 from skill_eval.evaluators.budget import BudgetEvaluator
+from skill_eval.evaluators.judge import JudgeEvaluator
 from skill_eval.evaluators.trajectory import TrajectoryEvaluator
+from skill_eval.judges.fake import FakeJudge
 from skill_eval.models import CaseOutcome, EvalCase, RunReport, Skill
 from skill_eval.runners.base import Runner
 
@@ -28,7 +30,13 @@ def _run_one(
             result=result,
         )
     scores = [evaluator.evaluate(case, result) for evaluator in evaluators]
-    status = "passed" if all(s.passed for s in scores) else "failed"
+    if any(score.errored for score in scores):
+        # An evaluator that blew up (a judge endpoint returning 500, structured
+        # output that did not match the rubric) is an infra signal, exactly like
+        # a runner that blew up. It must not read as a skill that got worse.
+        status = "errored"
+    else:
+        status = "passed" if all(score.passed for score in scores) else "failed"
     return CaseOutcome(
         skill_name=skill.name,
         case_name=case.name,
@@ -56,7 +64,15 @@ def run_evals(
     evaluators = (
         evaluators
         if evaluators is not None
-        else [AssertionEvaluator(), TrajectoryEvaluator(), BudgetEvaluator()]
+        else [
+            AssertionEvaluator(),
+            TrajectoryEvaluator(),
+            BudgetEvaluator(),
+            # The offline judge by default: M3 must never start spending money
+            # on its own. Unscripted it errors rather than passing, so a rubric
+            # with no real judge configured is never a vacuous green.
+            JudgeEvaluator(FakeJudge()),
+        ]
     )
     outcomes: list[CaseOutcome] = []
     skipped: list[str] = []
