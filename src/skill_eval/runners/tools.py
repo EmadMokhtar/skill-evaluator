@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from skill_eval.models import ToolSpec
+from skill_eval.models import Skill, ToolSpec
 
 
 @dataclass(frozen=True)
@@ -46,5 +46,49 @@ def build_mock_tool(spec: ToolSpec) -> MockTool:
             "required": list(properties),
             "additionalProperties": False,
         },
+        call=call,
+    )
+
+
+_EMPTY_SCHEMA = {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": False,
+}
+
+
+def skill_tool_name(skill_name: str) -> str:
+    """The identifier a skill is offered under: 'order-support' -> 'order_support'.
+
+    Deterministic, because both the runner (which registers the tool) and the
+    case loader (which rejects a case tool that would collide with it) have to
+    agree on the answer without talking to each other.
+    """
+    cleaned = "".join(char if char.isalnum() else "_" for char in skill_name)
+    if not cleaned.strip("_"):
+        return "skill"
+    if cleaned[0].isdigit():
+        cleaned = f"skill_{cleaned}"
+    return cleaned
+
+
+def build_skill_tool(skill: Skill) -> MockTool:
+    """The skill itself, offered as a tool the agent may decline to use.
+
+    Calling it returns the skill's instructions, so an offered run only has the
+    skill once the agent chose it -- and the rest of the run proceeds
+    realistically with it loaded, rather than the agent acting on instructions
+    it never received.
+    """
+    instructions = skill.instructions
+
+    def call(**_arguments: Any) -> str:
+        return instructions
+
+    return MockTool(
+        name=skill_tool_name(skill.name),
+        description=skill.description,
+        json_schema=dict(_EMPTY_SCHEMA),
         call=call,
     )
