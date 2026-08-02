@@ -38,3 +38,10 @@ def test_a_caller_cannot_corrupt_the_scripted_state():
     judge = FakeJudge({"t": scripted})
     judge.judge(request("t")).checks[0].evidence = "tampered"
     assert judge.judge(request("t")).checks[0].evidence == "said it"
+
+
+def test_a_caller_cannot_corrupt_the_default_verdict_state():
+    default = JudgeVerdict(checks=[CheckResult(id="r1", passed=False, evidence="no")])
+    judge = FakeJudge(default=default)
+    judge.judge(request("anything")).checks[0].evidence = "tampered"
+    assert judge.judge(request("anything")).checks[0].evidence == "no"

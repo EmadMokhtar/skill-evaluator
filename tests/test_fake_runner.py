@@ -38,6 +38,16 @@ def test_default_covers_unscripted_tasks():
     assert runner.run(SKILL, case("anything")).output == "fallback"
 
 
+def test_callers_cannot_corrupt_the_default_scripted_state():
+    runner = FakeRunner(default=RunResult(output="fallback"))
+    result1 = runner.run(SKILL, case("anything"))
+    result1.output = "mutated"
+    result1.tool_calls.append(ToolCall(name="sneaky"))
+    result2 = runner.run(SKILL, case("anything"))
+    assert result2.output == "fallback"
+    assert result2.tool_calls == []
+
+
 def test_unscripted_task_without_a_default_echoes_the_skill_name():
     runner = FakeRunner()
     assert "pdf" in runner.run(SKILL, case("anything")).output
