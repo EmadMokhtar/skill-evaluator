@@ -27,6 +27,10 @@ dev = [
     "vcrpy>=8.0",
     "pydantic-ai-slim[openai]>=2.22",
 ]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+]
 
 [build-system]
 requires = ["hatchling"]
