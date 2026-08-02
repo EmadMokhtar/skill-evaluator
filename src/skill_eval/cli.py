@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Annotated
 
@@ -16,22 +17,27 @@ from skill_eval.orchestrator import run_evals
 from skill_eval.reporters.console import render_console
 from skill_eval.reporters.json_reporter import render_json
 from skill_eval.runners.fake import FakeRunner
+from skill_eval.runners.preflight import MissingAPIKey, check_api_key
+from skill_eval.runners.pydantic_ai import PydanticAIRunner, RunnerDependencyError
 from skill_eval.skills.loader import SkillParseError, load_skills
 
 app = typer.Typer(help="Run evaluations on Agent Skills (SKILL.md).", no_args_is_help=True)
 
-_RUNNERS = {"fake": FakeRunner}
+_RUNNERS = {"fake": FakeRunner, "pydantic-ai": PydanticAIRunner}
 
 # Authoring errors: bad skill/case/config files, or a malformed assertion in an
 # eval YAML (Tasks 6/7 decided the latter aborts the whole run rather than
-# being silently swallowed as a failed case). All of these get the same clean
-# "print the message, exit 2" treatment instead of a raw traceback.
+# being silently swallowed as a failed case). Missing keys and missing optional
+# extras are user errors too -- all get the same clean "print the message, exit
+# 2" treatment instead of a raw traceback.
 _AUTHORING_ERRORS = (
     SkillParseError,
     CaseParseError,
     ConfigError,
     UnknownAssertionKind,
     InvalidAssertionValue,
+    MissingAPIKey,
+    RunnerDependencyError,
 )
 
 
@@ -55,6 +61,7 @@ def run(
     path: Annotated[Path, typer.Argument(help="A skill directory, or a directory of skills.")],
     evals: Annotated[Path | None, typer.Option(help="Explicit eval file or directory.")] = None,
     runner: Annotated[str | None, typer.Option(help="Runner to use.")] = None,
+    model: Annotated[str | None, typer.Option(help="Model id, e.g. openai:gpt-4o-mini.")] = None,
     tag: Annotated[str | None, typer.Option(help="Only run cases with this tag.")] = None,
     min_pass_rate: Annotated[float | None, typer.Option(help="Required pass rate.")] = None,
     json_output: Annotated[Path | None, typer.Option(help="Write a JSON report here.")] = None,
@@ -67,7 +74,19 @@ def run(
         runner_name = runner if runner is not None else settings.default_runner
         if runner_name not in _RUNNERS:
             raise typer.BadParameter(f"unknown runner: {runner_name}")
-        report = run_evals(skills, [_RUNNERS[runner_name]()], evals_path=evals, tag=tag)
+        runner_class = _RUNNERS[runner_name]
+        model_name = model if model is not None else settings.model
+        if getattr(runner_class, "needs_api_key", False):
+            check_api_key(model_name, os.environ)
+            active_runner = runner_class(
+                model=model_name,
+                temperature=settings.temperature,
+                retries=settings.retries,
+                retry_backoff_seconds=settings.retry_backoff_seconds,
+            )
+        else:
+            active_runner = runner_class()
+        report = run_evals(skills, [active_runner], evals_path=evals, tag=tag)
     except _AUTHORING_ERRORS as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=2) from exc

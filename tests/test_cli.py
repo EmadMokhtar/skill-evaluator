@@ -184,6 +184,74 @@ def test_json_output_with_failing_gate_writes_report_and_exits_one(tmp_path):
     assert report["summary"]["failed"] == 1
 
 
+def test_unknown_runner_is_a_user_error(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(skill_dir), "--runner", "nope"])
+    assert result.exit_code == 2
+
+
+def test_the_real_runner_is_registered(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(
+        app,
+        ["run", str(skill_dir), "--runner", "pydantic-ai", "--model", "openai:gpt-4o-mini"],
+        env={"OPENAI_API_KEY": ""},
+    )
+    # No key, so preflight stops it before any spend.
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+
+
+def test_preflight_names_the_missing_variable(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(skill_dir),
+            "--runner",
+            "pydantic-ai",
+            "--model",
+            "anthropic:claude-sonnet-4-6",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "ANTHROPIC_API_KEY" in result.output
+    assert "skill-eval.toml" in result.output
+
+
+def test_the_fake_runner_needs_no_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(skill_dir), "--runner", "fake"])
+    assert result.exit_code in (0, 1)  # gate verdict, not a preflight refusal
+    assert "OPENAI_API_KEY" not in result.output
+
+
+def test_model_flag_beats_the_config_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    config_file = tmp_path / "skill-eval.toml"
+    config_file.write_text('model = "anthropic:claude-sonnet-4-6"\n', encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(skill_dir),
+            "--runner",
+            "pydantic-ai",
+            "--model",
+            "openai:gpt-4o-mini",
+            "--config",
+            str(config_file),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+    assert "ANTHROPIC_API_KEY" not in result.output
+
+
 def test_json_output_with_non_ascii_is_written_as_utf8(tmp_path):
     # Regression test: the JSON report is a machine-readable CI artifact and must
     # be UTF-8 regardless of the platform's default encoding, or non-ASCII skill

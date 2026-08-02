@@ -1,13 +1,23 @@
-# These assertions intentionally match FakeRunner's echo output (it just
-# echoes the skill name back), since M1 ships no real runner. M2 replaces
-# FakeRunner with an actual agent runner and these assertions should be
-# rewritten to check real behavior.
+# Assertions here describe what a real agent should produce. They are exercised
+# for real by the live-integration tier; the zero-cost CI step only validates
+# that this file parses and that its checks are well formed.
 cases:
-  - name: fake runner echoes the skill name
+  - name: greets the named person in one sentence
     task: greet Ada
     tags: [smoke]
+    budget:
+      max_tokens: 500
     assertions:
       - kind: contains
-        value: greeting
+        value: Ada
       - kind: not_contains
-        value: traceback
+        value: Traceback
+      # SKILL.md asks for "one short sentence"; this regex only checks "one
+      # line, under 120 chars, ending in . ! or ?" -- it doesn't (and can't,
+      # with a regex) verify single-sentence-ness. It was deliberately
+      # relaxed from a stricter single-sentence pattern because real
+      # gpt-4o-mini output legitimately failed that stricter form (e.g. two
+      # short clauses joined by a comma). Don't tighten this without
+      # re-recording against a real provider.
+      - kind: regex
+        value: "^[^\\n]{1,120}[.!?]\"?\\s*$"

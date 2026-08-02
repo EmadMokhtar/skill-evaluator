@@ -11,8 +11,9 @@ The skills under test and their eval cases are **inputs** to the tool — nothin
 
 ### Goals
 - Evaluate whether a skill improves an agent's behavior, across multiple eval "levels" (cheap triggering checks → full agent runs).
+- **Measure improvement, not just absolute quality.** An eval that only runs with the skill loaded cannot separate "the skill works" from "the model would have done it anyway", so the tool runs each case against a **baseline** (no skill, or the previous version of the skill) and reports the delta (M4).
 - Be framework-agnostic in the core; run real agents behind pluggable adapters.
-- Score with three complementary evaluator types: deterministic assertions, trajectory/tool-use checks, and LLM-as-judge.
+- Score with four complementary evaluator types: deterministic assertions, trajectory/tool-use checks, efficiency budgets, and LLM-as-judge.
 - Produce CI-gating outputs (exit codes/thresholds, JSON, JUnit XML, Markdown/HTML) plus cost & latency tracking.
 - Teach the fundamentals: we own the eval loop rather than delegating it to a single library.
 
@@ -25,7 +26,7 @@ The skills under test and their eval cases are **inputs** to the tool — nothin
 
 The entire design rests on **two protocols**:
 
-- **`Runner`** — turns `(skill, task)` into a `RunResult`. A `RunResult` carries the final output text, the transcript/messages, the tool-call **trajectory**, and tokens/latency/cost.
+- **`Runner`** — turns `(skill, case)` into a `RunResult`. A `RunResult` carries the final output text, the transcript/messages, the tool-call **trajectory**, and tokens/latency/cost. The runner takes the whole case, not just its task string, because it also sets up the environment the case declares (its mock tools).
 - **`Evaluator`** — turns `(case, run_result)` into an `EvalScore` (pass/fail + numeric score + detail).
 
 Everything else — loading, orchestrating, reporting, gating — is plumbing around those two seams. **No agent-framework type (PydanticAI, LangChain) ever appears in the core**; frameworks live only inside `Runner` adapters.
@@ -35,8 +36,8 @@ Everything else — loading, orchestrating, reporting, gating — is plumbing ar
 
 ## 3. Architecture & components
 
-This is the **target** architecture. Entries marked `(M2+)` are not built yet — §9 defines
-what lands in each milestone.
+This is the **target** architecture. Unannotated entries shipped in M0+M1; a milestone tag
+like `(M2)` marks what is not built yet and when it lands — §9 defines each milestone.
 
 ```
 src/skill_eval/                # import module (hyphens invalid in identifiers, so underscore)
@@ -45,21 +46,26 @@ src/skill_eval/                # import module (hyphens invalid in identifiers, 
   skills/loader.py # walk a path for SKILL.md files → [Skill] (frontmatter, body, scripts)
   cases/loader.py  # discover & parse evals (*.eval.yaml / evals/) → [EvalCase]
   runners/
-    base.py        # Runner protocol: run(skill, task) -> RunResult
+    base.py        # Runner protocol: run(skill, case) -> RunResult
     fake.py        # deterministic, no-API runner (backbone of our own tests)
-    pydantic_ai.py # (M2+) adapter #1 (real, primary — provider-flexible)
-    langchain.py   # (M6, optional) adapter #2 — only if it slots in cleanly
+    pydantic_ai.py # (M2) adapter #1 (real, primary — provider-flexible)
+    tools.py       # (M2) case-declared mock tools; (M6) sandboxed real-execution toolset
+    langchain.py   # (M8, optional) adapter #2 — only if it slots in cleanly
   evaluators/
     base.py        # Evaluator protocol: evaluate(case, result) -> EvalScore
     assertion.py   # contains / not_contains / regex / equals
-                   #   (M2+) json-schema / file-produced
-    trajectory.py  # (M2+) tool called, order, forbidden tools, skill-triggered
-    judge.py       # (M3+) LLM-as-judge: rubric -> score + rationale (structured output)
-  orchestrator.py  # matrix (skill × case × runner) → RunReport; (M2+) concurrency, retries
-  reporters/       # console, json; (M4+) junit, markdown/html
-  gating.py        # thresholds -> exit code
-  config.py        # skill-eval.toml: default runner, thresholds; (M3+) judge model, concurrency
-  cli.py           # Typer: run / list; (M5+) init
+                   #   (M6) json-schema / file-produced
+    trajectory.py  # (M2) tool called, order, forbidden tools, max_calls
+                   #   (M3) skill-triggered, incl. negative controls
+    budget.py      # (M2) max_tokens / max_cost_usd / max_latency_ms
+    judge.py       # (M3) LLM-as-judge: rubric -> per-check pass + evidence
+  orchestrator.py  # matrix (skill × case × runner) → RunReport
+                   #   (M2) retries; (M4) baseline pairing + repeats; (M5) concurrency
+  reporters/       # console, json; (M5) junit, markdown/html
+  gating.py        # thresholds -> exit code; (M4) delta thresholds
+  config.py        # skill-eval.toml: default runner, thresholds
+                   #   (M2) model, retries; (M3) judge model; (M5) concurrency
+  cli.py           # Typer: run / list; (M7) init
 ```
 
 Repo-level (outside the package):
@@ -98,8 +104,9 @@ aggregate ─▶ RunReport (grouped by skill) ─▶ reporters + gating ─▶ e
 The tool is a **standalone evaluator**; skills and evals are external inputs.
 
 ```
-skill-eval run <path> [--evals <path>] [--runner <name>] [--tag <tag>] \
+skill-eval run <path> [--evals <path>] [--runner <name>] [--model <id>] [--tag <tag>] \
                       [--report console,json,junit,md] [--min-pass-rate <f>] \
+                      [--baseline none|previous] [--repeat <n>] [--min-delta <f>] \
                       [--config <file>]
 skill-eval list <path>          # discover skills + their eval cases, no execution
 skill-eval init <skill-dir>     # scaffold an eval file next to a skill
@@ -107,6 +114,8 @@ skill-eval init <skill-dir>     # scaffold an eval file next to a skill
 
 - `<path>` — a single skill dir (`SKILL.md`) **or** a parent dir containing many skill dirs. Discovery is recursive; the everyday CI call is simply `skill-eval run ./skills`.
 - `--evals` — optional explicit eval file/dir; otherwise discovered beside each skill.
+- `--model` — provider-qualified model id for real runners (e.g. `openai:gpt-4o-mini`), M2.
+- `--baseline` / `--repeat` / `--min-delta` — comparative evals (M4): run each case with and without the skill, sample it `n` times, and gate on the improvement rather than the absolute pass rate.
 - `--config` — optional `skill-eval.toml`; otherwise discovered by searching upward from CWD (see §6).
 - Resolution order for runner/judge/thresholds: **CLI flag > config file > built-in default**.
 - Skills with **no eval files** are reported as **skipped** (visible, never silently ignored).
@@ -114,8 +123,8 @@ skill-eval init <skill-dir>     # scaffold an eval file next to a skill
 ## 6. Configuration
 
 `skill-eval.toml` (all optional; CLI overrides). Located via `--config`, or otherwise discovered by searching upward from the current working directory — repo root is the conventional home, not a hard requirement:
-- `default_runner`, `judge_model`, `concurrency`, `retry` policy.
-- Threshold defaults: `min_pass_rate` (overall) and optional per-skill thresholds.
+- `default_runner`, `model`, `temperature`, `judge_model`, `concurrency`, `retry` policy.
+- Threshold defaults: `min_pass_rate` (overall) and optional per-skill thresholds; `min_delta` once comparative evals land (M4).
 - Which reporters to emit.
 - **Secrets (API keys) come from environment variables only — never from config.**
 
@@ -131,7 +140,7 @@ skill-eval init <skill-dir>     # scaffold an eval file next to a skill
 - Transient runner errors get **retries with backoff**.
 - A **preflight check** verifies required API keys before spending anything.
 - Skill/YAML/config parse errors **fail fast** with a precise message (which file, which field). This includes unreadable and non-UTF-8 files — all file IO pins `encoding="utf-8"` rather than inheriting a platform default.
-- **Judge reliability:** temperature 0 + Pydantic structured output. Optional N-sample majority vote is deferred.
+- **Judge reliability:** temperature 0 + Pydantic structured output, with each rubric check returning its own verdict **and the evidence for it** — an unsupported PASS is the judge's characteristic failure. Optional N-sample majority vote is deferred.
 
 ## 8. Testing strategy (the tool's own tests)
 
@@ -149,13 +158,17 @@ Each milestone is independently shippable and leaves the tool working end-to-end
 
 - **M0 — Scaffolding & release plumbing:** uv project, `src/skill_eval/` layout, ruff + pytest, `skill-eval.toml` config loader, Typer CLI skeleton. **Commitizen configured** (conventional-commit `commit-msg` hook, single-source version in `pyproject.toml`); CI workflow runs lint + the pipeline-tier tests. `skill-eval --help` runs. (See §12.)
 - **M1 — Core engine (deterministic, zero-cost):** Skill loader (multi-skill discovery), YAML case loader, `Runner`/`Evaluator` protocols, `FakeRunner`, **Assertion evaluator**, orchestrator (skill × case × runner), console + JSON reporter, gating + exit code. Fully tested against `FakeRunner` — proves the whole loop with no API spend.
-- **M2 — PydanticAI runner + Trajectory evaluator + cassettes:** first real adapter (provider-flexible), tool-call/trajectory capture, **Trajectory evaluator**, cost/latency capture. First `examples/` skill. Stand up the **recorded/replay (cassette) test tier** and the live-integration marker (§8).
-- **M3 — LLM-as-judge evaluator:** rubric-based judge, structured output, temp 0, rationale in report.
-- **M4 — CI/CD polish + automated release:** JUnit XML + Markdown/HTML summary reporters, GitHub Action example + PR-comment summary, per-skill thresholds, optional baseline/regression compare. **Automated release pipeline** (`cz bump` on merge to main → tag → Trusted-Publishing to PyPI) and the manual "refresh cassettes" workflow (§12).
-- **M5 — DX & docs:** `skill-eval init` scaffolder, docs, more `examples/` skills + eval suites, quickstart.
-- **M6 (optional) — LangChain adapter:** only if it slots cleanly behind `Runner`; enables cross-framework matrix. Droppable.
+- **M2 — PydanticAI runner + Trajectory & Budget evaluators + cassettes:** first real adapter (provider-flexible), case-declared **mock tools**, tool-call/trajectory capture, **Trajectory evaluator** (`called` / `forbidden` / `order` / `max_calls`), **Budget evaluator** (`max_tokens` / `max_cost_usd` / `max_latency_ms`), cost & latency capture, retries + API-key preflight. Real `examples/` skills. Stand up the **recorded/replay (cassette) test tier** and the live-integration marker (§8). Detailed design: `2026-08-01-skill-eval-m2-design.md`.
+- **M3 — LLM-as-judge + triggering evals:** rubric-based judge at temperature 0 with structured output — **per-check verdicts carrying evidence** (`{overall_pass, score, checks:[{id, pass, evidence}]}`), not one blended number, since an unsupported PASS is the judge's main failure mode. Cases gain a free-text `expected:` and a natural-language `rubric:` list. Adds the second runner mode: the skill is *offered* (name + description) rather than force-loaded, so `trajectory.skill_triggered` can measure whether the agent chose it — evaluated with **negative controls** (`should_trigger: false`), because a positives-only set scores a skill that fires on everything at 100%.
+- **M4 — Comparative evals (measure improvement, not quality):** `--baseline none|previous` runs every case twice — with the skill and without it (or against the previous version) — and `--repeat N` samples each configuration `N` times. The report gains a `delta` block (pass rate, tokens, cost, latency) plus per-case mean/stddev; gating learns `--min-delta` so CI can require that a `SKILL.md` edit actually *improved* things. Reporting flags **low-signal assertions** (those passing in both configurations, which inflate the with-skill score while measuring nothing) and **high-variance cases**, where an unstable pass rate points at ambiguous skill instructions.
+- **M5 — CI/CD polish + automated release:** JUnit XML + Markdown/HTML summary reporters, GitHub Action example + PR-comment summary, per-skill thresholds, bounded orchestrator concurrency. **Automated release pipeline** (`cz bump` on merge to main → tag → Trusted-Publishing to PyPI) and the manual "refresh cassettes" workflow (§12).
+- **M6 — Real-execution tools:** a sandboxed built-in toolset (read/write/list files, run a bundled skill script) rooted in a per-case temp workspace, per-case input `files:`, and the `file-produced` / `json-schema` assertion kinds. Moves evals from "did the model choose the right tool" to "did it produce the right artifact" — the level both the OpenAI and agentskills.io eval guides operate at.
+- **M7 — DX & docs:** `skill-eval init` scaffolder, docs, more `examples/` skills + eval suites, quickstart.
+- **M8 (optional) — LangChain adapter:** only if it slots cleanly behind `Runner`; enables cross-framework matrix. Droppable.
 
 **Ordering principle:** the entire pipeline is exercised at **M1 with zero cost**, then real runners and richer evaluators swap in behind stable seams. Each milestone is a working tool, not a partial one.
+
+**Prior art consulted (2026-08-01)** — OpenAI's *Evaluating Agent Skills* and agentskills.io's *Evaluating skill output quality*. Four ideas were adopted from them and are folded into the milestones above: baseline/delta comparison and repeat-with-variance (M4), efficiency as a first-class goal category alongside outcome/process/style (M2 Budget evaluator, M4 delta), negative controls for triggering (M3), and evidence-bearing per-check judge output (M3).
 
 ## 10. Stack & tooling
 

@@ -1,9 +1,10 @@
 import pytest
 
 from skill_eval.evaluators.assertion import UnknownAssertionKind
-from skill_eval.models import RunResult, Skill
+from skill_eval.models import RunResult, Skill, ToolCall
 from skill_eval.orchestrator import run_evals
 from skill_eval.runners.fake import FakeRunner
+from skill_eval.skills.loader import load_skills
 
 CASES_YAML = """cases:
   - name: passes
@@ -129,3 +130,52 @@ def test_unknown_assertion_kind_aborts_the_run(tmp_path):
     )
     with pytest.raises(UnknownAssertionKind):
         run_evals([_skill_with_cases(tmp_path, yaml_text=yaml_text)], [_runner()])
+
+
+def test_default_evaluators_include_trajectory_and_budget(tmp_path):
+    skill_dir = tmp_path / "s"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: s\n---\nbody\n", encoding="utf-8")
+    (skill_dir / "s.eval.yaml").write_text(
+        "cases:\n"
+        "  - name: c\n"
+        "    task: t\n"
+        "    tools:\n"
+        "      - name: lookup_order\n"
+        "    trajectory:\n"
+        "      called: [lookup_order]\n"
+        "    budget:\n"
+        "      max_tokens: 100\n",
+        encoding="utf-8",
+    )
+    skills = load_skills(skill_dir)
+    runner = FakeRunner(
+        default=RunResult(tool_calls=[ToolCall(name="lookup_order")], input_tokens=10)
+    )
+    report = run_evals(skills, [runner])
+    assert [score.evaluator for score in report.outcomes[0].scores] == [
+        "assertion",
+        "trajectory",
+        "budget",
+    ]
+    assert report.outcomes[0].status == "passed"
+
+
+def test_a_trajectory_violation_fails_the_case(tmp_path):
+    skill_dir = tmp_path / "s"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: s\n---\nbody\n", encoding="utf-8")
+    (skill_dir / "s.eval.yaml").write_text(
+        "cases:\n"
+        "  - name: c\n"
+        "    task: t\n"
+        "    tools:\n"
+        "      - name: issue_refund\n"
+        "    trajectory:\n"
+        "      forbidden: [issue_refund]\n",
+        encoding="utf-8",
+    )
+    runner = FakeRunner(default=RunResult(tool_calls=[ToolCall(name="issue_refund")]))
+    report = run_evals(load_skills(skill_dir), [runner])
+    assert report.outcomes[0].status == "failed"
+    assert report.outcomes[0].result.errored is False

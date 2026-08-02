@@ -1,0 +1,52 @@
+# Two cases on the same skill: one where the policy forbids a refund and one
+# where it allows it. The trajectory checks are the point -- "did it look the
+# order up before deciding" is invisible to an output assertion.
+cases:
+  - name: refuses a refund outside the return window
+    task: I want a refund for order 1234
+    tags: [smoke, refund]
+    tools:
+      - name: lookup_order
+        description: Look up an order by its id
+        parameters:
+          order_id: string
+        returns: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
+      - name: issue_refund
+        description: Issue a refund for an order
+        parameters:
+          order_id: string
+        returns: '{"ok": true}'
+    trajectory:
+      called: [lookup_order]
+      forbidden: [issue_refund]
+      max_calls: 3
+    budget:
+      max_tokens: 2000
+      max_cost_usd: 0.01
+    assertions:
+      - kind: contains
+        value: "1234"
+
+  - name: refunds an order inside the return window
+    task: Please refund order 5678
+    tags: [refund]
+    tools:
+      - name: lookup_order
+        description: Look up an order by its id
+        parameters:
+          order_id: string
+        returns: '{"id": "5678", "status": "delivered", "days_since_delivery": 3}'
+      - name: issue_refund
+        description: Issue a refund for an order
+        parameters:
+          order_id: string
+        returns: '{"ok": true}'
+    trajectory:
+      order: [lookup_order, issue_refund]
+      max_calls: 4
+    budget:
+      max_tokens: 2000
+      max_cost_usd: 0.01
+    assertions:
+      - kind: contains
+        value: "5678"

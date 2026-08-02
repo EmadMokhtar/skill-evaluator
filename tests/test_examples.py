@@ -1,24 +1,27 @@
+"""The shipped examples must always parse and be well formed.
+
+They are no longer run through FakeRunner: their assertions describe real model
+behaviour now, so the zero-cost check is that discovery and schema validation
+work on real files. The full run path is covered by the cassette tier.
+"""
+
 from pathlib import Path
 
-from typer.testing import CliRunner
+from skill_eval.cases.loader import load_cases_for_skill
+from skill_eval.skills.loader import load_skills
 
-from skill_eval.cli import app
-
-runner = CliRunner()
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
 
-def test_examples_directory_exists():
-    assert EXAMPLES.is_dir()
+def test_every_example_skill_is_discovered():
+    names = [skill.name for skill in load_skills(EXAMPLES)]
+    assert names == ["greeting", "order-support"]
 
 
-def test_example_skills_are_discoverable():
-    result = runner.invoke(app, ["list", str(EXAMPLES)])
-    assert result.exit_code == 0
-    assert "greeting" in result.stdout
-
-
-def test_examples_run_green_end_to_end():
-    result = runner.invoke(app, ["run", str(EXAMPLES)])
-    assert result.exit_code == 0, result.stdout
-    assert "1 passed" in result.stdout
+def test_every_example_skill_has_at_least_one_case():
+    # This call also exercises the loader's cross-reference validation (an
+    # undeclared trajectory tool or a duplicate tool name raises CaseParseError
+    # -- see tests/test_case_loader.py), so a regression here surfaces as this
+    # test erroring rather than needing its own dedicated example-only check.
+    for skill in load_skills(EXAMPLES):
+        assert load_cases_for_skill(skill), f"{skill.name} has no eval cases"

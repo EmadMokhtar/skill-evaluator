@@ -5,10 +5,10 @@ Run evaluations on Agent Skills (`SKILL.md`) — in CI/CD or on demand.
 Skills and their eval cases are **inputs** to the tool. Nothing about a skill under test is
 vendored here, so any skill repo can adopt `skill-eval` without embedding it.
 
-> **Status:** early. The full pipeline — discovery, scoring, reporting, gating — works today,
-> but the only runner is `FakeRunner`, which returns scripted output and never touches the
-> network. Real agent runners land in M2 (see [Roadmap](#roadmap)). Until then this is useful
-> for building out the harness, not for measuring real agent behavior.
+> **Status:** M2. The full pipeline — discovery, scoring, reporting, gating — runs offline
+> against `FakeRunner` (the default, scripted, free) and against real agents through
+> `pydantic-ai` (provider-flexible), scoring output text, tool-use trajectories, and
+> efficiency budgets. See [Roadmap](#roadmap).
 
 ## Install
 
@@ -30,30 +30,28 @@ examples/
 ```yaml
 # greeting.eval.yaml
 cases:
-  - name: fake runner echoes the skill name
+  - name: greets the named person in one sentence
     task: greet Ada
     tags: [smoke]
+    budget:
+      max_tokens: 500
     assertions:
       - kind: contains
-        value: greeting
+        value: Ada
       - kind: not_contains
-        value: traceback
+        value: Traceback
+      # SKILL.md asks for "one short sentence"; this regex only checks "one line,
+      # under 120 chars, ending in . ! or ?" -- it doesn't (and can't, with a
+      # regex) verify single-sentence-ness. It's deliberately looser than that
+      # prose because real model output legitimately varies (e.g. two short
+      # clauses joined by a comma), so don't tighten it without re-recording
+      # against a real provider.
+      - kind: regex
+        value: "^[^\\n]{1,120}[.!?]\"?\\s*$"
 ```
 
 Point the CLI at a single skill directory or at a parent directory of many — discovery is
 recursive:
-
-```bash
-uv run skill-eval run ./examples
-```
-
-```
-[PASS] greeting :: fake runner echoes the skill name (fake)
-
-1 passed, 0 failed, 0 errored — pass rate 100%
-```
-
-To see what would run without running it:
 
 ```bash
 uv run skill-eval list ./examples
@@ -61,7 +59,14 @@ uv run skill-eval list ./examples
 
 ```
 greeting	1 case(s)	examples/greeting
+order-support	2 case(s)	examples/order-support
 ```
+
+`list` discovers skills and validates every eval file without calling a runner — free, and no
+API key required. The shipped examples assert real model behavior, so actually running them
+(`skill-eval run`) needs the `pydantic-ai` runner — see
+[Running against a real agent](#running-against-a-real-agent) below. The zero-cost `fake`
+runner (the default) is what the test suite itself runs on.
 
 ## Eval files
 
@@ -75,6 +80,9 @@ Extra keys alongside `cases:` at the top level of the file are ignored.
 | `task` | yes | The prompt handed to the runner |
 | `assertions` | no | Scoring rules; a case with none passes |
 | `tags` | no | Labels for `--tag` filtering |
+| `tools` | no | Mock tools the agent may call — see [Declaring tools and scoring the trajectory](#declaring-tools-and-scoring-the-trajectory) |
+| `trajectory` | no | Which tools must/must not have been called, and in what order |
+| `budget` | no | Ceilings on tokens, cost, and latency |
 
 ### Assertion kinds
 
@@ -101,12 +109,90 @@ files are reported as **skipped** — visible in the output, never silently igno
 ## CLI
 
 ```
-skill-eval run <path> [--evals <path>] [--runner <name>] [--tag <tag>]
+skill-eval run <path> [--evals <path>] [--runner <name>] [--model <name>] [--tag <tag>]
                       [--min-pass-rate <float>] [--json-output <path>] [--config <file>]
 skill-eval list <path> [--evals <path>]
 ```
 
 `<path>` is a skill directory or a directory of skill directories.
+
+## Running against a real agent
+
+The default runner is `fake` (offline, scripted, free). To evaluate a skill with a
+real agent, install the extra and pick a model:
+
+```bash
+pip install 'skill-eval[pydantic-ai]'
+export OPENAI_API_KEY=...
+skill-eval run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
+```
+
+API keys are read from the environment only — never from `skill-eval.toml`.
+`skill-eval` checks for the key before making any request, so a missing key costs
+nothing and exits 2.
+
+### Declaring tools and scoring the trajectory
+
+An eval case can declare the tools the agent may call. Nothing executes: a tool
+records the call and returns its canned value, so the trajectory is the model's
+own choice and the run has no side effects.
+
+```yaml
+cases:
+  - name: checks the order before refusing
+    task: I want a refund for order 1234
+    tools:
+      - name: lookup_order
+        description: Look up an order by its id
+        parameters:
+          order_id: string
+        returns: '{"id": "1234", "days_since_delivery": 45}'
+      - name: issue_refund
+        description: Issue a refund for an order
+        parameters:
+          order_id: string
+        returns: '{"ok": true}'
+    trajectory:
+      called: [lookup_order]        # each of these ran
+      forbidden: [issue_refund]     # none of these ran
+      order: [lookup_order]         # ran in this relative order
+      max_calls: 3                  # no looping
+    budget:
+      max_tokens: 2000
+      max_cost_usd: 0.01
+      max_latency_ms: 30000
+    assertions:
+      - kind: contains
+        value: "1234"
+```
+
+`order` is a relative subsequence: unrelated calls may appear in between, but the
+listed tools must not appear out of sequence.
+
+Every tool name in `called`, `forbidden`, or `order` must be declared in that case's
+`tools:` — including `forbidden`, since forbidding a tool the agent was never offered in
+the first place is a check that can never fire. A name that isn't declared is an
+authoring error (the run aborts, exit `2`), not a failing case, because a check that can
+never pass tells you nothing about the skill.
+
+### Budget limits and pricing
+
+The `budget` block sets ceilings on tokens, cost, and latency. Pricing comes from
+`genai-prices`, which carries data for widely-used models but not every provider — for
+example, Groq and Mistral models have no pricing entry yet. When a model cannot be priced,
+`cost_usd` degrades to `0.0` and a note is recorded explaining why; the note always appears
+in the JSON report. On the console it surfaces as budget-evaluator failure detail, which is
+only printed for a case that fails — so if the cost limit is the only budget check declared,
+the skip fails the case and the note prints; if token or latency limits are declared
+alongside and pass, the case passes and the note is silent on screen. Either way, an aggregate
+line ("some costs not priced" / "Total cost: not priced") appears in the console totals
+whenever any outcome's pricing degraded, pointing you at the JSON for the per-case detail.
+An unpriceable cost limit is **skipped rather than silently passed**, so a case with an
+unpriced cost limit and no other budget checks will fail,
+because nothing was actually verified. If other budget limits are declared alongside (tokens,
+latency), they are still evaluated normally, and only the cost limit is skipped. To adopt
+`skill-eval` against a provider without pricing data, simply omit `max_cost_usd` from the budget
+block for that provider.
 
 ## Configuration
 
@@ -126,12 +212,28 @@ greeting = 0.9
 | Key | Default | CLI override |
 | --- | --- | --- |
 | `default_runner` | `"fake"` | `--runner` |
+| `model` | `"openai:gpt-4o-mini"` | `--model` |
+| `temperature` | `0.0` | — |
+| `retries` | `2` | — |
+| `retry_backoff_seconds` | `1.0` | — |
 | `min_pass_rate` | `1.0` | `--min-pass-rate` |
 | `fail_on_error` | `true` | — |
 | `per_skill_min` | `{}` | — |
 
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
+
+`model`, `temperature`, `retries`, and `retry_backoff_seconds` only matter to a runner that
+reads them (currently `pydantic-ai`); `FakeRunner` ignores them. `temperature` accepts a float
+or the literal string `"unset"`, for reasoning models that reject any explicit temperature:
+
+```toml
+default_runner = "pydantic-ai"
+model = "openai:gpt-4o-mini"
+temperature = 0.0            # or "unset" for reasoning models, which reject it
+retries = 2
+retry_backoff_seconds = 1.0
+```
 
 ## Gating and exit codes
 
@@ -186,7 +288,7 @@ with its reasons.
 
 The design rests on two protocols; everything else is plumbing around them.
 
-- **`Runner`** — `run(skill, task) -> RunResult`, carrying the output, transcript, tool-call
+- **`Runner`** — `run(skill, case) -> RunResult`, carrying the output, transcript, tool-call
   trajectory, and tokens/latency/cost. This is the seam every agent framework plugs into.
 - **`Evaluator`** — `evaluate(case, result) -> EvalScore`, a pass/fail verdict with a numeric
   score and human-readable detail.
@@ -197,7 +299,8 @@ path → skill loader → [Skill] → case loader → [EvalCase]
 ```
 
 No agent-framework type appears in the core; frameworks live only inside `Runner` adapters.
-Full design: [`docs/superpowers/specs/2026-07-30-skill-eval-design.md`](docs/superpowers/specs/2026-07-30-skill-eval-design.md).
+Full design: [`docs/superpowers/specs/2026-07-30-skill-eval-design.md`](docs/superpowers/specs/2026-07-30-skill-eval-design.md),
+with the M2 additions in [`docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`](docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md).
 
 ## Roadmap
 
@@ -205,11 +308,13 @@ Full design: [`docs/superpowers/specs/2026-07-30-skill-eval-design.md`](docs/sup
 | --- | --- | --- |
 | M0 | Scaffolding, config, CLI skeleton, release plumbing | shipped |
 | M1 | Loaders, protocols, `FakeRunner`, assertion evaluator, orchestrator, console + JSON reporters, gating | shipped |
-| M2 | PydanticAI runner, trajectory evaluator, cost/latency capture, cassette test tier | next |
-| M3 | LLM-as-judge evaluator | planned |
-| M4 | JUnit XML + Markdown/HTML reporters, GitHub Action, automated release | planned |
-| M5 | `skill-eval init` scaffolder, docs, more examples | planned |
-| M6 | LangChain adapter (optional) | planned |
+| M2 | PydanticAI runner, trajectory + budget evaluators, cost/latency capture, cassette test tier | shipped |
+| M3 | LLM-as-judge evaluator (per-check verdicts), triggering evals with negative controls | planned |
+| M4 | Comparative evals: `--baseline`/`--repeat`, delta reporting, `--min-delta` gating | planned |
+| M5 | CI/CD polish: JUnit XML + Markdown/HTML reporters, GitHub Action, automated release | planned |
+| M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions | planned |
+| M7 | DX & docs: `skill-eval init` scaffolder, docs, more examples | planned |
+| M8 | LangChain adapter (optional) | planned |
 
 ## Contributing
 
@@ -220,11 +325,15 @@ uv sync
 uv run pytest                  # test suite
 uv run ruff check .            # lint
 uv run ruff format --check .   # formatting (as CI runs it)
-uv run skill-eval run ./examples
+uv run skill-eval list ./examples
 ```
 
 Tests marked `integration` hit real provider APIs and are deselected by default; run them with
-`uv run pytest -m integration`. Everything else passes offline with no API spend.
+`uv run pytest -m integration`. Tests marked `cassette` replay recorded provider traffic —
+zero cost, no key needed, and selected by default. Everything else passes offline with no API
+spend. `uv run skill-eval run ./examples` needs the `pydantic-ai` runner (see
+[Running against a real agent](#running-against-a-real-agent)); the shipped examples now
+assert real model behavior, so `list` is what dogfoods discovery for free.
 
 Development is test-driven: write the failing test first, then the implementation.
 

@@ -172,6 +172,103 @@ def test_typoed_assertion_key_singular_raises_instead_of_silently_passing(tmp_pa
     assert "assertion" in str(exc.value)
 
 
+def test_trajectory_called_naming_an_undeclared_tool_raises(tmp_path):
+    # A typo in `called:` (e.g. lookup_ordr instead of lookup_order) can never
+    # pass -- it isn't a signal about the skill, it's a mistake in the case
+    # file, and must abort the run rather than score as a failure.
+    path = tmp_path / "typo.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: order lookup\n"
+        "    task: look up order 1234\n"
+        "    tools:\n"
+        "      - name: lookup_order\n"
+        "    trajectory:\n"
+        "      called: [lookup_ordr]\n"
+    )
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "typo.eval.yaml" in str(exc.value)
+    assert "order lookup" in str(exc.value)
+    assert "lookup_ordr" in str(exc.value)
+
+
+def test_trajectory_forbidden_naming_an_undeclared_tool_raises(tmp_path):
+    path = tmp_path / "typo.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: order lookup\n"
+        "    task: look up order 1234\n"
+        "    tools:\n"
+        "      - name: lookup_order\n"
+        "    trajectory:\n"
+        "      forbidden: [issue_refnd]\n"
+    )
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "typo.eval.yaml" in str(exc.value)
+    assert "order lookup" in str(exc.value)
+    assert "issue_refnd" in str(exc.value)
+
+
+def test_trajectory_order_naming_an_undeclared_tool_raises(tmp_path):
+    path = tmp_path / "typo.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: order lookup\n"
+        "    task: look up order 1234\n"
+        "    tools:\n"
+        "      - name: lookup_order\n"
+        "    trajectory:\n"
+        "      order: [lookup_order, issue_refnd]\n"
+    )
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "typo.eval.yaml" in str(exc.value)
+    assert "issue_refnd" in str(exc.value)
+
+
+def test_trajectory_referencing_only_declared_tools_is_fine(tmp_path):
+    path = tmp_path / "ok.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: order lookup\n"
+        "    task: look up order 1234\n"
+        "    tools:\n"
+        "      - name: lookup_order\n"
+        "      - name: issue_refund\n"
+        "    trajectory:\n"
+        "      called: [lookup_order]\n"
+        "      forbidden: [issue_refund]\n"
+        "      order: [lookup_order]\n"
+    )
+    cases = parse_cases_file(path)
+    assert cases[0].trajectory.called == ["lookup_order"]
+
+
+def test_duplicate_tool_names_in_one_case_raise(tmp_path):
+    # Two ToolSpec entries with the same name reach the adapter as
+    # "UserError: Tool name conflicts with existing tool" -- an errored case
+    # indistinguishable from a real skill regression. This is a mistake in the
+    # case file and must abort the run instead.
+    path = tmp_path / "dupe.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: order lookup\n"
+        "    task: look up order 1234\n"
+        "    tools:\n"
+        "      - name: lookup_order\n"
+        "        description: first\n"
+        "      - name: lookup_order\n"
+        "        description: second\n"
+    )
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "dupe.eval.yaml" in str(exc.value)
+    assert "order lookup" in str(exc.value)
+    assert "lookup_order" in str(exc.value)
+
+
 def test_non_ascii_eval_yaml_loads_regardless_of_platform_encoding(tmp_path):
     # Regression test: eval YAML is always UTF-8; read_text() must pin the
     # encoding rather than inherit a platform default that would mangle it.

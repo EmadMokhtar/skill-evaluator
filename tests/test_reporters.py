@@ -15,7 +15,7 @@ def _report():
                 runner="fake",
                 status="passed",
                 scores=[EvalScore(evaluator="assertion", passed=True, score=1.0, detail="ok")],
-                result=RunResult(output="yes", tokens=10, cost_usd=0.01, latency_ms=5),
+                result=RunResult(output="yes", output_tokens=10, cost_usd=0.01, latency_ms=5),
             ),
             CaseOutcome(
                 skill_name="pdf",
@@ -105,7 +105,7 @@ def test_json_summary_includes_total_tokens_and_cost():
     data = json.loads(render_json(_report()))
     assert "total_tokens" in data["summary"]
     assert "total_cost_usd" in data["summary"]
-    # First outcome has tokens=10, cost=0.01; second has defaults
+    # First outcome has output_tokens=10, cost=0.01; second has defaults
     assert data["summary"]["total_tokens"] == 10
     assert data["summary"]["total_cost_usd"] == 0.01
 
@@ -120,7 +120,7 @@ def test_reporters_handle_outcome_with_no_result():
                 runner="fake",
                 status="passed",
                 scores=[],
-                result=RunResult(tokens=10, cost_usd=0.01, latency_ms=100),
+                result=RunResult(output_tokens=10, cost_usd=0.01, latency_ms=100),
             ),
             CaseOutcome(
                 skill_name="pdf",
@@ -145,6 +145,86 @@ def test_reporters_handle_outcome_with_no_result():
     assert data["summary"]["total_tokens"] == 10
     assert data["summary"]["total_cost_usd"] == 0.01
     assert data["summary"]["total_latency_ms"] == 100
+
+
+def test_console_notes_when_pricing_degraded_even_at_zero_total_cost():
+    # total_cost is 0.0 whether the run genuinely cost nothing or pricing simply
+    # failed for every outcome. `if total_cost:` is falsy either way, so the one
+    # visual cue for degraded pricing disappeared exactly when it mattered most.
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="extracts",
+                runner="pydantic-ai",
+                status="passed",
+                scores=[],
+                result=RunResult(cost_usd=0.0, cost_note="no price data for groq:llama (KeyError)"),
+            ),
+        ],
+    )
+    text = render_console(report)
+    assert "Total cost: not priced (see per-case cost_note in the JSON report)" in text
+
+
+def test_console_totals_line_stays_silent_when_cost_is_genuinely_zero():
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="extracts",
+                runner="fake",
+                status="passed",
+                scores=[],
+                result=RunResult(cost_usd=0.0, cost_note=""),
+            ),
+        ],
+    )
+    text = render_console(report)
+    assert "Total cost" not in text
+    # cost_usd and latency_ms are both zero here, so the totals line has nothing
+    # to report at all -- not even a latency figure -- and must not appear.
+    assert "Total latency" not in text
+    assert "not priced" not in text.lower()
+
+
+def test_json_carries_model_and_cost_note_per_outcome():
+    # The adapter goes to real trouble to capture the dated snapshot name the
+    # provider actually served, and cost_note is the only visible signal that
+    # pricing degraded (e.g. an unpriced Groq/Mistral model). Neither is worth
+    # anything if the JSON artifact drops them on the floor.
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="extracts",
+                runner="pydantic-ai",
+                status="passed",
+                scores=[],
+                result=RunResult(
+                    output="yes",
+                    model="gpt-4o-mini-2024-07-18",
+                    cost_note="no price data for groq:llama (KeyError)",
+                ),
+            ),
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="no result",
+                runner="fake",
+                status="passed",
+                scores=[],
+                result=None,
+            ),
+        ],
+    )
+    data = json.loads(render_json(report))
+    first = data["outcomes"][0]
+    assert first["model"] == "gpt-4o-mini-2024-07-18"
+    assert first["cost_note"] == "no price data for groq:llama (KeyError)"
+
+    second = data["outcomes"][1]
+    assert second["model"] == ""
+    assert second["cost_note"] == ""
 
 
 def test_json_includes_tag_filtered_skills():

@@ -7,6 +7,8 @@ from pathlib import Path
 from skill_eval.cases.loader import load_cases_for_skill
 from skill_eval.evaluators.assertion import AssertionEvaluator
 from skill_eval.evaluators.base import Evaluator
+from skill_eval.evaluators.budget import BudgetEvaluator
+from skill_eval.evaluators.trajectory import TrajectoryEvaluator
 from skill_eval.models import CaseOutcome, EvalCase, RunReport, Skill
 from skill_eval.runners.base import Runner
 
@@ -15,7 +17,7 @@ def _run_one(
     skill: Skill, case: EvalCase, runner: Runner, evaluators: list[Evaluator]
 ) -> CaseOutcome:
     """Run a single combination and score it, keeping errored distinct from failed."""
-    result = runner.run(skill, case.task)
+    result = runner.run(skill, case)
     if result.errored:
         return CaseOutcome(
             skill_name=skill.name,
@@ -51,7 +53,11 @@ def run_evals(
     design: a malformed assertion is an authoring error in the eval YAML, not a
     skill failure, so the run aborts rather than silently reporting a red eval.
     """
-    evaluators = evaluators if evaluators is not None else [AssertionEvaluator()]
+    evaluators = (
+        evaluators
+        if evaluators is not None
+        else [AssertionEvaluator(), TrajectoryEvaluator(), BudgetEvaluator()]
+    )
     outcomes: list[CaseOutcome] = []
     skipped: list[str] = []
     tag_filtered: list[str] = []
