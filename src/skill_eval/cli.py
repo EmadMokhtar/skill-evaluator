@@ -11,8 +11,17 @@ import typer
 from skill_eval import __version__
 from skill_eval.cases.loader import CaseParseError, load_cases_for_skill
 from skill_eval.config import ConfigError, load_config
-from skill_eval.evaluators.assertion import InvalidAssertionValue, UnknownAssertionKind
+from skill_eval.evaluators.assertion import (
+    AssertionEvaluator,
+    InvalidAssertionValue,
+    UnknownAssertionKind,
+)
+from skill_eval.evaluators.budget import BudgetEvaluator
+from skill_eval.evaluators.judge import JudgeEvaluator
+from skill_eval.evaluators.trajectory import TrajectoryEvaluator
 from skill_eval.gating import EXIT_OK, evaluate_gate
+from skill_eval.judges.fake import FakeJudge
+from skill_eval.judges.pydantic_ai import PydanticAIJudge
 from skill_eval.orchestrator import run_evals
 from skill_eval.reporters.console import render_console
 from skill_eval.reporters.json_reporter import render_json
@@ -24,6 +33,7 @@ from skill_eval.skills.loader import SkillParseError, load_skills
 app = typer.Typer(help="Run evaluations on Agent Skills (SKILL.md).", no_args_is_help=True)
 
 _RUNNERS = {"fake": FakeRunner, "pydantic-ai": PydanticAIRunner}
+_JUDGES = {"fake": FakeJudge, "pydantic-ai": PydanticAIJudge}
 
 # Authoring errors: bad skill/case/config files, or a malformed assertion in an
 # eval YAML (Tasks 6/7 decided the latter aborts the whole run rather than
@@ -62,6 +72,9 @@ def run(
     evals: Annotated[Path | None, typer.Option(help="Explicit eval file or directory.")] = None,
     runner: Annotated[str | None, typer.Option(help="Runner to use.")] = None,
     model: Annotated[str | None, typer.Option(help="Model id, e.g. openai:gpt-4o-mini.")] = None,
+    judge_model: Annotated[
+        str | None, typer.Option(help="Model id for the LLM judge; defaults to --model.")
+    ] = None,
     tag: Annotated[str | None, typer.Option(help="Only run cases with this tag.")] = None,
     min_pass_rate: Annotated[float | None, typer.Option(help="Required pass rate.")] = None,
     json_output: Annotated[Path | None, typer.Option(help="Write a JSON report here.")] = None,
@@ -86,7 +99,34 @@ def run(
             )
         else:
             active_runner = runner_class()
-        report = run_evals(skills, [active_runner], evals_path=evals, tag=tag)
+        judge_name = settings.judge
+        if judge_name not in _JUDGES:
+            raise typer.BadParameter(f"unknown judge: {judge_name}")
+        judge_class = _JUDGES[judge_name]
+        # An empty judge_model means "grade with the same model you run with",
+        # so a project opting into real judging only has to name one model.
+        resolved_judge_model = (
+            judge_model if judge_model is not None else (settings.judge_model or model_name)
+        )
+        if getattr(judge_class, "needs_api_key", False):
+            check_api_key(resolved_judge_model, os.environ)
+            active_judge = judge_class(
+                model=resolved_judge_model,
+                temperature=settings.temperature,
+                retries=settings.retries,
+                retry_backoff_seconds=settings.retry_backoff_seconds,
+            )
+        else:
+            active_judge = judge_class()
+        evaluators = [
+            AssertionEvaluator(),
+            TrajectoryEvaluator(),
+            BudgetEvaluator(),
+            JudgeEvaluator(active_judge),
+        ]
+        report = run_evals(
+            skills, [active_runner], evals_path=evals, tag=tag, evaluators=evaluators
+        )
     except _AUTHORING_ERRORS as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=2) from exc

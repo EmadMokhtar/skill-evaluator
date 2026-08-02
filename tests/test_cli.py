@@ -252,6 +252,44 @@ def test_model_flag_beats_the_config_file(tmp_path, monkeypatch):
     assert "ANTHROPIC_API_KEY" not in result.output
 
 
+def test_an_unknown_judge_in_config_is_a_user_error(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text('judge = "psychic"\n', encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+    )
+    assert result.exit_code == 2
+    assert "psychic" in result.output
+
+
+def test_a_real_judge_without_its_api_key_fails_preflight(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text(
+        'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\n', encoding="utf-8"
+    )
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+    )
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+
+
+def test_the_judge_model_falls_back_to_the_run_model(tmp_path, monkeypatch):
+    # An empty judge_model must not reach the provider as an empty model id.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text(
+        'judge = "pydantic-ai"\nmodel = "anthropic:claude-haiku-4-5-20251001"\n',
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+    )
+    assert result.exit_code == 2
+    assert "ANTHROPIC_API_KEY" in result.output
+
+
 def test_json_output_with_non_ascii_is_written_as_utf8(tmp_path):
     # Regression test: the JSON report is a machine-readable CI artifact and must
     # be UTF-8 regardless of the platform's default encoding, or non-ASCII skill

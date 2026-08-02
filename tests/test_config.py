@@ -159,3 +159,24 @@ def test_config_rejects_a_nonsense_temperature(tmp_path):
     config_file.write_text('temperature = "hot"\n', encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(path=config_file)
+
+
+def test_the_built_in_judge_default_never_spends_money():
+    settings = load_config()
+    assert settings.judge == "fake"
+    assert settings.judge_model == ""
+
+
+def test_a_project_can_opt_into_real_judging(tmp_path):
+    (tmp_path / "skill-eval.toml").write_text(
+        'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o"\n', encoding="utf-8"
+    )
+    settings = load_config(path=tmp_path / "skill-eval.toml")
+    assert settings.judge == "pydantic-ai"
+    assert settings.judge_model == "openai:gpt-4o"
+
+
+def test_an_unknown_config_key_is_still_rejected(tmp_path):
+    (tmp_path / "skill-eval.toml").write_text('judg = "pydantic-ai"\n', encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(path=tmp_path / "skill-eval.toml")
