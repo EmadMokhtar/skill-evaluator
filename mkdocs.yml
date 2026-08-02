@@ -51,3 +51,5 @@ nav:
       - Runners: runners.md
       - Gating and exit codes: gating.md
   - Roadmap: roadmap.md
+  - Architecture: architecture.md
+  - Contributing: contributing.md

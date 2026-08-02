@@ -1,0 +1,57 @@
+# Contributing
+
+## Development
+
+```bash
+uv sync
+uv run pytest                  # test suite
+uv run ruff check .            # lint
+uv run ruff format --check .   # formatting (as CI runs it)
+uv run skill-eval list ./examples
+```
+
+Tests marked `integration` hit real provider APIs and are deselected by default; run them with
+`uv run pytest -m integration`. Tests marked `cassette` replay recorded provider traffic —
+zero cost, no key needed, and selected by default. Everything else passes offline with no API
+spend. `uv run skill-eval run ./examples` needs the `pydantic-ai` runner (see
+[Running against a real agent](runners.md)); the shipped examples now
+assert real model behavior, so `list` is what dogfoods discovery for free.
+
+Development is test-driven: write the failing test first, then the implementation.
+
+## Documentation
+
+```bash
+uv sync --group docs
+uv run mkdocs serve            # live preview at http://127.0.0.1:8000
+uv run mkdocs build --strict   # as CI runs it
+uv run pytest tests/test_docs.py
+```
+
+## Conventional Commits are required
+
+Every commit message **and** every pull request title must follow
+[Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>[optional scope][!]: <description>
+```
+
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `perf`, `build`, `ci`, `chore`,
+`style`, `revert`. Use the imperative mood, lowercase, no trailing period.
+
+This is not stylistic. `cz bump` derives the next version and the changelog from
+commit history, so a non-conforming message silently breaks the release. Because
+PRs are **squash-merged**, the PR title becomes the commit on `main` — so the
+title is what release automation actually reads.
+
+Install the hook once per clone so bad messages are rejected before they land:
+
+```bash
+uv run pre-commit install --hook-type commit-msg
+```
+
+CI enforces the same rules on every PR: the title is checked with `cz check`, and
+every commit on the branch with `scripts/check_commits.py`. Two docs-only commits
+predating the convention are exempted in `scripts/legacy-commits.txt`; that list
+should only ever shrink.

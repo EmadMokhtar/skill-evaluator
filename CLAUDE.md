@@ -58,6 +58,10 @@ their own data shapes.
 These are decided behaviors, not accidents — several were bugs caught in review. Preserve
 them, and expect a test asserting each.
 
+The full rationale for each of these — plus the module map and extension points — is in
+[`ARCHITECTURE.md`](ARCHITECTURE.md). Keep the two in sync: this list is the condensed
+form, that file is the explanation.
+
 - **`errored` ≠ `failed`.** `failed` = the case ran and scored below bar (an eval signal).
   `errored` = the runner itself blew up (an infra signal). Runners must **never raise** for
   provider failures — set `RunResult.error` instead. Errored cases fail the gate by default.

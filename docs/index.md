@@ -39,3 +39,5 @@ pip install 'skill-eval[pydantic-ai]'
 | Configure defaults for a repo | [Configuration](configuration.md) |
 | Evaluate against a real agent, with tools and budgets | [Runners](runners.md) |
 | Understand exit codes and CI behavior | [Gating](gating.md) |
+| Understand how the tool is built | [Architecture](architecture.md) |
+| Work on skill-eval itself | [Contributing](contributing.md) |
