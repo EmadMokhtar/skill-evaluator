@@ -70,3 +70,14 @@ def test_recording_mode_without_a_key_fails_with_guidance():
     """
     with pytest.raises(pytest.fail.Exception, match="export OPENAI_API_KEY"):
         configure_replay_key(monkeypatch=None, record_mode="once", environ={})
+
+
+def test_recording_mode_treats_an_empty_key_as_missing():
+    """`OPENAI_API_KEY=` exported but blank must fail here, not at the provider.
+
+    A presence check (`"OPENAI_API_KEY" in environ`) would let a blank value
+    through and the recording would die later with an opaque auth error. This
+    matches `check_api_key`, which already treats an empty key as missing.
+    """
+    with pytest.raises(pytest.fail.Exception, match="export OPENAI_API_KEY"):
+        configure_replay_key(monkeypatch=None, record_mode="once", environ={"OPENAI_API_KEY": ""})

@@ -104,7 +104,7 @@ def configure_replay_key(monkeypatch, record_mode, environ=None):
     set via `monkeypatch`, which is scoped to the test and un-sets it afterward.
 
     When recording (`record_mode != "none"`), a real OPENAI_API_KEY must already
-    be present in `environ`. If not, this fails with a clear message. This
+    be present and non-empty in `environ`. If not, this fails with a clear message. This
     prevents the confusing scenario where the fixture clobbered a real key
     during an attempted recording -- the bug this function exists to make hard
     to silently reintroduce (see tests/test_conftest_replay.py).
@@ -118,8 +118,11 @@ def configure_replay_key(monkeypatch, record_mode, environ=None):
         # Replay-only: use a dummy key since clients need *something*
         monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-replay")
     else:
-        # Recording mode: require a real key in the environment
-        if "OPENAI_API_KEY" not in environ:
+        # Recording mode: require a real key in the environment. An exported
+        # but blank value counts as missing, matching `check_api_key` -- a
+        # presence-only check would let it through and the recording would die
+        # at the provider with an opaque auth error instead of here.
+        if not environ.get("OPENAI_API_KEY"):
             pytest.fail(
                 "Recording mode (--record-mode=once) requires a real OPENAI_API_KEY "
                 "in the environment. Run: export OPENAI_API_KEY=<your-key>"
