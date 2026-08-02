@@ -329,3 +329,77 @@ def test_pydantic_ai_runner_satisfies_the_runner_protocol():
     """Runner is @runtime_checkable; this guards the seam the whole design rests
     on (Runner.run(skill, case) -> RunResult) against signature drift."""
     assert isinstance(PydanticAIRunner(model=scripted(text("x"))), Runner)
+
+
+def offered_case(**kwargs) -> EvalCase:
+    kwargs.setdefault("name", "c")
+    kwargs.setdefault("task", "refund order 1234")
+    kwargs["mode"] = "offered"
+    return EvalCase(**kwargs)
+
+
+def test_a_loaded_run_reports_no_triggering_decision():
+    # None is "not a triggering run", which is distinct from "did not trigger".
+    result = PydanticAIRunner(model=scripted(text("done"))).run(SKILL, case())
+    assert result.skill_triggered is None
+
+
+def test_an_offered_skill_is_registered_as_a_tool_named_after_it():
+    seen = {}
+
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        seen["tools"] = sorted(tool.name for tool in info.function_tools)
+        return text("done")
+
+    PydanticAIRunner(model=FunctionModel(reply)).run(
+        SKILL, offered_case(tools=[ToolSpec(name="lookup_order")])
+    )
+    assert seen["tools"] == ["lookup_order", "order_support"]
+
+
+def test_an_offered_skill_is_not_forced_into_the_system_prompt():
+    seen = {}
+
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        seen["instructions"] = messages[0].instructions or ""
+        return text("done")
+
+    PydanticAIRunner(model=FunctionModel(reply)).run(SKILL, offered_case())
+    assert "Always look up the order first." not in seen["instructions"]
+
+
+def test_an_offered_skill_that_is_declined_reports_false():
+    result = PydanticAIRunner(model=scripted(text("done"))).run(SKILL, offered_case())
+    assert result.skill_triggered is False
+
+
+def test_an_offered_skill_that_is_chosen_reports_true():
+    runner = PydanticAIRunner(model=scripted(tool_call("order_support", {}), text("done")))
+    result = runner.run(SKILL, offered_case())
+    assert result.skill_triggered is True
+
+
+def test_choosing_the_skill_delivers_its_instructions_to_the_model():
+    # Offered mode has to be honest: an agent that picks the skill must
+    # actually receive it, or every later assertion in the case is fiction.
+    seen = {}
+
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        for message in messages:
+            for part in getattr(message, "parts", []):
+                if getattr(part, "tool_name", None) == "order_support":
+                    seen["returned"] = str(getattr(part, "content", ""))
+        if "returned" in seen:
+            return text("done")
+        return tool_call("order_support", {})
+
+    PydanticAIRunner(model=FunctionModel(reply)).run(SKILL, offered_case())
+    assert "Always look up the order first." in seen["returned"]
+
+
+def test_the_offered_tool_call_appears_in_the_trajectory():
+    # It counts toward max_calls like any other call: the message history stays
+    # the authoritative record of what the model asked for.
+    runner = PydanticAIRunner(model=scripted(tool_call("order_support", {}), text("done")))
+    result = runner.run(SKILL, offered_case())
+    assert [call.name for call in result.tool_calls] == ["order_support"]
