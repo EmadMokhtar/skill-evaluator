@@ -11,14 +11,7 @@ import typer
 from skill_eval import __version__
 from skill_eval.cases.loader import CaseParseError, load_cases_for_skill
 from skill_eval.config import ConfigError, load_config
-from skill_eval.evaluators.assertion import (
-    AssertionEvaluator,
-    InvalidAssertionValue,
-    UnknownAssertionKind,
-)
-from skill_eval.evaluators.budget import BudgetEvaluator
-from skill_eval.evaluators.judge import JudgeEvaluator
-from skill_eval.evaluators.trajectory import TrajectoryEvaluator
+from skill_eval.evaluators.assertion import InvalidAssertionValue, UnknownAssertionKind
 from skill_eval.gating import EXIT_OK, evaluate_gate
 from skill_eval.judges.fake import FakeJudge
 from skill_eval.judges.pydantic_ai import PydanticAIJudge
@@ -73,7 +66,8 @@ def run(
     runner: Annotated[str | None, typer.Option(help="Runner to use.")] = None,
     model: Annotated[str | None, typer.Option(help="Model id, e.g. openai:gpt-4o-mini.")] = None,
     judge_model: Annotated[
-        str | None, typer.Option(help="Model id for the LLM judge; defaults to --model.")
+        str | None,
+        typer.Option(help='Model id for the judge; judge = "..." in skill-eval.toml picks it.'),
     ] = None,
     tag: Annotated[str | None, typer.Option(help="Only run cases with this tag.")] = None,
     min_pass_rate: Annotated[float | None, typer.Option(help="Required pass rate.")] = None,
@@ -118,15 +112,7 @@ def run(
             )
         else:
             active_judge = judge_class()
-        evaluators = [
-            AssertionEvaluator(),
-            TrajectoryEvaluator(),
-            BudgetEvaluator(),
-            JudgeEvaluator(active_judge),
-        ]
-        report = run_evals(
-            skills, [active_runner], evals_path=evals, tag=tag, evaluators=evaluators
-        )
+        report = run_evals(skills, [active_runner], evals_path=evals, tag=tag, judge=active_judge)
     except _AUTHORING_ERRORS as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=2) from exc
