@@ -28,6 +28,16 @@ uv run mkdocs build --strict   # as CI runs it
 uv run pytest tests/test_docs.py
 ```
 
+Documentation ships with the change, not as a follow-up. Two CI jobs enforce it: `docs`
+builds the site with `--strict`, and `docs-freshness` fails a PR that changes
+`src/skill_eval/**` without touching `docs/`, `README.md`, `ARCHITECTURE.md` or
+`mkdocs.yml`. When a change genuinely needs no documentation — a pure refactor, a
+dependency bump — add the `no-docs-needed` label to the PR.
+
+`tests/test_docs.py` is the precise half of the same idea: it asserts that every command,
+flag, config key, `EvalCase` field and assertion kind appears in the docs, that every page
+is in the nav, and that no relative link is dead.
+
 ## Conventional Commits are required
 
 Every commit message **and** every pull request title must follow

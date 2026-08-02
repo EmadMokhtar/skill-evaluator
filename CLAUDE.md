@@ -100,6 +100,35 @@ form, that file is the explanation.
   a missing cassette skips rather than fails, but a mismatched request fails rather than
   reaching the network.
 
+## Documentation
+
+Documentation ships **with** the change, never as a follow-up. Two CI jobs enforce this
+(`docs`, `docs-freshness`) and `tests/test_docs.py` asserts the docs still match the code.
+
+| When you change | Update |
+| --- | --- |
+| A CLI command or flag | `docs/cli.md` |
+| A `Config` field | `docs/configuration.md` |
+| An `EvalCase` field or assertion kind | `docs/eval-files.md` |
+| Runner behavior, tools, budgets, pricing | `docs/runners.md` |
+| Gate rules, exit codes, the JSON report | `docs/gating.md` |
+| A protocol, an invariant, or the module map | `ARCHITECTURE.md` |
+| Anything needing a new page | the page plus `nav:` in `mkdocs.yml` |
+
+`README.md` is a landing page only. Reference prose lives in `docs/` — do not reintroduce
+it in the README, and do not duplicate `ARCHITECTURE.md` into `docs/architecture.md`
+(that page includes the root file via a snippet).
+
+Before pushing:
+
+```bash
+uv run mkdocs build --strict
+uv run pytest tests/test_docs.py
+```
+
+`docs/superpowers/` is a historical archive of specs and plans. It is excluded from the
+published site and does **not** count as documenting a change.
+
 ## Conventions
 
 - **Test-driven:** write the failing test first. The pipeline tier (`FakeRunner`) must stay
