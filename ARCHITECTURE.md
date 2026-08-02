@@ -27,6 +27,7 @@ class Runner(Protocol):
 
 ```python
 class Evaluator(Protocol):
+    name: str
     def evaluate(self, case: EvalCase, result: RunResult) -> EvalScore: ...
 ```
 
@@ -82,7 +83,7 @@ All live in `models.py`.
 | --- | --- |
 | `Skill` | name, description, instructions, path |
 | `EvalCase` | name, task, `tools`, `assertions`, `trajectory`, `budget`, `tags` |
-| `RunResult` | output, tool calls, transcript, token split, latency, cost, model, `error` |
+| `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, model, `error` |
 | `EvalScore` | one evaluator's `passed` / `score` / `detail` |
 | `CaseOutcome` | one (skill, case, runner) triple: status plus its scores and result |
 | `RunReport` | every outcome, plus skipped and tag-filtered skills |
@@ -167,8 +168,9 @@ before constructing it. Never raise for a provider failure; return a `RunResult`
 it to the evaluator list in `orchestrator.py`. Return `passed=False` for a real failure;
 never treat a check you could not perform as passed.
 
-**Adding a reporter.** Add a module under `reporters/` taking `(report, gate)` and
-returning a string. `cli.py` decides when to call it.
+**Adding a reporter.** Add a module under `reporters/` taking `report` and an optional
+`gate` keyword argument (default `None`), and returning a string. `cli.py` decides when to
+call it.
 
 **Adding an assertion kind.** Add an entry to `_CHECKS` in `evaluators/assertion.py` and
 document it in `docs/eval-files.md`. `tests/test_docs.py` fails until you do both.
