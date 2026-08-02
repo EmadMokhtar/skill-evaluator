@@ -9,12 +9,23 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from skill_eval.models import EvalCase, Skill, ToolSpec
 from skill_eval.runners.base import Runner
-from skill_eval.runners.pydantic_ai import PydanticAIRunner
+from skill_eval.runners.pydantic_ai import OFFERED_PREAMBLE, PydanticAIRunner
+from skill_eval.runners.tools import skill_tool_name
 
 SKILL = Skill(
     name="order-support",
     description="Handle refund requests",
     instructions="Always look up the order first.",
+    path=Path("."),
+)
+
+# Not a fixed point of a naive `name.replace("-", "_")`: digits, a space and
+# punctuation all need `skill_tool_name`'s escaping, unlike "order-support"
+# above which a hand-rolled replace would also get right by accident.
+WEIRD_SKILL = Skill(
+    name="123 weird name!",
+    description="Do something odd",
+    instructions="Weird instructions.",
     path=Path("."),
 )
 
@@ -366,6 +377,11 @@ def test_an_offered_skill_is_not_forced_into_the_system_prompt():
 
     PydanticAIRunner(model=FunctionModel(reply)).run(SKILL, offered_case())
     assert "Always look up the order first." not in seen["instructions"]
+    # Pin the preamble exactly: anything appended beyond OFFERED_PREAMBLE --
+    # even something as small as a hint about what the skill does -- would
+    # turn the trigger rate into a measurement of the prompt, not the skill.
+    assert seen["instructions"] == OFFERED_PREAMBLE
+    assert SKILL.description not in seen["instructions"]
 
 
 def test_an_offered_skill_that_is_declined_reports_false():
@@ -387,7 +403,10 @@ def test_choosing_the_skill_delivers_its_instructions_to_the_model():
     def reply(messages, info: AgentInfo) -> ModelResponse:
         for message in messages:
             for part in getattr(message, "parts", []):
-                if getattr(part, "tool_name", None) == "order_support":
+                if (
+                    type(part).__name__ == "ToolReturnPart"
+                    and getattr(part, "tool_name", None) == "order_support"
+                ):
                     seen["returned"] = str(getattr(part, "content", ""))
         if "returned" in seen:
             return text("done")
@@ -403,3 +422,25 @@ def test_the_offered_tool_call_appears_in_the_trajectory():
     runner = PydanticAIRunner(model=scripted(tool_call("order_support", {}), text("done")))
     result = runner.run(SKILL, offered_case())
     assert [call.name for call in result.tool_calls] == ["order_support"]
+
+
+def test_registration_and_detection_agree_on_a_name_replace_would_get_wrong():
+    # skill_tool_name is the single source of truth: the runner registers the
+    # offered tool under it AND detects the trigger by comparing against it.
+    # "order-support" is a fixed point of a naive `name.replace("-", "_")`, so
+    # a test built only on it can't tell the real derivation apart from a
+    # hand-rolled stand-in. A digit-leading, space-and-punctuation name can.
+    expected_name = skill_tool_name(WEIRD_SKILL.name)
+    seen = {}
+
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        seen.setdefault("tools", sorted(tool.name for tool in info.function_tools))
+        if "called" not in seen:
+            seen["called"] = True
+            return tool_call(expected_name, {})
+        return text("done")
+
+    result = PydanticAIRunner(model=FunctionModel(reply)).run(WEIRD_SKILL, offered_case())
+
+    assert expected_name in seen["tools"]
+    assert result.skill_triggered is True
