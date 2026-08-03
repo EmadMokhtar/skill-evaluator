@@ -78,9 +78,9 @@ def test_a_name_with_a_category_no_character_is_still_a_valid_identifier():
     # defeats the digit-prefix guard, breaking the function's totality
     # contract. Assert the property (isidentifier()), not one output string,
     # since totality is the actual thing being guaranteed.
-    assert skill_tool_name("²").isidentifier()  # "²"
-    assert skill_tool_name("①").isidentifier()  # "①"
-    assert skill_tool_name("Level²").isidentifier()  # "Level²"
+    assert skill_tool_name("²").isidentifier()
+    assert skill_tool_name("①").isidentifier()
+    assert skill_tool_name("Level²").isidentifier()
 
 
 def test_distinct_names_may_collapse_to_the_same_identifier():
