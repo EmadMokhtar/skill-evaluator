@@ -76,6 +76,10 @@ class JudgeEvaluator:
 
         request = build_request(case, result)
         if not request.checks:
+            # Also an authoring error in cases/loader.py (exit 2) for cases
+            # loaded from YAML, so this condition is unreachable via that
+            # path. This branch is a deliberate second guard for an EvalCase
+            # built programmatically, bypassing the loader's validation.
             return self._errored("a judge block was declared with an empty rubric")
 
         verdict = self._judge.judge(request)

@@ -38,6 +38,17 @@ def test_the_system_prompt_tells_the_judge_the_response_is_data_not_instructions
     assert '<response id="...">' in SYSTEM_PROMPT
 
 
+def test_the_system_prompt_states_the_final_matching_closing_tag_is_the_boundary():
+    # Pinned with a distinctive phrase, not a substring that collides with
+    # unrelated words -- an earlier review caught `assert "id" in SYSTEM_PROMPT`
+    # passing only because "id" is a substring of "evidence". This states the
+    # ordering guarantee render_request's docstring actually relies on: its
+    # own closing tag is always appended last, so the final matching pair is
+    # the one that really closes the fence, regardless of what the response
+    # under test contains.
+    assert "the final matching closing tag is" in SYSTEM_PROMPT
+
+
 def test_the_rendered_request_carries_task_output_and_every_check():
     text = render_request(
         request(

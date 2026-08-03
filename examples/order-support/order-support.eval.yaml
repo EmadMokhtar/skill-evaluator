@@ -80,6 +80,12 @@ cases:
     mode: offered
     task: I want a refund for order 1234
     tags: [triggering]
+    tools:
+      - name: lookup_order
+        description: Look up an order by its id
+        parameters:
+          order_id: string
+        returns: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
     trajectory:
       skill_triggered: true
 
