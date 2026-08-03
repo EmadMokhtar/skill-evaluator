@@ -35,6 +35,27 @@ def _split_frontmatter(text: str) -> tuple[dict, str]:
     return safe_load(parts[1]) or {}, parts[2]
 
 
+def _version(frontmatter: dict, source: str) -> str:
+    """A skill's declared version, which must be text.
+
+    YAML resolves `version: 1.20` to the float 1.2, which is the same object it
+    resolves `version: 1.2` to -- so a bare decimal version cannot round-trip,
+    and two genuinely different versions would silently compare equal in
+    `--baseline previous`. Rather than claim a guarantee `str()` cannot deliver,
+    anything YAML did not hand back as a string is rejected here and the author
+    is told to quote it.
+    """
+    declared = frontmatter.get("version")
+    if declared is None:
+        return ""
+    if not isinstance(declared, str):
+        raise SkillParseError(
+            f"invalid frontmatter in {source}: version must be quoted text, got "
+            f'{declared!r} -- write version: "{declared}"'
+        )
+    return declared
+
+
 def parse_skill_text(text: str, *, name_fallback: str, path: Path, source: str) -> Skill:
     """Parse SKILL.md content into a Skill.
 
@@ -52,7 +73,7 @@ def parse_skill_text(text: str, *, name_fallback: str, path: Path, source: str) 
         name=str(frontmatter.get("name") or name_fallback),
         description=str(frontmatter.get("description") or ""),
         instructions=body.strip(),
-        version=str(frontmatter.get("version") or ""),
+        version=_version(frontmatter, source),
         path=path,
     )
 

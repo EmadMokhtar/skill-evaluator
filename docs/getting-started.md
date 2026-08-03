@@ -23,6 +23,9 @@ version: 1.0.0
 previous version of the skill in git history — see
 [Comparative evals](comparative-evals.md).
 
+Versions are text, not numbers: quote anything a YAML parser would read as a
+number (`version: "1.2"`), or use three-part semver, which is already text.
+
 ```yaml
 # greeting.eval.yaml
 cases:
