@@ -282,3 +282,113 @@ def test_non_ascii_eval_yaml_loads_regardless_of_platform_encoding(tmp_path):
     assert cases[0].name == "café test"
     assert cases[0].task == "décrire"
     assert cases[0].assertions[0].value == "日本語"
+
+
+def write(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "x.eval.yaml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_a_judge_block_with_an_empty_rubric_is_an_authoring_error(tmp_path):
+    path = write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    judge:
+      expected: something good
+""",
+    )
+    with pytest.raises(CaseParseError, match="empty rubric"):
+        parse_cases_file(path)
+
+
+def test_a_blank_rubric_entry_is_an_authoring_error(tmp_path):
+    # A stray blank list item ("" or whitespace-only) loads fine as valid YAML
+    # and would render as a check with no text -- a model asked to verify
+    # nothing will likely return a vacuous pass. Reachable from ordinary YAML,
+    # so it gets the same guard as an empty rubric list.
+    path = write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    judge:
+      expected: something good
+      rubric:
+        - a real check
+        - "   "
+""",
+    )
+    with pytest.raises(CaseParseError, match="entry 2 is blank"):
+        parse_cases_file(path)
+
+
+def test_skill_triggered_on_a_loaded_case_is_an_authoring_error(tmp_path):
+    # A loaded skill is always in force, so the check could never be false.
+    path = write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    trajectory:
+      skill_triggered: true
+""",
+    )
+    with pytest.raises(CaseParseError, match="mode: offered"):
+        parse_cases_file(path)
+
+
+def test_skill_triggered_is_accepted_on_an_offered_case(tmp_path):
+    path = write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    mode: offered
+    trajectory:
+      skill_triggered: false
+""",
+    )
+    cases = parse_cases_file(path)
+    assert cases[0].trajectory.skill_triggered is False
+
+
+def test_a_case_tool_colliding_with_the_offered_skill_name_is_an_authoring_error(tmp_path):
+    skill = Skill(name="order-support", description="d", instructions="i", path=tmp_path)
+    write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    mode: offered
+    tools:
+      - name: order_support
+        description: not the skill
+""",
+    )
+    with pytest.raises(CaseParseError, match="collides"):
+        load_cases_for_skill(skill)
+
+
+def test_the_collision_check_only_applies_to_offered_cases(tmp_path):
+    # In loaded mode nothing is offered, so the name is free.
+    skill = Skill(name="order-support", description="d", instructions="i", path=tmp_path)
+    write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    tools:
+      - name: order_support
+        description: just a tool
+""",
+    )
+    assert len(load_cases_for_skill(skill)) == 1

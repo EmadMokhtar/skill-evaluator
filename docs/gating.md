@@ -12,8 +12,11 @@ A run fails the gate when the overall pass rate is below `min_pass_rate`, when a
 per-skill minimum is not met, or when any case **errored**. Two distinctions matter:
 
 - **failed** — the case ran and scored below the bar. An *eval* signal.
-- **errored** — the runner itself blew up (API error, timeout, missing key). An *infra* signal,
-  and it fails the gate by default so CI never goes green on a broken run.
+- **errored** — something in the harness blew up rather than the skill scoring badly: the
+  runner (API error, timeout, missing key), or an evaluator (a judge endpoint returning 500,
+  a judge verdict that does not match its rubric, an offered case on a runner that does not
+  support the mode). An *infra* signal, and it fails the gate by default so CI never goes
+  green on a broken run.
 
 A case that fails its assertions drags the pass rate below the bar and fails the gate:
 

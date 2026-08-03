@@ -15,9 +15,9 @@ without embedding it, and `skill-eval` can be released independently of anything
 
 Non-goals: authoring skills, running skills in production, and hosting a results dashboard.
 
-## The two protocols
+## The three protocols
 
-The design rests on two protocols. Everything else is plumbing around them.
+The design rests on three protocols. Everything else is plumbing around them.
 
 ```python
 class Runner(Protocol):
@@ -33,9 +33,23 @@ class Evaluator(Protocol):
     def evaluate(self, case: EvalCase, result: RunResult) -> EvalScore: ...
 ```
 
+```python
+class Judge(Protocol):
+    name: str
+
+    def judge(self, request: JudgeRequest) -> JudgeVerdict: ...
+```
+
 `Runner` is the seam every agent framework plugs into. `Evaluator` is the seam every
-scoring strategy plugs into. Adding a framework or a scoring rule means adding one
-implementation of one protocol — no change to the orchestrator, the reporters, or the gate.
+scoring strategy plugs into. `Judge` is the seam every LLM-as-judge implementation plugs
+into — it exists so `JudgeEvaluator` can grade a rubric with a real model without any
+agent-framework type entering `evaluators/`. Adding a framework, a scoring rule, or a judge
+means adding one implementation of one protocol — no change to the orchestrator, the
+reporters, or the gate.
+
+`Runner` and `Judge` share a rule: **neither raises for provider failures.** They report
+through `RunResult.error` and `JudgeVerdict.error`, so the orchestrator can tell an infra
+problem (errored) from a low score (failed).
 
 ## Module map
 
@@ -51,7 +65,7 @@ implementation of one protocol — no change to the orchestrator, the reporters,
 | `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models. |
 | `runners/base.py` | The `Runner` protocol. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
-| `runners/pydantic_ai.py` | The PydanticAI adapter. **The only module that imports an agent framework.** |
+| `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of only two modules that import an agent framework.** |
 | `runners/tools.py` | Builds framework-neutral `MockTool`s (name + JSON schema + callable) from a case's `tools:` block. |
 | `runners/preflight.py` | Verifies the provider API key is present before any spend. |
 | `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
@@ -59,6 +73,11 @@ implementation of one protocol — no change to the orchestrator, the reporters,
 | `evaluators/assertion.py` | Rule-based scoring of the final output text. |
 | `evaluators/trajectory.py` | Scoring which tools were called, in what order, and how many times. |
 | `evaluators/budget.py` | Scoring efficiency: tokens, cost, latency. |
+| `evaluators/judge.py` | Rubric scoring. Holds no framework code; takes a `Judge` by injection. |
+| `judges/base.py` | The `Judge` protocol. |
+| `judges/prompt.py` | Renders a `JudgeRequest` into prompt text. Pure, deterministic, no IO. |
+| `judges/fake.py` | A scripted, offline judge. The default — and unscripted it *errors* rather than passing, so an unjudged rubric is never a quiet green. |
+| `judges/pydantic_ai.py` | The PydanticAI judge adapter. **The other module that imports an agent framework.** |
 | `reporters/console.py` | Human-readable run summary. |
 | `reporters/json_reporter.py` | Machine-readable run report. |
 
@@ -137,15 +156,26 @@ the string.
 **Secrets come from environment variables only** — never from `skill-eval.toml`. A config
 file is committed; a key must not be.
 
-**No agent-framework type appears outside `runners/pydantic_ai.py`.** `runners/tools.py`
-builds framework-neutral mock tools and the adapter wraps them. A test asserts the string
-`pydantic_ai` does not appear in `tools.py`. This is what keeps the `Runner` seam real
-rather than nominal.
+**Agent-framework imports appear in exactly two modules** — `runners/pydantic_ai.py` and
+`judges/pydantic_ai.py`. `runners/tools.py` builds framework-neutral mock tools and the
+adapter wraps them. `tests/test_framework_isolation.py` scans the whole package for
+top-level framework imports and allows only those two files; it matches import *forms*, so
+`cli.py` importing our own `skill_eval.runners.pydantic_ai` is not a false positive. This is
+what keeps the `Runner` and `Judge` seams real rather than nominal.
 
 **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` plus a
 `cost_note`. Pricing is reporting metadata; it must never be why a run errors. In
 `BudgetEvaluator`, an unpriceable cost limit is *skipped* — not counted as passed — so a
 case whose only budget check is an unpriced cost limit fails, because nothing was verified.
+
+**Nothing scores a vacuous pass.** The rule that an unpriceable budget limit fails rather
+than passing generalises: a rubric with no configured judge is *errored*, and a judge check
+that passes without citing evidence is recorded as a *failure*. An unsupported PASS is an
+LLM judge's characteristic failure mode, so it gets a mechanical defence rather than a
+prompt asking nicely.
+
+**Judge spend never enters `RunResult`.** It lives on `EvalScore.cost_usd` and is reported
+as judge overhead. `budget:` measures the skill's efficiency, not the harness's.
 
 **Mock tools accept any arguments.** A model hallucinating an argument is an eval signal
 about the skill; raising would surface it as an infra error instead.

@@ -1,6 +1,11 @@
-# Two cases on the same skill: one where the policy forbids a refund and one
-# where it allows it. The trajectory checks are the point -- "did it look the
-# order up before deciding" is invisible to an output assertion.
+# Five cases on the same skill, covering three concerns:
+#   - trajectory: did it look the order up before deciding -- one case where
+#     the policy forbids a refund, one where it allows it. Invisible to an
+#     output assertion.
+#   - judge: "explains it plainly" is not a substring, so a rubric-based
+#     LLM judge grades it instead.
+#   - triggering (`mode: offered`): does the agent even reach for the skill,
+#     including the negative control that proves it isn't firing on everything.
 cases:
   - name: refuses a refund outside the return window
     task: I want a refund for order 1234
@@ -50,3 +55,43 @@ cases:
     assertions:
       - kind: contains
         value: "5678"
+
+  # The judge earns its keep where an assertion cannot: "explains it plainly"
+  # is not a substring.
+  - name: explains the refusal in plain language
+    task: I want a refund for order 1234
+    tags: [refund, judged]
+    tools:
+      - name: lookup_order
+        description: Look up an order by its id
+        parameters:
+          order_id: string
+        returns: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
+    judge:
+      expected: A short, plain-language refusal that names the order id.
+      rubric:
+        - The reply names order 1234
+        - The reply explains that the return window has closed
+        - The reply does not promise a refund
+
+  # Triggering, both directions. Run only the positive and a skill that fires
+  # on everything scores 100% -- which is why the negative control ships too.
+  - name: reaches for the skill on a refund question
+    mode: offered
+    task: I want a refund for order 1234
+    tags: [triggering]
+    tools:
+      - name: lookup_order
+        description: Look up an order by its id
+        parameters:
+          order_id: string
+        returns: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
+    trajectory:
+      skill_triggered: true
+
+  - name: leaves an unrelated question alone
+    mode: offered
+    task: What's the capital of Egypt?
+    tags: [triggering]
+    trajectory:
+      skill_triggered: false

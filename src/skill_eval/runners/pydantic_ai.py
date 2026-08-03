@@ -14,13 +14,23 @@ from typing import Any
 
 from skill_eval.models import EvalCase, RunResult, Skill, ToolCall
 from skill_eval.runners.pricing import calculate_cost, provider_of
-from skill_eval.runners.tools import build_mock_tool
+from skill_eval.runners.tools import build_mock_tool, build_skill_tool, skill_tool_name
 
 DEFAULT_MODEL = "openai:gpt-4o-mini"
 
 # Statuses worth another attempt: rate limits, request timeouts, conflicts and
 # anything the provider blames on itself. A 401 or 404 will never fix itself.
 _TRANSIENT_STATUSES = {408, 409, 429}
+
+# In offered mode the agent must be able to *decline* the skill, so the system
+# prompt says nothing about what the skill does -- only that tools exist and
+# describe themselves. Anything more would be a nudge, and a nudged trigger
+# rate measures the prompt rather than the skill.
+OFFERED_PREAMBLE = (
+    "You are a helpful assistant. Some capabilities are available to you as tools. "
+    "Read their descriptions and use one when it genuinely fits the request. "
+    "If none fits, just answer directly."
+)
 
 
 class RunnerDependencyError(Exception):
@@ -32,7 +42,7 @@ def _require_pydantic_ai() -> None:
         import pydantic_ai  # noqa: F401
     except ImportError as exc:
         raise RunnerDependencyError(
-            "the 'pydantic-ai' runner needs its optional extra: "
+            "the 'pydantic-ai' optional extra is required for this runner or judge: "
             "pip install 'skill-eval[pydantic-ai]'"
         ) from exc
 
@@ -138,18 +148,22 @@ class PydanticAIRunner:
     def _build_agent(self, skill: Skill, case: EvalCase) -> Any:
         from pydantic_ai import Agent, Tool
 
-        tools = []
-        for spec in case.tools:
-            mock = build_mock_tool(spec)
-            tools.append(
-                Tool.from_schema(
-                    mock.call,
-                    name=mock.name,
-                    description=mock.description,
-                    json_schema=mock.json_schema,
-                )
+        mocks = [build_mock_tool(spec) for spec in case.tools]
+        if case.mode == "offered":
+            mocks.append(build_skill_tool(skill))
+            instructions = OFFERED_PREAMBLE
+        else:
+            instructions = _system_prompt(skill)
+        tools = [
+            Tool.from_schema(
+                mock.call,
+                name=mock.name,
+                description=mock.description,
+                json_schema=mock.json_schema,
             )
-        return Agent(self._model, instructions=_system_prompt(skill), tools=tools)
+            for mock in mocks
+        ]
+        return Agent(self._model, instructions=instructions, tools=tools)
 
     def _run_with_retries(self, agent: Any, task: str) -> Any:
         settings = self._model_settings()
@@ -168,6 +182,7 @@ class PydanticAIRunner:
     def run(self, skill: Skill, case: EvalCase) -> RunResult:
         _require_pydantic_ai()
         configured = self._model if isinstance(self._model, str) else ""
+        offered = skill_tool_name(skill.name) if case.mode == "offered" else None
         started = time.monotonic()
         try:
             agent = self._build_agent(skill, case)
@@ -176,9 +191,10 @@ class PydanticAIRunner:
             usage = result.usage
             model_name = _model_name(messages, configured)
             cost_usd, cost_note = calculate_cost(usage, model_name, provider_of(configured))
+            tool_calls = _tool_calls(messages)
             run_result = RunResult(
                 output=result.output if isinstance(result.output, str) else str(result.output),
-                tool_calls=_tool_calls(messages),
+                tool_calls=tool_calls,
                 transcript=_transcript(messages),
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
@@ -186,6 +202,9 @@ class PydanticAIRunner:
                 cost_usd=cost_usd,
                 cost_note=cost_note,
                 model=model_name,
+                skill_triggered=(
+                    None if offered is None else any(call.name == offered for call in tool_calls)
+                ),
             )
         except Exception as exc:
             return RunResult(

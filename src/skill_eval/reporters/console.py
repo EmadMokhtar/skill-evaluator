@@ -17,6 +17,14 @@ def render_console(report: RunReport, gate: GateResult | None = None) -> str:
         for score in outcome.scores:
             if not score.passed:
                 lines.append(f"        {score.evaluator}: {score.detail}")
+                # The evidence is the point of a judge verdict: a summary line
+                # cannot tell an author whether the judge read the response or
+                # invented a reason.
+                for check in score.checks:
+                    if not check.passed:
+                        lines.append(
+                            f"            {check.id}: {check.evidence or 'no evidence given'}"
+                        )
         if outcome.result is not None and outcome.result.error:
             lines.append(f"        error: {outcome.result.error}")
 
@@ -51,6 +59,11 @@ def render_console(report: RunReport, gate: GateResult | None = None) -> str:
             totals_parts.append("some costs not priced (see per-case cost_note in the JSON report)")
     elif pricing_degraded:
         totals_parts.append("Total cost: not priced (see per-case cost_note in the JSON report)")
+
+    judge_cost = report.judge_cost_usd
+    if judge_cost:
+        totals_parts.append(f"Judge overhead: ${judge_cost:.4f}")
+
     if total_latency_ms:
         if total_latency_ms >= 1000:
             totals_parts.append(f"Total latency: {total_latency_ms / 1000:.2f}s")

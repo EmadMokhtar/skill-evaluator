@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from skill_eval.models import ToolSpec
+from skill_eval.models import Skill, ToolSpec
 
 
 @dataclass(frozen=True)
@@ -46,5 +46,71 @@ def build_mock_tool(spec: ToolSpec) -> MockTool:
             "required": list(properties),
             "additionalProperties": False,
         },
+        call=call,
+    )
+
+
+def _empty_schema() -> dict[str, Any]:
+    """A fresh, parameter-free JSON schema.
+
+    Built inline per call -- like `build_mock_tool` already does for its own
+    schema -- so no two built tools ever share a mutable `properties` dict or
+    `required` list. A dict literal, however it was copied, does not protect
+    against mutating what's *inside* it.
+    """
+    return {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": False,
+    }
+
+
+def skill_tool_name(skill_name: str) -> str:
+    """The identifier a skill is offered under: 'order-support' -> 'order_support'.
+
+    Deterministic, because both the runner (which registers the tool) and the
+    case loader (which rejects a case tool that would collide with it) have to
+    agree on the answer without talking to each other.
+
+    Must be total: every possible input has to yield a valid Python
+    identifier. `char.isalnum()` / `char.isdigit()` are not safe tests for
+    this -- both return True for Unicode "Other Number" (No) characters
+    (superscripts, circled digits, vulgar fractions) that are nonetheless
+    illegal in an identifier in any position. Asking Python directly avoids
+    that trap: `f"a{char}".isidentifier()` is exactly "valid in a non-leading
+    position", and `char.isidentifier()` is exactly "valid in the leading
+    position".
+
+    Distinct names can collapse to the same identifier (e.g. "a-b", "a_b" and
+    "a b" all become "a_b"). That's an accepted, deliberate tradeoff: only one
+    skill is offered as a tool per run, so there's never a same-run collision
+    to resolve.
+    """
+    cleaned = "".join(char if f"a{char}".isidentifier() else "_" for char in skill_name)
+    if not cleaned.strip("_"):
+        return "skill"
+    if not cleaned[0].isidentifier():
+        cleaned = f"skill_{cleaned}"
+    return cleaned
+
+
+def build_skill_tool(skill: Skill) -> MockTool:
+    """The skill itself, offered as a tool the agent may decline to use.
+
+    Calling it returns the skill's instructions, so an offered run only has the
+    skill once the agent chose it -- and the rest of the run proceeds
+    realistically with it loaded, rather than the agent acting on instructions
+    it never received.
+    """
+    instructions = skill.instructions
+
+    def call(**_arguments: Any) -> str:
+        return instructions
+
+    return MockTool(
+        name=skill_tool_name(skill.name),
+        description=skill.description,
+        json_schema=_empty_schema(),
         call=call,
     )

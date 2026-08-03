@@ -1,10 +1,32 @@
 import json
+import re
 
 from typer.testing import CliRunner
 
 from skill_eval.cli import app
+from skill_eval.judges.pydantic_ai import PydanticAIJudge
+from skill_eval.runners.pydantic_ai import PydanticAIRunner
 
 runner = CliRunner()
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_BOX = str.maketrans("", "", "│╭╮╯╰─")
+
+
+def plain(output: str) -> str:
+    """Strip Rich's terminal rendering so an assertion tests the message itself.
+
+    Typer renders `BadParameter` through Rich, which styles the flag name and
+    line-wraps the text to the terminal width. Both vary by environment: with
+    colour on, `--model` arrives as `-` and `-model` with escape codes between
+    them, so a plain `in` check silently fails somewhere that has colour (CI)
+    while passing somewhere that does not (a piped local run). Removing escapes
+    and box-drawing characters and collapsing whitespace rejoins a wrapped
+    message into one line, so the assertion is about what we said, not how the
+    terminal drew it.
+    """
+    return " ".join(_ANSI.sub("", output).translate(_BOX).split())
+
 
 SKILL_MD = """---
 name: pdf
@@ -252,6 +274,90 @@ def test_model_flag_beats_the_config_file(tmp_path, monkeypatch):
     assert "ANTHROPIC_API_KEY" not in result.output
 
 
+def test_an_unknown_judge_in_config_is_a_user_error(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text('judge = "psychic"\n', encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+    )
+    assert result.exit_code == 2
+    assert "psychic" in result.output
+
+
+def test_a_real_judge_without_its_api_key_fails_preflight(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text(
+        'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\n', encoding="utf-8"
+    )
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+    )
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+
+
+def test_the_judge_model_falls_back_to_the_run_model(tmp_path, monkeypatch):
+    # An empty judge_model must not reach the provider as an empty model id.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text(
+        'judge = "pydantic-ai"\nmodel = "anthropic:claude-haiku-4-5-20251001"\n',
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+    )
+    assert result.exit_code == 2
+    assert "ANTHROPIC_API_KEY" in result.output
+
+
+def test_judge_temperature_is_independent_of_the_runner_temperature(tmp_path, monkeypatch):
+    """The judge must be constructed at `judge_temperature` (default 0.0 for
+    determinism), never at the runner's `temperature` -- a team raising
+    `temperature` to exercise the runner under sampling must not silently make
+    every rubric verdict nondeterministic too. See Config.judge_temperature.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text(
+        'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\ntemperature = 0.7\n',
+        encoding="utf-8",
+    )
+    captured: dict = {}
+
+    def _capture(self, **kwargs):
+        captured.update(kwargs)
+        raise AssertionError("stop before any network call")
+
+    monkeypatch.setattr(PydanticAIJudge, "__init__", _capture)
+    runner.invoke(app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")])
+
+    assert captured["temperature"] == 0.0
+
+
+def test_judge_temperature_unset_reaches_the_judge(tmp_path, monkeypatch):
+    """A reasoning judge model needs `judge_temperature = "unset"`, independent
+    of the runner's `temperature`.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text(
+        'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\njudge_temperature = "unset"\n',
+        encoding="utf-8",
+    )
+    captured: dict = {}
+
+    def _capture(self, **kwargs):
+        captured.update(kwargs)
+        raise AssertionError("stop before any network call")
+
+    monkeypatch.setattr(PydanticAIJudge, "__init__", _capture)
+    runner.invoke(app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")])
+
+    assert captured["temperature"] == "unset"
+
+
 def test_json_output_with_non_ascii_is_written_as_utf8(tmp_path):
     # Regression test: the JSON report is a machine-readable CI artifact and must
     # be UTF-8 regardless of the platform's default encoding, or non-ASCII skill
@@ -272,3 +378,83 @@ def test_json_output_with_non_ascii_is_written_as_utf8(tmp_path):
     data = json.loads(out.read_text(encoding="utf-8"))
     assert data["outcomes"][0]["skill_name"] == "café"
     assert data["outcomes"][0]["case_name"] == "日本語 case"
+
+
+def test_runner_preflight_wins_the_race_against_construction(tmp_path, monkeypatch):
+    """A missing key must be caught before `PydanticAIRunner(...)` ever runs.
+
+    If `check_api_key` moved to *after* construction, a future runner whose
+    `__init__` does real work (builds a client, etc.) would spend before the
+    key check ever fires. Pin the ordering directly: make construction itself
+    blow up, and prove the CLI still reports the missing key rather than the
+    construction crash.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+
+    def _boom(self, *args, **kwargs):
+        raise AssertionError("PydanticAIRunner constructed before preflight")
+
+    monkeypatch.setattr(PydanticAIRunner, "__init__", _boom)
+    result = runner.invoke(
+        app,
+        ["run", str(skill_dir), "--runner", "pydantic-ai", "--model", "openai:gpt-4o-mini"],
+    )
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+    assert "constructed before preflight" not in result.output
+
+
+def test_judge_preflight_wins_the_race_against_construction(tmp_path, monkeypatch):
+    """Same guarantee as above, for the judge: preflight must run before
+    `PydanticAIJudge(...)` is ever called.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text(
+        'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\n', encoding="utf-8"
+    )
+
+    def _boom(self, *args, **kwargs):
+        raise AssertionError("PydanticAIJudge constructed before preflight")
+
+    monkeypatch.setattr(PydanticAIJudge, "__init__", _boom)
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+    )
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+    assert "constructed before preflight" not in result.output
+
+
+def test_a_blank_model_is_a_user_error_not_a_broken_run(tmp_path):
+    # A blank id has no provider prefix, so preflight finds nothing to check and
+    # the run used to die inside the adapter as an errored case (exit 1 -- "the
+    # run broke") for what is really a mistyped flag. Exit codes are the CI
+    # contract: a user error is 2.
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(skill_dir), "--runner", "pydantic-ai", "--model", ""])
+    assert result.exit_code == 2
+    assert "--model is empty" in plain(result.output)
+
+
+def test_a_blank_judge_model_is_a_user_error_not_a_broken_run(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    config = tmp_path / "skill-eval.toml"
+    config.write_text('judge = "pydantic-ai"\n', encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(config), "--judge-model", "   "]
+    )
+    assert result.exit_code == 2
+    assert "--judge-model is empty" in plain(result.output)
+
+
+def test_a_blank_model_in_the_config_file_is_caught_too(tmp_path):
+    # Checked on the resolved value, so a blank in skill-eval.toml is rejected
+    # exactly like a blank flag.
+    skill_dir = _make_skill(tmp_path)
+    config = tmp_path / "skill-eval.toml"
+    config.write_text('default_runner = "pydantic-ai"\nmodel = ""\n', encoding="utf-8")
+    result = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
+    assert result.exit_code == 2
+    assert "--model is empty" in plain(result.output)

@@ -7,10 +7,11 @@ Run evaluations on Agent Skills (`SKILL.md`) — in CI/CD or on demand.
 Skills and their eval cases are **inputs** to the tool. Nothing about a skill under test
 is vendored here, so any skill repo can adopt `skill-eval` without embedding it.
 
-> **Status:** M2. The full pipeline — discovery, scoring, reporting, gating — runs offline
+> **Status:** M3. The full pipeline — discovery, scoring, reporting, gating — runs offline
 > against `FakeRunner` (the default, scripted, free) and against real agents through
 > `pydantic-ai` (provider-flexible), scoring output text, tool-use trajectories, and
-> efficiency budgets.
+> efficiency budgets. A rubric-based LLM judge scores output quality, and `mode: offered`
+> measures whether an agent reached for the skill at all.
 
 ## Install
 
@@ -38,7 +39,7 @@ uv run skill-eval list ./examples
 
 ```
 greeting	1 case(s)	examples/greeting
-order-support	2 case(s)	examples/order-support
+order-support	5 case(s)	examples/order-support
 ```
 
 `list` discovers skills and validates every eval file without calling a runner — free, and

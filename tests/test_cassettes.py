@@ -19,8 +19,19 @@ import pytest
 
 from skill_eval.evaluators.assertion import AssertionEvaluator
 from skill_eval.evaluators.budget import BudgetEvaluator
+from skill_eval.evaluators.judge import JudgeEvaluator
 from skill_eval.evaluators.trajectory import TrajectoryEvaluator
-from skill_eval.models import BudgetSpec, EvalCase, Skill, ToolSpec, TrajectorySpec
+from skill_eval.judges.pydantic_ai import PydanticAIJudge
+from skill_eval.models import (
+    BudgetSpec,
+    EvalCase,
+    JudgeRequest,
+    JudgeSpec,
+    RubricCheck,
+    Skill,
+    ToolSpec,
+    TrajectorySpec,
+)
 from skill_eval.runners.pydantic_ai import PydanticAIRunner
 
 SKILL = Skill(
@@ -80,3 +91,96 @@ def test_real_traffic_drives_the_whole_loop(replay):
     assert TrajectoryEvaluator().evaluate(CASE, result).passed is True
     assert BudgetEvaluator().evaluate(CASE, result).passed is True
     assert AssertionEvaluator().evaluate(CASE, result).passed is True
+
+
+JUDGED_CASE = EvalCase(
+    name="explains the refund refusal plainly",
+    task="I want a refund for order 1234",
+    # Without this tool the agent has no way to learn the order was delivered
+    # 45 days ago, so it can't satisfy the second rubric check below. Mirrors
+    # the `lookup_order` declaration in examples/order-support/order-support.eval.yaml.
+    tools=[
+        ToolSpec(
+            name="lookup_order",
+            description="Look up an order by its id",
+            parameters={"order_id": "string"},
+            returns='{"id": "1234", "status": "delivered", "days_since_delivery": 45}',
+        ),
+    ],
+    judge=JudgeSpec(
+        expected="A short, plain-language refusal that names the order id.",
+        rubric=[
+            "The reply names order 1234",
+            "The reply explains that the return window has closed",
+        ],
+    ),
+)
+
+OFFERED_POSITIVE = EvalCase(
+    name="reaches for the skill on a refund question",
+    task="I want a refund for order 1234",
+    mode="offered",
+    trajectory=TrajectorySpec(skill_triggered=True),
+)
+
+OFFERED_NEGATIVE = EvalCase(
+    name="leaves an unrelated question alone",
+    task="What's the capital of Egypt?",
+    mode="offered",
+    trajectory=TrajectorySpec(skill_triggered=False),
+)
+
+
+@pytest.mark.cassette
+@pytest.mark.vcr
+def test_a_real_judge_grades_a_rubric_with_evidence(replay):
+    # Only real traffic can prove the model actually fills the structured
+    # output shape -- FunctionModel is scripted to fill it by construction.
+    request = JudgeRequest(
+        task=JUDGED_CASE.task,
+        output="Order 1234 was delivered 45 days ago, so the 30-day return window has closed.",
+        expected=JUDGED_CASE.judge.expected,
+        checks=[
+            RubricCheck(id="r1", text=JUDGED_CASE.judge.rubric[0]),
+            RubricCheck(id="r2", text=JUDGED_CASE.judge.rubric[1]),
+        ],
+    )
+    verdict = PydanticAIJudge(model="openai:gpt-4o-mini", retries=0).judge(request)
+
+    assert verdict.errored is False
+    assert sorted(check.id for check in verdict.checks) == ["r1", "r2"]
+    assert all(check.evidence for check in verdict.checks)
+    assert verdict.cost_usd > 0
+
+
+@pytest.mark.cassette
+@pytest.mark.vcr
+def test_a_real_agent_reaches_for_an_offered_skill(replay):
+    result = PydanticAIRunner(model="openai:gpt-4o-mini", retries=0).run(SKILL, OFFERED_POSITIVE)
+    assert result.errored is False
+    assert result.skill_triggered is True
+    assert TrajectoryEvaluator().evaluate(OFFERED_POSITIVE, result).passed is True
+
+
+@pytest.mark.cassette
+@pytest.mark.vcr
+def test_a_real_agent_leaves_an_offered_skill_alone_on_an_unrelated_task(replay):
+    # The negative control. Without it, a skill that fires on everything scores
+    # 100% on a positives-only suite.
+    result = PydanticAIRunner(model="openai:gpt-4o-mini", retries=0).run(SKILL, OFFERED_NEGATIVE)
+    assert result.errored is False
+    assert result.skill_triggered is False
+    assert TrajectoryEvaluator().evaluate(OFFERED_NEGATIVE, result).passed is True
+
+
+@pytest.mark.cassette
+@pytest.mark.vcr
+def test_a_real_judge_drives_the_evaluator_end_to_end(replay):
+    result = PydanticAIRunner(model="openai:gpt-4o-mini", retries=0).run(SKILL, JUDGED_CASE)
+    score = JudgeEvaluator(PydanticAIJudge(model="openai:gpt-4o-mini", retries=0)).evaluate(
+        JUDGED_CASE, result
+    )
+    assert score.errored is False
+    assert score.passed is True
+    assert len(score.checks) == 2
+    assert score.cost_usd > 0

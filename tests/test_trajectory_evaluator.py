@@ -87,3 +87,66 @@ def test_score_is_the_fraction_of_checks_that_held():
 
 def test_evaluator_reports_its_name():
     assert EVALUATOR.evaluate(case(called=["a"]), result("a")).evaluator == "trajectory"
+
+
+def triggering_case(expected: bool) -> EvalCase:
+    return EvalCase(
+        name="c",
+        task="t",
+        mode="offered",
+        trajectory=TrajectorySpec(skill_triggered=expected),
+    )
+
+
+def test_a_skill_that_triggered_when_it_should_have_passes():
+    score = TrajectoryEvaluator().evaluate(triggering_case(True), RunResult(skill_triggered=True))
+    assert score.passed is True
+    assert score.errored is False
+
+
+def test_a_skill_that_did_not_trigger_when_it_should_have_fails():
+    score = TrajectoryEvaluator().evaluate(triggering_case(True), RunResult(skill_triggered=False))
+    assert score.passed is False
+    assert score.errored is False
+    assert "not triggered" in score.detail
+
+
+def test_a_negative_control_fails_when_the_skill_fires_anyway():
+    # A positives-only suite scores a skill that fires on everything at 100%.
+    score = TrajectoryEvaluator().evaluate(triggering_case(False), RunResult(skill_triggered=True))
+    assert score.passed is False
+    assert "should not" in score.detail
+
+
+def test_a_negative_control_passes_when_the_skill_stays_out_of_it():
+    score = TrajectoryEvaluator().evaluate(triggering_case(False), RunResult(skill_triggered=False))
+    assert score.passed is True
+
+
+def test_a_runner_that_reported_no_decision_errors_rather_than_failing():
+    # None is "this runner does not do offered mode", which is infra, not a
+    # signal about the skill -- it must not read as a skill that misfired.
+    score = TrajectoryEvaluator().evaluate(triggering_case(True), RunResult(skill_triggered=None))
+    assert score.errored is True
+    assert score.passed is False
+    assert "does not support" in score.detail
+
+
+def test_a_negative_control_on_an_unsupported_runner_errors_too():
+    # A truthy guard would misreport this as a plain failure (did not trigger
+    # when expected), not an infra error (runner does not support offered mode).
+    score = TrajectoryEvaluator().evaluate(triggering_case(False), RunResult(skill_triggered=None))
+    assert score.errored is True
+    assert score.passed is False
+    assert "does not support" in score.detail
+
+
+def test_the_triggering_check_counts_toward_the_score_fraction():
+    case = EvalCase(
+        name="c",
+        task="t",
+        mode="offered",
+        trajectory=TrajectorySpec(max_calls=5, skill_triggered=True),
+    )
+    score = TrajectoryEvaluator().evaluate(case, RunResult(skill_triggered=False))
+    assert score.score == 0.5

@@ -13,6 +13,8 @@ from skill_eval.cases.loader import CaseParseError, load_cases_for_skill
 from skill_eval.config import ConfigError, load_config
 from skill_eval.evaluators.assertion import InvalidAssertionValue, UnknownAssertionKind
 from skill_eval.gating import EXIT_OK, evaluate_gate
+from skill_eval.judges.fake import FakeJudge
+from skill_eval.judges.pydantic_ai import PydanticAIJudge
 from skill_eval.orchestrator import run_evals
 from skill_eval.reporters.console import render_console
 from skill_eval.reporters.json_reporter import render_json
@@ -24,6 +26,7 @@ from skill_eval.skills.loader import SkillParseError, load_skills
 app = typer.Typer(help="Run evaluations on Agent Skills (SKILL.md).", no_args_is_help=True)
 
 _RUNNERS = {"fake": FakeRunner, "pydantic-ai": PydanticAIRunner}
+_JUDGES = {"fake": FakeJudge, "pydantic-ai": PydanticAIJudge}
 
 # Authoring errors: bad skill/case/config files, or a malformed assertion in an
 # eval YAML (Tasks 6/7 decided the latter aborts the whole run rather than
@@ -39,6 +42,21 @@ _AUTHORING_ERRORS = (
     MissingAPIKey,
     RunnerDependencyError,
 )
+
+
+def _require_a_model(flag: str, model: str) -> None:
+    """Reject a blank model id before it can reach a provider.
+
+    A blank id has no provider prefix, so `check_api_key` finds nothing to
+    check and waves it through; the run then dies deep inside the adapter as
+    `UserError: Unknown model:` and is reported as an *errored case* -- exit 1,
+    the code that means "the run broke", when the truth is a mistyped flag.
+    Exit codes are the CI contract, so a user error has to surface as 2 here.
+    Checked on the resolved value so a blank in `skill-eval.toml` is caught too,
+    not only a blank on the command line.
+    """
+    if not model.strip():
+        raise typer.BadParameter(f"{flag} is empty; name a model such as openai:gpt-4o-mini")
 
 
 def _version_callback(value: bool) -> None:
@@ -62,6 +80,10 @@ def run(
     evals: Annotated[Path | None, typer.Option(help="Explicit eval file or directory.")] = None,
     runner: Annotated[str | None, typer.Option(help="Runner to use.")] = None,
     model: Annotated[str | None, typer.Option(help="Model id, e.g. openai:gpt-4o-mini.")] = None,
+    judge_model: Annotated[
+        str | None,
+        typer.Option(help='Model id for the judge; judge = "..." in skill-eval.toml picks it.'),
+    ] = None,
     tag: Annotated[str | None, typer.Option(help="Only run cases with this tag.")] = None,
     min_pass_rate: Annotated[float | None, typer.Option(help="Required pass rate.")] = None,
     json_output: Annotated[Path | None, typer.Option(help="Write a JSON report here.")] = None,
@@ -77,6 +99,7 @@ def run(
         runner_class = _RUNNERS[runner_name]
         model_name = model if model is not None else settings.model
         if getattr(runner_class, "needs_api_key", False):
+            _require_a_model("--model", model_name)
             check_api_key(model_name, os.environ)
             active_runner = runner_class(
                 model=model_name,
@@ -86,7 +109,27 @@ def run(
             )
         else:
             active_runner = runner_class()
-        report = run_evals(skills, [active_runner], evals_path=evals, tag=tag)
+        judge_name = settings.judge
+        if judge_name not in _JUDGES:
+            raise typer.BadParameter(f"unknown judge: {judge_name}")
+        judge_class = _JUDGES[judge_name]
+        # An empty judge_model means "grade with the same model you run with",
+        # so a project opting into real judging only has to name one model.
+        resolved_judge_model = (
+            judge_model if judge_model is not None else (settings.judge_model or model_name)
+        )
+        if getattr(judge_class, "needs_api_key", False):
+            _require_a_model("--judge-model", resolved_judge_model)
+            check_api_key(resolved_judge_model, os.environ)
+            active_judge = judge_class(
+                model=resolved_judge_model,
+                temperature=settings.judge_temperature,
+                retries=settings.retries,
+                retry_backoff_seconds=settings.retry_backoff_seconds,
+            )
+        else:
+            active_judge = judge_class()
+        report = run_evals(skills, [active_runner], evals_path=evals, tag=tag, judge=active_judge)
     except _AUTHORING_ERRORS as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=2) from exc

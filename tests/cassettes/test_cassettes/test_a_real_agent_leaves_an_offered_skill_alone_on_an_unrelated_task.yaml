@@ -1,0 +1,120 @@
+interactions:
+- request:
+    body: '{"input":[{"role":"user","content":"What''s the capital of Egypt?"}],"instructions":"You
+      are a helpful assistant. Some capabilities are available to you as tools. Read
+      their descriptions and use one when it genuinely fits the request. If none fits,
+      just answer directly.","model":"gpt-4o-mini","stream":false,"temperature":0.0,"tool_choice":"auto","tools":[{"name":"order_support","parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false},"type":"function","description":"Handle
+      customer refund requests","strict":true}]}'
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate
+      connection:
+      - keep-alive
+      content-length:
+      - '552'
+      content-type:
+      - application/json
+      host:
+      - api.openai.com
+      user-agent:
+      - pydantic-ai/2.22.0
+      x-stainless-arch:
+      - arm64
+      x-stainless-async:
+      - async:asyncio
+      x-stainless-lang:
+      - python
+      x-stainless-os:
+      - MacOS
+      x-stainless-package-version:
+      - 2.52.0
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-runtime:
+      - CPython
+      x-stainless-runtime-version:
+      - 3.13.4
+    method: POST
+    uri: https://api.openai.com/v1/responses
+  response:
+    body:
+      string: "{\n  \"id\": \"resp_0b1f5539cd4ce145006a70eaff216c819db92a6f4843281ffb\",\n
+        \ \"object\": \"response\",\n  \"created_at\": 1785785087,\n  \"status\":
+        \"completed\",\n  \"background\": false,\n  \"billing\": {\n    \"payer\":
+        \"openai\"\n  },\n  \"completed_at\": 1785785087,\n  \"error\": null,\n  \"frequency_penalty\":
+        0.0,\n  \"incomplete_details\": null,\n  \"instructions\": \"You are a helpful
+        assistant. Some capabilities are available to you as tools. Read their descriptions
+        and use one when it genuinely fits the request. If none fits, just answer
+        directly.\",\n  \"max_output_tokens\": null,\n  \"max_tool_calls\": null,\n
+        \ \"model\": \"gpt-4o-mini-2024-07-18\",\n  \"moderation\": null,\n  \"output\":
+        [\n    {\n      \"id\": \"msg_0b1f5539cd4ce145006a70eaff8f48819da832b331c7f08a72\",\n
+        \     \"type\": \"message\",\n      \"status\": \"completed\",\n      \"content\":
+        [\n        {\n          \"type\": \"output_text\",\n          \"annotations\":
+        [],\n          \"logprobs\": [],\n          \"text\": \"The capital of Egypt
+        is Cairo.\"\n        }\n      ],\n      \"role\": \"assistant\"\n    }\n  ],\n
+        \ \"parallel_tool_calls\": true,\n  \"presence_penalty\": 0.0,\n  \"previous_response_id\":
+        null,\n  \"prompt_cache_key\": null,\n  \"prompt_cache_retention\": \"in_memory\",\n
+        \ \"reasoning\": {\n    \"context\": null,\n    \"effort\": null,\n    \"summary\":
+        null\n  },\n  \"safety_identifier\": null,\n  \"service_tier\": \"default\",\n
+        \ \"store\": true,\n  \"temperature\": 0.0,\n  \"text\": {\n    \"format\":
+        {\n      \"type\": \"text\"\n    },\n    \"verbosity\": \"medium\"\n  },\n
+        \ \"tool_choice\": \"auto\",\n  \"tool_usage\": {\n    \"image_gen\": {\n
+        \     \"input_tokens\": 0,\n      \"input_tokens_details\": {\n        \"image_tokens\":
+        0,\n        \"text_tokens\": 0\n      },\n      \"output_tokens\": 0,\n      \"output_tokens_details\":
+        {\n        \"image_tokens\": 0,\n        \"text_tokens\": 0\n      },\n      \"total_tokens\":
+        0\n    },\n    \"web_search\": {\n      \"num_requests\": 0\n    }\n  },\n
+        \ \"tools\": [\n    {\n      \"type\": \"function\",\n      \"description\":
+        \"Handle customer refund requests\",\n      \"name\": \"order_support\",\n
+        \     \"output_schema\": null,\n      \"parameters\": {\n        \"type\":
+        \"object\",\n        \"properties\": {},\n        \"required\": [],\n        \"additionalProperties\":
+        false\n      },\n      \"strict\": true\n    }\n  ],\n  \"top_logprobs\":
+        0,\n  \"top_p\": 1.0,\n  \"truncation\": \"disabled\",\n  \"usage\": {\n    \"input_tokens\":
+        76,\n    \"input_tokens_details\": {\n      \"cache_write_tokens\": 0,\n      \"cached_tokens\":
+        0\n    },\n    \"output_tokens\": 9,\n    \"output_tokens_details\": {\n      \"reasoning_tokens\":
+        0\n    },\n    \"total_tokens\": 85\n  },\n  \"user\": null,\n  \"metadata\":
+        {}\n}"
+    headers:
+      alt-svc:
+      - h3=":443"; ma=86400
+      cf-cache-status:
+      - DYNAMIC
+      connection:
+      - keep-alive
+      content-length:
+      - '2502'
+      content-type:
+      - application/json
+      date:
+      - Mon, 03 Aug 2026 19:24:47 GMT
+      openai-processing-ms:
+      - '661'
+      openai-version:
+      - '2020-10-01'
+      server:
+      - cloudflare
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      transfer-encoding:
+      - chunked
+      x-content-type-options:
+      - nosniff
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9995'
+      x-ratelimit-remaining-tokens:
+      - '199707'
+      x-ratelimit-reset-requests:
+      - 34.778s
+      x-ratelimit-reset-tokens:
+      - 87ms
+    status:
+      code: 200
+      message: OK
+version: 1

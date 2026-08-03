@@ -9,12 +9,16 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M2**: the pipeline runs real agents through `PydanticAIRunner`
+Currently at **M3**: the pipeline runs real agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
-remains the default and the backbone of the zero-cost test tier. Milestones are
-defined in `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2
-design is in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`.
+remains the default and the backbone of the zero-cost test tier. M3 adds a
+rubric-based LLM judge that scores output quality with per-check evidence, and
+an `offered` case mode that measures whether the agent chose to trigger the
+skill at all, negative controls included. Milestones are defined in
+`docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
+in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, and the M3
+design is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`.
 
 ## Commands
 
@@ -32,13 +36,15 @@ uv run pre-commit install --hook-type commit-msg   # once per clone
 
 ## Architecture
 
-Two protocols carry the whole design; everything else is plumbing around those seams:
+Three protocols carry the whole design; everything else is plumbing around those seams:
 
 - **`Runner`** (`runners/base.py`) — `run(skill, case) -> RunResult`. The seam every agent
   framework plugs into. **No agent-framework type may appear in the core** — frameworks
   live only inside runner adapters.
 - **`Evaluator`** (`evaluators/base.py`) — `evaluate(case, result) -> EvalScore`. The seam
   every scoring strategy plugs into.
+- **`Judge`** (`judges/base.py`) — `judge(request) -> JudgeVerdict`. The seam every
+  LLM-as-judge implementation plugs into.
 
 Data flow (`orchestrator.run_evals`):
 
@@ -86,9 +92,11 @@ form, that file is the explanation.
 - **`skill_eval` (underscore) never appears in user-facing output.** The user-facing name is
   `skill-eval` everywhere: command, config file, distribution.
 - **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
-- **No agent-framework type may appear outside `runners/pydantic_ai.py`.** `runners/tools.py`
-  builds framework-neutral `MockTool`s (name + JSON schema + callable); the adapter wraps them.
-  A test asserts `pydantic_ai` does not appear in `tools.py`.
+- **No agent-framework type may appear outside `runners/pydantic_ai.py` and
+  `judges/pydantic_ai.py`.** `runners/tools.py` builds framework-neutral `MockTool`s (name +
+  JSON schema + callable); the adapters wrap them. `tests/test_framework_isolation.py` guards
+  this: it asserts no other module under `src/skill_eval/` imports `pydantic_ai` at the top
+  level.
 - **`RunResult.tokens` is derived**, not stored — `extra="forbid"` makes writing it a loud
   error rather than a total that silently disagrees with the input/output split it was priced from.
 - **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` plus a
@@ -100,6 +108,16 @@ form, that file is the explanation.
 - **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act;
   a missing cassette skips rather than fails, but a mismatched request fails rather than
   reaching the network.
+- **An errored *evaluator* errors the case.** `errored` ≠ `failed` now applies to evaluators
+  too: a judge endpoint returning 500 must not read as a skill that got worse.
+- **Judges never raise for provider failures** — they set `JudgeVerdict.error`.
+- **skill-eval derives `passed` and `score` from per-check verdicts.** The judge is never
+  asked for a blended number, and a check that passes without evidence is recorded as a
+  failure.
+- **An unscripted `FakeJudge` errors rather than passing.** That is what makes
+  `judge = "fake"` safe as the built-in default: an unchecked rubric is never a green case.
+- **Judge spend never enters `RunResult`.** It lives on `EvalScore.cost_usd` and is reported
+  as judge overhead; `budget:` measures the skill, not the harness.
 
 ## Documentation
 

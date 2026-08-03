@@ -19,10 +19,26 @@ class ConfigError(Exception):
 class Config(BaseModel):
     """Run defaults for `skill-eval run`.
 
-    `default_runner` (`--runner`), `model` (`--model`) and `min_pass_rate`
-    (`--min-pass-rate`) can be overridden by a CLI flag; the rest can only be
-    set here. Secrets are never read from this file -- API keys come from the
-    environment only.
+    `default_runner` (`--runner`), `model` (`--model`), `judge_model`
+    (`--judge-model`) and `min_pass_rate` (`--min-pass-rate`) can be overridden
+    by a CLI flag; the rest can only be set here. Secrets are never read from
+    this file -- API keys come from the environment only.
+
+    `judge` defaults to "fake" for the same reason `default_runner` does:
+    upgrading must never start spending money on its own. An unscripted
+    FakeJudge errors rather than passing, so that default cannot turn an
+    unchecked rubric into a green case. An empty `judge_model` falls back to
+    `model`.
+
+    `judge_temperature` is deliberately separate from `temperature` and
+    defaults to `0.0` for determinism: the judge grades a fixed rubric and
+    must not become a source of flaky CI runs, even when `temperature` is
+    raised to exercise the runner under sampling. It does not fall back to
+    `temperature` -- a silent fallback is exactly what let the judge inherit
+    the runner's temperature before this field existed. A reasoning judge
+    model that rejects any explicit temperature needs
+    `judge_temperature = "unset"`, same as `temperature` does for a reasoning
+    runner model.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -32,6 +48,9 @@ class Config(BaseModel):
     temperature: float | Literal["unset"] = 0.0
     retries: int = 2
     retry_backoff_seconds: float = 1.0
+    judge: str = "fake"
+    judge_model: str = ""
+    judge_temperature: float | Literal["unset"] = 0.0
     min_pass_rate: float = 1.0
     fail_on_error: bool = True
     per_skill_min: dict[str, float] = Field(default_factory=dict)

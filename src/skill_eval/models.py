@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 CaseStatus = Literal["passed", "failed", "errored"]
 ToolParamType = Literal["string", "integer", "number", "boolean"]
+CaseMode = Literal["loaded", "offered"]
 
 
 class Skill(BaseModel):
@@ -27,8 +28,74 @@ class ToolCall(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class CheckResult(BaseModel):
+    """One rubric check's verdict, with the evidence that supports it.
+
+    Evidence is not decoration: an unsupported PASS is the judge's
+    characteristic failure mode, so a pass that cannot cite anything is
+    recorded as a failure by `JudgeEvaluator`.
+    """
+
+    id: str
+    passed: bool
+    evidence: str = ""
+
+
+class RubricCheck(BaseModel):
+    """One thing a judge must verify, and the id its verdict comes back under."""
+
+    id: str
+    text: str
+
+
+class JudgeRequest(BaseModel):
+    """Everything a judge needs, and nothing about eval-case shape.
+
+    A judge grades an output against a list of checks; it does not know what an
+    EvalCase is. That keeps the seam reusable and `FakeJudge` trivial.
+    """
+
+    task: str
+    output: str = ""
+    expected: str = ""
+    checks: list[RubricCheck] = Field(default_factory=list)
+
+
+class JudgeOutput(BaseModel):
+    """The structured output a judge model must return: verdicts, nothing else.
+
+    Deliberately narrower than `JudgeVerdict` -- tokens, cost and error are
+    facts about the call, not things the model gets to assert. Asking the model
+    for an overall verdict or a blended score is exactly the failure mode this
+    milestone exists to avoid.
+    """
+
+    checks: list[CheckResult] = Field(default_factory=list)
+
+
+class JudgeVerdict(BaseModel):
+    """What a judge reports back: per-check verdicts, its own spend, or a failure."""
+
+    checks: list[CheckResult] = Field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float = 0.0
+    cost_note: str = ""
+    model: str = ""
+    error: str | None = None
+
+    @property
+    def errored(self) -> bool:
+        """True when the judge itself failed (infra), not when a check did."""
+        return self.error is not None
+
+
 class RunResult(BaseModel):
-    """The outcome of running one task against one skill with one runner."""
+    """The outcome of running one task against one skill with one runner.
+
+    `skill_triggered` is None outside `mode: offered` -- "this was not a
+    triggering run" is a different fact from "the skill was not triggered".
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -41,6 +108,7 @@ class RunResult(BaseModel):
     cost_usd: float = 0.0
     cost_note: str = ""
     model: str = ""
+    skill_triggered: bool | None = None
     error: str | None = None
 
     @property
@@ -55,12 +123,28 @@ class RunResult(BaseModel):
 
 
 class EvalScore(BaseModel):
-    """One evaluator's verdict on one run."""
+    """One evaluator's verdict on one run.
+
+    `errored` marks an infra failure *inside the evaluator* (a judge endpoint
+    returning 500, structured output that does not match the rubric). It is not
+    an eval signal, so the orchestrator must classify the case errored, never
+    failed. `cost_usd` is eval-side spend -- judging is harness overhead and is
+    never charged to the skill's budget.
+    """
 
     evaluator: str
     passed: bool
     score: float = 0.0
     detail: str = ""
+    checks: list[CheckResult] = Field(default_factory=list)
+    errored: bool = False
+    cost_usd: float = 0.0
+
+    @model_validator(mode="after")
+    def _errored_is_never_passed(self) -> EvalScore:
+        if self.errored and self.passed:
+            raise ValueError("an errored EvalScore cannot also be passed")
+        return self
 
 
 class AssertionSpec(BaseModel):
@@ -104,6 +188,7 @@ class TrajectorySpec(BaseModel):
     forbidden: list[str] = Field(default_factory=list)
     order: list[str] = Field(default_factory=list)
     max_calls: int | None = None
+    skill_triggered: bool | None = None
 
 
 class BudgetSpec(BaseModel):
@@ -114,6 +199,19 @@ class BudgetSpec(BaseModel):
     max_tokens: int | None = None
     max_cost_usd: float | None = None
     max_latency_ms: int | None = None
+
+
+class JudgeSpec(BaseModel):
+    """What "good" looks like, in prose, for an LLM judge to check.
+
+    `rubric` entries are plain strings; ids are generated positionally by the
+    evaluator so authors never have to invent them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected: str = ""
+    rubric: list[str] = Field(default_factory=list)
 
 
 class EvalCase(BaseModel):
@@ -127,6 +225,8 @@ class EvalCase(BaseModel):
     assertions: list[AssertionSpec] = Field(default_factory=list)
     trajectory: TrajectorySpec | None = None
     budget: BudgetSpec | None = None
+    mode: CaseMode = "loaded"
+    judge: JudgeSpec | None = None
     tags: list[str] = Field(default_factory=list)
 
 
@@ -169,6 +269,21 @@ class RunReport(BaseModel):
         if not self.outcomes:
             return 0.0
         return self.passed / self.total
+
+    @property
+    def judge_cost_usd(self) -> float:
+        """Eval-side spend, reported apart from what the skill's own runs cost.
+
+        Sums *every* evaluator's `cost_usd`, not only the judge's. Today that is
+        the same number -- `JudgeEvaluator` is the only evaluator that spends --
+        so the name holds. Deliberately not filtered on `score.evaluator ==
+        "judge"`: that would hard-code an evaluator's `name` into the data layer,
+        and renaming the evaluator would then silently report $0.00 overhead,
+        which is a worse failure than over-reporting because nothing looks wrong.
+        If a second cost-bearing evaluator ever lands, split this into per-
+        evaluator totals rather than narrowing the filter.
+        """
+        return sum(score.cost_usd for o in self.outcomes for score in o.scores)
 
     def pass_rate_by_skill(self) -> dict[str, float]:
         """Pass rate per skill name, for per-skill gating and reporting."""

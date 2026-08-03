@@ -1,7 +1,16 @@
 import pytest
 
 from skill_eval.evaluators.assertion import UnknownAssertionKind
-from skill_eval.models import RunResult, Skill, ToolCall
+from skill_eval.judges.fake import FakeJudge
+from skill_eval.models import (
+    CheckResult,
+    EvalCase,
+    EvalScore,
+    JudgeVerdict,
+    RunResult,
+    Skill,
+    ToolCall,
+)
 from skill_eval.orchestrator import run_evals
 from skill_eval.runners.fake import FakeRunner
 from skill_eval.skills.loader import load_skills
@@ -153,12 +162,74 @@ def test_default_evaluators_include_trajectory_and_budget(tmp_path):
         default=RunResult(tool_calls=[ToolCall(name="lookup_order")], input_tokens=10)
     )
     report = run_evals(skills, [runner])
+    # Task 7 widens the default evaluator list to include the offline judge;
+    # this case has no `judge:` block so JudgeEvaluator vacuous-passes and
+    # still appends a "judge" score.
     assert [score.evaluator for score in report.outcomes[0].scores] == [
         "assertion",
         "trajectory",
         "budget",
+        "judge",
     ]
     assert report.outcomes[0].status == "passed"
+
+
+class ErroringEvaluator:
+    name = "boom"
+
+    def evaluate(self, case: EvalCase, result: RunResult) -> EvalScore:
+        return EvalScore(evaluator=self.name, passed=False, errored=True, detail="judge died")
+
+
+class PassingEvaluator:
+    name = "fine"
+
+    def evaluate(self, case: EvalCase, result: RunResult) -> EvalScore:
+        return EvalScore(evaluator=self.name, passed=True, score=1.0)
+
+
+def test_an_errored_evaluator_errors_the_case_rather_than_failing_it(tmp_path):
+    # A judge endpoint returning 500 must not read as a skill that got worse.
+    yaml_text = "cases:\n  - name: c\n    task: t\n"
+    report = run_evals(
+        [_skill_with_cases(tmp_path, yaml_text=yaml_text)],
+        [FakeRunner()],
+        evaluators=[PassingEvaluator(), ErroringEvaluator()],
+    )
+    assert report.outcomes[0].status == "errored"
+    assert report.errored == 1
+    assert report.failed == 0
+
+
+def test_a_merely_failing_evaluator_still_fails_the_case(tmp_path):
+    class FailingEvaluator:
+        name = "nope"
+
+        def evaluate(self, case, result):
+            return EvalScore(evaluator=self.name, passed=False, score=0.0)
+
+    yaml_text = "cases:\n  - name: c\n    task: t\n"
+    report = run_evals(
+        [_skill_with_cases(tmp_path, yaml_text=yaml_text)],
+        [FakeRunner()],
+        evaluators=[FailingEvaluator()],
+    )
+    assert report.outcomes[0].status == "failed"
+
+
+def test_the_default_evaluators_include_a_judge(tmp_path):
+    # Default judging is the offline FakeJudge, so this stays free -- and a
+    # case with no judge block is a vacuous pass.
+    yaml_text = "cases:\n  - name: c\n    task: t\n"
+    report = run_evals([_skill_with_cases(tmp_path, yaml_text=yaml_text)], [FakeRunner()])
+    assert "judge" in [score.evaluator for score in report.outcomes[0].scores]
+
+
+def test_an_unjudged_rubric_errors_under_the_default_judge(tmp_path):
+    yaml_text = "cases:\n  - name: c\n    task: t\n    judge:\n      rubric:\n        - is polite\n"
+    skill = _skill_with_cases(tmp_path, yaml_text=yaml_text)
+    report = run_evals([skill], [FakeRunner()])
+    assert report.outcomes[0].status == "errored"
 
 
 def test_a_trajectory_violation_fails_the_case(tmp_path):
@@ -179,3 +250,37 @@ def test_a_trajectory_violation_fails_the_case(tmp_path):
     report = run_evals(load_skills(skill_dir), [runner])
     assert report.outcomes[0].status == "failed"
     assert report.outcomes[0].result.errored is False
+
+
+def test_the_caller_supplied_judge_is_actually_used(tmp_path):
+    """`judge=` must reach `JudgeEvaluator`, not be silently discarded.
+
+    An unscripted default `FakeJudge()` always errors a rubric-bearing case
+    (see `FakeJudge.NOT_CONFIGURED`). Passing a `FakeJudge` scripted to pass
+    the rubric makes the outcome flip to "passed" -- a status a default judge
+    could never produce here. That makes the two outcomes unmistakable: if
+    `judge` were ignored in favor of a fresh `FakeJudge()`, this would go
+    "errored" instead.
+    """
+    yaml_text = "cases:\n  - name: c\n    task: t\n    judge:\n      rubric:\n        - is polite\n"
+    skill = _skill_with_cases(tmp_path, yaml_text=yaml_text)
+    configured_judge = FakeJudge(
+        default=JudgeVerdict(checks=[CheckResult(id="r1", passed=True, evidence="polite tone")])
+    )
+    report = run_evals([skill], [FakeRunner()], judge=configured_judge)
+    assert report.outcomes[0].status == "passed"
+
+
+def test_passing_both_evaluators_and_judge_raises(tmp_path):
+    """`evaluators` and `judge` are mutually exclusive -- pin the guard."""
+    yaml_text = "cases:\n  - name: c\n    task: t\n"
+    skill = _skill_with_cases(tmp_path, yaml_text=yaml_text)
+    with pytest.raises(ValueError) as excinfo:
+        run_evals(
+            [skill],
+            [FakeRunner()],
+            evaluators=[PassingEvaluator()],
+            judge=FakeJudge(),
+        )
+    assert "evaluators" in str(excinfo.value)
+    assert "judge" in str(excinfo.value)
