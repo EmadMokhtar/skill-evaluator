@@ -100,11 +100,13 @@ def test_unpriced_cost_budget_is_not_reported_as_within_budget():
 
 
 def test_unpriced_cost_is_excluded_from_the_denominator_when_other_limits_pass():
-    # Only the token limit is actually evaluated; the skipped cost check must
-    # not inflate or deflate that fraction.
+    # Only the token limit is actually evaluated, so the skipped cost check
+    # must not inflate or deflate that fraction -- score stays 1.0. But the
+    # case still fails overall: a skipped limit is a limit nobody verified,
+    # and `passed` keys on every declared check, evaluated or not.
     result = RunResult(input_tokens=100, cost_usd=0.0, cost_note="no price data for x (KeyError)")
     score = EVALUATOR.evaluate(case(max_tokens=1000, max_cost_usd=0.01), result)
-    assert score.passed is True
+    assert score.passed is False
     assert score.score == 1.0
     assert "not evaluated" in score.detail
 
@@ -128,3 +130,26 @@ def test_token_and_latency_budgets_are_unaffected_by_an_unrelated_cost_note():
     assert score.passed is False
     assert "1100" in score.detail
     assert "2500" in score.detail
+
+
+def test_each_declared_limit_gets_its_own_check():
+    case = EvalCase(name="c", task="t", budget=BudgetSpec(max_tokens=10, max_latency_ms=1000))
+    result = RunResult(input_tokens=20, output_tokens=0, latency_ms=5)
+    score = BudgetEvaluator().evaluate(case, result)
+
+    assert [(c.id, c.passed) for c in score.checks] == [
+        ("max_tokens", False),
+        ("max_latency_ms", True),
+    ]
+
+
+def test_an_unpriceable_cost_limit_is_a_failing_check_with_its_reason():
+    # It is not "within budget" -- nothing was verified. The check says so
+    # instead of leaving an unexplained red case.
+    case = EvalCase(name="c", task="t", budget=BudgetSpec(max_cost_usd=0.01))
+    result = RunResult(cost_usd=0.0, cost_note="no pricing for model 'zzz'")
+    score = BudgetEvaluator().evaluate(case, result)
+
+    assert score.passed is False
+    assert [(c.id, c.passed) for c in score.checks] == [("max_cost_usd", False)]
+    assert "no pricing" in score.checks[0].evidence

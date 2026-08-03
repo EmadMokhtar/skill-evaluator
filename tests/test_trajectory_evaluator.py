@@ -115,7 +115,7 @@ def test_a_negative_control_fails_when_the_skill_fires_anyway():
     # A positives-only suite scores a skill that fires on everything at 100%.
     score = TrajectoryEvaluator().evaluate(triggering_case(False), RunResult(skill_triggered=True))
     assert score.passed is False
-    assert "should not" in score.detail
+    assert "expected False" in score.detail
 
 
 def test_a_negative_control_passes_when_the_skill_stays_out_of_it():
@@ -150,3 +150,49 @@ def test_the_triggering_check_counts_toward_the_score_fraction():
     )
     score = TrajectoryEvaluator().evaluate(case, RunResult(skill_triggered=False))
     assert score.score == 0.5
+
+
+def test_each_declared_tool_gets_its_own_check():
+    case = EvalCase(
+        name="c",
+        task="t",
+        trajectory=TrajectorySpec(called=["lookup_order", "issue_refund"]),
+    )
+    result = RunResult(tool_calls=[ToolCall(name="lookup_order")])
+    score = TrajectoryEvaluator().evaluate(case, result)
+
+    assert [(c.id, c.passed) for c in score.checks] == [
+        ("called:lookup_order", True),
+        ("called:issue_refund", False),
+    ]
+
+
+def test_order_and_max_calls_are_single_checks():
+    case = EvalCase(
+        name="c",
+        task="t",
+        trajectory=TrajectorySpec(order=["a", "b"], max_calls=1),
+    )
+    result = RunResult(tool_calls=[ToolCall(name="b"), ToolCall(name="a")])
+    score = TrajectoryEvaluator().evaluate(case, result)
+
+    assert [(c.id, c.passed) for c in score.checks] == [("order", False), ("max_calls", False)]
+
+
+def test_the_triggering_check_has_an_id_of_its_own():
+    case = EvalCase(
+        name="c", task="t", mode="offered", trajectory=TrajectorySpec(skill_triggered=True)
+    )
+    score = TrajectoryEvaluator().evaluate(case, RunResult(skill_triggered=True))
+    assert [c.id for c in score.checks] == ["skill_triggered"]
+
+
+def test_an_errored_trajectory_reports_no_checks():
+    # The runner reported no triggering decision at all. There is no verdict to
+    # record, and a check here would read as a real one.
+    case = EvalCase(
+        name="c", task="t", mode="offered", trajectory=TrajectorySpec(skill_triggered=True)
+    )
+    score = TrajectoryEvaluator().evaluate(case, RunResult(skill_triggered=None))
+    assert score.errored is True
+    assert score.checks == []
