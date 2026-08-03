@@ -2361,43 +2361,40 @@ def _delta(pass_rate_delta: float, *, comparable: bool = True) -> Delta:
 
 
 def test_a_delta_at_or_above_the_bar_passes():
-    report = RunReport(outcomes=[_passed_outcome()])
-    gate = evaluate_gate(report, min_delta=0.2, delta=_delta(0.2))
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.2, delta=_delta(0.2))
     assert gate.passed is True
-    assert gate.exit_code == 0
+    assert gate.exit_code == EXIT_OK
 
 
 def test_a_delta_below_the_bar_fails():
-    report = RunReport(outcomes=[_passed_outcome()])
-    gate = evaluate_gate(report, min_delta=0.2, delta=_delta(0.05))
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.2, delta=_delta(0.05))
     assert gate.passed is False
-    assert gate.exit_code == 1
+    assert gate.exit_code == EXIT_FAILED
     assert any("delta" in reason for reason in gate.reasons)
 
 
 def test_a_negative_delta_fails_a_must_not_regress_bar():
-    report = RunReport(outcomes=[_passed_outcome()])
-    gate = evaluate_gate(report, min_delta=0.0, delta=_delta(-0.25))
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.0, delta=_delta(-0.25))
     assert gate.passed is False
 
 
 def test_gating_on_a_delta_with_nothing_comparable_fails():
     # A check that verified nothing must never report a pass.
-    report = RunReport(outcomes=[_passed_outcome()])
-    gate = evaluate_gate(report, min_delta=0.0, delta=_delta(0.0, comparable=False))
+    gate = evaluate_gate(
+        _report(("pdf", "passed")), min_delta=0.0, delta=_delta(0.0, comparable=False)
+    )
     assert gate.passed is False
     assert any("comparable" in reason for reason in gate.reasons)
 
 
 def test_gating_on_a_delta_with_no_delta_at_all_fails():
-    report = RunReport(outcomes=[_passed_outcome()])
-    gate = evaluate_gate(report, min_delta=0.0, delta=None)
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.0, delta=None)
     assert gate.passed is False
 
 
 def test_an_unresolved_baseline_fails_a_delta_gate():
     report = RunReport(
-        outcomes=[_passed_outcome()],
+        outcomes=[CaseOutcome(skill_name="pdf", case_name="c", runner="fake", status="passed")],
         baseline_kind="previous",
         baseline_notes=[BaselineNote(skill_name="pdf", kind="unavailable", reason="no repo")],
     )
@@ -2410,7 +2407,7 @@ def test_a_deliberately_skipped_baseline_is_not_a_gate_reason():
     # Nothing went wrong: `mode: offered` has nothing to offer under
     # `--baseline none`. It still excludes the case from the delta.
     report = RunReport(
-        outcomes=[_passed_outcome()],
+        outcomes=[CaseOutcome(skill_name="pdf", case_name="c", runner="fake", status="passed")],
         baseline_kind="none",
         baseline_notes=[
             BaselineNote(skill_name="pdf", case_name="c", kind="skipped", reason="offered")
@@ -2421,20 +2418,17 @@ def test_a_deliberately_skipped_baseline_is_not_a_gate_reason():
 
 
 def test_without_min_delta_the_delta_is_reported_but_not_gated():
-    report = RunReport(outcomes=[_passed_outcome()])
-    gate = evaluate_gate(report, delta=_delta(-0.9))
+    gate = evaluate_gate(_report(("pdf", "passed")), delta=_delta(-0.9))
     assert gate.passed is True
 ```
 
-Add a small helper and the imports at the top of `tests/test_gating.py` (reuse whatever outcome factory the file already has if one exists — otherwise add this):
+`tests/test_gating.py` already has `_report(*statuses_by_skill)` (each argument a
+`(skill_name, status)` tuple) and imports `EXIT_FAILED` / `EXIT_OK` — use them as shown
+above. Extend the file's imports:
 
 ```python
 from skill_eval.comparison import ArmStats, CaseStats, Delta
 from skill_eval.models import BaselineNote, CaseOutcome, RunReport
-
-
-def _passed_outcome() -> CaseOutcome:
-    return CaseOutcome(skill_name="pdf", case_name="c", runner="fake", status="passed")
 ```
 
 - [ ] **Step 2: Run to verify they fail**
@@ -2554,44 +2548,48 @@ def test_an_unknown_baseline_kind_is_a_config_error(tmp_path):
 Append to `tests/test_cli.py`:
 
 ```python
-def test_min_delta_without_a_baseline_is_a_user_error(tmp_path, runner_cli):
-    skill = _skill_with_a_passing_case(tmp_path)
-    result = runner_cli.invoke(app, ["run", str(skill), "--min-delta", "0.1"])
+def test_min_delta_without_a_baseline_is_a_user_error(tmp_path):
+    _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(tmp_path), "--min-delta", "0.1"])
     assert result.exit_code == 2
-    assert "--baseline" in result.output
+    assert "--baseline" in plain(result.output)
 
 
-def test_a_repeat_below_one_is_a_user_error(tmp_path, runner_cli):
-    skill = _skill_with_a_passing_case(tmp_path)
-    result = runner_cli.invoke(app, ["run", str(skill), "--repeat", "0"])
-    assert result.exit_code == 2
-
-
-def test_an_unknown_baseline_kind_is_a_user_error(tmp_path, runner_cli):
-    skill = _skill_with_a_passing_case(tmp_path)
-    result = runner_cli.invoke(app, ["run", str(skill), "--baseline", "yesterday"])
+def test_a_repeat_below_one_is_a_user_error(tmp_path):
+    _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(tmp_path), "--repeat", "0"])
     assert result.exit_code == 2
 
 
-def test_min_delta_is_satisfied_by_a_baseline_from_config(tmp_path, runner_cli):
+def test_an_unknown_baseline_kind_is_a_user_error(tmp_path):
+    _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(tmp_path), "--baseline", "yesterday"])
+    assert result.exit_code == 2
+
+
+def test_min_delta_is_satisfied_by_a_baseline_from_config(tmp_path):
     # The check runs against resolved values, so a baseline in skill-eval.toml
     # satisfies a --min-delta passed on the command line.
-    skill = _skill_with_a_passing_case(tmp_path)
+    _make_skill(tmp_path)
     config = tmp_path / "skill-eval.toml"
     config.write_text('baseline = "none"\n', encoding="utf-8")
-    result = runner_cli.invoke(
-        app, ["run", str(skill), "--config", str(config), "--min-delta", "0.0"]
+    result = runner.invoke(
+        app, ["run", str(tmp_path), "--config", str(config), "--min-delta", "0.0"]
     )
     assert result.exit_code != 2
 
 
-def test_the_run_plan_is_not_printed_for_the_offline_runner(tmp_path, runner_cli):
-    skill = _skill_with_a_passing_case(tmp_path)
-    result = runner_cli.invoke(app, ["run", str(skill), "--baseline", "none", "--repeat", "2"])
-    assert "Plan:" not in result.output
+def test_the_run_plan_is_not_printed_for_the_offline_runner(tmp_path):
+    _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(tmp_path), "--baseline", "none", "--repeat", "2"])
+    assert "Plan:" not in result.stdout
 ```
 
-> Reuse the file's existing fixtures and helpers — `tests/test_cli.py` already has a Typer `CliRunner` fixture and a helper that writes a skill with one passing case. Match their names rather than introducing `runner_cli` / `_skill_with_a_passing_case` if the file calls them something else.
+`tests/test_cli.py` already defines the module-level `runner = CliRunner()`, the
+`plain(output)` ANSI/box stripper, and `_make_skill(tmp_path, name="pdf", cases=CASES_YAML)`
+(which writes both `SKILL.md` and the eval file, and returns the skill directory). Use them
+exactly as shown — `plain()` matters for any assertion on a `BadParameter` message, because
+Typer renders those through Rich and line-wraps them by terminal width.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -2748,60 +2746,111 @@ git commit -m "feat: add --baseline, --repeat and --min-delta"
 Append to `tests/test_reporters.py`:
 
 ```python
+def _arm_outcome(status, arm="candidate", index=0, *, checks=()):
+    """One repetition of one arm. Local to this module on purpose: importing a
+    helper across test files couples two suites that should move independently.
+    """
+    return CaseOutcome(
+        skill_name="pdf",
+        case_name="extracts",
+        runner="fake",
+        status=status,
+        arm=arm,
+        repeat_index=index,
+        scores=[
+            EvalScore(
+                evaluator="assertion",
+                passed=status == "passed",
+                detail="ok" if status == "passed" else "nope",
+                checks=[CheckResult(id=cid, passed=ok, evidence="e") for cid, ok in checks],
+            )
+        ],
+        result=RunResult(output="x", input_tokens=100, cost_usd=0.001, latency_ms=5),
+    )
+
+
+def _two_arm_report(**kwargs):
+    return RunReport(
+        baseline_kind="none",
+        repeat=2,
+        outcomes=[
+            _arm_outcome("passed", index=0),
+            _arm_outcome("passed", index=1),
+            _arm_outcome("failed", arm="baseline", index=0),
+            _arm_outcome("failed", arm="baseline", index=1),
+        ],
+        **kwargs,
+    )
+
+
 def test_without_a_delta_the_console_output_is_unchanged():
-    report = RunReport(outcomes=[_outcome("passed")])
+    report = _report()
     assert render_console(report) == render_console(report, delta=None)
 
 
 def test_a_comparative_line_shows_both_arms_and_the_difference():
-    report = RunReport(baseline_kind="none", repeat=2, outcomes=[...])
+    report = _two_arm_report()
     text = render_console(report, delta=build_delta(report))
     assert "candidate 2/2" in text
     assert "baseline 0/2" in text
+    assert "+100%" in text
 
 
 def test_the_delta_block_names_the_direction_that_is_better():
-    report = RunReport(baseline_kind="none", outcomes=[...])
+    report = _two_arm_report()
     text = render_console(report, delta=build_delta(report))
     assert "Delta vs baseline" in text
     assert "negative is better" in text
 
 
 def test_flags_are_rendered_as_advice_not_failures():
-    report = RunReport(baseline_kind="none", outcomes=[...])  # a low-signal check
+    report = RunReport(
+        baseline_kind="none",
+        outcomes=[
+            _arm_outcome("passed", checks=(("contains[0]", True),)),
+            _arm_outcome("failed", arm="baseline", checks=(("contains[0]", True),)),
+        ],
+    )
     text = render_console(report, delta=build_delta(report))
     assert "low-signal" in text
+    assert "never fail the gate" in text
 
 
 def test_baseline_notes_are_shown():
-    report = RunReport(
-        baseline_kind="previous",
-        baseline_notes=[BaselineNote(skill_name="pdf", kind="unavailable", reason="no repo")],
-        outcomes=[...],
+    report = _two_arm_report(
+        baseline_notes=[BaselineNote(skill_name="pdf", kind="unavailable", reason="no repo")]
     )
     assert "no repo" in render_console(report, delta=build_delta(report))
 
 
 def test_json_carries_the_arm_and_repetition_of_every_outcome():
-    report = RunReport(baseline_kind="none", outcomes=[...])
+    report = _two_arm_report()
     payload = json.loads(render_json(report, delta=build_delta(report)))
     assert {o["arm"] for o in payload["outcomes"]} == {"candidate", "baseline"}
-    assert payload["outcomes"][0]["repeat_index"] == 0
+    assert sorted(o["repeat_index"] for o in payload["outcomes"]) == [0, 0, 1, 1]
 
 
 def test_json_delta_is_null_without_a_baseline():
-    payload = json.loads(render_json(RunReport(outcomes=[_outcome("passed")])))
+    payload = json.loads(render_json(_report()))
     assert payload["delta"] is None
 
 
 def test_json_totals_count_real_spend_across_both_arms():
     # Money spent is money spent: the baseline arm's tokens are real.
-    report = RunReport(baseline_kind="none", outcomes=[...])
+    report = _two_arm_report()
     payload = json.loads(render_json(report, delta=build_delta(report)))
-    assert payload["summary"]["total_tokens"] == 200
+    assert payload["summary"]["total_tokens"] == 400
+    # ... while the pass/fail counts stay candidate-only, because those gate.
+    assert payload["summary"]["total"] == 2
+    assert payload["summary"]["passed"] == 2
 ```
 
-> Replace each `[...]` with a two-arm outcome list built from the file's existing outcome helper — one candidate `passed` and one baseline `failed`, each with `result=RunResult(input_tokens=100)`, and for the low-signal test give both a passing `CheckResult(id="contains[0]")`. Build them the same way `tests/test_comparison.py::_outcome` does; copy that helper into `tests/test_reporters.py` rather than importing across test modules.
+Extend the file's imports:
+
+```python
+from skill_eval.comparison import build_delta
+from skill_eval.models import BaselineNote, CaseOutcome, CheckResult, EvalScore, RunReport, RunResult
+```
 
 - [ ] **Step 2: Run to verify they fail**
 
