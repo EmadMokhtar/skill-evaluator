@@ -9,6 +9,20 @@ examples/
     greeting.eval.yaml
 ```
 
+The `SKILL.md` frontmatter declares the skill's name, description, and optional version:
+
+```yaml
+---
+name: greeting
+description: Greet a user warmly and by name
+version: 1.0.0
+---
+```
+
+`version:` is optional. When present, `--baseline previous` uses it to find the
+previous version of the skill in git history — see
+[Comparative evals](comparative-evals.md).
+
 ```yaml
 # greeting.eval.yaml
 cases:

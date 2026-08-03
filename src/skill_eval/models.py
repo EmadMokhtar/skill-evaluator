@@ -10,15 +10,25 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 CaseStatus = Literal["passed", "failed", "errored"]
 ToolParamType = Literal["string", "integer", "number", "boolean"]
 CaseMode = Literal["loaded", "offered"]
+Arm = Literal["candidate", "baseline"]
+BaselineKind = Literal["none", "previous"]
 
 
 class Skill(BaseModel):
-    """A skill under test, loaded from a SKILL.md file."""
+    """A skill under test, loaded from a SKILL.md file.
+
+    `version` is whatever the frontmatter declared, verbatim and as text -- it
+    is an identifier, not a number, so `1.20` must not compare equal to `1.2`.
+    `variant` says which arm of a comparative run this copy belongs to; the
+    orchestrator sets it, and `FakeRunner` scripts against it.
+    """
 
     name: str
     description: str = ""
     instructions: str = ""
+    version: str = ""
     path: Path
+    variant: Arm = "candidate"
 
 
 class ToolCall(BaseModel):

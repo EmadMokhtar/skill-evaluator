@@ -1,6 +1,13 @@
+from pathlib import Path
+
 import pytest
 
-from skill_eval.skills.loader import SkillParseError, load_skills
+from skill_eval.skills.loader import (
+    SkillParseError,
+    load_skills,
+    parse_skill_file,
+    parse_skill_text,
+)
 
 SKILL_MD = """---
 name: pdf
@@ -118,3 +125,50 @@ def test_non_ascii_skill_md_loads_regardless_of_platform_encoding(tmp_path):
     assert skills[0].name == "café"
     assert skills[0].description == "naïve — 日本語"
     assert "🎯" in skills[0].instructions
+
+
+def test_the_frontmatter_version_is_parsed(tmp_path):
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text(
+        "---\nname: pdf\ndescription: d\nversion: 1.3.0\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+    assert parse_skill_file(skill_md).version == "1.3.0"
+
+
+def test_a_missing_version_is_an_empty_string_not_an_error(tmp_path):
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text("---\nname: pdf\n---\n\nBody.\n", encoding="utf-8")
+    assert parse_skill_file(skill_md).version == ""
+
+
+def test_a_numeric_version_is_kept_as_text(tmp_path):
+    # YAML turns `1.2` into a float; a version is an identifier, not a number,
+    # and 1.20 must not compare equal to 1.2.
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text("---\nname: pdf\nversion: 1.2\n---\n\nBody.\n", encoding="utf-8")
+    assert parse_skill_file(skill_md).version == "1.2"
+
+
+def test_a_skill_is_a_candidate_unless_told_otherwise(tmp_path):
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text("---\nname: pdf\n---\n\nBody.\n", encoding="utf-8")
+    assert parse_skill_file(skill_md).variant == "candidate"
+
+
+def test_a_skill_parses_from_text_without_touching_the_filesystem():
+    text = "---\nname: pdf\ndescription: d\nversion: 2.0.0\n---\n\nBody.\n"
+    skill = parse_skill_text(
+        text, name_fallback="fallback", path=Path("/nowhere"), source="commit abc1234"
+    )
+    assert (skill.name, skill.version, skill.instructions) == ("pdf", "2.0.0", "Body.")
+
+
+def test_malformed_text_names_its_source_not_a_file_path():
+    with pytest.raises(SkillParseError, match="commit abc1234"):
+        parse_skill_text(
+            "---\nname: [unclosed\n---\n\nBody.\n",
+            name_fallback="fallback",
+            path=Path("/nowhere"),
+            source="commit abc1234",
+        )

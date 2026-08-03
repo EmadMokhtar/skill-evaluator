@@ -35,23 +35,39 @@ def _split_frontmatter(text: str) -> tuple[dict, str]:
     return safe_load(parts[1]) or {}, parts[2]
 
 
+def parse_skill_text(text: str, *, name_fallback: str, path: Path, source: str) -> Skill:
+    """Parse SKILL.md content into a Skill.
+
+    `source` only ever appears in error messages: the content may have come
+    from a file or from `git show`, and an error that says "commit 4f2a1c" is
+    the difference between a useful report and a confusing one.
+    """
+    try:
+        frontmatter, body = _split_frontmatter(text)
+    except yaml.YAMLError as exc:
+        raise SkillParseError(f"invalid frontmatter in {source}: {exc}") from exc
+    if not isinstance(frontmatter, dict):
+        raise SkillParseError(f"invalid frontmatter in {source}: expected a mapping")
+    return Skill(
+        name=str(frontmatter.get("name") or name_fallback),
+        description=str(frontmatter.get("description") or ""),
+        instructions=body.strip(),
+        version=str(frontmatter.get("version") or ""),
+        path=path,
+    )
+
+
 def parse_skill_file(skill_md: Path) -> Skill:
     """Parse one SKILL.md into a Skill, falling back to the dir name."""
     try:
         text = skill_md.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise SkillParseError(f"cannot read {skill_md}: {exc}") from exc
-    try:
-        frontmatter, body = _split_frontmatter(text)
-    except yaml.YAMLError as exc:
-        raise SkillParseError(f"invalid frontmatter in {skill_md}: {exc}") from exc
-    if not isinstance(frontmatter, dict):
-        raise SkillParseError(f"invalid frontmatter in {skill_md}: expected a mapping")
-    return Skill(
-        name=str(frontmatter.get("name") or skill_md.parent.name),
-        description=str(frontmatter.get("description") or ""),
-        instructions=body.strip(),
+    return parse_skill_text(
+        text,
+        name_fallback=skill_md.parent.name,
         path=skill_md.parent,
+        source=str(skill_md),
     )
 
 
