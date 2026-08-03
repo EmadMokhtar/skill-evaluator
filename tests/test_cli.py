@@ -292,6 +292,52 @@ def test_the_judge_model_falls_back_to_the_run_model(tmp_path, monkeypatch):
     assert "ANTHROPIC_API_KEY" in result.output
 
 
+def test_judge_temperature_is_independent_of_the_runner_temperature(tmp_path, monkeypatch):
+    """The judge must be constructed at `judge_temperature` (default 0.0 for
+    determinism), never at the runner's `temperature` -- a team raising
+    `temperature` to exercise the runner under sampling must not silently make
+    every rubric verdict nondeterministic too. See Config.judge_temperature.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text(
+        'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\ntemperature = 0.7\n',
+        encoding="utf-8",
+    )
+    captured: dict = {}
+
+    def _capture(self, **kwargs):
+        captured.update(kwargs)
+        raise AssertionError("stop before any network call")
+
+    monkeypatch.setattr(PydanticAIJudge, "__init__", _capture)
+    runner.invoke(app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")])
+
+    assert captured["temperature"] == 0.0
+
+
+def test_judge_temperature_unset_reaches_the_judge(tmp_path, monkeypatch):
+    """A reasoning judge model needs `judge_temperature = "unset"`, independent
+    of the runner's `temperature`.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-eval.toml").write_text(
+        'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\njudge_temperature = "unset"\n',
+        encoding="utf-8",
+    )
+    captured: dict = {}
+
+    def _capture(self, **kwargs):
+        captured.update(kwargs)
+        raise AssertionError("stop before any network call")
+
+    monkeypatch.setattr(PydanticAIJudge, "__init__", _capture)
+    runner.invoke(app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")])
+
+    assert captured["temperature"] == "unset"
+
+
 def test_json_output_with_non_ascii_is_written_as_utf8(tmp_path):
     # Regression test: the JSON report is a machine-readable CI artifact and must
     # be UTF-8 regardless of the platform's default encoding, or non-ASCII skill

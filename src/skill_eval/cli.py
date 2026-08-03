@@ -106,7 +106,7 @@ def run(
             check_api_key(resolved_judge_model, os.environ)
             active_judge = judge_class(
                 model=resolved_judge_model,
-                temperature=settings.temperature,
+                temperature=settings.judge_temperature,
                 retries=settings.retries,
                 retry_backoff_seconds=settings.retry_backoff_seconds,
             )

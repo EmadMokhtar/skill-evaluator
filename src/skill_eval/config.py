@@ -29,6 +29,16 @@ class Config(BaseModel):
     FakeJudge errors rather than passing, so that default cannot turn an
     unchecked rubric into a green case. An empty `judge_model` falls back to
     `model`.
+
+    `judge_temperature` is deliberately separate from `temperature` and
+    defaults to `0.0` for determinism: the judge grades a fixed rubric and
+    must not become a source of flaky CI runs, even when `temperature` is
+    raised to exercise the runner under sampling. It does not fall back to
+    `temperature` -- a silent fallback is exactly what let the judge inherit
+    the runner's temperature before this field existed. A reasoning judge
+    model that rejects any explicit temperature needs
+    `judge_temperature = "unset"`, same as `temperature` does for a reasoning
+    runner model.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -40,6 +50,7 @@ class Config(BaseModel):
     retry_backoff_seconds: float = 1.0
     judge: str = "fake"
     judge_model: str = ""
+    judge_temperature: float | Literal["unset"] = 0.0
     min_pass_rate: float = 1.0
     fail_on_error: bool = True
     per_skill_min: dict[str, float] = Field(default_factory=dict)
