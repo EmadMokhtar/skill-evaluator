@@ -140,6 +140,13 @@ propagate; `cli.py` catches them via `_AUTHORING_ERRORS` and exits 2.
 error `2`. In `cli.py`, a JSON-write failure escalates to 2 only when the gate itself
 passed — a write problem must never mask an already-failing gate.
 
+**An unfilled scaffold is an authoring error, not a failure.** `skill-eval init` writes
+`TODO(skill-eval)` into every field the author must supply, and `cases/loader.py`
+rejects any case still containing it — before schema validation, so the message names
+the field rather than its type. Enforcing this in the loader rather than the generator
+makes it unconditional: hand-written stubs get it too, and no CI configuration can opt
+out of it.
+
 **`extra="forbid"` on every user-authored model.** `EvalCase`, `AssertionSpec`, `ToolSpec`,
 `TrajectorySpec`, `BudgetSpec`, `Config`. Without it, a typo like `assertion:` yields a
 case that passes vacuously — the worst possible failure mode for an eval tool. It is also

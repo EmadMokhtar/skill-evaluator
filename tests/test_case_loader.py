@@ -392,3 +392,71 @@ cases:
 """,
     )
     assert len(load_cases_for_skill(skill)) == 1
+
+
+def test_a_sentinel_in_a_case_is_an_authoring_error(tmp_path):
+    path = tmp_path / "unfilled.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: handles the common case\n"
+        "    task: TODO(skill-eval) the prompt a user would type\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    message = str(exc.value)
+    assert "TODO(skill-eval)" in message
+    assert "task" in message
+    assert str(path) in message
+
+
+def test_a_sentinel_nested_in_a_tool_names_the_field(tmp_path):
+    path = tmp_path / "unfilled.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: takes the right path\n"
+        "    task: refund order 1234\n"
+        "    tools:\n"
+        "      - name: lookup_order\n"
+        "        description: look an order up\n"
+        "        returns: 'TODO(skill-eval) the JSON this tool returns'\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "tools[0].returns" in str(exc.value)
+
+
+def test_a_sentinel_in_a_rubric_entry_names_its_position(tmp_path):
+    path = tmp_path / "unfilled.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: explains itself\n"
+        "    task: refund order 1234\n"
+        "    judge:\n"
+        "      rubric:\n"
+        "        - The reply names order 1234\n"
+        "        - TODO(skill-eval) what else a good answer does\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "judge.rubric[1]" in str(exc.value)
+
+
+def test_a_sentinel_in_a_comment_is_not_a_sentinel(tmp_path):
+    # Comments are discarded by the YAML parser before the scan sees the data,
+    # which is what lets the generated file explain the token it uses.
+    path = tmp_path / "filled.eval.yaml"
+    path.write_text(
+        "# Replace every TODO(skill-eval) before running this file.\n"
+        "cases:\n"
+        "  - name: handles the common case\n"
+        "    task: greet Ada\n"
+        "    assertions:\n"
+        "      - kind: contains\n"
+        "        value: Ada\n",
+        encoding="utf-8",
+    )
+    cases = parse_cases_file(path)
+    assert [case.name for case in cases] == ["handles the common case"]

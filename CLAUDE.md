@@ -81,6 +81,9 @@ form, that file is the explanation.
 - **Exit codes are the CI contract:** gate pass `0`, gate fail `1`, user/authoring error `2`.
   In `cli.py`, a JSON-write failure only escalates to 2 when the gate itself passed — it must
   not mask an already-failing gate.
+- **An unfilled scaffold aborts the run.** A case still containing `TODO(skill-eval)` is
+  an authoring error (exit 2), checked in `cases/loader.py` before validation so the
+  message names the field. The rule is the loader's, so hand-written stubs get it too.
 - **`extra="forbid"`** on `EvalCase` / `AssertionSpec` / `ToolSpec` / `TrajectorySpec` /
   `BudgetSpec` / `Config` / `RunResult`. Without it a typo like `assertion:` yields a
   vacuously-passing case.
