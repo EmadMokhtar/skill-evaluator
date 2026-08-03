@@ -4,9 +4,9 @@ The default runner is `fake` (offline, scripted, free). To evaluate a skill with
 real agent, install the extra and pick a model:
 
 ```bash
-pip install 'skill-eval[pydantic-ai]'
+uv sync --extra pydantic-ai
 export OPENAI_API_KEY=...
-skill-eval run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
+uv run skill-eval run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
 ```
 
 API keys are read from the environment only — never from `skill-eval.toml`.

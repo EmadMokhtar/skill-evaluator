@@ -1,7 +1,7 @@
 # Docs infrastructure design
 
 **Date:** 2026-08-02
-**Status:** approved, not yet implemented
+**Status:** implemented — see [PR #4](https://github.com/EmadMokhtar/skill-evaluator/pull/4)
 **Scope:** documentation only — no change to `skill-eval` runtime behavior, except one
 small refactor in `evaluators/assertion.py` (see §4.1).
 
