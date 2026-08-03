@@ -50,8 +50,10 @@ def _version(frontmatter: dict, source: str) -> str:
         return ""
     if not isinstance(declared, str):
         raise SkillParseError(
-            f"invalid frontmatter in {source}: version must be quoted text, got "
-            f'{declared!r} -- write version: "{declared}"'
+            f"invalid frontmatter in {source}: version must be quoted text, but YAML "
+            f"read it as {type(declared).__name__} {declared!r}. Quote it exactly as "
+            f'you wrote it, e.g. version: "1.20" -- unquoted, 1.20 and 1.2 are the '
+            "same number and two different versions would compare equal."
         )
     return declared
 

@@ -151,11 +151,25 @@ def test_a_bare_decimal_version_is_an_authoring_error(tmp_path):
         parse_skill_file(skill_md)
 
 
-def test_the_error_shows_the_author_how_to_quote_it(tmp_path):
+def test_the_error_never_suggests_the_collapsed_value(tmp_path):
+    # `version: 1.20` reaches us as the float 1.2. Echoing that back as the fix
+    # would tell the author to write "1.2" -- dropping the trailing zero this
+    # check exists to protect.
     skill_md = tmp_path / "SKILL.md"
     skill_md.write_text("---\nname: pdf\nversion: 1.20\n---\n\nBody.\n", encoding="utf-8")
-    with pytest.raises(SkillParseError, match=r'version: "1.2"'):
+    with pytest.raises(SkillParseError) as caught:
         parse_skill_file(skill_md)
+    assert 'version: "1.2"' not in str(caught.value)
+
+
+def test_the_error_says_what_yaml_read_and_to_quote_it(tmp_path):
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text("---\nname: pdf\nversion: 1.2\n---\n\nBody.\n", encoding="utf-8")
+    with pytest.raises(SkillParseError, match="must be quoted text") as caught:
+        parse_skill_file(skill_md)
+    message = str(caught.value)
+    assert "float" in message
+    assert "Quote it exactly as you wrote it" in message
 
 
 def test_a_quoted_version_survives_verbatim(tmp_path):
