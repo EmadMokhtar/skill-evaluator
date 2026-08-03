@@ -272,7 +272,17 @@ class RunReport(BaseModel):
 
     @property
     def judge_cost_usd(self) -> float:
-        """Eval-side spend, reported apart from what the skill's own runs cost."""
+        """Eval-side spend, reported apart from what the skill's own runs cost.
+
+        Sums *every* evaluator's `cost_usd`, not only the judge's. Today that is
+        the same number -- `JudgeEvaluator` is the only evaluator that spends --
+        so the name holds. Deliberately not filtered on `score.evaluator ==
+        "judge"`: that would hard-code an evaluator's `name` into the data layer,
+        and renaming the evaluator would then silently report $0.00 overhead,
+        which is a worse failure than over-reporting because nothing looks wrong.
+        If a second cost-bearing evaluator ever lands, split this into per-
+        evaluator totals rather than narrowing the filter.
+        """
         return sum(score.cost_usd for o in self.outcomes for score in o.scores)
 
     def pass_rate_by_skill(self) -> dict[str, float]:

@@ -405,3 +405,36 @@ def test_judge_preflight_wins_the_race_against_construction(tmp_path, monkeypatc
     assert result.exit_code == 2
     assert "OPENAI_API_KEY" in result.output
     assert "constructed before preflight" not in result.output
+
+
+def test_a_blank_model_is_a_user_error_not_a_broken_run(tmp_path):
+    # A blank id has no provider prefix, so preflight finds nothing to check and
+    # the run used to die inside the adapter as an errored case (exit 1 -- "the
+    # run broke") for what is really a mistyped flag. Exit codes are the CI
+    # contract: a user error is 2.
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(skill_dir), "--runner", "pydantic-ai", "--model", ""])
+    assert result.exit_code == 2
+    assert "--model is empty" in result.output
+
+
+def test_a_blank_judge_model_is_a_user_error_not_a_broken_run(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    config = tmp_path / "skill-eval.toml"
+    config.write_text('judge = "pydantic-ai"\n', encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(config), "--judge-model", "   "]
+    )
+    assert result.exit_code == 2
+    assert "--judge-model is empty" in result.output
+
+
+def test_a_blank_model_in_the_config_file_is_caught_too(tmp_path):
+    # Checked on the resolved value, so a blank in skill-eval.toml is rejected
+    # exactly like a blank flag.
+    skill_dir = _make_skill(tmp_path)
+    config = tmp_path / "skill-eval.toml"
+    config.write_text('default_runner = "pydantic-ai"\nmodel = ""\n', encoding="utf-8")
+    result = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
+    assert result.exit_code == 2
+    assert "--model is empty" in result.output

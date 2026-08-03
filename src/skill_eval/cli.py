@@ -44,6 +44,21 @@ _AUTHORING_ERRORS = (
 )
 
 
+def _require_a_model(flag: str, model: str) -> None:
+    """Reject a blank model id before it can reach a provider.
+
+    A blank id has no provider prefix, so `check_api_key` finds nothing to
+    check and waves it through; the run then dies deep inside the adapter as
+    `UserError: Unknown model:` and is reported as an *errored case* -- exit 1,
+    the code that means "the run broke", when the truth is a mistyped flag.
+    Exit codes are the CI contract, so a user error has to surface as 2 here.
+    Checked on the resolved value so a blank in `skill-eval.toml` is caught too,
+    not only a blank on the command line.
+    """
+    if not model.strip():
+        raise typer.BadParameter(f"{flag} is empty; name a model such as openai:gpt-4o-mini")
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(__version__)
@@ -84,6 +99,7 @@ def run(
         runner_class = _RUNNERS[runner_name]
         model_name = model if model is not None else settings.model
         if getattr(runner_class, "needs_api_key", False):
+            _require_a_model("--model", model_name)
             check_api_key(model_name, os.environ)
             active_runner = runner_class(
                 model=model_name,
@@ -103,6 +119,7 @@ def run(
             judge_model if judge_model is not None else (settings.judge_model or model_name)
         )
         if getattr(judge_class, "needs_api_key", False):
+            _require_a_model("--judge-model", resolved_judge_model)
             check_api_key(resolved_judge_model, os.environ)
             active_judge = judge_class(
                 model=resolved_judge_model,
