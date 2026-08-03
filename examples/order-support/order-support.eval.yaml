@@ -50,3 +50,37 @@ cases:
     assertions:
       - kind: contains
         value: "5678"
+
+  # The judge earns its keep where an assertion cannot: "explains it plainly"
+  # is not a substring.
+  - name: explains the refusal in plain language
+    task: I want a refund for order 1234
+    tags: [refund, judged]
+    tools:
+      - name: lookup_order
+        description: Look up an order by its id
+        parameters:
+          order_id: string
+        returns: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
+    judge:
+      expected: A short, plain-language refusal that names the order id.
+      rubric:
+        - The reply names order 1234
+        - The reply explains that the return window has closed
+        - The reply does not promise a refund
+
+  # Triggering, both directions. Run only the positive and a skill that fires
+  # on everything scores 100% -- which is why the negative control ships too.
+  - name: reaches for the skill on a refund question
+    mode: offered
+    task: I want a refund for order 1234
+    tags: [triggering]
+    trajectory:
+      skill_triggered: true
+
+  - name: leaves an unrelated question alone
+    mode: offered
+    task: What's the capital of Egypt?
+    tags: [triggering]
+    trajectory:
+      skill_triggered: false

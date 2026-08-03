@@ -5,10 +5,11 @@ Run evaluations on Agent Skills (`SKILL.md`) — in CI/CD or on demand.
 Skills and their eval cases are **inputs** to the tool. Nothing about a skill under test is
 vendored here, so any skill repo can adopt `skill-eval` without embedding it.
 
-> **Status:** M2. The full pipeline — discovery, scoring, reporting, gating — runs offline
+> **Status:** M3. The full pipeline — discovery, scoring, reporting, gating — runs offline
 > against `FakeRunner` (the default, scripted, free) and against real agents through
 > `pydantic-ai` (provider-flexible), scoring output text, tool-use trajectories, and
-> efficiency budgets. See [Roadmap](#roadmap).
+> efficiency budgets. A rubric-based LLM judge scores output quality, and `mode: offered`
+> measures whether an agent chose to use the skill at all. See [Roadmap](#roadmap).
 
 ## Install
 
@@ -83,6 +84,8 @@ Extra keys alongside `cases:` at the top level of the file are ignored.
 | `tools` | no | Mock tools the agent may call — see [Declaring tools and scoring the trajectory](#declaring-tools-and-scoring-the-trajectory) |
 | `trajectory` | no | Which tools must/must not have been called, and in what order |
 | `budget` | no | Ceilings on tokens, cost, and latency |
+| `mode` | no | `"loaded"` (default, force-loaded) or `"offered"` — see [Does the agent even reach for the skill?](#does-the-agent-even-reach-for-the-skill) |
+| `judge` | no | `expected:` text plus a `rubric:` list for LLM-as-judge scoring — see [Judging output quality](#judging-output-quality) |
 
 ### Assertion kinds
 
@@ -109,8 +112,9 @@ files are reported as **skipped** — visible in the output, never silently igno
 ## CLI
 
 ```
-skill-eval run <path> [--evals <path>] [--runner <name>] [--model <name>] [--tag <tag>]
-                      [--min-pass-rate <float>] [--json-output <path>] [--config <file>]
+skill-eval run <path> [--evals <path>] [--runner <name>] [--model <name>]
+                      [--judge-model <name>] [--tag <tag>] [--min-pass-rate <float>]
+                      [--json-output <path>] [--config <file>]
 skill-eval list <path> [--evals <path>]
 ```
 
@@ -194,6 +198,63 @@ latency), they are still evaluated normally, and only the cost limit is skipped.
 `skill-eval` against a provider without pricing data, simply omit `max_cost_usd` from the budget
 block for that provider.
 
+### Judging output quality
+
+Some things an assertion cannot check — "explains it plainly" is not a substring.
+A `judge:` block hands those to an LLM judge, which returns one verdict per rubric
+entry **with the evidence for it**:
+
+```yaml
+    judge:
+      expected: A short, plain-language refusal that names the order id.
+      rubric:
+        - The reply names order 1234
+        - The reply explains that the return window has closed
+```
+
+skill-eval derives the verdict and the score from the per-check results; the judge is
+never asked for a blended number. **A check that passes without citing evidence is
+recorded as a failure** — an unsupported PASS is a judge's characteristic failure mode.
+
+Judging costs money, so it is opted into explicitly:
+
+```toml
+judge = "pydantic-ai"
+judge_model = ""    # empty falls back to `model`
+```
+
+The default `judge = "fake"` does not grade at all — and rather than passing a rubric it
+never checked, it reports the case as **errored**. Judge spend is reported as "judge
+overhead", separately from what the runs themselves cost, and never counts against a
+case's `budget:`.
+
+### Does the agent even reach for the skill?
+
+`mode: offered` stops force-loading the skill and offers it as a tool instead, named
+after the skill and described by its frontmatter `description`. If the agent calls it,
+it receives the skill's instructions and carries on; if it doesn't, it never sees them.
+
+```yaml
+  - name: reaches for the skill on a refund question
+    mode: offered
+    task: I want a refund for order 1234
+    trajectory:
+      skill_triggered: true
+
+  - name: leaves an unrelated question alone
+    mode: offered
+    task: What's the capital of Egypt?
+    trajectory:
+      skill_triggered: false
+```
+
+**Always ship the negative control.** A suite of positives alone scores a skill that
+fires on everything at 100%.
+
+Two things to know: the offered tool call appears in `tool_calls` like any other, so it
+counts toward `max_calls`; and it is checked with `skill_triggered`, not by naming it in
+`called:` (which only accepts tools the case itself declares).
+
 ## Configuration
 
 `skill-eval.toml` is optional. It is located via `--config`, or otherwise discovered by
@@ -216,6 +277,8 @@ greeting = 0.9
 | `temperature` | `0.0` | — |
 | `retries` | `2` | — |
 | `retry_backoff_seconds` | `1.0` | — |
+| `judge` | `"fake"` | — |
+| `judge_model` | `""` (falls back to `model`) | `--judge-model` |
 | `min_pass_rate` | `1.0` | `--min-pass-rate` |
 | `fail_on_error` | `true` | — |
 | `per_skill_min` | `{}` | — |
@@ -286,21 +349,25 @@ with its reasons.
 
 ## Architecture
 
-The design rests on two protocols; everything else is plumbing around them.
+The design rests on three protocols; everything else is plumbing around them.
 
 - **`Runner`** — `run(skill, case) -> RunResult`, carrying the output, transcript, tool-call
   trajectory, and tokens/latency/cost. This is the seam every agent framework plugs into.
 - **`Evaluator`** — `evaluate(case, result) -> EvalScore`, a pass/fail verdict with a numeric
   score and human-readable detail.
+- **`Judge`** — `judge(request) -> JudgeVerdict`, one verdict per rubric check, each carrying
+  its evidence. The seam every LLM-as-judge implementation plugs into.
 
 ```
 path → skill loader → [Skill] → case loader → [EvalCase]
      → orchestrator (skill × case × runner) → RunReport → reporters + gating → exit code
 ```
 
-No agent-framework type appears in the core; frameworks live only inside `Runner` adapters.
+No agent-framework type appears in the core; frameworks live only inside `Runner` and `Judge`
+adapters (`runners/pydantic_ai.py`, `judges/pydantic_ai.py`).
 Full design: [`docs/superpowers/specs/2026-07-30-skill-eval-design.md`](docs/superpowers/specs/2026-07-30-skill-eval-design.md),
-with the M2 additions in [`docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`](docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md).
+with the M2 additions in [`docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`](docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md)
+and the M3 additions in [`docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`](docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md).
 
 ## Roadmap
 
@@ -309,7 +376,7 @@ with the M2 additions in [`docs/superpowers/specs/2026-08-01-skill-eval-m2-desig
 | M0 | Scaffolding, config, CLI skeleton, release plumbing | shipped |
 | M1 | Loaders, protocols, `FakeRunner`, assertion evaluator, orchestrator, console + JSON reporters, gating | shipped |
 | M2 | PydanticAI runner, trajectory + budget evaluators, cost/latency capture, cassette test tier | shipped |
-| M3 | LLM-as-judge evaluator (per-check verdicts), triggering evals with negative controls | planned |
+| M3 | LLM-as-judge evaluator (per-check verdicts), triggering evals with negative controls | shipped |
 | M4 | Comparative evals: `--baseline`/`--repeat`, delta reporting, `--min-delta` gating | planned |
 | M5 | CI/CD polish: JUnit XML + Markdown/HTML reporters, GitHub Action, automated release | planned |
 | M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions | planned |
