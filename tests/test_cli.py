@@ -1,4 +1,5 @@
 import json
+import re
 
 from typer.testing import CliRunner
 
@@ -7,6 +8,25 @@ from skill_eval.judges.pydantic_ai import PydanticAIJudge
 from skill_eval.runners.pydantic_ai import PydanticAIRunner
 
 runner = CliRunner()
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_BOX = str.maketrans("", "", "│╭╮╯╰─")
+
+
+def plain(output: str) -> str:
+    """Strip Rich's terminal rendering so an assertion tests the message itself.
+
+    Typer renders `BadParameter` through Rich, which styles the flag name and
+    line-wraps the text to the terminal width. Both vary by environment: with
+    colour on, `--model` arrives as `-` and `-model` with escape codes between
+    them, so a plain `in` check silently fails somewhere that has colour (CI)
+    while passing somewhere that does not (a piped local run). Removing escapes
+    and box-drawing characters and collapsing whitespace rejoins a wrapped
+    message into one line, so the assertion is about what we said, not how the
+    terminal drew it.
+    """
+    return " ".join(_ANSI.sub("", output).translate(_BOX).split())
+
 
 SKILL_MD = """---
 name: pdf
@@ -415,7 +435,7 @@ def test_a_blank_model_is_a_user_error_not_a_broken_run(tmp_path):
     skill_dir = _make_skill(tmp_path)
     result = runner.invoke(app, ["run", str(skill_dir), "--runner", "pydantic-ai", "--model", ""])
     assert result.exit_code == 2
-    assert "--model is empty" in result.output
+    assert "--model is empty" in plain(result.output)
 
 
 def test_a_blank_judge_model_is_a_user_error_not_a_broken_run(tmp_path):
@@ -426,7 +446,7 @@ def test_a_blank_judge_model_is_a_user_error_not_a_broken_run(tmp_path):
         app, ["run", str(skill_dir), "--config", str(config), "--judge-model", "   "]
     )
     assert result.exit_code == 2
-    assert "--judge-model is empty" in result.output
+    assert "--judge-model is empty" in plain(result.output)
 
 
 def test_a_blank_model_in_the_config_file_is_caught_too(tmp_path):
@@ -437,4 +457,4 @@ def test_a_blank_model_in_the_config_file_is_caught_too(tmp_path):
     config.write_text('default_runner = "pydantic-ai"\nmodel = ""\n', encoding="utf-8")
     result = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
     assert result.exit_code == 2
-    assert "--model is empty" in result.output
+    assert "--model is empty" in plain(result.output)
