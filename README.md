@@ -217,6 +217,9 @@ entry **with the evidence for it**:
 skill-eval derives the verdict and the score from the per-check results; the judge is
 never asked for a blended number. **A check that passes without citing evidence is
 recorded as a failure** — an unsupported PASS is a judge's characteristic failure mode.
+An empty rubric, or a rubric entry that is blank or whitespace-only, is an authoring
+error (exit `2`) rather than a case that scores 1.0 — a check that verifies nothing
+is the same vacuous pass in a different shape.
 
 Judging costs money, so it is opted into explicitly:
 
@@ -229,6 +232,12 @@ The default `judge = "fake"` does not grade at all — and rather than passing a
 never checked, it reports the case as **errored**. Judge spend is reported as "judge
 overhead", separately from what the runs themselves cost, and never counts against a
 case's `budget:`.
+
+The judge always runs at `judge_temperature` (default `0.0`), never at the runner's
+`temperature` — see [Configuration](#configuration). Determinism is load-bearing here:
+skill-eval skips N-sample majority voting on the strength of temperature 0 plus
+evidence-bearing per-check output, so a judge that silently inherited a sampled runner
+temperature would make the same rubric verdict flaky across runs with no code change.
 
 ### Does the agent even reach for the skill?
 
@@ -282,6 +291,7 @@ greeting = 0.9
 | `retry_backoff_seconds` | `1.0` | — |
 | `judge` | `"fake"` | — |
 | `judge_model` | `""` (falls back to `model`) | `--judge-model` |
+| `judge_temperature` | `0.0` | — |
 | `min_pass_rate` | `1.0` | `--min-pass-rate` |
 | `fail_on_error` | `true` | — |
 | `per_skill_min` | `{}` | — |
@@ -305,6 +315,12 @@ temperature = 0.0            # or "unset" for reasoning models, which reject it
 retries = 2
 retry_backoff_seconds = 1.0
 ```
+
+`judge_temperature` is separate from `temperature` and defaults to `0.0` regardless of what
+`temperature` is set to. The judge is never asked to reuse the runner's temperature, even
+implicitly: raising `temperature` to exercise a skill under sampling must not also make rubric
+verdicts nondeterministic. Set `judge_temperature = "unset"` if the judge model is a reasoning
+model that rejects an explicit temperature.
 
 ## Gating and exit codes
 
