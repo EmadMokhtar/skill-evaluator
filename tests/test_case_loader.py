@@ -305,6 +305,28 @@ cases:
         parse_cases_file(path)
 
 
+def test_a_blank_rubric_entry_is_an_authoring_error(tmp_path):
+    # A stray blank list item ("" or whitespace-only) loads fine as valid YAML
+    # and would render as a check with no text -- a model asked to verify
+    # nothing will likely return a vacuous pass. Reachable from ordinary YAML,
+    # so it gets the same guard as an empty rubric list.
+    path = write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    judge:
+      expected: something good
+      rubric:
+        - a real check
+        - "   "
+""",
+    )
+    with pytest.raises(CaseParseError, match="entry 2 is blank"):
+        parse_cases_file(path)
+
+
 def test_skill_triggered_on_a_loaded_case_is_an_authoring_error(tmp_path):
     # A loaded skill is always in force, so the check could never be false.
     path = write(

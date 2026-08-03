@@ -67,12 +67,21 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
 
     declared = {tool.name for tool in case.tools}
 
-    if case.judge is not None and not case.judge.rubric:
-        raise CaseParseError(
-            f"{path}: case {case.name!r} declares a judge block with an empty rubric. "
-            f"Give the judge something to check, or remove the block -- an "
-            f"unchecked rubric would score as a pass nobody verified."
-        )
+    if case.judge is not None:
+        if not case.judge.rubric:
+            raise CaseParseError(
+                f"{path}: case {case.name!r} declares a judge block with an empty rubric. "
+                f"Give the judge something to check, or remove the block -- an "
+                f"unchecked rubric would score as a pass nobody verified."
+            )
+        for position, entry in enumerate(case.judge.rubric, start=1):
+            if not entry.strip():
+                raise CaseParseError(
+                    f"{path}: case {case.name!r} declares a judge block whose rubric "
+                    f"entry {position} is blank. Give the judge something to check, or "
+                    f"remove the entry -- a check that verifies nothing would score as "
+                    f"a pass nobody verified."
+                )
 
     if case.mode == "offered" and skill is not None:
         offered = skill_tool_name(skill.name)
