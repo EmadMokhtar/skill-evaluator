@@ -26,30 +26,36 @@ cases:
   # 1. The common case. Keep at least one assertion -- a case with none passes
   #    without checking anything.
   - name: handles the common case
-    task: '{sentinel} the prompt a user would type'
+    task: >-
+      {sentinel} the prompt a user would type
     tags: [smoke]
     assertions:
       - kind: contains
-        value: '{sentinel} a string every good answer contains'
+        value: >-
+          {sentinel} a string every good answer contains
 
   # 2. The edge this skill exists to get right. Mock tools execute nothing:
   #    calling one records the call and returns `returns` verbatim, so the
   #    trajectory is genuinely the model's choice. `trajectory` catches the
   #    failure an output assertion cannot see -- deciding without looking.
   - name: takes the right path on the hard case
-    task: '{sentinel} the prompt that reaches the policy edge'
+    task: >-
+      {sentinel} the prompt that reaches the policy edge
     tools:
       - name: lookup_something
-        description: '{sentinel} what this tool does'
+        description: >-
+          {sentinel} what this tool does
         parameters:
           query: string
-        returns: '{sentinel} the JSON this tool returns'
+        returns: |-
+          {sentinel} the JSON this tool returns
     trajectory:
       called: [lookup_something]
       max_calls: 3
     assertions:
       - kind: contains
-        value: '{sentinel} a string every good answer contains'
+        value: >-
+          {sentinel} a string every good answer contains
 
   # 3 and 4. Does the agent reach for the skill at all? `mode: offered` stops
   #    force-loading it and registers it as a tool described by its frontmatter
@@ -61,14 +67,16 @@ cases:
   #    everything at 100%.
   - name: reaches for the skill when it should
     mode: offered
-    task: '{sentinel} a prompt this skill is for'
+    task: >-
+      {sentinel} a prompt this skill is for
     tags: [triggering]
     trajectory:
       skill_triggered: true
 
   - name: leaves unrelated work alone
     mode: offered
-    task: '{sentinel} a prompt this skill is NOT for'
+    task: >-
+      {sentinel} a prompt this skill is NOT for
     tags: [triggering]
     trajectory:
       skill_triggered: false

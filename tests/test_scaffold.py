@@ -54,13 +54,23 @@ def test_a_fresh_scaffold_refuses_to_load(tmp_path):
     assert UNFILLED_SENTINEL in str(exc.value)
 
 
-def test_a_filled_scaffold_loads_clean(tmp_path):
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        pytest.param("the customer's order", id="apostrophe"),
+        pytest.param('a "priority" ticket', id="double-quote"),
+        pytest.param("refund order 1234: approved", id="colon-space"),
+    ],
+)
+def test_a_filled_scaffold_loads_clean(tmp_path, replacement):
     # Substituting any real text for the placeholder must be all it takes: if
     # the generated file were malformed in some other way -- a trajectory
     # naming an undeclared tool, `skill_triggered` on a loaded case -- the
-    # cross-reference checks would catch it here.
+    # cross-reference checks would catch it here. Real authors type
+    # apostrophes, quotes, and colons far more often than anything exotic, so
+    # those are exactly the characters the template must survive.
     path = tmp_path / "order-support.eval.yaml"
-    filled = render_scaffold(SKILL).replace(UNFILLED_SENTINEL, "refund order 1234:")
+    filled = render_scaffold(SKILL).replace(UNFILLED_SENTINEL, replacement)
     path.write_text(filled, encoding="utf-8")
     cases = parse_cases_file(path, SKILL)
     assert len(cases) == 4
