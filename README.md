@@ -60,14 +60,16 @@ uv run skill-eval list ./examples
 
 ```
 greeting	1 case(s)	examples/greeting
-order-support	2 case(s)	examples/order-support
+order-support	5 case(s)	examples/order-support
 ```
 
 `list` discovers skills and validates every eval file without calling a runner — free, and no
 API key required. The shipped examples assert real model behavior, so actually running them
 (`skill-eval run`) needs the `pydantic-ai` runner — see
-[Running against a real agent](#running-against-a-real-agent) below. The zero-cost `fake`
-runner (the default) is what the test suite itself runs on.
+[Running against a real agent](#running-against-a-real-agent) below. The judged case also needs
+`judge = "pydantic-ai"` in `skill-eval.toml` — the judge is configured independently of the
+runner, and the default `judge = "fake"` reports it errored rather than grading it. The
+zero-cost `fake` runner (the default) is what the test suite itself runs on.
 
 ## Eval files
 
@@ -231,8 +233,9 @@ case's `budget:`.
 ### Does the agent even reach for the skill?
 
 `mode: offered` stops force-loading the skill and offers it as a tool instead, named
-after the skill and described by its frontmatter `description`. If the agent calls it,
-it receives the skill's instructions and carries on; if it doesn't, it never sees them.
+after the skill (normalized to a Python identifier, e.g. `order-support` → `order_support`)
+and described by its frontmatter `description`. If the agent calls it, it receives the
+skill's instructions and carries on; if it doesn't, it never sees them.
 
 ```yaml
   - name: reaches for the skill on a refund question
@@ -286,8 +289,13 @@ greeting = 0.9
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
 
-`model`, `temperature`, `retries`, and `retry_backoff_seconds` only matter to a runner that
-reads them (currently `pydantic-ai`); `FakeRunner` ignores them. `temperature` accepts a float
+`--judge-model` only has an effect once `judge` is set to a real judge (currently
+`"pydantic-ai"`); under the default `judge = "fake"` it is accepted but silently unused, since
+`FakeJudge` never grades anything.
+
+`model`, `temperature`, `retries`, and `retry_backoff_seconds` matter to a runner or judge that
+reads them (currently `pydantic-ai` for both); `FakeRunner` and `FakeJudge` ignore them. `model`
+also doubles as the fallback for `judge_model` when it's empty. `temperature` accepts a float
 or the literal string `"unset"`, for reasoning models that reject any explicit temperature:
 
 ```toml
@@ -312,8 +320,11 @@ A run fails the gate when the overall pass rate is below `min_pass_rate`, when a
 per-skill minimum is not met, or when any case **errored**. Two distinctions matter:
 
 - **failed** — the case ran and scored below the bar. An *eval* signal.
-- **errored** — the runner itself blew up (API error, timeout, missing key). An *infra* signal,
-  and it fails the gate by default so CI never goes green on a broken run.
+- **errored** — the runner or an evaluator blew up: an API error, timeout, or missing key from
+  the runner, but also an evaluator that couldn't do its job — for example a `judge:` block with
+  no judge configured, or a `trajectory.skill_triggered` check against a runner that doesn't
+  support `mode: offered`. An *infra* signal either way, and it fails the gate by default so CI
+  never goes green on a broken run.
 
 A case that fails its assertions drags the pass rate below the bar and fails the gate:
 

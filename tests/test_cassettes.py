@@ -96,6 +96,17 @@ def test_real_traffic_drives_the_whole_loop(replay):
 JUDGED_CASE = EvalCase(
     name="explains the refund refusal plainly",
     task="I want a refund for order 1234",
+    # Without this tool the agent has no way to learn the order was delivered
+    # 45 days ago, so it can't satisfy the second rubric check below. Mirrors
+    # the `lookup_order` declaration in examples/order-support/order-support.eval.yaml.
+    tools=[
+        ToolSpec(
+            name="lookup_order",
+            description="Look up an order by its id",
+            parameters={"order_id": "string"},
+            returns='{"id": "1234", "status": "delivered", "days_since_delivery": 45}',
+        ),
+    ],
     judge=JudgeSpec(
         expected="A short, plain-language refusal that names the order id.",
         rubric=[
