@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 from skill_eval.models import AssertionSpec, EvalCase, EvalScore, RunResult
 
@@ -15,19 +16,28 @@ class InvalidAssertionValue(Exception):
     """Raised when an assertion's value is malformed (e.g. an invalid regex)."""
 
 
+# The single source of truth for supported assertion kinds. `_check` dispatches
+# from this mapping and tests/test_docs.py enumerates it, so a kind cannot be
+# added in one place and forgotten in the other.
+_CHECKS: dict[str, Callable[[str, str], bool]] = {
+    "contains": lambda value, output: value in output,
+    "not_contains": lambda value, output: value not in output,
+    "regex": lambda value, output: re.search(value, output) is not None,
+    "equals": lambda value, output: output.strip() == value,
+}
+
+ASSERTION_KINDS: tuple[str, ...] = tuple(_CHECKS)
+
+
 def _check(spec: AssertionSpec, output: str) -> bool:
-    if spec.kind == "contains":
-        return spec.value in output
-    if spec.kind == "not_contains":
-        return spec.value not in output
-    if spec.kind == "regex":
-        try:
-            return re.search(spec.value, output) is not None
-        except re.error as exc:
-            raise InvalidAssertionValue(f"invalid regex pattern {spec.value!r}: {exc}") from exc
-    if spec.kind == "equals":
-        return output.strip() == spec.value
-    raise UnknownAssertionKind(f"unknown assertion kind: {spec.kind!r}")
+    try:
+        check = _CHECKS[spec.kind]
+    except KeyError:
+        raise UnknownAssertionKind(f"unknown assertion kind: {spec.kind!r}") from None
+    try:
+        return check(spec.value, output)
+    except re.error as exc:
+        raise InvalidAssertionValue(f"invalid regex pattern {spec.value!r}: {exc}") from exc
 
 
 class AssertionEvaluator:

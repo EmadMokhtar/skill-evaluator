@@ -106,3 +106,28 @@ def test_invalid_regex_raises_invalid_assertion_value():
         AssertionEvaluator().evaluate(
             _case(AssertionSpec(kind="regex", value="[unclosed")), RunResult(output="x")
         )
+
+
+def test_assertion_kinds_lists_every_supported_kind():
+    """ASSERTION_KINDS is the single source of truth for supported kinds.
+
+    The docs test in tests/test_docs.py enumerates this tuple, so a kind that
+    dispatches but is missing here would ship undocumented.
+    """
+    from skill_eval.evaluators.assertion import ASSERTION_KINDS
+
+    assert ASSERTION_KINDS == ("contains", "not_contains", "regex", "equals")
+
+
+def test_every_listed_kind_actually_dispatches():
+    """No entry in ASSERTION_KINDS may raise UnknownAssertionKind."""
+    from skill_eval.evaluators.assertion import ASSERTION_KINDS, AssertionEvaluator
+
+    for kind in ASSERTION_KINDS:
+        case = EvalCase(
+            name="c",
+            task="t",
+            assertions=[AssertionSpec(kind=kind, value="x")],
+        )
+        # Must not raise; pass/fail is irrelevant here.
+        AssertionEvaluator().evaluate(case, RunResult(output="x"))

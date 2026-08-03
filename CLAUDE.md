@@ -58,6 +58,10 @@ their own data shapes.
 These are decided behaviors, not accidents — several were bugs caught in review. Preserve
 them, and expect a test asserting each.
 
+The full rationale for each of these — plus the module map and extension points — is in
+[`ARCHITECTURE.md`](ARCHITECTURE.md). Keep the two in sync: this list is the condensed
+form, that file is the explanation.
+
 - **`errored` ≠ `failed`.** `failed` = the case ran and scored below bar (an eval signal).
   `errored` = the runner itself blew up (an infra signal). Runners must **never raise** for
   provider failures — set `RunResult.error` instead. Errored cases fail the gate by default.
@@ -71,8 +75,9 @@ them, and expect a test asserting each.
 - **Exit codes are the CI contract:** gate pass `0`, gate fail `1`, user/authoring error `2`.
   In `cli.py`, a JSON-write failure only escalates to 2 when the gate itself passed — it must
   not mask an already-failing gate.
-- **`extra="forbid"`** on `EvalCase` / `AssertionSpec` / `Config`. Without it a typo like
-  `assertion:` yields a vacuously-passing case.
+- **`extra="forbid"`** on `EvalCase` / `AssertionSpec` / `ToolSpec` / `TrajectorySpec` /
+  `BudgetSpec` / `Config` / `RunResult`. Without it a typo like `assertion:` yields a
+  vacuously-passing case.
 - **All file IO pins `encoding="utf-8"`** and re-raises as a typed parse error
   (`SkillParseError` / `CaseParseError` / `ConfigError`) naming the file and field.
 - **YAML goes through `yaml_loading.safe_load`**, never `yaml.safe_load`. The custom loader
@@ -95,6 +100,39 @@ them, and expect a test asserting each.
 - **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act;
   a missing cassette skips rather than fails, but a mismatched request fails rather than
   reaching the network.
+
+## Documentation
+
+Documentation ships **with** the change, never as a follow-up. Two CI jobs enforce this
+(`docs`, `docs-freshness`) and `tests/test_docs.py` asserts the docs still match the code.
+
+| When you change | Update |
+| --- | --- |
+| A CLI command or flag | `docs/cli.md` |
+| A `Config` field | `docs/configuration.md` |
+| An `EvalCase` field or assertion kind | `docs/eval-files.md` |
+| Runner behavior, tools, budgets, pricing | `docs/runners.md` |
+| Gate rules, exit codes, the JSON report | `docs/gating.md` |
+| A protocol, an invariant, or the module map | `ARCHITECTURE.md` |
+| Anything needing a new page | the page plus `nav:` in `mkdocs.yml` |
+
+`README.md` is a landing page only. Reference prose lives in `docs/` — do not reintroduce
+it in the README, and do not duplicate `ARCHITECTURE.md` into `docs/architecture.md`
+(that page includes the root file via a snippet).
+
+Before pushing:
+
+```bash
+uv sync --group docs           # mkdocs lives in the docs group; plain `uv sync` skips it
+uv run mkdocs build --strict
+uv run pytest tests/test_docs.py
+```
+
+`docs/superpowers/` is a historical archive of specs and plans. It is excluded from the
+published site and does **not** count as documenting a change.
+
+When a change genuinely needs no documentation — a pure refactor, a dependency bump — add
+the `no-docs-needed` label to the PR to satisfy the `docs-freshness` gate.
 
 ## Conventions
 
