@@ -1,0 +1,59 @@
+site_name: skill-eval
+site_description: Run evaluations on Agent Skills (SKILL.md) — in CI/CD or on demand.
+site_url: https://emadmokhtar.github.io/skill-evaluator/
+repo_url: https://github.com/EmadMokhtar/skill-evaluator
+repo_name: EmadMokhtar/skill-evaluator
+edit_uri: edit/main/docs/
+
+validation:
+  anchors: warn
+  absolute_links: warn
+
+# docs/superpowers/ is a historical record of design specs and plans. It lives
+# in the repo but is not part of the published site.
+exclude_docs: |
+  superpowers/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  # base_path reaches the repo root so docs/architecture.md can include the
+  # root-level ARCHITECTURE.md instead of duplicating it.
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Reference:
+      - Eval files: eval-files.md
+      - CLI: cli.md
+      - Configuration: configuration.md
+      - Runners: runners.md
+      - Gating and exit codes: gating.md
+  - Roadmap: roadmap.md
+  - Architecture: architecture.md
+  - Contributing: contributing.md
