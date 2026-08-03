@@ -32,6 +32,11 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Set up Python
+        # Same pin as ci.yml, so what deploys is built on the interpreter the
+        # PR gate already checked rather than the runner's shifting default.
+        run: uv python install 3.11
+
       - name: Install dependencies
         run: uv sync --group docs
 
