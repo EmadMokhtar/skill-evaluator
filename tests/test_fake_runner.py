@@ -72,3 +72,22 @@ def test_fake_runner_satisfies_the_runner_protocol():
     against it, so a protocol drift (a renamed run, a dropped name) would otherwise
     go undetected."""
     assert isinstance(FakeRunner(), Runner)
+
+
+def test_the_baseline_arm_can_be_scripted_separately():
+    runner = FakeRunner(
+        responses={"t": RunResult(output="with skill")},
+        baseline_responses={"t": RunResult(output="without skill")},
+    )
+    case = EvalCase(name="c", task="t")
+    candidate = Skill(name="s", path=Path("."))
+    baseline = Skill(name="s", path=Path("."), variant="baseline")
+
+    assert runner.run(candidate, case).output == "with skill"
+    assert runner.run(baseline, case).output == "without skill"
+
+
+def test_an_unscripted_baseline_arm_falls_back_to_the_shared_script():
+    runner = FakeRunner(responses={"t": RunResult(output="shared")})
+    baseline = Skill(name="s", path=Path("."), variant="baseline")
+    assert runner.run(baseline, EvalCase(name="c", task="t")).output == "shared"
