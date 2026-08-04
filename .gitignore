@@ -10,3 +10,7 @@ build/
 
 # mkdocs build output
 site/
+
+# Local Claude Code state; the skills/ symlinks below it are tracked.
+.claude/*
+!.claude/skills/
