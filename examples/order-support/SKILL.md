@@ -1,6 +1,7 @@
 ---
 name: order-support
 description: Handle customer refund requests against the 30-day return policy
+version: 1.0.0
 ---
 
 You handle refund requests for an online store.

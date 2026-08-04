@@ -184,3 +184,21 @@ def test_a_real_judge_drives_the_evaluator_end_to_end(replay):
     assert score.passed is True
     assert len(score.checks) == 2
     assert score.cost_usd > 0
+
+
+@pytest.mark.cassette
+@pytest.mark.vcr
+def test_a_baseline_run_reaches_the_provider_without_the_skill_name(replay, tmp_path):
+    """The neutral preamble is what the provider actually receives.
+
+    A unit test proves the string; only a recorded exchange proves it survived
+    the adapter and went out on the wire.
+    """
+    skill = Skill(
+        name="order-support", description="", instructions="", variant="baseline", path=tmp_path
+    )
+    runner = PydanticAIRunner(model="openai:gpt-4o-mini")
+    result = runner.run(skill, EvalCase(name="c", task="Say hello in five words."))
+
+    assert result.errored is False
+    assert "order-support" not in result.output
