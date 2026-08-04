@@ -47,7 +47,7 @@ cases:
         description: Run a shell command and return its output
         parameters:
           command: string
-        returns: 'order-support  4 case(s)  skills/order-support'
+        returns: 'order-support  0 case(s)  skills/order-support'
     trajectory:
       order: [read_file, write_file]
       max_calls: 8
