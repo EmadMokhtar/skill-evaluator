@@ -96,3 +96,27 @@ def test_an_unfilled_scaffold_fails_a_run_as_an_authoring_error(tmp_path):
     result = runner.invoke(app, ["run", str(path)])
     assert result.exit_code == 2
     assert UNFILLED_SENTINEL in result.output
+
+
+def test_a_skill_md_with_non_mapping_frontmatter_is_a_user_error(tmp_path):
+    # Frontmatter that parses as YAML but isn't a mapping (e.g. a bare list)
+    # reaches SkillParseError, which init must surface as a clean exit 2 --
+    # not a traceback, and not the "no SKILL.md" message, which is a
+    # different cause.
+    path = tmp_path / "order-support"
+    path.mkdir()
+    (path / "SKILL.md").write_text("---\n- just a list\n---\n\nbody\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["init", str(path)])
+    assert result.exit_code == 2
+    assert "frontmatter" in result.output
+
+
+def test_a_skill_md_with_unparseable_yaml_frontmatter_is_a_user_error(tmp_path):
+    path = tmp_path / "order-support"
+    path.mkdir()
+    (path / "SKILL.md").write_text("---\nname: [unclosed\n---\n\nbody\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["init", str(path)])
+    assert result.exit_code == 2
+    assert "frontmatter" in result.output

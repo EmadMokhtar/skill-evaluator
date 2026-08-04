@@ -10,7 +10,8 @@ skill-eval --version
 ```
 
 `<path>` is a skill directory or a directory of skill directories. Discovery is
-recursive.
+recursive. `init` is the exception: its `<path>` is exactly one skill directory
+containing `SKILL.md`, never a directory of skills.
 
 ## `run`
 
@@ -59,6 +60,9 @@ order-support	5 case(s)	examples/order-support
 skill-eval init <skill-dir> [--force]
 ```
 
+`<skill-dir>` names exactly one skill directory containing `SKILL.md` — unlike `run` and
+`list`, `init` does not accept a directory of skill directories and does not discover.
+
 Writes a starter eval suite to `<skill-dir>/evals/<skill-name>.eval.yaml`: a common-case
 case, a policy-edge case carrying `tools:` and `trajectory:`, and both halves of the
 `mode: offered` triggering pair.
@@ -71,8 +75,9 @@ The generated file is therefore never a green suite that checks nothing.
 | --- | --- |
 | `--force` | Overwrite an existing eval file. Without it, an existing file is a user error. |
 
-Exit `0` on success. Exit `2` when the path holds no `SKILL.md`, when the output file
-exists and `--force` was not given, or when the file cannot be written.
+Exit `0` on success. Exit `2` when the path holds no `SKILL.md`, when `SKILL.md` is
+malformed, when the output file exists and `--force` was not given, or when the file
+cannot be written.
 
 ## `--version`
 
