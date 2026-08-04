@@ -501,8 +501,13 @@ def test_the_run_plan_is_a_ceiling_not_a_forecast(tmp_path, monkeypatch):
     # `mode: offered` under --baseline none and unresolvable baselines both drop
     # the baseline arm, so the printed total can only ever overstate. Saying
     # "up to" is what makes it honest.
+    #
+    # The skill deliberately has no eval cases: the plan line prints before
+    # `run_evals` does anything, so this exercises the plan arithmetic without
+    # the runner ever being called. A version of this test with real cases sent
+    # four live requests to the provider on every run of the default test tier.
     monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-parsing")
-    _make_skill(tmp_path)
+    _make_skill(tmp_path, cases=None)
     result = runner.invoke(
         app,
         ["run", str(tmp_path), "--runner", "pydantic-ai", "--baseline", "none", "--repeat", "2"],
