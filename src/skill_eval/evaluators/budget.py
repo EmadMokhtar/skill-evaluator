@@ -61,10 +61,11 @@ def _checks(spec: BudgetSpec, result: RunResult) -> tuple[list[CheckResult], int
 
 
 class BudgetEvaluator:
-    """Every limit that was actually evaluated must hold; the score is the fraction
-    of *evaluated* limits that held. A limit whose cost could not be priced is
-    skipped rather than counted as passed, so an unpriced model cannot earn a
-    vacuous "within budget" verdict.
+    """Every declared limit must hold to pass; an unevaluated limit fails the
+    case. The score is the fraction of *evaluated* limits that held, so an
+    unpriceable limit neither inflates nor deflates it. An unpriced model
+    degrades cost to 0.0, and 0.0 > max_cost_usd is always False—so evaluating
+    it would falsely report "within budget" for something never checked.
     """
 
     name = "budget"
