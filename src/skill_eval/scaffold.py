@@ -21,6 +21,9 @@ _TEMPLATE = """\
 # skill-eval treats an unfilled scaffold as an authoring error (exit 2) rather
 # than reporting cases that check nothing as passes.
 #
+# Preserve the indentation of continuation lines after >- or |- so your text
+# can safely include colons, apostrophes, and quotes.
+#
 # Reference: https://emadmokhtar.github.io/skill-evaluator/eval-files/
 cases:
   # 1. The common case. Keep at least one assertion -- a case with none passes

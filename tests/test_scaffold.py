@@ -85,3 +85,9 @@ def test_no_scaffold_case_is_assertion_free_unless_it_checks_triggering():
         if case.get("mode") == "offered":
             continue
         assert case["assertions"], case["name"]
+
+
+def test_scaffold_header_mentions_indentation():
+    text = render_scaffold(SKILL)
+    assert "indentation" in text.lower()
+    assert "continuation" in text.lower() or ">-" in text
