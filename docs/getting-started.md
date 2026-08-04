@@ -23,9 +23,11 @@ version: 1.0.0
 previous version of the skill in git history — see
 [Comparative evals](comparative-evals.md).
 
-Versions must be quoted text: an unquoted numeric-looking version fails the run
-with a parse error. To YAML, `1.20` and `1.2` are the same number, so two
-different versions would silently compare equal without quotes.
+Versions must parse as text. The three-part semver above, `1.0.0`, is already text to
+YAML and needs no quotes. A two-part decimal is the trap: `version: 1.20` reads as the
+*number* `1.2`, indistinguishable from `1.2` itself, so two genuinely different versions
+would silently compare equal — that case is rejected at parse time with a quoting hint
+rather than accepted and later mistaken for a version that never changed.
 
 ```yaml
 # greeting.eval.yaml
