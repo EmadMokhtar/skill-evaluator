@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from skill_eval.cases.loader import load_cases_for_skill
 from skill_eval.evaluators.assertion import ASSERTION_KINDS
 from skill_eval.models import EvalCase
-from skill_eval.skills.loader import parse_skill_file
+from skill_eval.skills.loader import load_skills, parse_skill_file
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILL_DIR = REPO_ROOT / "skills" / "writing-skill-evals"
@@ -40,3 +41,24 @@ def test_the_skill_is_linked_into_dot_claude():
     link = REPO_ROOT / ".claude" / "skills" / "writing-skill-evals"
     assert link.is_dir(), "the skill is not linked into .claude/skills/"
     assert (link / "SKILL.md").is_file()
+
+
+SKILLS_DIR = REPO_ROOT / "skills"
+
+
+def test_the_shipped_skill_has_cases_that_parse():
+    # This call also exercises the loader's cross-reference validation, so an
+    # undeclared trajectory tool or a leftover placeholder surfaces here.
+    (skill,) = load_skills(SKILLS_DIR)
+    cases = load_cases_for_skill(skill)
+    assert cases
+
+
+def test_the_shipped_suite_ships_both_halves_of_the_triggering_pair():
+    (skill,) = load_skills(SKILLS_DIR)
+    triggered = [
+        case.trajectory.skill_triggered
+        for case in load_cases_for_skill(skill)
+        if case.mode == "offered"
+    ]
+    assert sorted(triggered) == [False, True]

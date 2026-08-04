@@ -1,0 +1,93 @@
+# Evals for the skill that writes evals. Four cases, three concerns:
+#   - triggering: does it fire on an eval-writing request, and stay quiet
+#     otherwise (the negative control this skill insists on for everyone else).
+#   - authoring: does it read the skill before writing the file, and is what it
+#     writes a suite rather than a shape -- judged, because "includes a negative
+#     control" is a property of the YAML, not a substring of the reply.
+#   - auditing: handed a deliberately weak suite, does it name what is missing.
+cases:
+  - name: reaches for the skill on an eval-writing request
+    mode: offered
+    task: Write evals for my order-support skill in ./skills/order-support
+    tags: [triggering]
+    trajectory:
+      skill_triggered: true
+
+  - name: leaves unrelated work alone
+    mode: offered
+    task: Rename the `parse` function in utils.py to `parse_input`
+    tags: [triggering]
+    trajectory:
+      skill_triggered: false
+
+  - name: reads the skill before writing the suite
+    task: >-
+      Write an eval suite for the skill at ./skills/order-support. Read the
+      skill first, then write the file.
+    tags: [authoring, judged]
+    tools:
+      - name: read_file
+        description: Read a file from disk
+        parameters:
+          path: string
+        returns: |
+          ---
+          name: order-support
+          description: Handle customer refund requests against the 30-day return policy
+          ---
+          Always call lookup_order before saying anything about an order's state.
+          Never issue a refund for an order delivered more than 30 days ago.
+      - name: write_file
+        description: Write text to a file on disk
+        parameters:
+          path: string
+          content: string
+        returns: '{"ok": true}'
+      - name: run_command
+        description: Run a shell command and return its output
+        parameters:
+          command: string
+        returns: 'order-support  4 case(s)  skills/order-support'
+    trajectory:
+      order: [read_file, write_file]
+      max_calls: 8
+    judge:
+      expected: >-
+        An eval suite covering both sides of the 30-day policy, with a
+        mode: offered pair including the negative control, and no placeholders
+        left in it.
+      rubric:
+        - The suite it wrote includes a case where a refund is refused
+        - The suite it wrote includes a case where a refund is allowed
+        # Quoted: a plain YAML scalar cannot contain ": ".
+        - "The suite it wrote includes a mode: offered case expecting skill_triggered true"
+        - "The suite it wrote includes a mode: offered case expecting skill_triggered false"
+        - No case in the suite it wrote still contains the text TODO
+        - Every non-triggering case it wrote has at least one assertion, judge or trajectory check
+
+  - name: names what a weak suite is missing
+    task: Review the eval file at ./skills/greeting/evals/greeting.eval.yaml and tell me what is wrong with it
+    tags: [auditing, judged]
+    tools:
+      - name: read_file
+        description: Read a file from disk
+        parameters:
+          path: string
+        returns: |
+          cases:
+            - name: greets someone
+              task: greet Ada
+            - name: fires on a greeting request
+              mode: offered
+              task: say hello to Ada
+              trajectory:
+                skill_triggered: true
+    trajectory:
+      called: [read_file]
+    judge:
+      expected: >-
+        A review naming the assertion-free first case and the missing negative
+        control for the triggering case.
+      rubric:
+        - The review says the first case checks nothing because it has no assertions
+        - The review says the triggering case has no negative control
