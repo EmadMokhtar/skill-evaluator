@@ -1,5 +1,6 @@
+from skill_eval.comparison import ArmStats, CaseStats, Delta
 from skill_eval.gating import EXIT_FAILED, EXIT_OK, evaluate_gate
-from skill_eval.models import CaseOutcome, RunReport
+from skill_eval.models import BaselineNote, CaseOutcome, RunReport
 
 
 def _report(*statuses_by_skill):
@@ -118,3 +119,83 @@ def test_singular_case_errored_message():
     gate = evaluate_gate(_report(("a", "errored")), fail_on_error=True, min_pass_rate=0.0)
     assert gate.passed is False
     assert any("1 case errored" in r for r in gate.reasons)
+
+
+def _delta(pass_rate_delta: float, *, comparable: bool = True) -> Delta:
+    return Delta(
+        baseline_kind="none",
+        pass_rate_delta=pass_rate_delta,
+        cases=[
+            CaseStats(
+                skill_name="pdf",
+                case_name="c",
+                runner="fake",
+                candidate=ArmStats(runs=1, passed=1, pass_rate=1.0),
+                baseline=ArmStats(runs=1),
+                comparable=comparable,
+                exclusion_reason="" if comparable else "no baseline run",
+            )
+        ],
+    )
+
+
+def test_a_delta_at_or_above_the_bar_passes():
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.2, delta=_delta(0.2))
+    assert gate.passed is True
+    assert gate.exit_code == EXIT_OK
+
+
+def test_a_delta_below_the_bar_fails():
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.2, delta=_delta(0.05))
+    assert gate.passed is False
+    assert gate.exit_code == EXIT_FAILED
+    assert any("delta" in reason for reason in gate.reasons)
+
+
+def test_a_negative_delta_fails_a_must_not_regress_bar():
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.0, delta=_delta(-0.25))
+    assert gate.passed is False
+
+
+def test_gating_on_a_delta_with_nothing_comparable_fails():
+    # A check that verified nothing must never report a pass.
+    gate = evaluate_gate(
+        _report(("pdf", "passed")), min_delta=0.0, delta=_delta(0.0, comparable=False)
+    )
+    assert gate.passed is False
+    assert any("comparable" in reason for reason in gate.reasons)
+
+
+def test_gating_on_a_delta_with_no_delta_at_all_fails():
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.0, delta=None)
+    assert gate.passed is False
+
+
+def test_an_unresolved_baseline_fails_a_delta_gate():
+    report = RunReport(
+        outcomes=[CaseOutcome(skill_name="pdf", case_name="c", runner="fake", status="passed")],
+        baseline_kind="previous",
+        baseline_notes=[BaselineNote(skill_name="pdf", kind="unavailable", reason="no repo")],
+    )
+    gate = evaluate_gate(report, min_delta=0.0, delta=_delta(0.5))
+    assert gate.passed is False
+    assert any("no repo" in reason for reason in gate.reasons)
+
+
+def test_a_deliberately_skipped_baseline_is_not_a_gate_reason():
+    # Nothing went wrong: `mode: offered` has nothing to offer under
+    # `--baseline none`. It still excludes the case from the delta.
+    report = RunReport(
+        outcomes=[CaseOutcome(skill_name="pdf", case_name="c", runner="fake", status="passed")],
+        baseline_kind="none",
+        baseline_notes=[
+            BaselineNote(skill_name="pdf", case_name="c", kind="skipped", reason="offered")
+        ],
+    )
+    gate = evaluate_gate(report, min_delta=0.0, delta=_delta(0.5))
+    assert gate.passed is True
+
+
+def test_without_min_delta_the_delta_is_reported_but_not_gated():
+    gate = evaluate_gate(_report(("pdf", "passed")), delta=_delta(-0.9))
+    assert gate.passed is True
