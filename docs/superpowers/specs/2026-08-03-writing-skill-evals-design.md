@@ -1,7 +1,7 @@
 # Design: a skill for writing evals, and the scaffolder under it
 
 Date: 2026-08-03
-Status: approved, not yet implemented
+Status: implemented
 
 ## Problem
 
