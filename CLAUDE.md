@@ -9,16 +9,21 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M3**: the pipeline runs real agents through `PydanticAIRunner`
+Currently at **M4**: the pipeline runs real agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
 remains the default and the backbone of the zero-cost test tier. M3 adds a
 rubric-based LLM judge that scores output quality with per-check evidence, and
 an `offered` case mode that measures whether the agent chose to trigger the
-skill at all, negative controls included. Milestones are defined in
+skill at all, negative controls included. M4 makes every measurement
+comparative: each case can run in a candidate arm and a baseline arm
+(`--baseline none` or `--baseline previous`, resolved from git), optionally
+sampled `--repeat N` times, with the report gaining a delta and `--min-delta`
+gating on it. Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
-in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, and the M3
-design is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`.
+in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
+is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, and the M4
+design is in `docs/superpowers/specs/2026-08-03-skill-eval-m4-design.md`.
 
 ## Commands
 
@@ -101,8 +106,13 @@ form, that file is the explanation.
   error rather than a total that silently disagrees with the input/output split it was priced from.
 - **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` plus a
   `cost_note`; pricing is reporting metadata and must never be why a run errors. An unpriceable
-  cost limit is skipped in `BudgetEvaluator` — not counted as passed — so an unpriced cost limit
-  as the only budget check causes the case to fail (nothing was verified).
+  `max_cost_usd` is skipped in `BudgetEvaluator` — not counted as passed, recorded as a failing
+  check instead — so **any** budget block declaring it fails the case, even one whose other
+  priced limits (`max_tokens`, `max_latency_ms`) all hold; `score` still excludes the unpriced
+  limit from its divisor, so it neither inflates nor deflates that number. A repo running an
+  unpriced model with a budget block that mixes a priced limit and `max_cost_usd` will see
+  those cases turn red on upgrade — drop `max_cost_usd` for that provider rather than relying
+  on the skip to be silently ignored.
 - **Mock tools accept any arguments.** A model hallucinating an argument must not raise, or an
   eval signal would surface as an infra error.
 - **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act;
@@ -118,6 +128,29 @@ form, that file is the explanation.
   `judge = "fake"` safe as the built-in default: an unchecked rubric is never a green case.
 - **Judge spend never enters `RunResult`.** It lives on `EvalScore.cost_usd` and is reported
   as judge overhead; `budget:` measures the skill, not the harness.
+- **A `version:` that YAML does not parse as a string is an authoring error.** `SkillParseError`,
+  exit 2. YAML resolves `1.20` and `1.2` to the same float, so two genuinely different versions
+  would silently compare equal under `--baseline previous`; three-part semver (`1.0.0`) is
+  already a string and needs no quoting.
+- **Absent `--baseline`, behavior is identical to the single-arm run.** `none` is a *kind* of
+  baseline; the flag being unset — not `--baseline none` — is what turns comparison off.
+- **Baseline outcomes never count toward the gate's pass rate or `errored`.** Every
+  `RunReport` aggregate reads `candidate_outcomes`; `baseline_outcomes` / `baseline_errored`
+  surface the comparison side apart from them.
+- **The baseline arm never receives the skill's name under `--baseline none`.** A skill with
+  both `description` and `instructions` empty gets `BASELINE_PREAMBLE` instead of the normal
+  `# {name}` header, keyed on emptiness rather than on which arm is running.
+- **An unresolvable baseline is reported, never assumed to be "no change".** `resolve_previous`
+  returns `BaselineUnavailable`; treating silence as "no change" would let a repo pass
+  `--min-delta` forever by deleting its git history.
+- **The delta is paired: a case excluded from one arm is excluded from both.** Keeping the
+  surviving half of a broken pair would bias the aggregate with an unmeasured comparison.
+- **`--min-delta` without a baseline is a user error (exit 2); gating on a delta with nothing
+  comparable fails.** Both are the vacuous-pass rejection this project applies everywhere else.
+- **Low-signal and high-variance flags never change the exit code.** They are diagnostics
+  about the eval suite, not verdicts on the skill.
+- **`resolve_previous` never raises for environmental failures** — no `git`, no repo, an
+  untracked `SKILL.md`, an exhausted history window all come back as `BaselineUnavailable`.
 
 ## Documentation
 

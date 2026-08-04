@@ -26,12 +26,19 @@ greeting = 0.9
 | `min_pass_rate` | `1.0` | `--min-pass-rate` |
 | `fail_on_error` | `true` | — |
 | `per_skill_min` | `{}` | — |
-| `baseline` | `""` | `""` (off), `"none"` or `"previous"`. Overridden by `--baseline`. |
-| `repeat` | `1` | Repetitions per arm. Overridden by `--repeat`. |
-| `min_delta` | unset | Required improvement over the baseline. Unset means the delta is reported but not gated; `0.0` is the stricter "must not regress". Overridden by `--min-delta`. |
+| `baseline` | `""` | `--baseline` |
+| `repeat` | `1` | `--repeat` |
+| `min_delta` | unset | `--min-delta` |
 
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
+
+`baseline` is `""` (off), `"none"` (compare against an empty skill) or `"previous"` (compare
+against the prior version resolved from git). `repeat` is how many times each arm is sampled
+per case. `min_delta` has no default — leaving it unset means the delta is reported but not
+gated, and `0.0` is a real, stricter choice ("must not regress") rather than the same as
+unset. All three are detailed in [Comparative evals](comparative-evals.md), including why
+`min_delta` requires `baseline` to be set.
 
 `model`, `retries`, and `retry_backoff_seconds` only matter to components that reach a
 provider (`pydantic-ai`, as a runner or a judge); `FakeRunner` and `FakeJudge` ignore them.
