@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from skill_eval.comparison import ArmStats, CaseStats, Delta
+from skill_eval.comparison import ArmStats, CaseStats, Delta, format_baseline_notes
 from skill_eval.gating import GateResult
 from skill_eval.models import RunReport
 
@@ -62,6 +62,21 @@ def _delta_block(delta: Delta) -> list[str]:
         lines.extend(f"  - {note}" for note in delta.notes)
     lines.append("")
     lines.append("Flags above are advice about the eval suite; they never fail the gate.")
+    return lines
+
+
+def _no_baseline_block(report: RunReport) -> list[str]:
+    """Say so when a comparative run produced no baseline arm at all.
+
+    Without this, `--baseline previous` in a shallow clone prints output
+    indistinguishable from a non-comparative run and exits 0 -- the user is
+    never told the comparison silently stopped happening.
+    """
+    lines = ["", "No baseline arm ran, so no delta was computed."]
+    notes = format_baseline_notes(report.baseline_notes)
+    if notes:
+        lines.append("Baseline notes:")
+        lines.extend(f"  - {note}" for note in notes)
     return lines
 
 
@@ -170,6 +185,8 @@ def render_console(
 
     if delta is not None:
         lines.extend(_delta_block(delta))
+    elif report.baseline_kind is not None:
+        lines.extend(_no_baseline_block(report))
 
     if gate is not None and not gate.passed:
         lines.append("")

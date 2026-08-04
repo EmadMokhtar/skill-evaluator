@@ -28,6 +28,7 @@ def render_json(
             "passed": report.passed,
             "failed": report.failed,
             "errored": report.errored,
+            "baseline_errored": report.baseline_errored,
             "pass_rate": report.pass_rate,
             "pass_rate_by_skill": report.pass_rate_by_skill(),
             "total_tokens": total_tokens,

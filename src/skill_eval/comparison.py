@@ -12,7 +12,7 @@ from statistics import pstdev
 
 from pydantic import BaseModel, Field
 
-from skill_eval.models import Arm, BaselineKind, CaseOutcome, RunReport
+from skill_eval.models import Arm, BaselineKind, BaselineNote, CaseOutcome, RunReport
 
 
 class ArmStats(BaseModel):
@@ -80,6 +80,21 @@ class Delta(BaseModel):
     low_signal: list[LowSignalCheck] = Field(default_factory=list)
     high_variance: list[CaseRef] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+
+
+def format_baseline_notes(notes: list[BaselineNote]) -> list[str]:
+    """Render baseline notes for a human.
+
+    Lifted out of `build_delta` because the console has to print these even
+    when there is no delta at all -- a comparative run whose baseline never
+    materialised must not look identical to a non-comparative one.
+    """
+    return [
+        f"{note.skill_name}: baseline unavailable — {note.reason}"
+        if note.kind == "unavailable"
+        else f"{note.skill_name} :: {note.case_name}: baseline skipped — {note.reason}"
+        for note in notes
+    ]
 
 
 def _mean(values: list[float]) -> float:
@@ -223,10 +238,5 @@ def build_delta(report: RunReport) -> Delta | None:
         cases=cases,
         low_signal=all_low_signal,
         high_variance=all_high_variance,
-        notes=[
-            f"{note.skill_name}: baseline unavailable — {note.reason}"
-            if note.kind == "unavailable"
-            else f"{note.skill_name} :: {note.case_name}: baseline skipped — {note.reason}"
-            for note in report.baseline_notes
-        ],
+        notes=format_baseline_notes(report.baseline_notes),
     )

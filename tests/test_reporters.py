@@ -417,3 +417,54 @@ def test_every_efficiency_line_states_which_direction_is_better():
         stripped = line.strip()
         if stripped.startswith(("tokens", "cost", "latency")):
             assert "negative is better" in line, f"no direction stated on: {line!r}"
+
+
+def test_a_comparative_run_with_no_baseline_arm_says_so():
+    # A --baseline run in a shallow clone must not look like a plain run.
+    report = RunReport(
+        baseline_kind="previous",
+        outcomes=[_arm_outcome("passed")],
+        baseline_notes=[
+            BaselineNote(skill_name="pdf", kind="unavailable", reason="not tracked by git")
+        ],
+    )
+    text = render_console(report, delta=build_delta(report))
+    assert "No baseline arm ran" in text
+    assert "not tracked by git" in text
+
+
+def test_a_skipped_baseline_note_renders_with_its_case():
+    # The "skipped" formatting branch was previously unreachable from the console.
+    report = RunReport(
+        baseline_kind="none",
+        outcomes=[_arm_outcome("passed")],
+        baseline_notes=[
+            BaselineNote(
+                skill_name="pdf",
+                case_name="triggers",
+                kind="skipped",
+                reason="mode: offered has nothing to offer under --baseline none",
+            )
+        ],
+    )
+    text = render_console(report, delta=build_delta(report))
+    assert "pdf :: triggers" in text
+
+
+def test_a_run_with_no_baseline_requested_says_nothing_about_baselines():
+    # M3 parity: a user who never opted in sees no new lines.
+    assert "No baseline arm ran" not in render_console(_report())
+
+
+def test_json_summary_carries_baseline_errored_count():
+    # Nothing read this field before; a CI dashboard needs it to see an
+    # errored baseline repetition without parsing the raw outcomes list.
+    report = RunReport(
+        baseline_kind="none",
+        outcomes=[
+            _arm_outcome("passed"),
+            _arm_outcome("errored", arm="baseline"),
+        ],
+    )
+    payload = json.loads(render_json(report, delta=build_delta(report)))
+    assert payload["summary"]["baseline_errored"] == 1
