@@ -26,6 +26,11 @@ user's suite unasked.
       check is skipped, so the case fails for having verified nothing.
 - [ ] **Leftover placeholders.** `TODO(skill-eval)` anywhere.
 - [ ] **Tags.** Is there a `smoke` subset a fast CI job could run?
+- [ ] **Cases that error under the configured runner or judge.** An `errored` case never
+      ran to a verdict; it says nothing about the skill. Check whether the harness is
+      simply unconfigured (default fake runner, default fake judge) or the case declares
+      something this runner cannot report (`mode: offered` under a runner with no
+      triggering support, for instance).
 
 ## Reporting
 
