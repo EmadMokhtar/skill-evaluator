@@ -86,6 +86,7 @@ discipline runners follow for provider failures:
 | `git` is not installed | The environment cannot answer the question at all |
 | not a git repository | The skill's directory (or an ancestor) has no `.git` |
 | `SKILL.md` is not tracked by git | The file exists but was never committed |
+| cannot read the working copy's `SKILL.md` | Filesystem error (file missing, permission denied) or character encoding issue |
 | no earlier version found within the searched history | Every commit in the last 50 has the same version (or, unversioned, the same content) |
 
 **An unresolvable baseline is reported, never assumed to be "no change".** Treating "we

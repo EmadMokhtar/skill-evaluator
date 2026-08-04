@@ -62,7 +62,7 @@ of these numbers move from what they were before comparative evals existed.
   deleting its git history.
 
 `--min-delta` requires `--baseline`; passing one without the other is a user/authoring error
-(exit `2`), not a gate failure, since the resolved model is rejected before any case runs. A
+(exit `2`), not a gate failure, since the configuration is rejected before any case runs. A
 deliberately skipped baseline (an `offered` case under `--baseline none`) is not, on its own,
 a gate reason — nothing went wrong there. See
 [Comparative evals](comparative-evals.md#-min-delta) for the full picture, including how the
