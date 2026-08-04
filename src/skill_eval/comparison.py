@@ -125,6 +125,36 @@ def _exclusion_reason(candidate: list[CaseOutcome], baseline: list[CaseOutcome])
     return ""
 
 
+def _check_verdicts(outcome: CaseOutcome) -> dict[tuple[str, str], bool]:
+    """Every check this run produced, keyed by (evaluator, check id)."""
+    return {
+        (score.evaluator, check.id): check.passed
+        for score in outcome.scores
+        for check in score.checks
+    }
+
+
+def _low_signal(candidate: list[CaseOutcome], baseline: list[CaseOutcome]) -> list[tuple[str, str]]:
+    """Checks that passed in every scored repetition of both arms.
+
+    A check missing from any repetition is skipped rather than assumed: an
+    unanimous verdict cannot be claimed from an incomplete one.
+    """
+    runs = [_check_verdicts(o) for o in _scored(candidate) + _scored(baseline)]
+    if not runs:
+        return []
+    shared = set(runs[0])
+    for verdicts in runs[1:]:
+        shared &= set(verdicts)
+    return sorted(key for key in shared if all(verdicts[key] for verdicts in runs))
+
+
+def _high_variance(stats: ArmStats) -> bool:
+    """True when repetitions disagreed. Only meaningful above one repetition."""
+    scored = stats.runs - stats.errored
+    return scored > 1 and 0.0 < stats.pass_rate < 1.0
+
+
 def build_delta(report: RunReport) -> Delta | None:
     """Compare the arms, or return None when only one arm ran."""
     if not report.baseline_outcomes or report.baseline_kind is None:
@@ -133,6 +163,8 @@ def build_delta(report: RunReport) -> Delta | None:
     cases: list[CaseStats] = []
     paired_candidate: list[CaseOutcome] = []
     paired_baseline: list[CaseOutcome] = []
+    all_low_signal: list[LowSignalCheck] = []
+    all_high_variance: list[CaseRef] = []
 
     for (skill_name, case_name, runner), arms in _group(report).items():
         candidate, baseline = arms["candidate"], arms["baseline"]
@@ -146,9 +178,35 @@ def build_delta(report: RunReport) -> Delta | None:
             comparable=not reason,
             exclusion_reason=reason,
         )
+        low_signal: list[LowSignalCheck] = []
         if not reason:
             paired_candidate.extend(candidate)
             paired_baseline.extend(baseline)
+            for evaluator, check_id in _low_signal(candidate, baseline):
+                low_signal.append(
+                    LowSignalCheck(
+                        skill_name=skill_name,
+                        case_name=case_name,
+                        evaluator=evaluator,
+                        check_id=check_id,
+                    )
+                )
+            stats.low_signal = [c.check_id for c in low_signal]
+            all_low_signal.extend(low_signal)
+
+        for arm_name, arm_stats in (("candidate", stats.candidate), ("baseline", stats.baseline)):
+            if arm_stats is not None and _high_variance(arm_stats):
+                stats.high_variance = True
+                all_high_variance.append(
+                    CaseRef(
+                        skill_name=skill_name,
+                        case_name=case_name,
+                        runner=runner,
+                        arm=arm_name,
+                        pass_rate=arm_stats.pass_rate,
+                        stddev=arm_stats.stddev,
+                    )
+                )
         cases.append(stats)
 
     candidate_stats = _arm_stats(paired_candidate)
@@ -163,6 +221,8 @@ def build_delta(report: RunReport) -> Delta | None:
         cost_usd_delta=candidate_stats.mean_cost_usd - baseline_stats.mean_cost_usd,
         latency_ms_delta=candidate_stats.mean_latency_ms - baseline_stats.mean_latency_ms,
         cases=cases,
+        low_signal=all_low_signal,
+        high_variance=all_high_variance,
         notes=[
             f"{note.skill_name}: baseline unavailable — {note.reason}"
             if note.kind == "unavailable"
