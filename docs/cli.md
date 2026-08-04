@@ -5,11 +5,13 @@ skill-eval run <path> [--evals <path>] [--runner <name>] [--model <name>]
                       [--judge-model <name>] [--tag <tag>] [--min-pass-rate <float>]
                       [--json-output <path>] [--config <file>]
 skill-eval list <path> [--evals <path>]
+skill-eval init <path> [--force]
 skill-eval --version
 ```
 
 `<path>` is a skill directory or a directory of skill directories. Discovery is
-recursive.
+recursive. `init` is the exception: its `<path>` is exactly one skill directory
+containing `SKILL.md`, never a directory of skills.
 
 ## `run`
 
@@ -51,6 +53,31 @@ uv run skill-eval list ./examples
 greeting	1 case(s)	examples/greeting
 order-support	5 case(s)	examples/order-support
 ```
+
+## `init`
+
+```bash
+skill-eval init <skill-dir> [--force]
+```
+
+`<skill-dir>` names exactly one skill directory containing `SKILL.md` — unlike `run` and
+`list`, `init` does not accept a directory of skill directories and does not discover.
+
+Writes a starter eval suite to `<skill-dir>/evals/<skill-name>.eval.yaml`: a common-case
+case, a policy-edge case carrying `tools:` and `trajectory:`, and both halves of the
+`mode: offered` triggering pair.
+
+Every field you have to supply holds the placeholder `TODO(skill-eval)`, and a case still
+containing one aborts the run as an [authoring error](eval-files.md#unfilled-scaffolds).
+The generated file is therefore never a green suite that checks nothing.
+
+| Flag | Meaning |
+| --- | --- |
+| `--force` | Overwrite an existing eval file. Without it, an existing file is a user error. |
+
+Exit `0` on success. Exit `2` when the path holds no `SKILL.md`, when `SKILL.md` is
+malformed, when the output file exists and `--force` was not given, or when the file
+cannot be written.
 
 ## `--version`
 

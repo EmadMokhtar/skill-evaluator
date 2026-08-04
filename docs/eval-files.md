@@ -91,6 +91,19 @@ Setting `skill_triggered` on a `mode: loaded` case is an authoring error too: a 
 is always in force, so the check could never be false. Running an offered case on a runner
 that does not support the mode is **errored**, never a quiet pass.
 
+## Unfilled scaffolds
+
+`skill-eval init` writes placeholder fields holding the literal `TODO(skill-eval)`.
+Loading a case that still contains one is an **authoring error**: the run aborts with
+exit `2` naming the file, the case, and the field.
+
+That is deliberate, and it is the loader's rule rather than the scaffolder's — a
+hand-written stub is refused the same way. An unfinished eval that ran would either pass
+while checking nothing or fail while saying nothing about the skill, and both are worse
+than a run that stops and tells you which field to fill in.
+
+Comments are discarded before the check, so a file may discuss the token freely.
+
 ## Assertion kinds
 
 | `kind` | Passes when |

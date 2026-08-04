@@ -63,6 +63,7 @@ problem (errored) from a low score (failed).
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models. |
 | `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models. |
+| `scaffold.py` | Renders the starter eval suite `skill-eval init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. |
 | `runners/base.py` | The `Runner` protocol. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of only two modules that import an agent framework.** |
@@ -139,6 +140,13 @@ propagate; `cli.py` catches them via `_AUTHORING_ERRORS` and exits 2.
 **Exit codes are the CI contract.** Gate passed `0`, gate failed `1`, user or authoring
 error `2`. In `cli.py`, a JSON-write failure escalates to 2 only when the gate itself
 passed — a write problem must never mask an already-failing gate.
+
+**An unfilled scaffold is an authoring error, not a failure.** `skill-eval init` writes
+`TODO(skill-eval)` into every field the author must supply, and `cases/loader.py`
+rejects any case still containing it — before schema validation, so the message names
+the field rather than its type. Enforcing this in the loader rather than the generator
+makes it unconditional: hand-written stubs get it too, and no CI configuration can opt
+out of it.
 
 **`extra="forbid"` on every user-authored model.** `EvalCase`, `AssertionSpec`, `ToolSpec`,
 `TrajectorySpec`, `BudgetSpec`, `Config`. Without it, a typo like `assertion:` yields a

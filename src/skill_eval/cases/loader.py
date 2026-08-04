@@ -14,9 +14,53 @@ from skill_eval.yaml_loading import safe_load
 EVALS_DIRNAME = "evals"
 EVAL_SUFFIX = ".eval.yaml"
 
+# The placeholder `skill-eval init` writes into every field the author has to
+# fill in. Living here rather than in scaffold.py makes it the *loader's*
+# guarantee: a hand-written stub is refused exactly like a generated one.
+UNFILLED_SENTINEL = "TODO(skill-eval)"
+
 
 class CaseParseError(Exception):
     """Raised when an eval file is missing or cannot be parsed."""
+
+
+def _reject_unfilled(
+    path: Path, index: int, raw: object, trail: str = "", seen: set[int] | None = None
+) -> None:
+    """Refuse a case still carrying scaffold placeholders.
+
+    Runs before schema validation so the message names the field to fill in
+    rather than complaining about the type of a value nobody meant to keep.
+    An unfilled scaffold says something about the author's progress, not about
+    the skill, so it aborts the run as an authoring error instead of scoring
+    as a failure.
+
+    `seen` tracks the `id()` of every dict/list currently being walked, so a
+    self-referential YAML anchor (a node that contains itself) is skipped
+    instead of recursing forever -- still a malformed file, but one that must
+    exit cleanly rather than crash with a RecursionError.
+    """
+    if seen is None:
+        seen = set()
+    if isinstance(raw, str):
+        if UNFILLED_SENTINEL in raw:
+            raise CaseParseError(
+                f"{path}: case #{index + 1} still has the scaffold placeholder "
+                f"{UNFILLED_SENTINEL} at {trail or 'case'}. Fill it in -- an "
+                f"unfinished eval cannot say anything about the skill."
+            )
+    elif isinstance(raw, dict):
+        if id(raw) in seen:
+            return
+        seen = seen | {id(raw)}
+        for key, value in raw.items():
+            _reject_unfilled(path, index, value, f"{trail}.{key}" if trail else str(key), seen)
+    elif isinstance(raw, list):
+        if id(raw) in seen:
+            return
+        seen = seen | {id(raw)}
+        for position, value in enumerate(raw):
+            _reject_unfilled(path, index, value, f"{trail}[{position}]", seen)
 
 
 def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
@@ -42,6 +86,7 @@ def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
         raise CaseParseError(f"{path}: 'cases' must be a list")
     cases: list[EvalCase] = []
     for index, raw in enumerate(raw_cases):
+        _reject_unfilled(path, index, raw)
         try:
             case = EvalCase.model_validate(raw)
         except ValidationError as exc:
