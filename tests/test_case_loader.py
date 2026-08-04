@@ -444,6 +444,21 @@ def test_a_sentinel_in_a_rubric_entry_names_its_position(tmp_path):
     assert "judge.rubric[1]" in str(exc.value)
 
 
+def test_a_self_referential_yaml_anchor_is_an_authoring_error_not_a_recursion_error(tmp_path):
+    # A self-referential anchor (`self: *a` inside the node `&a` itself) makes
+    # a naive recursive walk loop forever. It's still a malformed eval file --
+    # the loader must exit cleanly with CaseParseError, the same clean "exit 2
+    # naming the file" contract as any other bad input, not a raw
+    # RecursionError traceback out of skill-eval list.
+    path = tmp_path / "cyclic.eval.yaml"
+    path.write_text(
+        "cases:\n  - &a\n    name: x\n    task: t\n    self: *a\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CaseParseError):
+        parse_cases_file(path)
+
+
 def test_a_sentinel_in_a_comment_is_not_a_sentinel(tmp_path):
     # Comments are discarded by the YAML parser before the scan sees the data,
     # which is what lets the generated file explain the token it uses.

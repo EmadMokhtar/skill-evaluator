@@ -24,7 +24,9 @@ class CaseParseError(Exception):
     """Raised when an eval file is missing or cannot be parsed."""
 
 
-def _reject_unfilled(path: Path, index: int, raw: object, trail: str = "") -> None:
+def _reject_unfilled(
+    path: Path, index: int, raw: object, trail: str = "", seen: set[int] | None = None
+) -> None:
     """Refuse a case still carrying scaffold placeholders.
 
     Runs before schema validation so the message names the field to fill in
@@ -32,7 +34,14 @@ def _reject_unfilled(path: Path, index: int, raw: object, trail: str = "") -> No
     An unfilled scaffold says something about the author's progress, not about
     the skill, so it aborts the run as an authoring error instead of scoring
     as a failure.
+
+    `seen` tracks the `id()` of every dict/list currently being walked, so a
+    self-referential YAML anchor (a node that contains itself) is skipped
+    instead of recursing forever -- still a malformed file, but one that must
+    exit cleanly rather than crash with a RecursionError.
     """
+    if seen is None:
+        seen = set()
     if isinstance(raw, str):
         if UNFILLED_SENTINEL in raw:
             raise CaseParseError(
@@ -41,11 +50,17 @@ def _reject_unfilled(path: Path, index: int, raw: object, trail: str = "") -> No
                 f"unfinished eval cannot say anything about the skill."
             )
     elif isinstance(raw, dict):
+        if id(raw) in seen:
+            return
+        seen = seen | {id(raw)}
         for key, value in raw.items():
-            _reject_unfilled(path, index, value, f"{trail}.{key}" if trail else str(key))
+            _reject_unfilled(path, index, value, f"{trail}.{key}" if trail else str(key), seen)
     elif isinstance(raw, list):
+        if id(raw) in seen:
+            return
+        seen = seen | {id(raw)}
         for position, value in enumerate(raw):
-            _reject_unfilled(path, index, value, f"{trail}[{position}]")
+            _reject_unfilled(path, index, value, f"{trail}[{position}]", seen)
 
 
 def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
