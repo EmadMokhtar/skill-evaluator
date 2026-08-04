@@ -64,6 +64,7 @@ problem (errored) from a low score (failed).
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
 | `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
 | `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models. |
+| `scaffold.py` | Renders the starter eval suite `skill-eval init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. |
 | `runners/base.py` | The `Runner` protocol. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of only two modules that import an agent framework.** |
@@ -157,6 +158,13 @@ propagate; `cli.py` catches them via `_AUTHORING_ERRORS` and exits 2.
 error `2`. In `cli.py`, a JSON-write failure escalates to 2 only when the gate itself
 passed — a write problem must never mask an already-failing gate.
 
+**An unfilled scaffold is an authoring error, not a failure.** `skill-eval init` writes
+`TODO(skill-eval)` into every field the author must supply, and `cases/loader.py`
+rejects any case still containing it — before schema validation, so the message names
+the field rather than its type. Enforcing this in the loader rather than the generator
+makes it unconditional: hand-written stubs get it too, and no CI configuration can opt
+out of it.
+
 **`extra="forbid"` on every user-authored model.** `EvalCase`, `AssertionSpec`, `ToolSpec`,
 `TrajectorySpec`, `BudgetSpec`, `Config`. Without it, a typo like `assertion:` yields a
 case that passes vacuously — the worst possible failure mode for an eval tool. It is also
@@ -215,10 +223,15 @@ A missing cassette skips; a mismatched request fails rather than reaching the ne
 
 ### Comparative evals (M4)
 
-**Absent `--baseline`, behavior is identical to the single-arm run that predates M4.** One
-arm, no delta, console output byte-identical (a golden test holds this line), JSON identical
-apart from additive `null`s. `none` names a *kind* of baseline — the flag being unset, not
-`--baseline none`, is what turns comparison off. Upgrading must never silently double a bill.
+**Absent `--baseline`, what runs is identical to the single-arm run that predates M4.** One
+arm, no delta block, the same one-line-per-outcome layout, and JSON that keeps every prior key
+and value with additive ones alongside (`arm`, `repeat_index`, a null `delta`,
+`baseline_notes`). Console output is *not* byte-identical: a failing case now prints one
+indented line per failed check, because M4 made the assertion, trajectory and budget
+evaluators emit per-check evidence where only the judge did before. That is strictly more
+information, not a change in what runs; the Comparative evals page covers it in full.
+`none` names a *kind* of baseline — the flag being unset, not `--baseline none`, is what turns
+comparison off. Upgrading must never silently double a bill.
 
 **Baseline outcomes never count toward the gate**, and never toward `errored`.
 `RunReport.total` / `passed` / `failed` / `errored` / `pass_rate` / `pass_rate_by_skill` all

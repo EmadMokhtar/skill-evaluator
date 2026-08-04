@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from skill_eval import __version__
-from skill_eval.cases.loader import CaseParseError, load_cases_for_skill
+from skill_eval.cases.loader import (
+    EVAL_SUFFIX,
+    EVALS_DIRNAME,
+    UNFILLED_SENTINEL,
+    CaseParseError,
+    load_cases_for_skill,
+)
 from skill_eval.comparison import build_delta
 from skill_eval.config import ConfigError, load_config
 from skill_eval.evaluators.assertion import InvalidAssertionValue, UnknownAssertionKind
@@ -22,7 +29,8 @@ from skill_eval.reporters.json_reporter import render_json
 from skill_eval.runners.fake import FakeRunner
 from skill_eval.runners.preflight import MissingAPIKey, check_api_key
 from skill_eval.runners.pydantic_ai import PydanticAIRunner, RunnerDependencyError
-from skill_eval.skills.loader import SkillParseError, load_skills
+from skill_eval.scaffold import render_scaffold
+from skill_eval.skills.loader import SKILL_FILENAME, SkillParseError, load_skills, parse_skill_file
 
 app = typer.Typer(help="Run evaluations on Agent Skills (SKILL.md).", no_args_is_help=True)
 
@@ -225,3 +233,47 @@ def list_skills(
     except (SkillParseError, CaseParseError) as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=2) from exc
+
+
+def _eval_filename(name: str) -> str:
+    """A safe file name for a skill's eval suite.
+
+    The name comes from user-supplied frontmatter, so it is not automatically
+    a safe path component: `name: ../../x` would otherwise write outside the
+    directory init was pointed at.
+    """
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.") or "skill"
+    return f"{safe}{EVAL_SUFFIX}"
+
+
+@app.command()
+def init(
+    path: Annotated[Path, typer.Argument(help="A skill directory containing SKILL.md.")],
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite an existing eval file.")
+    ] = False,
+) -> None:
+    """Write a starter eval suite beside a skill."""
+    skill_md = path / SKILL_FILENAME
+    if not skill_md.is_file():
+        typer.echo(f"no {SKILL_FILENAME} in {path}; point init at a skill directory")
+        raise typer.Exit(code=2)
+    try:
+        skill = parse_skill_file(skill_md)
+    except SkillParseError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=2) from exc
+
+    target = path / EVALS_DIRNAME / _eval_filename(skill.name)
+    if target.exists() and not force:
+        typer.echo(f"{target} already exists; pass --force to overwrite it")
+        raise typer.Exit(code=2)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(render_scaffold(skill), encoding="utf-8")
+    except OSError as exc:
+        typer.echo(f"cannot write {target}: {exc}")
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(f"Wrote {target}")
+    typer.echo(f"Fill in every {UNFILLED_SENTINEL}, then run: skill-eval list {path}")
