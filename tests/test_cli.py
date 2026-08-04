@@ -495,3 +495,27 @@ def test_the_run_plan_is_not_printed_for_the_offline_runner(tmp_path):
     _make_skill(tmp_path)
     result = runner.invoke(app, ["run", str(tmp_path), "--baseline", "none", "--repeat", "2"])
     assert "Plan:" not in result.stdout
+
+
+def test_the_run_plan_is_a_ceiling_not_a_forecast(tmp_path, monkeypatch):
+    # `mode: offered` under --baseline none and unresolvable baselines both drop
+    # the baseline arm, so the printed total can only ever overstate. Saying
+    # "up to" is what makes it honest.
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-parsing")
+    _make_skill(tmp_path)
+    result = runner.invoke(
+        app,
+        ["run", str(tmp_path), "--runner", "pydantic-ai", "--baseline", "none", "--repeat", "2"],
+    )
+    assert "Plan: up to 2 arm(s) x 2 repeat(s)" in plain(result.stdout)
+
+
+def test_the_run_plan_counts_only_cases_the_tag_filter_keeps(tmp_path, monkeypatch):
+    # run_evals applies --tag after discovery. A plan that ignores it can print a
+    # nonzero total for a run in which nothing at all will execute.
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-parsing")
+    _make_skill(tmp_path)
+    result = runner.invoke(
+        app, ["run", str(tmp_path), "--runner", "pydantic-ai", "--tag", "no-such-tag"]
+    )
+    assert "0 case(s) = 0 runs" in plain(result.stdout)
