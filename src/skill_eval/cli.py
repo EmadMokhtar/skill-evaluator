@@ -193,11 +193,11 @@ def run(
         delta=delta,
     )
 
-    typer.echo(render_console(report, gate=gate))
+    typer.echo(render_console(report, gate=gate, delta=delta))
     if json_output is not None:
         try:
             json_output.parent.mkdir(parents=True, exist_ok=True)
-            json_output.write_text(render_json(report, gate=gate), encoding="utf-8")
+            json_output.write_text(render_json(report, gate=gate, delta=delta), encoding="utf-8")
         except OSError as exc:
             typer.echo(f"Failed to write JSON report to {json_output}: {exc}")
             # Exit codes are the CI contract: a gate that already failed (1)

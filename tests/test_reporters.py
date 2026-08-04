@@ -1,7 +1,15 @@
 import json
 
+from skill_eval.comparison import build_delta
 from skill_eval.gating import evaluate_gate
-from skill_eval.models import CaseOutcome, CheckResult, EvalScore, RunReport, RunResult
+from skill_eval.models import (
+    BaselineNote,
+    CaseOutcome,
+    CheckResult,
+    EvalScore,
+    RunReport,
+    RunResult,
+)
 from skill_eval.reporters.console import render_console
 from skill_eval.reporters.json_reporter import render_json
 
@@ -286,3 +294,102 @@ def test_the_json_report_carries_per_check_verdicts_and_judge_cost():
     checks = payload["outcomes"][0]["scores"][0]["checks"]
     assert [c["id"] for c in checks] == ["r1", "r2"]
     assert checks[1]["evidence"] == "uses the word 'RMA'"
+
+
+def _arm_outcome(status, arm="candidate", index=0, *, checks=()):
+    """One repetition of one arm. Local to this module on purpose: importing a
+    helper across test files couples two suites that should move independently.
+    """
+    return CaseOutcome(
+        skill_name="pdf",
+        case_name="extracts",
+        runner="fake",
+        status=status,
+        arm=arm,
+        repeat_index=index,
+        scores=[
+            EvalScore(
+                evaluator="assertion",
+                passed=status == "passed",
+                detail="ok" if status == "passed" else "nope",
+                checks=[CheckResult(id=cid, passed=ok, evidence="e") for cid, ok in checks],
+            )
+        ],
+        result=RunResult(output="x", input_tokens=100, cost_usd=0.001, latency_ms=5),
+    )
+
+
+def _two_arm_report(**kwargs):
+    return RunReport(
+        baseline_kind="none",
+        repeat=2,
+        outcomes=[
+            _arm_outcome("passed", index=0),
+            _arm_outcome("passed", index=1),
+            _arm_outcome("failed", arm="baseline", index=0),
+            _arm_outcome("failed", arm="baseline", index=1),
+        ],
+        **kwargs,
+    )
+
+
+def test_without_a_delta_the_console_output_is_unchanged():
+    report = _report()
+    assert render_console(report) == render_console(report, delta=None)
+
+
+def test_a_comparative_line_shows_both_arms_and_the_difference():
+    report = _two_arm_report()
+    text = render_console(report, delta=build_delta(report))
+    assert "candidate 2/2" in text
+    assert "baseline 0/2" in text
+    assert "+100%" in text
+
+
+def test_the_delta_block_names_the_direction_that_is_better():
+    report = _two_arm_report()
+    text = render_console(report, delta=build_delta(report))
+    assert "Delta vs baseline" in text
+    assert "negative is better" in text
+
+
+def test_flags_are_rendered_as_advice_not_failures():
+    report = RunReport(
+        baseline_kind="none",
+        outcomes=[
+            _arm_outcome("passed", checks=(("contains[0]", True),)),
+            _arm_outcome("failed", arm="baseline", checks=(("contains[0]", True),)),
+        ],
+    )
+    text = render_console(report, delta=build_delta(report))
+    assert "low-signal" in text
+    assert "never fail the gate" in text
+
+
+def test_baseline_notes_are_shown():
+    report = _two_arm_report(
+        baseline_notes=[BaselineNote(skill_name="pdf", kind="unavailable", reason="no repo")]
+    )
+    assert "no repo" in render_console(report, delta=build_delta(report))
+
+
+def test_json_carries_the_arm_and_repetition_of_every_outcome():
+    report = _two_arm_report()
+    payload = json.loads(render_json(report, delta=build_delta(report)))
+    assert {o["arm"] for o in payload["outcomes"]} == {"candidate", "baseline"}
+    assert sorted(o["repeat_index"] for o in payload["outcomes"]) == [0, 0, 1, 1]
+
+
+def test_json_delta_is_null_without_a_baseline():
+    payload = json.loads(render_json(_report()))
+    assert payload["delta"] is None
+
+
+def test_json_totals_count_real_spend_across_both_arms():
+    # Money spent is money spent: the baseline arm's tokens are real.
+    report = _two_arm_report()
+    payload = json.loads(render_json(report, delta=build_delta(report)))
+    assert payload["summary"]["total_tokens"] == 400
+    # ... while the pass/fail counts stay candidate-only, because those gate.
+    assert payload["summary"]["total"] == 2
+    assert payload["summary"]["passed"] == 2

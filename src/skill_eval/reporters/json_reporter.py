@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import json
 
+from skill_eval.comparison import Delta
 from skill_eval.gating import GateResult
 from skill_eval.models import RunReport
 
 
-def render_json(report: RunReport, gate: GateResult | None = None) -> str:
-    """Render a report as indented JSON for CI artifacts and tooling."""
+def render_json(
+    report: RunReport, gate: GateResult | None = None, delta: Delta | None = None
+) -> str:
+    """Render a report as indented JSON for CI artifacts and tooling.
+
+    Token, cost and latency totals sum **both** arms: money spent is money
+    spent. The pass/fail counts in `summary` are the candidate arm's, because
+    those are what the gate reads.
+    """
     total_tokens = sum(o.result.tokens for o in report.outcomes if o.result)
     total_cost_usd = sum(o.result.cost_usd for o in report.outcomes if o.result)
     total_latency_ms = sum(o.result.latency_ms for o in report.outcomes if o.result)
@@ -37,6 +45,8 @@ def render_json(report: RunReport, gate: GateResult | None = None) -> str:
                 "case_name": o.case_name,
                 "runner": o.runner,
                 "status": o.status,
+                "arm": o.arm,
+                "repeat_index": o.repeat_index,
                 "scores": [s.model_dump() for s in o.scores],
                 "output": o.result.output if o.result else "",
                 "error": o.result.error if o.result else None,
@@ -49,6 +59,8 @@ def render_json(report: RunReport, gate: GateResult | None = None) -> str:
             for o in report.outcomes
         ],
     }
+    payload["delta"] = delta.model_dump() if delta is not None else None
+    payload["baseline_notes"] = [note.model_dump() for note in report.baseline_notes]
     if gate is not None:
         payload["gate"] = gate.model_dump()
     return json.dumps(payload, indent=2)
