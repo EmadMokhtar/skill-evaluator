@@ -26,6 +26,15 @@ Then ask for it by name, or describe the task — "write evals for my order-supp
 
 ## Using it
 
-It expects `skill-eval` on `PATH` (`uv tool install skill-eval`, or run it inside a
-project that depends on it). Everything it writes is an ordinary eval file: nothing about
-the suite depends on the skill afterwards.
+It expects `skill-eval` on `PATH`. skill-eval is not yet published to PyPI, so get it from
+source the same way [`getting-started.md`](getting-started.md) does:
+
+```bash
+git clone https://github.com/EmadMokhtar/skill-evaluator
+cd skill-evaluator
+uv sync
+```
+
+`uv run skill-eval` then works from that checkout, or run it inside a project that already
+depends on it. Everything the skill writes is an ordinary eval file: nothing about the
+suite depends on the skill afterwards.
