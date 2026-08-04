@@ -224,4 +224,4 @@ def init(
         raise typer.Exit(code=2) from exc
 
     typer.echo(f"Wrote {target}")
-    typer.echo(f"Fill in every {UNFILLED_SENTINEL}, then run: skill-eval run {path}")
+    typer.echo(f"Fill in every {UNFILLED_SENTINEL}, then run: skill-eval list {path}")
