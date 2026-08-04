@@ -458,3 +458,40 @@ def test_a_blank_model_in_the_config_file_is_caught_too(tmp_path):
     result = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
     assert result.exit_code == 2
     assert "--model is empty" in plain(result.output)
+
+
+def test_min_delta_without_a_baseline_is_a_user_error(tmp_path):
+    _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(tmp_path), "--min-delta", "0.1"])
+    assert result.exit_code == 2
+    assert "--baseline" in plain(result.output)
+
+
+def test_a_repeat_below_one_is_a_user_error(tmp_path):
+    _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(tmp_path), "--repeat", "0"])
+    assert result.exit_code == 2
+
+
+def test_an_unknown_baseline_kind_is_a_user_error(tmp_path):
+    _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(tmp_path), "--baseline", "yesterday"])
+    assert result.exit_code == 2
+
+
+def test_min_delta_is_satisfied_by_a_baseline_from_config(tmp_path):
+    # The check runs against resolved values, so a baseline in skill-eval.toml
+    # satisfies a --min-delta passed on the command line.
+    _make_skill(tmp_path)
+    config = tmp_path / "skill-eval.toml"
+    config.write_text('baseline = "none"\n', encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(tmp_path), "--config", str(config), "--min-delta", "0.0"]
+    )
+    assert result.exit_code != 2
+
+
+def test_the_run_plan_is_not_printed_for_the_offline_runner(tmp_path):
+    _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(tmp_path), "--baseline", "none", "--repeat", "2"])
+    assert "Plan:" not in result.stdout

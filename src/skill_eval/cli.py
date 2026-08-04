@@ -10,6 +10,7 @@ import typer
 
 from skill_eval import __version__
 from skill_eval.cases.loader import CaseParseError, load_cases_for_skill
+from skill_eval.comparison import build_delta
 from skill_eval.config import ConfigError, load_config
 from skill_eval.evaluators.assertion import InvalidAssertionValue, UnknownAssertionKind
 from skill_eval.gating import EXIT_OK, evaluate_gate
@@ -88,11 +89,32 @@ def run(
     min_pass_rate: Annotated[float | None, typer.Option(help="Required pass rate.")] = None,
     json_output: Annotated[Path | None, typer.Option(help="Write a JSON report here.")] = None,
     config: Annotated[Path | None, typer.Option(help="Path to skill-eval.toml.")] = None,
+    baseline: Annotated[
+        str | None,
+        typer.Option(help="Compare against a baseline: none (no skill) or previous."),
+    ] = None,
+    repeat: Annotated[int | None, typer.Option(help="Sample each arm this many times.")] = None,
+    min_delta: Annotated[
+        float | None,
+        typer.Option(help="Required improvement over the baseline; needs --baseline."),
+    ] = None,
 ) -> None:
     """Discover skills, run their eval cases, and gate on the results."""
     try:
         settings = load_config(path=config)
         skills = load_skills(path)
+        baseline_kind = baseline if baseline is not None else settings.baseline
+        if baseline_kind not in ("", "none", "previous"):
+            raise typer.BadParameter(f"unknown baseline: {baseline_kind}")
+        resolved_repeat = repeat if repeat is not None else settings.repeat
+        if resolved_repeat < 1:
+            raise typer.BadParameter("--repeat must be at least 1")
+        resolved_min_delta = min_delta if min_delta is not None else settings.min_delta
+        # Checked against resolved values so a baseline in skill-eval.toml
+        # satisfies a --min-delta on the command line. A gate that verified
+        # nothing must never report a pass, so this is an error, not a warning.
+        if resolved_min_delta is not None and not baseline_kind:
+            raise typer.BadParameter("--min-delta requires --baseline none or --baseline previous")
         runner_name = runner if runner is not None else settings.default_runner
         if runner_name not in _RUNNERS:
             raise typer.BadParameter(f"unknown runner: {runner_name}")
@@ -129,16 +151,34 @@ def run(
             )
         else:
             active_judge = judge_class()
-        report = run_evals(skills, [active_runner], evals_path=evals, tag=tag, judge=active_judge)
+        if getattr(runner_class, "needs_api_key", False):
+            arms = 2 if baseline_kind else 1
+            case_count = sum(len(load_cases_for_skill(s, evals_path=evals)) for s in skills)
+            typer.echo(
+                f"Plan: {arms} arm(s) x {resolved_repeat} repeat(s) x {case_count} case(s) "
+                f"= {arms * resolved_repeat * case_count} runs"
+            )
+        report = run_evals(
+            skills,
+            [active_runner],
+            evals_path=evals,
+            tag=tag,
+            judge=active_judge,
+            baseline=baseline_kind or None,
+            repeat=resolved_repeat,
+        )
     except _AUTHORING_ERRORS as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=2) from exc
 
+    delta = build_delta(report)
     gate = evaluate_gate(
         report,
         min_pass_rate=min_pass_rate if min_pass_rate is not None else settings.min_pass_rate,
         fail_on_error=settings.fail_on_error,
         per_skill_min=settings.per_skill_min,
+        min_delta=resolved_min_delta,
+        delta=delta,
     )
 
     typer.echo(render_console(report, gate=gate))

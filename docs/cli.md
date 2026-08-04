@@ -3,7 +3,8 @@
 ```
 skill-eval run <path> [--evals <path>] [--runner <name>] [--model <name>]
                       [--judge-model <name>] [--tag <tag>] [--min-pass-rate <float>]
-                      [--json-output <path>] [--config <file>]
+                      [--json-output <path>] [--config <file>] [--baseline <kind>]
+                      [--repeat <int>] [--min-delta <float>]
 skill-eval list <path> [--evals <path>]
 skill-eval --version
 ```
@@ -25,6 +26,9 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--min-pass-rate <float>` | `1.0` | Required overall pass rate, `0.0`–`1.0` |
 | `--json-output <path>` | none | Write a machine-readable report here |
 | `--config <file>` | upward discovery | Path to `skill-eval.toml` |
+| `--baseline <kind>` | off | Run a second, baseline arm: `none` (no skill loaded) or `previous` (the prior version, from git). Omit for a single-arm run. |
+| `--repeat <int>` | `1` | Sample each arm this many times. Each repetition is its own outcome. |
+| `--min-delta <float>` | unset | Require the candidate arm to beat the baseline by at least this much. Requires `--baseline`. |
 
 Each flag overrides the corresponding key in [configuration](configuration.md).
 Exit codes are documented in [Gating](gating.md).

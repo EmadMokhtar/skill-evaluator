@@ -180,3 +180,17 @@ def test_an_unknown_config_key_is_still_rejected(tmp_path):
     (tmp_path / "skill-eval.toml").write_text('judg = "pydantic-ai"\n', encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(path=tmp_path / "skill-eval.toml")
+
+
+def test_the_comparative_fields_have_safe_defaults():
+    settings = Config()
+    assert settings.baseline == ""
+    assert settings.repeat == 1
+    assert settings.min_delta is None
+
+
+def test_an_unknown_baseline_kind_is_a_config_error(tmp_path):
+    path = tmp_path / "skill-eval.toml"
+    path.write_text('baseline = "yesterday"\n', encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(path=path)

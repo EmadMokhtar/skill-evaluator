@@ -39,6 +39,12 @@ class Config(BaseModel):
     model that rejects any explicit temperature needs
     `judge_temperature = "unset"`, same as `temperature` does for a reasoning
     runner model.
+
+    `baseline` defaults to `""` (off) so upgrading never doubles anyone's bill:
+    `none` and `previous` are the two kinds of baseline, and the *absence* of a
+    value is what turns comparison off. `min_delta` has no default because 0.0
+    is a real, stricter choice ("must not regress") -- silently assuming it
+    would gate runs nobody asked to gate.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -54,6 +60,9 @@ class Config(BaseModel):
     min_pass_rate: float = 1.0
     fail_on_error: bool = True
     per_skill_min: dict[str, float] = Field(default_factory=dict)
+    baseline: Literal["", "none", "previous"] = ""
+    repeat: int = 1
+    min_delta: float | None = None
 
 
 def find_config_file(start: Path) -> Path | None:

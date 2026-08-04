@@ -26,6 +26,9 @@ greeting = 0.9
 | `min_pass_rate` | `1.0` | `--min-pass-rate` |
 | `fail_on_error` | `true` | — |
 | `per_skill_min` | `{}` | — |
+| `baseline` | `""` | `""` (off), `"none"` or `"previous"`. Overridden by `--baseline`. |
+| `repeat` | `1` | Repetitions per arm. Overridden by `--repeat`. |
+| `min_delta` | unset | Required improvement over the baseline. Unset means the delta is reported but not gated; `0.0` is the stricter "must not regress". Overridden by `--min-delta`. |
 
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
