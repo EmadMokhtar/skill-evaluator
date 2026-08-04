@@ -11,6 +11,9 @@ build/
 # mkdocs build output
 site/
 
+# Agent scratch state (subagent-driven-development ledger, briefs, review packages)
+.superpowers/
+
 # Local Claude Code state; the skills/ symlinks below it are tracked.
 .claude/*
 !.claude/skills/

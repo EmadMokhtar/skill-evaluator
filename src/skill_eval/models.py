@@ -10,15 +10,25 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 CaseStatus = Literal["passed", "failed", "errored"]
 ToolParamType = Literal["string", "integer", "number", "boolean"]
 CaseMode = Literal["loaded", "offered"]
+Arm = Literal["candidate", "baseline"]
+BaselineKind = Literal["none", "previous"]
 
 
 class Skill(BaseModel):
-    """A skill under test, loaded from a SKILL.md file."""
+    """A skill under test, loaded from a SKILL.md file.
+
+    `version` is whatever the frontmatter declared, verbatim and as text -- it
+    is an identifier, not a number, so `1.20` must not compare equal to `1.2`.
+    `variant` says which arm of a comparative run this copy belongs to; the
+    orchestrator sets it, and `FakeRunner` scripts against it.
+    """
 
     name: str
     description: str = ""
     instructions: str = ""
+    version: str = ""
     path: Path
+    variant: Arm = "candidate"
 
 
 class ToolCall(BaseModel):
@@ -230,8 +240,28 @@ class EvalCase(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class BaselineNote(BaseModel):
+    """Why a case or a skill has no baseline arm.
+
+    A typed record, not a formatted string: gating has to distinguish "the
+    baseline could not be resolved" (a problem) from "this case deliberately
+    has no baseline" (not one), and parsing prose to tell them apart is how
+    that distinction rots.
+    """
+
+    skill_name: str
+    case_name: str = ""
+    kind: Literal["unavailable", "skipped"]
+    reason: str
+
+
 class CaseOutcome(BaseModel):
-    """The fully-scored result of one (skill, case, runner) combination."""
+    """The fully-scored result of one (skill, case, runner) combination.
+
+    `repeat_index` is the 0-based index of one repetition; `RunReport.repeat` is
+    how many were requested. The names differ because confusing the two is how
+    an off-by-one reaches a report.
+    """
 
     skill_name: str
     case_name: str
@@ -239,34 +269,63 @@ class CaseOutcome(BaseModel):
     status: CaseStatus
     scores: list[EvalScore] = Field(default_factory=list)
     result: RunResult | None = None
+    arm: Arm = "candidate"
+    repeat_index: int = 0
 
 
 class RunReport(BaseModel):
-    """Aggregated results for a whole run."""
+    """Aggregated results for a whole run.
+
+    Every aggregate below reads the **candidate** arm. A strong baseline means
+    the skill was unnecessary, not that CI should go red, so baseline outcomes
+    are reported but never gated on. With no baseline the two sets are
+    identical and none of these numbers move.
+    """
 
     outcomes: list[CaseOutcome] = Field(default_factory=list)
     skipped_skills: list[str] = Field(default_factory=list)
     tag_filtered_skills: list[str] = Field(default_factory=list)
+    baseline_kind: BaselineKind | None = None
+    repeat: int = 1
+    baseline_notes: list[BaselineNote] = Field(default_factory=list)
+
+    @property
+    def candidate_outcomes(self) -> list[CaseOutcome]:
+        return [o for o in self.outcomes if o.arm == "candidate"]
+
+    @property
+    def baseline_outcomes(self) -> list[CaseOutcome]:
+        return [o for o in self.outcomes if o.arm == "baseline"]
 
     @property
     def total(self) -> int:
-        return len(self.outcomes)
+        return len(self.candidate_outcomes)
 
     @property
     def passed(self) -> int:
-        return sum(1 for o in self.outcomes if o.status == "passed")
+        return sum(1 for o in self.candidate_outcomes if o.status == "passed")
 
     @property
     def failed(self) -> int:
-        return sum(1 for o in self.outcomes if o.status == "failed")
+        return sum(1 for o in self.candidate_outcomes if o.status == "failed")
 
     @property
     def errored(self) -> int:
-        return sum(1 for o in self.outcomes if o.status == "errored")
+        return sum(1 for o in self.candidate_outcomes if o.status == "errored")
+
+    @property
+    def baseline_errored(self) -> int:
+        """Errored baseline runs, surfaced apart from `errored`.
+
+        An errored baseline invalidates that case's delta rather than counting
+        as a case that broke -- `errored` is about the candidate. It still gets
+        its own number so it cannot hide.
+        """
+        return sum(1 for o in self.baseline_outcomes if o.status == "errored")
 
     @property
     def pass_rate(self) -> float:
-        if not self.outcomes:
+        if not self.candidate_outcomes:
             return 0.0
         return self.passed / self.total
 
@@ -288,7 +347,7 @@ class RunReport(BaseModel):
     def pass_rate_by_skill(self) -> dict[str, float]:
         """Pass rate per skill name, for per-skill gating and reporting."""
         buckets: dict[str, list[CaseOutcome]] = {}
-        for outcome in self.outcomes:
+        for outcome in self.candidate_outcomes:
             buckets.setdefault(outcome.skill_name, []).append(outcome)
         return {
             name: sum(1 for o in items if o.status == "passed") / len(items)

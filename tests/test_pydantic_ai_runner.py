@@ -9,7 +9,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from skill_eval.models import EvalCase, Skill, ToolSpec
 from skill_eval.runners.base import Runner
-from skill_eval.runners.pydantic_ai import OFFERED_PREAMBLE, PydanticAIRunner
+from skill_eval.runners.pydantic_ai import BASELINE_PREAMBLE, OFFERED_PREAMBLE, PydanticAIRunner
 from skill_eval.runners.tools import skill_tool_name
 
 SKILL = Skill(
@@ -444,3 +444,56 @@ def test_registration_and_detection_agree_on_a_name_replace_would_get_wrong():
 
     assert expected_name in seen["tools"]
     assert result.skill_triggered is True
+
+
+EMPTY_SKILL = Skill(
+    name="order-support",
+    description="",
+    instructions="",
+    variant="baseline",
+    path=Path("."),
+)
+
+
+def test_a_skill_with_nothing_to_say_gets_a_neutral_preamble():
+    seen = {}
+
+    def reply(messages, info: AgentInfo):
+        seen["instructions"] = messages[0].instructions or ""
+        return text("done")
+
+    PydanticAIRunner(model=FunctionModel(reply)).run(EMPTY_SKILL, case())
+    assert seen["instructions"] == BASELINE_PREAMBLE
+
+
+def test_a_baseline_prompt_never_leaks_the_skill_name():
+    # The whole point of the baseline arm: if its prompt names the skill, the
+    # delta measures the leak rather than the skill.
+    seen = {}
+
+    def reply(messages, info: AgentInfo):
+        seen["instructions"] = messages[0].instructions or ""
+        return text("done")
+
+    PydanticAIRunner(model=FunctionModel(reply)).run(EMPTY_SKILL, case())
+    assert "order-support" not in seen["instructions"]
+
+
+def test_a_baseline_resolved_from_git_still_gets_its_own_prompt():
+    # `--baseline previous` has real content, so it is prompted normally --
+    # the neutral preamble keys on emptiness, not on the arm.
+    previous = Skill(
+        name="order-support",
+        description="Handle refunds",
+        instructions="Old instructions.",
+        variant="baseline",
+        path=Path("."),
+    )
+    seen = {}
+
+    def reply(messages, info: AgentInfo):
+        seen["instructions"] = messages[0].instructions or ""
+        return text("done")
+
+    PydanticAIRunner(model=FunctionModel(reply)).run(previous, case())
+    assert "Old instructions." in seen["instructions"]

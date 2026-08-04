@@ -61,7 +61,8 @@ problem (errored) from a low score (failed).
 | `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. |
 | `config.py` | Loads `skill-eval.toml` by explicit path or upward discovery. Never reads secrets. |
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
-| `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models. |
+| `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
+| `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
 | `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models. |
 | `scaffold.py` | Renders the starter eval suite `skill-eval init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. |
 | `runners/base.py` | The `Runner` protocol. |
@@ -75,6 +76,7 @@ problem (errored) from a low score (failed).
 | `evaluators/trajectory.py` | Scoring which tools were called, in what order, and how many times. |
 | `evaluators/budget.py` | Scoring efficiency: tokens, cost, latency. |
 | `evaluators/judge.py` | Rubric scoring. Holds no framework code; takes a `Judge` by injection. |
+| `comparison.py` | Turns a two-armed `RunReport` into a `Delta`: pairing, sign conventions, low-signal checks, high-variance cases. Pure — no IO, no provider calls. |
 | `judges/base.py` | The `Judge` protocol. |
 | `judges/prompt.py` | Renders a `JudgeRequest` into prompt text. Pure, deterministic, no IO. |
 | `judges/fake.py` | A scripted, offline judge. The default — and unscripted it *errors* rather than passing, so an unjudged rubric is never a quiet green. |
@@ -87,15 +89,21 @@ problem (errored) from a low score (failed).
 ```
 path
   └─ skills/loader (walk for SKILL.md) ──────────────► [Skill]
+        └─ per skill: skills/baseline (once, if --baseline) ──► baseline Skill | note
         └─ per skill: cases/loader (evals/ dir or *.eval.yaml) ──► [EvalCase]
 
-matrix: for each (skill × case × runner)
+matrix: for each (skill × case × arm × repeat × runner)
     Runner.run ──► RunResult ──► each Evaluator ──► [EvalScore]
-                                                       └─► CaseOutcome
+                                                       └─► CaseOutcome (arm, repeat_index)
 
-aggregate ──► RunReport ──► reporters/  ──► console + JSON
+aggregate ──► RunReport ──► comparison.build_delta ──► Delta | None
+                        └─► reporters/  ──► console + JSON
                         └─► gating      ──► exit code
 ```
+
+`arm` is `"candidate"` for the skill under test and `"baseline"` for the comparison skill;
+absent `--baseline` every outcome is `"candidate"` and `build_delta` returns `None`, so the
+matrix, the aggregates and the reporters all degrade to exactly the pre-M4 shape.
 
 ## Core data models
 
@@ -103,16 +111,25 @@ All live in `models.py`.
 
 | Model | Carries |
 | --- | --- |
-| `Skill` | name, description, instructions, path |
+| `Skill` | name, description, instructions, `version` (declared frontmatter version, `""` if absent), path, `variant` (`"candidate"` or `"baseline"`) |
 | `EvalCase` | name, task, `tools`, `assertions`, `trajectory`, `budget`, `tags` |
 | `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, model, `error` |
-| `EvalScore` | one evaluator's `passed` / `score` / `detail` |
-| `CaseOutcome` | one (skill, case, runner) triple: status plus its scores and result |
-| `RunReport` | every outcome, plus skipped and tag-filtered skills |
+| `CheckResult` | one check's `id`, `passed`, `evidence` — emitted by the judge and, since M4, by assertion/trajectory/budget too |
+| `EvalScore` | one evaluator's `passed` / `score` / `detail`, plus its `checks: list[CheckResult]` |
+| `BaselineNote` | why a skill or case has no baseline arm: `kind` (`"unavailable"` or `"skipped"`) plus a reason |
+| `CaseOutcome` | one (skill, case, runner, arm, repetition) combination: status plus its scores and result |
+| `RunReport` | every outcome, skipped and tag-filtered skills, `baseline_kind`, `repeat`, `baseline_notes` |
 
 Two fields are **derived, not stored**: `RunResult.tokens` (the input/output split summed)
 and `RunResult.errored` (`error is not None`). Aggregates on `RunReport` — `total`,
-`passed`, `failed`, `errored`, `pass_rate` — are likewise computed from `outcomes`.
+`passed`, `failed`, `errored`, `pass_rate` — read `candidate_outcomes` only (Decision: baseline
+outcomes never count toward the gate); `baseline_outcomes` and `baseline_errored` surface the
+comparison side apart from them. `pass_rate_by_skill` is likewise candidate-only.
+
+`comparison.py` adds a second layer of models — `ArmStats`, `CaseStats`, `LowSignalCheck`,
+`CaseRef` and `Delta` — that are computed from a `RunReport`, never stored on it. `Delta` is
+`None` whenever no baseline arm ran, which is the signal reporters use to fall back to the
+pre-M4 single-arm rendering.
 
 ## Invariants, and why
 
@@ -173,8 +190,16 @@ what keeps the `Runner` and `Judge` seams real rather than nominal.
 
 **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` plus a
 `cost_note`. Pricing is reporting metadata; it must never be why a run errors. In
-`BudgetEvaluator`, an unpriceable cost limit is *skipped* — not counted as passed — so a
-case whose only budget check is an unpriced cost limit fails, because nothing was verified.
+`BudgetEvaluator`, an unpriceable `max_cost_usd` limit is *skipped* — not counted as passed —
+and that skip is recorded as a failing `CheckResult`. `passed` requires every declared limit
+to hold, so **any** budget block that declares an unpriceable `max_cost_usd` fails the case,
+whether or not it is the only check declared: a case whose `max_tokens` and `max_latency_ms`
+both hold still fails if `max_cost_usd` could not be priced, because that one check was never
+verified. `score`, by contrast, is the fraction of *evaluated* limits that held — the unpriced
+limit is excluded from that divisor entirely, so it neither inflates nor deflates the score
+the way a false pass would. A repository running an unpriced model with a `budget:` block that
+mixes a priced limit with `max_cost_usd` will see those cases turn red on an upgrade to this
+behavior; the fix is to drop `max_cost_usd` for that provider, not to treat the skip as a pass.
 
 **Nothing scores a vacuous pass.** The rule that an unpriceable budget limit fails rather
 than passing generalises: a rubric with no configured judge is *errored*, and a judge check
@@ -195,6 +220,63 @@ A missing cassette skips; a mismatched request fails rather than reaching the ne
 `skill-eval` everywhere: command, config file, distribution.
 
 **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
+
+### Comparative evals (M4)
+
+**Absent `--baseline`, what runs is identical to the single-arm run that predates M4.** One
+arm, no delta block, the same one-line-per-outcome layout, and JSON that keeps every prior key
+and value with additive ones alongside (`arm`, `repeat_index`, a null `delta`,
+`baseline_notes`). Console output is *not* byte-identical: a failing case now prints one
+indented line per failed check, because M4 made the assertion, trajectory and budget
+evaluators emit per-check evidence where only the judge did before. That is strictly more
+information, not a change in what runs; the Comparative evals page covers it in full.
+`none` names a *kind* of baseline — the flag being unset, not `--baseline none`, is what turns
+comparison off. Upgrading must never silently double a bill.
+
+**Baseline outcomes never count toward the gate**, and never toward `errored`.
+`RunReport.total` / `passed` / `failed` / `errored` / `pass_rate` / `pass_rate_by_skill` all
+read `candidate_outcomes`; `baseline_outcomes` and `baseline_errored` exist so the comparison
+side is visible without ever feeding the numbers the gate reads. A strong baseline means the
+skill was unnecessary, not that CI should go red.
+
+**The baseline arm never receives the skill's name, description or instructions** under
+`--baseline none`. `_system_prompt` emits a neutral `BASELINE_PREAMBLE` instead of the normal
+`# {name}` header whenever both `description` and `instructions` are empty. The rule keys on
+emptiness, not on `variant`, so no runner can — or has to — branch on which arm it is serving;
+a runner that could branch on the arm could cheat the comparison.
+
+**A baseline that cannot be resolved is reported, never assumed to be "no change".**
+`resolve_previous` returns a `BaselineUnavailable` rather than treating silence as evidence.
+Without `--min-delta` it is a note; with `--min-delta` it fails the gate, because treating "we
+couldn't check" as "nothing changed" would let a repository pass forever by deleting its git
+history.
+
+**The delta is paired.** `comparison.build_delta` excludes a case from *both* halves of the
+delta the moment either arm cannot be honestly compared — a skipped baseline, an unresolvable
+one, or every repetition of an arm erroring. Keeping the surviving half would bias the
+aggregate with data that has no partner to be measured against.
+
+**`--min-delta` without `--baseline` is a user error (exit 2).** A delta gate that checks
+nothing must never report a pass — the same vacuous-pass rejection every other gate rule in
+this project applies. Gating on a delta with no comparable case fails for the same reason,
+mirroring "a run executing zero cases fails the gate".
+
+**Low-signal and high-variance flags never change the exit code.** They are diagnostics about
+the *eval suite* — a weak assertion, an unstable case — not verdicts on the skill. A flag that
+could block a merge trains people to ignore flags, and a flaky provider would be
+indistinguishable from a genuinely bad skill.
+
+**`resolve_previous` never raises for environmental failures** — no `git`, no repository, an
+untracked `SKILL.md`, an exhausted history window. Each comes back as a `BaselineUnavailable`
+with a reason, the same discipline runners and judges follow for provider failures.
+Subprocesses run without a shell, decode as UTF-8, and carry a timeout, so a hung `git` cannot
+hang CI.
+
+**Deterministic evaluators emit per-check verdicts**, ids derived from the case (never the
+result) so the same id names the same check in both arms: `{kind}[{index}]` for assertions,
+`called:{tool}` / `forbidden:{tool}` / `order` / `max_calls` / `skill_triggered` for
+trajectory, `max_tokens` / `max_cost_usd` / `max_latency_ms` for budget. This is what lets
+`comparison.py` name a specific low-signal check rather than only flag a whole case.
 
 ## Extension points
 

@@ -2,31 +2,141 @@
 
 from __future__ import annotations
 
+from skill_eval.comparison import ArmStats, CaseStats, Delta, format_baseline_notes
 from skill_eval.gating import GateResult
 from skill_eval.models import RunReport
 
 _MARKS = {"passed": "PASS", "failed": "FAIL", "errored": "ERROR"}
 
 
-def render_console(report: RunReport, gate: GateResult | None = None) -> str:
-    """Render a report as plain text suitable for a terminal or CI log."""
+def _fraction(stats: ArmStats) -> str:
+    scored = stats.runs - stats.errored
+    return f"{stats.passed}/{scored}" if scored else "0/0 (all errored)"
+
+
+def _mark_for(stats: ArmStats) -> str:
+    if stats.runs and stats.errored == stats.runs:
+        return _MARKS["errored"]
+    return _MARKS["passed" if stats.pass_rate == 1.0 else "failed"]
+
+
+def _case_line(case: CaseStats) -> str:
+    head = (
+        f"[{_mark_for(case.candidate)}] {case.skill_name} :: {case.case_name} "
+        f"({case.runner})  candidate {_fraction(case.candidate)}"
+    )
+    if case.baseline is None:
+        return f"{head}  baseline not run"
+    if not case.comparable:
+        return f"{head}  baseline {_fraction(case.baseline)}  (excluded: {case.exclusion_reason})"
+    difference = case.candidate.pass_rate - case.baseline.pass_rate
+    return f"{head}  baseline {_fraction(case.baseline)}  {difference:+.0%}"
+
+
+def _delta_block(delta: Delta) -> list[str]:
+    lines = ["", f"Delta vs baseline ({delta.baseline_kind})"]
+    lines.append(
+        f"  pass rate  {delta.pass_rate_baseline:.0%} -> {delta.pass_rate_candidate:.0%}  "
+        f"{delta.pass_rate_delta:+.0%}   (higher is better)"
+    )
+    lines.append(f"  tokens     {delta.tokens_delta:+.0f}   (negative is better)")
+    lines.append(f"  cost       ${delta.cost_usd_delta:+.4f}   (negative is better)")
+    lines.append(f"  latency    {delta.latency_ms_delta:+.0f}ms   (negative is better)")
+    if delta.low_signal:
+        lines.append("")
+        lines.append(
+            "Low-signal checks (passed with and without the skill — they measure nothing):"
+        )
+        lines.extend(f"  - {c.skill_name} :: {c.case_name}: {c.check_id}" for c in delta.low_signal)
+    if delta.high_variance:
+        lines.append("")
+        lines.append("High-variance cases (repetitions disagreed — often ambiguous instructions):")
+        lines.extend(
+            f"  - {r.skill_name} :: {r.case_name} ({r.arm}): "
+            f"{r.pass_rate:.0%}, stddev {r.stddev:.2f}"
+            for r in delta.high_variance
+        )
+    if delta.notes:
+        lines.append("")
+        lines.append("Baseline notes:")
+        lines.extend(f"  - {note}" for note in delta.notes)
+    lines.append("")
+    lines.append("Flags above are advice about the eval suite; they never fail the gate.")
+    return lines
+
+
+def _no_baseline_block(report: RunReport) -> list[str]:
+    """Say so when a comparative run produced no baseline arm at all.
+
+    Without this, `--baseline previous` in a shallow clone prints output
+    indistinguishable from a non-comparative run and exits 0 -- the user is
+    never told the comparison silently stopped happening.
+    """
+    lines = ["", "No baseline arm ran, so no delta was computed."]
+    notes = format_baseline_notes(report.baseline_notes)
+    if notes:
+        lines.append("Baseline notes:")
+        lines.extend(f"  - {note}" for note in notes)
+    return lines
+
+
+def render_console(
+    report: RunReport, gate: GateResult | None = None, delta: Delta | None = None
+) -> str:
+    """Render a report as plain text suitable for a terminal or CI log.
+
+    With no `delta` this is exactly the M3 renderer: one line per outcome. A
+    comparative run collapses to one line per (case, arm) instead, because
+    `--repeat 5 --baseline previous` would otherwise print ten lines per case.
+    """
     lines: list[str] = []
-    for outcome in report.outcomes:
-        mark = _MARKS[outcome.status]
-        lines.append(f"[{mark}] {outcome.skill_name} :: {outcome.case_name} ({outcome.runner})")
-        for score in outcome.scores:
-            if not score.passed:
-                lines.append(f"        {score.evaluator}: {score.detail}")
-                # The evidence is the point of a judge verdict: a summary line
-                # cannot tell an author whether the judge read the response or
-                # invented a reason.
-                for check in score.checks:
-                    if not check.passed:
-                        lines.append(
-                            f"            {check.id}: {check.evidence or 'no evidence given'}"
-                        )
-        if outcome.result is not None and outcome.result.error:
-            lines.append(f"        error: {outcome.result.error}")
+    if delta is None:
+        for outcome in report.outcomes:
+            mark = _MARKS[outcome.status]
+            lines.append(f"[{mark}] {outcome.skill_name} :: {outcome.case_name} ({outcome.runner})")
+            for score in outcome.scores:
+                if not score.passed:
+                    lines.append(f"        {score.evaluator}: {score.detail}")
+                    # The evidence is the point of a judge verdict: a summary line
+                    # cannot tell an author whether the judge read the response or
+                    # invented a reason.
+                    for check in score.checks:
+                        if not check.passed:
+                            lines.append(
+                                f"            {check.id}: {check.evidence or 'no evidence given'}"
+                            )
+            if outcome.result is not None and outcome.result.error:
+                lines.append(f"        error: {outcome.result.error}")
+    else:
+        for case in delta.cases:
+            lines.append(_case_line(case))
+            failing = next(
+                (
+                    o
+                    for o in report.candidate_outcomes
+                    if (o.skill_name, o.case_name, o.runner)
+                    == (case.skill_name, case.case_name, case.runner)
+                    and o.status != "passed"
+                ),
+                None,
+            )
+            if failing is not None:
+                for score in failing.scores:
+                    if not score.passed:
+                        lines.append(f"        {score.evaluator}: {score.detail}")
+                        # The evidence is the point of a judge verdict: a summary line
+                        # cannot tell an author whether the judge read the response or
+                        # invented a reason.
+                        for check in score.checks:
+                            if not check.passed:
+                                lines.append(
+                                    f"            {check.id}: "
+                                    f"{check.evidence or 'no evidence given'}"
+                                )
+                if failing.result is not None and failing.result.error:
+                    lines.append(f"        error: {failing.result.error}")
+            if case.low_signal:
+                lines.append(f"        low-signal: {', '.join(case.low_signal)}")
 
     if report.skipped_skills:
         lines.append("")
@@ -72,6 +182,11 @@ def render_console(report: RunReport, gate: GateResult | None = None) -> str:
 
     if totals_parts:
         lines.append(" | ".join(totals_parts))
+
+    if delta is not None:
+        lines.extend(_delta_block(delta))
+    elif report.baseline_kind is not None:
+        lines.extend(_no_baseline_block(report))
 
     if gate is not None and not gate.passed:
         lines.append("")

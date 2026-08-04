@@ -32,6 +32,13 @@ OFFERED_PREAMBLE = (
     "If none fits, just answer directly."
 )
 
+# A skill with no description and no instructions has nothing to say. Emitting
+# the usual `# {name}` header anyway would put the skill's name into a baseline
+# run's prompt, and the delta would then measure that leak rather than the
+# skill. The rule keys on emptiness, not on the arm, so no runner has to know
+# which arm it is serving -- a runner that *could* branch on the arm could cheat.
+BASELINE_PREAMBLE = "You are a helpful assistant."
+
 
 class RunnerDependencyError(Exception):
     """Raised when the optional extra providing this runner is not installed."""
@@ -49,6 +56,8 @@ def _require_pydantic_ai() -> None:
 
 def _system_prompt(skill: Skill) -> str:
     """The skill, as the agent sees it: identity first, then its instructions."""
+    if not skill.description and not skill.instructions:
+        return BASELINE_PREAMBLE
     header = f"# {skill.name}"
     if skill.description:
         header = f"{header}\n\n{skill.description}"

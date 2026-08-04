@@ -1,6 +1,13 @@
+from pathlib import Path
+
 import pytest
 
-from skill_eval.skills.loader import SkillParseError, load_skills
+from skill_eval.skills.loader import (
+    SkillParseError,
+    load_skills,
+    parse_skill_file,
+    parse_skill_text,
+)
 
 SKILL_MD = """---
 name: pdf
@@ -118,3 +125,86 @@ def test_non_ascii_skill_md_loads_regardless_of_platform_encoding(tmp_path):
     assert skills[0].name == "café"
     assert skills[0].description == "naïve — 日本語"
     assert "🎯" in skills[0].instructions
+
+
+def test_the_frontmatter_version_is_parsed(tmp_path):
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text(
+        "---\nname: pdf\ndescription: d\nversion: 1.3.0\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+    assert parse_skill_file(skill_md).version == "1.3.0"
+
+
+def test_a_missing_version_is_an_empty_string_not_an_error(tmp_path):
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text("---\nname: pdf\n---\n\nBody.\n", encoding="utf-8")
+    assert parse_skill_file(skill_md).version == ""
+
+
+def test_a_bare_decimal_version_is_an_authoring_error(tmp_path):
+    # YAML resolves 1.2 and 1.20 to the same float, so a bare decimal cannot
+    # round-trip. Rejecting it is how the "versions are text" rule stays true.
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text("---\nname: pdf\nversion: 1.2\n---\n\nBody.\n", encoding="utf-8")
+    with pytest.raises(SkillParseError, match="must be quoted text"):
+        parse_skill_file(skill_md)
+
+
+def test_the_error_never_suggests_the_collapsed_value(tmp_path):
+    # `version: 1.20` reaches us as the float 1.2. Echoing that back as the fix
+    # would tell the author to write "1.2" -- dropping the trailing zero this
+    # check exists to protect.
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text("---\nname: pdf\nversion: 1.20\n---\n\nBody.\n", encoding="utf-8")
+    with pytest.raises(SkillParseError) as caught:
+        parse_skill_file(skill_md)
+    assert 'version: "1.2"' not in str(caught.value)
+
+
+def test_the_error_says_what_yaml_read_and_to_quote_it(tmp_path):
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text("---\nname: pdf\nversion: 1.2\n---\n\nBody.\n", encoding="utf-8")
+    with pytest.raises(SkillParseError, match="must be quoted text") as caught:
+        parse_skill_file(skill_md)
+    message = str(caught.value)
+    assert "float" in message
+    assert "Quote it exactly as you wrote it" in message
+
+
+def test_a_quoted_version_survives_verbatim(tmp_path):
+    # The whole point: "1.20" and "1.2" must stay distinguishable.
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text('---\nname: pdf\nversion: "1.20"\n---\n\nBody.\n', encoding="utf-8")
+    assert parse_skill_file(skill_md).version == "1.20"
+
+
+def test_an_empty_version_key_reads_as_no_version(tmp_path):
+    # `version:` with nothing after it is "not declared", not an error.
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text("---\nname: pdf\nversion:\n---\n\nBody.\n", encoding="utf-8")
+    assert parse_skill_file(skill_md).version == ""
+
+
+def test_a_skill_is_a_candidate_unless_told_otherwise(tmp_path):
+    skill_md = tmp_path / "SKILL.md"
+    skill_md.write_text("---\nname: pdf\n---\n\nBody.\n", encoding="utf-8")
+    assert parse_skill_file(skill_md).variant == "candidate"
+
+
+def test_a_skill_parses_from_text_without_touching_the_filesystem():
+    text = "---\nname: pdf\ndescription: d\nversion: 2.0.0\n---\n\nBody.\n"
+    skill = parse_skill_text(
+        text, name_fallback="fallback", path=Path("/nowhere"), source="commit abc1234"
+    )
+    assert (skill.name, skill.version, skill.instructions) == ("pdf", "2.0.0", "Body.")
+
+
+def test_malformed_text_names_its_source_not_a_file_path():
+    with pytest.raises(SkillParseError, match="commit abc1234"):
+        parse_skill_text(
+            "---\nname: [unclosed\n---\n\nBody.\n",
+            name_fallback="fallback",
+            path=Path("/nowhere"),
+            source="commit abc1234",
+        )

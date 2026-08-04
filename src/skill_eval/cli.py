@@ -17,6 +17,7 @@ from skill_eval.cases.loader import (
     CaseParseError,
     load_cases_for_skill,
 )
+from skill_eval.comparison import build_delta
 from skill_eval.config import ConfigError, load_config
 from skill_eval.evaluators.assertion import InvalidAssertionValue, UnknownAssertionKind
 from skill_eval.gating import EXIT_OK, evaluate_gate
@@ -96,11 +97,32 @@ def run(
     min_pass_rate: Annotated[float | None, typer.Option(help="Required pass rate.")] = None,
     json_output: Annotated[Path | None, typer.Option(help="Write a JSON report here.")] = None,
     config: Annotated[Path | None, typer.Option(help="Path to skill-eval.toml.")] = None,
+    baseline: Annotated[
+        str | None,
+        typer.Option(help="Compare against a baseline: none (no skill) or previous."),
+    ] = None,
+    repeat: Annotated[int | None, typer.Option(help="Sample each arm this many times.")] = None,
+    min_delta: Annotated[
+        float | None,
+        typer.Option(help="Required improvement over the baseline; needs --baseline."),
+    ] = None,
 ) -> None:
     """Discover skills, run their eval cases, and gate on the results."""
     try:
         settings = load_config(path=config)
         skills = load_skills(path)
+        baseline_kind = baseline if baseline is not None else settings.baseline
+        if baseline_kind not in ("", "none", "previous"):
+            raise typer.BadParameter(f"unknown baseline: {baseline_kind}")
+        resolved_repeat = repeat if repeat is not None else settings.repeat
+        if resolved_repeat < 1:
+            raise typer.BadParameter("--repeat must be at least 1")
+        resolved_min_delta = min_delta if min_delta is not None else settings.min_delta
+        # Checked against resolved values so a baseline in skill-eval.toml
+        # satisfies a --min-delta on the command line. A gate that verified
+        # nothing must never report a pass, so this is an error, not a warning.
+        if resolved_min_delta is not None and not baseline_kind:
+            raise typer.BadParameter("--min-delta requires --baseline none or --baseline previous")
         runner_name = runner if runner is not None else settings.default_runner
         if runner_name not in _RUNNERS:
             raise typer.BadParameter(f"unknown runner: {runner_name}")
@@ -137,23 +159,53 @@ def run(
             )
         else:
             active_judge = judge_class()
-        report = run_evals(skills, [active_runner], evals_path=evals, tag=tag, judge=active_judge)
+        if getattr(runner_class, "needs_api_key", False):
+            # A ceiling, not a forecast. The tag filter is applied here because
+            # `run_evals` applies it too and ignoring it can overstate the total
+            # wildly -- but the baseline arm is also dropped per-case for
+            # `mode: offered` under --baseline none, and per-skill when a
+            # previous version cannot be resolved. Both only ever *reduce* the
+            # count, and reproducing them here would mean duplicating the
+            # orchestrator's discovery (and its git calls) just to print a line.
+            arms = 2 if baseline_kind else 1
+            case_count = 0
+            for candidate_skill in skills:
+                cases = load_cases_for_skill(candidate_skill, evals_path=evals)
+                if tag is not None:
+                    cases = [c for c in cases if tag in c.tags]
+                case_count += len(cases)
+            typer.echo(
+                f"Plan: up to {arms} arm(s) x {resolved_repeat} repeat(s) x "
+                f"{case_count} case(s) = {arms * resolved_repeat * case_count} runs"
+            )
+        report = run_evals(
+            skills,
+            [active_runner],
+            evals_path=evals,
+            tag=tag,
+            judge=active_judge,
+            baseline=baseline_kind or None,
+            repeat=resolved_repeat,
+        )
     except _AUTHORING_ERRORS as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=2) from exc
 
+    delta = build_delta(report)
     gate = evaluate_gate(
         report,
         min_pass_rate=min_pass_rate if min_pass_rate is not None else settings.min_pass_rate,
         fail_on_error=settings.fail_on_error,
         per_skill_min=settings.per_skill_min,
+        min_delta=resolved_min_delta,
+        delta=delta,
     )
 
-    typer.echo(render_console(report, gate=gate))
+    typer.echo(render_console(report, gate=gate, delta=delta))
     if json_output is not None:
         try:
             json_output.parent.mkdir(parents=True, exist_ok=True)
-            json_output.write_text(render_json(report, gate=gate), encoding="utf-8")
+            json_output.write_text(render_json(report, gate=gate, delta=delta), encoding="utf-8")
         except OSError as exc:
             typer.echo(f"Failed to write JSON report to {json_output}: {exc}")
             # Exit codes are the CI contract: a gate that already failed (1)

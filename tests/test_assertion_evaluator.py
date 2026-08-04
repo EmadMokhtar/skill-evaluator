@@ -131,3 +131,48 @@ def test_every_listed_kind_actually_dispatches():
         )
         # Must not raise; pass/fail is irrelevant here.
         AssertionEvaluator().evaluate(case, RunResult(output="x"))
+
+
+def test_each_assertion_gets_its_own_check():
+    case = EvalCase(
+        name="c",
+        task="t",
+        assertions=[
+            AssertionSpec(kind="contains", value="yes"),
+            AssertionSpec(kind="contains", value="never"),
+        ],
+    )
+    score = AssertionEvaluator().evaluate(case, RunResult(output="yes indeed"))
+
+    assert [(c.id, c.passed) for c in score.checks] == [
+        ("contains[0]", True),
+        ("contains[1]", False),
+    ]
+
+
+def test_check_ids_are_positional_so_they_pair_across_arms():
+    # Two assertions of the same kind must not collide, or a low-signal report
+    # cannot say which one is dead weight.
+    case = EvalCase(
+        name="c",
+        task="t",
+        assertions=[
+            AssertionSpec(kind="contains", value="a"),
+            AssertionSpec(kind="contains", value="b"),
+        ],
+    )
+    score = AssertionEvaluator().evaluate(case, RunResult(output="a b"))
+    assert [c.id for c in score.checks] == ["contains[0]", "contains[1]"]
+
+
+def test_every_check_carries_evidence():
+    case = EvalCase(name="c", task="t", assertions=[AssertionSpec(kind="contains", value="never")])
+    score = AssertionEvaluator().evaluate(case, RunResult(output="nope"))
+    assert score.checks[0].evidence
+    assert "never" in score.checks[0].evidence
+
+
+def test_a_case_with_no_assertions_has_no_checks():
+    score = AssertionEvaluator().evaluate(EvalCase(name="c", task="t"), RunResult(output="x"))
+    assert score.checks == []
+    assert score.passed is True

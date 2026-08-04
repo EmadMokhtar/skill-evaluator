@@ -13,6 +13,7 @@ involved and the "no network" contract still holds; if you hit this, suspect a
 stale/mismatched cassette before you suspect your network.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -32,7 +33,18 @@ from skill_eval.models import (
     ToolSpec,
     TrajectorySpec,
 )
-from skill_eval.runners.pydantic_ai import PydanticAIRunner
+from skill_eval.runners.pydantic_ai import BASELINE_PREAMBLE, PydanticAIRunner
+
+
+def _request_body(request) -> str:
+    """A recorded request's body as text.
+
+    vcrpy hands back bytes for a recorded POST and str for a replayed one
+    depending on the transport, so normalise rather than guessing.
+    """
+    body = request.body
+    return body.decode("utf-8") if isinstance(body, bytes) else body
+
 
 SKILL = Skill(
     name="order-support",
@@ -184,3 +196,28 @@ def test_a_real_judge_drives_the_evaluator_end_to_end(replay):
     assert score.passed is True
     assert len(score.checks) == 2
     assert score.cost_usd > 0
+
+
+@pytest.mark.cassette
+@pytest.mark.vcr
+def test_a_baseline_run_reaches_the_provider_without_the_skill_name(replay, vcr, tmp_path):
+    """The neutral preamble is what the provider actually receives.
+
+    A unit test proves the string; only a recorded exchange proves it survived
+    the adapter and went out on the wire. So this asserts on the recorded
+    *request* -- what the response happens to say back is the model's choice and
+    would prove nothing about what we sent.
+    """
+    skill = Skill(
+        name="order-support", description="", instructions="", variant="baseline", path=tmp_path
+    )
+    runner = PydanticAIRunner(model="openai:gpt-4o-mini")
+    result = runner.run(skill, EvalCase(name="c", task="Say hello in five words."))
+
+    assert result.errored is False
+
+    sent = json.loads(_request_body(vcr.requests[0]))
+    assert sent["instructions"] == BASELINE_PREAMBLE
+    # Not just absent from `instructions`: the skill's name must appear nowhere
+    # in the request at all -- not in a tool definition, not in the input.
+    assert "order-support" not in json.dumps(sent)

@@ -35,23 +35,62 @@ def _split_frontmatter(text: str) -> tuple[dict, str]:
     return safe_load(parts[1]) or {}, parts[2]
 
 
+def _version(frontmatter: dict, source: str) -> str:
+    """A skill's declared version, which must be text.
+
+    YAML resolves `version: 1.20` to the float 1.2, which is the same object it
+    resolves `version: 1.2` to -- so a bare decimal version cannot round-trip,
+    and two genuinely different versions would silently compare equal in
+    `--baseline previous`. Rather than claim a guarantee `str()` cannot deliver,
+    anything YAML did not hand back as a string is rejected here and the author
+    is told to quote it.
+    """
+    declared = frontmatter.get("version")
+    if declared is None:
+        return ""
+    if not isinstance(declared, str):
+        raise SkillParseError(
+            f"invalid frontmatter in {source}: version must be quoted text, but YAML "
+            f"read it as {type(declared).__name__} {declared!r}. Quote it exactly as "
+            f'you wrote it, e.g. version: "1.20" -- unquoted, 1.20 and 1.2 are the '
+            "same number and two different versions would compare equal."
+        )
+    return declared
+
+
+def parse_skill_text(text: str, *, name_fallback: str, path: Path, source: str) -> Skill:
+    """Parse SKILL.md content into a Skill.
+
+    `source` only ever appears in error messages: the content may have come
+    from a file or from `git show`, and an error that says "commit 4f2a1c" is
+    the difference between a useful report and a confusing one.
+    """
+    try:
+        frontmatter, body = _split_frontmatter(text)
+    except yaml.YAMLError as exc:
+        raise SkillParseError(f"invalid frontmatter in {source}: {exc}") from exc
+    if not isinstance(frontmatter, dict):
+        raise SkillParseError(f"invalid frontmatter in {source}: expected a mapping")
+    return Skill(
+        name=str(frontmatter.get("name") or name_fallback),
+        description=str(frontmatter.get("description") or ""),
+        instructions=body.strip(),
+        version=_version(frontmatter, source),
+        path=path,
+    )
+
+
 def parse_skill_file(skill_md: Path) -> Skill:
     """Parse one SKILL.md into a Skill, falling back to the dir name."""
     try:
         text = skill_md.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise SkillParseError(f"cannot read {skill_md}: {exc}") from exc
-    try:
-        frontmatter, body = _split_frontmatter(text)
-    except yaml.YAMLError as exc:
-        raise SkillParseError(f"invalid frontmatter in {skill_md}: {exc}") from exc
-    if not isinstance(frontmatter, dict):
-        raise SkillParseError(f"invalid frontmatter in {skill_md}: expected a mapping")
-    return Skill(
-        name=str(frontmatter.get("name") or skill_md.parent.name),
-        description=str(frontmatter.get("description") or ""),
-        instructions=body.strip(),
+    return parse_skill_text(
+        text,
+        name_fallback=skill_md.parent.name,
         path=skill_md.parent,
+        source=str(skill_md),
     )
 
 

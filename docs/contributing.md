@@ -21,6 +21,16 @@ spend. `uv run skill-eval run ./examples` needs the `pydantic-ai` runner (see
 [Running against a real agent](runners.md)); the shipped examples now
 assert real model behavior, so `list` is what dogfoods discovery for free.
 
+`test_a_baseline_run_reaches_the_provider_without_the_skill_name` in `tests/test_cassettes.py`
+proves the M4 no-name-leak rule survives the wire, but its cassette has not been recorded yet
+— no API key was available when it was written. A missing cassette **skips rather than
+fails**, by design, so a fresh clone is never red for this; whoever has a key next should
+record it with:
+
+```bash
+uv run pytest tests/test_cassettes.py --record-mode=once
+```
+
 Development is test-driven: write the failing test first, then the implementation.
 
 ## Documentation

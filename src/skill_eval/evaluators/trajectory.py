@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from skill_eval.models import EvalCase, EvalScore, RunResult, TrajectorySpec
+from skill_eval.models import CheckResult, EvalCase, EvalScore, RunResult, TrajectorySpec
 
 
 def _is_subsequence(required: list[str], actual: list[str]) -> bool:
@@ -11,44 +11,71 @@ def _is_subsequence(required: list[str], actual: list[str]) -> bool:
     return all(name in remaining for name in required)
 
 
-def _check(spec: TrajectorySpec, called: list[str], triggered: bool | None) -> list[str]:
-    """Return one failure description per check that did not hold."""
-    failures: list[str] = []
+def _checks(spec: TrajectorySpec, called: list[str], triggered: bool | None) -> list[CheckResult]:
+    """One CheckResult per declared check, in a stable order.
 
-    missing = [name for name in spec.called if name not in called]
-    if missing:
-        failures.append(f"never called: {', '.join(missing)}")
+    Ids come from the spec, never from the result, so the same ids appear in
+    both arms of a comparative run.
+    """
+    checks: list[CheckResult] = []
 
-    used = [name for name in spec.forbidden if name in called]
-    if used:
-        failures.append(f"called forbidden tool: {', '.join(used)}")
-
-    if spec.order and not _is_subsequence(spec.order, called):
-        failures.append(f"order {' -> '.join(spec.order)} not followed, got {called}")
-
-    if spec.max_calls is not None and len(called) > spec.max_calls:
-        failures.append(f"made {len(called)} tool calls, limit is {spec.max_calls}")
-
-    if spec.skill_triggered is not None and triggered != spec.skill_triggered:
-        failures.append(
-            "skill was triggered but should not have been"
-            if triggered
-            else "skill was not triggered but should have been"
+    for name in spec.called:
+        held = name in called
+        checks.append(
+            CheckResult(
+                id=f"called:{name}",
+                passed=held,
+                evidence=f"{name} was {'called' if held else 'never called'}",
+            )
         )
 
-    return failures
+    for name in spec.forbidden:
+        held = name not in called
+        checks.append(
+            CheckResult(
+                id=f"forbidden:{name}",
+                passed=held,
+                evidence=f"forbidden tool {name} was {'not called' if held else 'called'}",
+            )
+        )
 
+    if spec.order:
+        held = _is_subsequence(spec.order, called)
+        arrow = " -> ".join(spec.order)
+        checks.append(
+            CheckResult(
+                id="order",
+                passed=held,
+                evidence=(
+                    f"order {arrow} followed"
+                    if held
+                    else f"order {arrow} not followed, got {called}"
+                ),
+            )
+        )
 
-def _total_checks(spec: TrajectorySpec) -> int:
-    return sum(
-        [
-            bool(spec.called),
-            bool(spec.forbidden),
-            bool(spec.order),
-            spec.max_calls is not None,
-            spec.skill_triggered is not None,
-        ]
-    )
+    if spec.max_calls is not None:
+        held = len(called) <= spec.max_calls
+        checks.append(
+            CheckResult(
+                id="max_calls",
+                passed=held,
+                evidence=f"made {len(called)} tool calls, limit is {spec.max_calls}",
+            )
+        )
+
+    if spec.skill_triggered is not None:
+        held = triggered == spec.skill_triggered
+        checks.append(
+            CheckResult(
+                id="skill_triggered",
+                passed=held,
+                evidence=("skill was triggered" if triggered else "skill was not triggered")
+                + f"; expected {spec.skill_triggered}",
+            )
+        )
+
+    return checks
 
 
 class TrajectoryEvaluator:
@@ -58,15 +85,15 @@ class TrajectoryEvaluator:
 
     def evaluate(self, case: EvalCase, result: RunResult) -> EvalScore:
         spec = case.trajectory
-        total = _total_checks(spec) if spec is not None else 0
-        if spec is None or total == 0:
+        if spec is None:
             return EvalScore(
                 evaluator=self.name, passed=True, score=1.0, detail="no trajectory checks"
             )
         if spec.skill_triggered is not None and result.skill_triggered is None:
             # The runner reported no triggering decision at all. That is an
             # infra fact about the runner, not a signal about the skill, so it
-            # must not read as a skill that failed to fire.
+            # must not read as a skill that failed to fire -- and there is no
+            # verdict to record as a check.
             return EvalScore(
                 evaluator=self.name,
                 passed=False,
@@ -78,11 +105,17 @@ class TrajectoryEvaluator:
                 ),
             )
         called = [call.name for call in result.tool_calls]
-        failures = _check(spec, called, result.skill_triggered)
+        checks = _checks(spec, called, result.skill_triggered)
+        if not checks:
+            return EvalScore(
+                evaluator=self.name, passed=True, score=1.0, detail="no trajectory checks"
+            )
+        failures = [c.evidence for c in checks if not c.passed]
         detail = "all trajectory checks held" if not failures else "; ".join(failures)
         return EvalScore(
             evaluator=self.name,
             passed=not failures,
-            score=(total - len(failures)) / total,
+            score=(len(checks) - len(failures)) / len(checks),
             detail=detail,
+            checks=checks,
         )

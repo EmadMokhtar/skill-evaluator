@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from skill_eval.models import AssertionSpec, EvalCase, EvalScore, RunResult
+from skill_eval.models import AssertionSpec, CheckResult, EvalCase, EvalScore, RunResult
 
 
 class UnknownAssertionKind(Exception):
@@ -41,17 +41,33 @@ def _check(spec: AssertionSpec, output: str) -> bool:
 
 
 class AssertionEvaluator:
-    """Every assertion must hold; the score is the fraction that held."""
+    """Every assertion must hold; the score is the fraction that held.
+
+    Each assertion also comes back as its own `CheckResult`. Ids are positional
+    and derived from the *case*, never from the result, so the same ids appear
+    in both arms of a comparative run and can be paired -- which is what makes
+    "this assertion passes with or without the skill" detectable.
+    """
 
     name = "assertion"
 
     def evaluate(self, case: EvalCase, result: RunResult) -> EvalScore:
         if not case.assertions:
             return EvalScore(evaluator=self.name, passed=True, score=1.0, detail="no assertions")
+        checks: list[CheckResult] = []
         failures: list[str] = []
-        for spec in case.assertions:
-            if not _check(spec, result.output):
-                failures.append(f"{spec.kind}({spec.value!r})")
+        for index, spec in enumerate(case.assertions):
+            held = _check(spec, result.output)
+            description = f"{spec.kind}({spec.value!r})"
+            if not held:
+                failures.append(description)
+            checks.append(
+                CheckResult(
+                    id=f"{spec.kind}[{index}]",
+                    passed=held,
+                    evidence=f"{description} {'held' if held else 'did not hold'}",
+                )
+            )
         passed_count = len(case.assertions) - len(failures)
         detail = "all assertions held" if not failures else "failed: " + ", ".join(failures)
         return EvalScore(
@@ -59,4 +75,5 @@ class AssertionEvaluator:
             passed=not failures,
             score=passed_count / len(case.assertions),
             detail=detail,
+            checks=checks,
         )

@@ -116,6 +116,40 @@ Comments are discarded before the check, so a file may discuss the token freely.
 Every assertion in a case must hold for the case to pass. An unsupported `kind` or a malformed
 regex aborts the run as an authoring error rather than being reported as a skill failure.
 
+## Per-check results
+
+`assertions`, `trajectory` and `budget` each report one result per declared check, not just
+one verdict for the whole block — the same shape the LLM judge already uses for its rubric.
+Every check carries a stable id, derived from what the case declared rather than from what the
+run produced, so the same id names the same check whether the skill was loaded or not. That is
+what makes [comparative evals](comparative-evals.md) able to pair up a check across the
+candidate and baseline arms — including flagging one that passed either way as
+[low-signal](comparative-evals.md#low-signal-checks-and-high-variance-cases).
+
+| Source | Check id format | Example |
+| --- | --- | --- |
+| `assertions` | `{kind}[{index}]` — positionally stable | `contains[0]`, `regex[2]` |
+| `trajectory.called` | `called:{tool}` | `called:lookup_order` |
+| `trajectory.forbidden` | `forbidden:{tool}` | `forbidden:issue_refund` |
+| `trajectory.order` | `order` | `order` |
+| `trajectory.max_calls` | `max_calls` | `max_calls` |
+| `trajectory.skill_triggered` | `skill_triggered` | `skill_triggered` |
+| `budget.max_tokens` | `max_tokens` | `max_tokens` |
+| `budget.max_cost_usd` | `max_cost_usd` | `max_cost_usd` |
+| `budget.max_latency_ms` | `max_latency_ms` | `max_latency_ms` |
+
+Each check also carries **evidence** — the same text that would otherwise only appear in the
+evaluator's summary `detail`. In the JSON report, every score's `checks` list carries these
+ids and evidence regardless of whether a baseline ran; the console only prints evidence for
+checks that failed, to keep a passing run's output short.
+
+The "a pass without evidence is a failure" rule (see
+[Judging output quality](#judging-output-quality) above) is specific to the LLM judge, where
+an unsupported PASS is the characteristic failure mode it exists to defend against. It is not
+applied to assertion, trajectory or budget checks — their evidence is generated
+deterministically from the same comparison that produced the verdict, so it cannot go missing
+independently of it.
+
 ## Where eval files are found
 
 For each discovered skill, in order:

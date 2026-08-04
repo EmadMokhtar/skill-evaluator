@@ -55,6 +55,7 @@ nav:
       - Configuration: configuration.md
       - Runners: runners.md
       - Gating and exit codes: gating.md
+      - Comparative evals: comparative-evals.md
   - Roadmap: roadmap.md
   - Architecture: architecture.md
   - Contributing: contributing.md

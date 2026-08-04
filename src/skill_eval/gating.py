@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from skill_eval.comparison import Delta
 from skill_eval.models import RunReport
 
 EXIT_OK = 0
@@ -23,8 +24,16 @@ def evaluate_gate(
     min_pass_rate: float = 1.0,
     fail_on_error: bool = True,
     per_skill_min: dict[str, float] | None = None,
+    min_delta: float | None = None,
+    delta: Delta | None = None,
 ) -> GateResult:
-    """Apply thresholds to a report. Errored cases fail the gate by default."""
+    """Apply thresholds to a report. Errored cases fail the gate by default.
+
+    Every pre-existing rule reads the candidate arm (see `RunReport`). `min_delta`
+    adds the comparative rules: the improvement must clear the bar, and it must
+    have been measured against something -- a gate that verified nothing must
+    never report a pass.
+    """
     reasons: list[str] = []
 
     if report.total == 0:
@@ -69,6 +78,33 @@ def evaluate_gate(
             reasons.append(
                 f"skill {skill_name!r} pass rate {actual:.0%} is below its required {minimum:.0%}"
             )
+
+    if min_delta is not None:
+        if delta is None:
+            reasons.append(
+                "a minimum delta was required but no baseline arm ran, so no "
+                "improvement could be measured"
+            )
+        else:
+            comparable = [case for case in delta.cases if case.comparable]
+            if not comparable:
+                reasons.append(
+                    "a minimum delta was required but no case had a comparable "
+                    "baseline, so no improvement could be measured"
+                )
+            elif delta.pass_rate_delta < min_delta:
+                reasons.append(
+                    f"pass-rate delta {delta.pass_rate_delta:+.0%} is below the "
+                    f"required {min_delta:+.0%}"
+                )
+        for note in report.baseline_notes:
+            # A deliberately skipped baseline is not a failure -- nothing went
+            # wrong. An unresolvable one is: treating it as "no change" would
+            # let a repo pass this gate forever by deleting its git history.
+            if note.kind == "unavailable":
+                reasons.append(
+                    f"skill {note.skill_name!r} has no resolvable baseline: {note.reason}"
+                )
 
     passed = not reasons
     return GateResult(passed=passed, exit_code=EXIT_OK if passed else EXIT_FAILED, reasons=reasons)
