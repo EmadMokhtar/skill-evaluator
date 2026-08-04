@@ -40,8 +40,8 @@ def _delta_block(delta: Delta) -> list[str]:
         f"{delta.pass_rate_delta:+.0%}   (higher is better)"
     )
     lines.append(f"  tokens     {delta.tokens_delta:+.0f}   (negative is better)")
-    lines.append(f"  cost       ${delta.cost_usd_delta:+.4f}")
-    lines.append(f"  latency    {delta.latency_ms_delta:+.0f}ms")
+    lines.append(f"  cost       ${delta.cost_usd_delta:+.4f}   (negative is better)")
+    lines.append(f"  latency    {delta.latency_ms_delta:+.0f}ms   (negative is better)")
     if delta.low_signal:
         lines.append("")
         lines.append(
@@ -109,6 +109,15 @@ def render_console(
                 for score in failing.scores:
                     if not score.passed:
                         lines.append(f"        {score.evaluator}: {score.detail}")
+                        # The evidence is the point of a judge verdict: a summary line
+                        # cannot tell an author whether the judge read the response or
+                        # invented a reason.
+                        for check in score.checks:
+                            if not check.passed:
+                                lines.append(
+                                    f"            {check.id}: "
+                                    f"{check.evidence or 'no evidence given'}"
+                                )
                 if failing.result is not None and failing.result.error:
                     lines.append(f"        error: {failing.result.error}")
             if case.low_signal:

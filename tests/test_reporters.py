@@ -393,3 +393,27 @@ def test_json_totals_count_real_spend_across_both_arms():
     # ... while the pass/fail counts stay candidate-only, because those gate.
     assert payload["summary"]["total"] == 2
     assert payload["summary"]["passed"] == 2
+
+
+def test_the_comparative_path_still_shows_failing_check_evidence():
+    # The evidence is the point of a judge verdict. Losing it when a baseline is
+    # present would make exactly the runs a user opted into harder to diagnose.
+    report = RunReport(
+        baseline_kind="none",
+        outcomes=[
+            _arm_outcome("failed", checks=(("clarity", False),)),
+            _arm_outcome("failed", arm="baseline", checks=(("clarity", False),)),
+        ],
+    )
+    text = render_console(report, delta=build_delta(report))
+    assert "clarity" in text
+
+
+def test_every_efficiency_line_states_which_direction_is_better():
+    # A CI log is read one line at a time; each line has to stand alone.
+    report = _two_arm_report()
+    text = render_console(report, delta=build_delta(report))
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(("tokens", "cost", "latency")):
+            assert "negative is better" in line, f"no direction stated on: {line!r}"
