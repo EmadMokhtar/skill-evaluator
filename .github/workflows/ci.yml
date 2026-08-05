@@ -143,3 +143,38 @@ jobs:
           test -f smoke/summary.md
           python3 -c "import xml.etree.ElementTree as ET; ET.parse('smoke/junit.xml')"
           grep -q "gate passed" smoke/summary.md
+
+  action-smoke-failing-gate:
+    # The passing fixture cannot catch a broken failure path, and that is the
+    # path that matters: `shell: bash` runs with -e already set, so a bare
+    # failing command aborts the step before it can record the exit code, the
+    # summary is never published, and a workflow keyed on the exit-code output
+    # goes green on a red gate. This job is what stops that regressing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the action against a deliberately failing fixture
+        id: eval
+        uses: ./
+        continue-on-error: true
+        with:
+          path: tests/fixtures/ci-smoke-fail
+          runner: fake
+          install-spec: .
+          json-output: fail/report.json
+          junit-output: fail/junit.xml
+          markdown-output: fail/summary.md
+
+      - name: Assert the gate failed and still reported
+        env:
+          CODE: ${{ steps.eval.outputs.exit-code }}
+          PASSED: ${{ steps.eval.outputs.passed }}
+        run: |
+          set -euo pipefail
+          test "$CODE" = "1"
+          test "$PASSED" = "false"
+          test -s fail/summary.md
+          grep -q "gate failed" fail/summary.md
+          test -s fail/junit.xml
+          python3 -c "import xml.etree.ElementTree as ET; ET.parse('fail/junit.xml')"

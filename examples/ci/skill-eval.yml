@@ -60,6 +60,10 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            if (!fs.existsSync('skill-eval-summary.md')) {
+              core.info('No Markdown summary was written; skipping the comment.');
+              return;
+            }
             const marker = '<!-- skill-eval -->';
             const body = marker + '\n' + fs.readFileSync('skill-eval-summary.md', 'utf8');
             const { data: comments } = await github.rest.issues.listComments({
@@ -80,8 +84,10 @@ jobs:
             }
 
       - name: Fail the build if the gate failed
-        # `continue-on-error` above let the comment and artifact steps run; the
-        # gate's verdict is re-raised here so the exit code still decides the
-        # build.
-        if: steps.eval.outputs.exit-code != '0'
-        run: exit ${{ steps.eval.outputs.exit-code }}
+        # `continue-on-error` above let the comment and artifact steps run, so
+        # the gate's verdict is re-raised here. An empty exit code means the
+        # evaluation never completed, which must fail rather than pass.
+        if: always() && steps.eval.outputs.exit-code != '0'
+        env:
+          CODE: ${{ steps.eval.outputs.exit-code }}
+        run: exit "${CODE:-1}"

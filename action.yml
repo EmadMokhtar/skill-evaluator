@@ -137,15 +137,16 @@ runs:
         add --markdown-output "$SE_MARKDOWN"
         add --markdown-max-chars "$SE_MARKDOWN_MAX"
 
-        # The exit code is the CI contract, but it must not stop this step
-        # before the summary is written -- so it is captured here and re-raised
-        # by the last step instead.
-        skill-eval run "${args[@]}"
-        code=$?
+        # `shell: bash` runs with -e already set, so a bare failing command
+        # would abort this step before the code could be recorded -- and the
+        # summary and outputs below would never be written. `|| code=$?` is
+        # exempt from -e because the command is not the last in the list.
+        code=0
+        skill-eval run "${args[@]}" || code=$?
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
 
     - name: Publish the step summary
-      if: inputs.step-summary == 'true'
+      if: always() && inputs.step-summary == 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -158,6 +159,7 @@ runs:
 
     - name: Read the report
       id: report
+      if: always()
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -182,7 +184,12 @@ runs:
         PY
 
     - name: Re-raise the gate result
+      if: always()
       shell: bash
       env:
         CODE: ${{ steps.run.outputs.exit-code }}
-      run: exit "$CODE"
+      run: |
+        # An empty CODE means the run step never completed at all -- a failed
+        # install, a cancelled job. A gate that cannot prove it passed must
+        # fail, never default to success.
+        exit "${CODE:-1}"
