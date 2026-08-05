@@ -242,3 +242,71 @@ def test_judge_cost_is_summed_across_outcomes_and_kept_off_the_run_cost():
     )
     assert report.judge_cost_usd == pytest.approx(0.002)
     assert report.outcomes[0].result.cost_usd == pytest.approx(0.01)
+
+
+def test_totals_are_summed_across_both_arms():
+    # Unlike passed/failed/pass_rate (candidate arm only), the totals read
+    # every outcome: a baseline run still spent real tokens and money even
+    # though the gate never looks at it.
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="s",
+                case_name="c",
+                runner="fake",
+                status="passed",
+                arm="candidate",
+                result=RunResult(input_tokens=10, output_tokens=5, cost_usd=0.01, latency_ms=100),
+            ),
+            CaseOutcome(
+                skill_name="s",
+                case_name="c",
+                runner="fake",
+                status="failed",
+                arm="baseline",
+                result=RunResult(input_tokens=20, output_tokens=5, cost_usd=0.02, latency_ms=200),
+            ),
+        ]
+    )
+    assert report.total_tokens == 40
+    assert report.total_cost_usd == pytest.approx(0.03)
+    assert report.total_latency_ms == 300
+
+
+def test_pricing_degraded_is_true_when_any_outcome_in_either_arm_has_a_cost_note():
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="s",
+                case_name="c",
+                runner="fake",
+                status="passed",
+                arm="candidate",
+                result=RunResult(cost_usd=0.0),
+            ),
+            CaseOutcome(
+                skill_name="s",
+                case_name="c",
+                runner="fake",
+                status="failed",
+                arm="baseline",
+                result=RunResult(cost_usd=0.0, cost_note="no price data for x (KeyError)"),
+            ),
+        ]
+    )
+    assert report.pricing_degraded is True
+
+
+def test_pricing_degraded_is_false_when_no_result_carries_a_cost_note():
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="s",
+                case_name="c",
+                runner="fake",
+                status="passed",
+                result=RunResult(cost_usd=0.01),
+            )
+        ]
+    )
+    assert report.pricing_degraded is False

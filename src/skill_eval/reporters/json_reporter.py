@@ -18,9 +18,9 @@ def render_json(
     spent. The pass/fail counts in `summary` are the candidate arm's, because
     those are what the gate reads.
     """
-    total_tokens = sum(o.result.tokens for o in report.outcomes if o.result)
-    total_cost_usd = sum(o.result.cost_usd for o in report.outcomes if o.result)
-    total_latency_ms = sum(o.result.latency_ms for o in report.outcomes if o.result)
+    total_tokens = report.total_tokens
+    total_cost_usd = report.total_cost_usd
+    total_latency_ms = report.total_latency_ms
 
     payload: dict = {
         "summary": {
