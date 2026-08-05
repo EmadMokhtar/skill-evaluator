@@ -9,7 +9,7 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M4**: the pipeline runs real agents through `PydanticAIRunner`
+Currently at **M5 (part 1)**: the pipeline runs real agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
 remains the default and the backbone of the zero-cost test tier. M3 adds a
@@ -19,11 +19,15 @@ skill at all, negative controls included. M4 makes every measurement
 comparative: each case can run in a candidate arm and a baseline arm
 (`--baseline none` or `--baseline previous`, resolved from git), optionally
 sampled `--repeat N` times, with the report gaining a delta and `--min-delta`
-gating on it. Milestones are defined in
+gating on it. M5 part 1 makes a run legible to CI: `--junit-output` and
+`--markdown-output` reporters, `--concurrency N` over the work matrix, and a
+composite GitHub Action with example workflows. Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
-is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, and the M4
-design is in `docs/superpowers/specs/2026-08-03-skill-eval-m4-design.md`.
+is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
+design is in `docs/superpowers/specs/2026-08-03-skill-eval-m4-design.md`, and
+the M5 design is in
+`docs/superpowers/specs/2026-08-05-skill-eval-m5-design.md`.
 
 ## Commands
 
@@ -154,6 +158,34 @@ form, that file is the explanation.
   about the eval suite, not verdicts on the skill.
 - **`resolve_previous` never raises for environmental failures** — no `git`, no repo, an
   untracked `SKILL.md`, an exhausted history window all come back as `BaselineUnavailable`.
+- **JUnit reports the candidate arm only, and `<failure>`/`<error>` mirror `failed`/`errored`.**
+  A failing baseline is evidence the skill helped, not a red build. `errored` covers a runner
+  that raised *and* an evaluator that did — `_error_body` reads `RunResult.error` first and
+  falls back to an errored evaluator's own `detail`, so a judge endpoint returning 500 is never
+  misreported as the runner's fault.
+- **JUnit output is always well-formed XML.** `ElementTree` emits control characters raw, so
+  illegal characters are stripped before they reach the tree. A zero-case run emits an
+  `<error>`, never an empty `tests="0"` suite that would render green against exit code 1.
+- **Markdown truncation gives up detail before it gives up meaning.** Optional blocks are
+  dropped first; if gate reasons still overflow the budget they are elided behind a truthful
+  `+N more reasons` count rather than cut silently, so a clipped comment can never imply the
+  reasons it shows were all of them; only a budget too small to hold the verdict itself falls
+  back to a hard character cut. It lives in the renderer, because only the renderer knows where
+  a `<details>` block ends or a count line would be cut in half.
+- **Reporters never do IO to a service.** The tool renders; the workflow posts.
+- **`--concurrency 1` constructs no executor** and runs the plain sequential loop; outcome
+  order is submission order rather than completion order at every concurrency level. An
+  authoring error still aborts the run deterministically: only the futures queued *after* the
+  failure are cancelled, the executor always shuts down with `cancel_futures=True` (including
+  when `submit` itself raises), and a result list shorter than the work list is a raised error,
+  never a quiet partial run. Discovery is now always a separate sequential pass ahead of
+  execution, so a malformed eval file anywhere aborts before any case runs. Runners, judges and
+  evaluators must have no mutable state touched by `run`/`evaluate`/`judge`.
+- **The action fails closed.** `shell: bash` already runs under `-e`; the run step captures the
+  CLI's exit code itself (`code=0; skill-eval run ... || code=$?`) before `-e` can discard it,
+  every later step carries `if: always()`, and the final step re-raises with `exit
+  "${CODE:-1}"` — an empty code (the run step never finishing at all) fails rather than
+  defaulting to success.
 
 ## Documentation
 
@@ -168,6 +200,7 @@ Documentation ships **with** the change, never as a follow-up. Two CI jobs enfor
 | Runner behavior, tools, budgets, pricing | `docs/runners.md` |
 | Gate rules, exit codes, the JSON report | `docs/gating.md` |
 | A protocol, an invariant, or the module map | `ARCHITECTURE.md` |
+| CI integration, the action, example workflows | `docs/ci.md` |
 | Anything needing a new page | the page plus `nav:` in `mkdocs.yml` |
 
 `README.md` is a landing page only. Reference prose lives in `docs/` — do not reintroduce

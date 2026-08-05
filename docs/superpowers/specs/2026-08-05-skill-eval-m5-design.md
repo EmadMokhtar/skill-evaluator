@@ -62,9 +62,13 @@ with a trusted publisher, a protected `pypi` environment, a `main`-push credenti
    all user- or model-controlled. ElementTree escapes `&`/`<`/`>` but passes control
    characters through raw, so a model emitting `\x00` would produce a file real parsers
    reject; illegal characters are stripped before they reach the tree.
-6. **Markdown truncation never drops the verdict or the gate reasons.** If a report is clipped
-   to fit a comment, the one thing a reader needs — why CI went red — must survive. Detail
-   blocks are expendable; the summary is not.
+6. **Markdown truncation gives up detail before it gives up meaning, and never hides how much
+   it gave up.** The verdict and the gate reasons are assembled first, ahead of every table
+   (§4), so a clipped comment still opens with the answer. Optional detail blocks are the first
+   thing dropped. If gate reasons still do not fit, they are elided behind a truthful `+N more
+   reasons` count rather than being cut in silence, so a clipped comment can never imply the
+   reasons it shows were all of them. Only a budget too small to hold the verdict, the summary
+   and that count itself falls back to a hard character cut.
 7. **The renderer owns truncation, the GitHub layer owns the number.** Only the renderer knows
    where a `<details>` block ends, so a `.slice()` in the workflow would cut mid-block. But
    65,536 is a fact about GitHub comments, not about skill-eval, so `--markdown-max-chars`
@@ -147,6 +151,14 @@ no vocabulary for "this case improved". The delta lives in JSON and Markdown.
 
 ## 4. Markdown reporter — `reporters/markdown.py`
 
+> **Corrected 2026-08-06, after implementation.** This section originally said truncation
+> "never drops... the gate reasons" (echoed in §2 Decision 6 and §12) while also describing a
+> fallback that hard-truncates them — two claims that cannot both be true. It also said model
+> output and judge evidence "go inside fenced code blocks" unconditionally. Both are rewritten
+> below to describe what `reporters/markdown.py` actually does, so this spec stays a truthful
+> record rather than reading as if it always said this. See `ARCHITECTURE.md`'s "CI surfaces
+> (M5)" section and `docs/ci.md` for the user-facing version.
+
 ```python
 def render_markdown(report: RunReport, gate: GateResult | None = None,
                     delta: Delta | None = None, max_chars: int | None = None) -> str: ...
@@ -210,14 +222,30 @@ Pass rate **58% → 83%** (**+25%**, higher is better)
 - **Low-signal and high-variance blocks carry the "advice, never a gate failure" sentence**
   that the console already prints. In a PR comment the temptation to read every red-looking
   item as a failure is much stronger than in a terminal.
-- **Escaping:** skill and case names have `|` and backticks escaped before entering a table and
-  are wrapped in backticks; model output and judge evidence go inside fenced code blocks with a
-  fence long enough to survive backticks in the content.
-- **Truncation** is structural, not a string slice. The renderer builds an ordered list of
-  blocks, each flagged essential (verdict, summary, gate reasons) or optional (everything
-  else). Over budget, optional blocks are dropped from the end until it fits, and
-  `_Truncated — see the JSON report artifact._` is appended. If the essential blocks alone
-  exceed the budget, the last one is hard-truncated. Deterministic and testable offline.
+- **Escaping:** skill and case names are pipe-escaped (`|` → `\|`) and wrapped in an inline code
+  span before entering a table — GFM's table extension splits a row on `|` *before* inline
+  parsing, so an escaped code span is still required even though the pipe never renders as a
+  delimiter. Evaluator detail and judge evidence are model-controlled text of unknown shape:
+  single-line content gets an inline code span, multi-line content gets a fenced block instead
+  (so it is not squashed onto one line) — either delimiter is sized longer than the longest run
+  of backticks already in the text, so the content cannot break out of it.
+- **Truncation** is structural, not a single string slice, and escalates through three stages,
+  each strictly more destructive than the last. The renderer first assembles the full report:
+  verdict, summary, gate reasons, then every optional block (totals, per-skill table, delta,
+  failures, low-signal/high-variance, skipped) in order. If that fits the budget, it is returned
+  as-is — no truncation marker, because nothing was truncated. Otherwise:
+  1. **Drop optional blocks from the end**, one at a time, appending
+     `_Truncated — see the JSON report artifact._`, until it fits or none remain.
+  2. **Still over budget: elide gate reasons from the end**, one at a time, each cut announced
+     by a `- _+N more reasons — see the JSON report._` line, until it fits or zero reasons are
+     shown.
+  3. **Still over budget** — the verdict, the summary and that one elision line do not fit —
+     **hard-cut the assembled text** to `max_chars` with a plain slice, marker included. This is
+     the only stage that can truncate mid-word, and it is reached only when the budget cannot
+     hold the report's irreducible minimum.
+  A negative `max_chars` is clamped to `0` before any of this runs, so "nothing fits" is
+  explicit rather than `s[:-5]`-style slicing from the end, which would keep nearly the whole
+  report while claiming to be a ceiling. Deterministic and testable offline.
 
 ## 5. Bounded concurrency
 
@@ -420,7 +448,10 @@ New:
 2. **`<failure>` is `failed`; `<error>` is `errored`.** The distinction survives into the CI UI.
 3. **JUnit output is always well-formed XML.** Illegal characters are stripped, never emitted.
 4. **A zero-case run produces a JUnit error, not an empty green suite.**
-5. **Markdown truncation never drops the verdict or a gate reason.**
+5. **Markdown truncation gives up detail before meaning, and never hides how much it gave up.**
+   Optional blocks are dropped first; gate reasons that still do not fit are elided behind a
+   truthful `+N more reasons` count rather than being cut in silence; only a budget too small to
+   hold the verdict itself falls back to a hard character cut. (Corrected 2026-08-06 — see §4.)
 6. **`--concurrency 1` constructs no executor and is byte-identical to a sequential run.**
 7. **Outcome order is submission order, never completion order.**
 8. **Concurrency never turns an authoring error into a case failure**, and the surfaced error
