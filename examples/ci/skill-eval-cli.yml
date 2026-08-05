@@ -1,0 +1,44 @@
+# The same gate without the composite action, for repositories that would
+# rather call the CLI directly.
+#
+# Copy this into .github/workflows/ in your own repository.
+name: skill-eval (CLI)
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install skill-eval
+        run: uv tool install "skill-eval[pydantic-ai]"
+
+      - name: Evaluate the skills
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          skill-eval run ./skills \
+            --runner pydantic-ai \
+            --model openai:gpt-4o-mini \
+            --concurrency 4 \
+            --json-output skill-eval-report.json \
+            --junit-output skill-eval-junit.xml \
+            --markdown-output skill-eval-summary.md
+
+      - name: Publish the summary
+        # `always()` so a failing gate still reports why.
+        if: always()
+        run: cat skill-eval-summary.md >> "$GITHUB_STEP_SUMMARY"

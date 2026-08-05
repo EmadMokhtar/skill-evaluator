@@ -115,3 +115,31 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         # No dependencies: the script is stdlib-only, so this needs no uv sync.
         run: python3 scripts/check_docs_updated.py "$BASE_SHA" HEAD
+
+  action-smoke:
+    # Exercises action.yml end to end. tests/test_action.py can only check that
+    # the inputs match the CLI's flags; nothing but a real run catches a missing
+    # `shell: bash`, a bad expression, or a step that swallows the exit code.
+    # `install-spec: .` installs this checkout, so the job needs no release.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run the action against a fixture skill
+        uses: ./
+        with:
+          path: tests/fixtures/ci-smoke
+          runner: fake
+          install-spec: .
+          json-output: smoke/report.json
+          junit-output: smoke/junit.xml
+          markdown-output: smoke/summary.md
+
+      - name: Assert the reports were written and are well-formed
+        run: |
+          set -euo pipefail
+          test -f smoke/report.json
+          test -f smoke/junit.xml
+          test -f smoke/summary.md
+          python3 -c "import xml.etree.ElementTree as ET; ET.parse('smoke/junit.xml')"
+          grep -q "gate passed" smoke/summary.md
