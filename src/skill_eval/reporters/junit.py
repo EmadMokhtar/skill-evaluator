@@ -57,6 +57,20 @@ def _failure_body(outcome: CaseOutcome) -> str:
     return "\n".join(lines) or "no failing evaluator reported a detail"
 
 
+def _error_body(outcome: CaseOutcome) -> str:
+    """Why this case errored -- from the runner, or from an evaluator.
+
+    `errored` covers both: a runner that blew up, and an evaluator that did
+    (a judge endpoint returning 500). Only the runner sets `RunResult.error`,
+    so reading only that would discard an evaluator's diagnostic and pin the
+    blame on the wrong component.
+    """
+    if outcome.result is not None and outcome.result.error:
+        return outcome.result.error
+    details = [f"{score.evaluator}: {score.detail}" for score in outcome.scores if score.errored]
+    return "\n".join(details) if details else "no detail was reported"
+
+
 def _case_name(outcome: CaseOutcome, repeat: int) -> str:
     """Repetitions need distinct names: consumers key on classname+name and
     silently collapse duplicates. No suffix at repeat == 1 keeps the ordinary
@@ -88,10 +102,10 @@ def _skipped_suite(root: Element, skill_name: str, case_name: str, reason: str) 
         suite,
         "testcase",
         classname=_xml_safe(skill_name),
-        name=case_name,
+        name=_xml_safe(case_name),
         time="0.000",
     )
-    SubElement(case, "skipped", message=reason)
+    SubElement(case, "skipped", message=_xml_safe(reason))
 
 
 def render_junit(
@@ -129,11 +143,7 @@ def render_junit(
                 SubElement(case, "failure", message=_message(body)).text = _xml_safe(body)
             elif outcome.status == "errored":
                 suite_errors += 1
-                body = (
-                    outcome.result.error
-                    if outcome.result is not None and outcome.result.error
-                    else "the runner reported no detail"
-                )
+                body = _error_body(outcome)
                 SubElement(case, "error", message=_message(body)).text = _xml_safe(body)
         suite.set("tests", str(len(outcomes)))
         suite.set("failures", str(suite_failures))

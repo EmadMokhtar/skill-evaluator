@@ -198,3 +198,31 @@ def test_time_is_reported_in_seconds():
 
 def test_the_document_starts_with_an_xml_declaration():
     assert render_junit(RunReport(outcomes=[_outcome()])).startswith('<?xml version="1.0"')
+
+
+def test_an_errored_evaluator_reports_its_own_diagnostic():
+    """`errored` covers an evaluator that blew up as well as a runner that did.
+
+    Only the runner sets `RunResult.error`, so reading only that would discard
+    a judge failure's message and blame the runner for it.
+    """
+    report = RunReport(
+        outcomes=[
+            _outcome(
+                name="judged",
+                status="errored",
+                scores=[
+                    EvalScore(
+                        evaluator="judge",
+                        passed=False,
+                        errored=True,
+                        detail="judge failed: connection reset",
+                    )
+                ],
+                result=RunResult(output="ok", latency_ms=500),
+            )
+        ]
+    )
+    error = _parse(report).find("testsuite/testcase/error")
+    assert "judge: judge failed: connection reset" in error.text
+    assert "runner" not in error.text
