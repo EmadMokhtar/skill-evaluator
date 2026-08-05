@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from concurrent.futures import Executor, ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from skill_eval.cases.loader import load_cases_for_skill
@@ -126,6 +129,127 @@ def _arms(
     return arms
 
 
+@dataclass(frozen=True)
+class _WorkItem:
+    """One (skill-arm, case, runner, repetition) to run and score.
+
+    `skill` is the arm's skill -- a baseline resolved from git keeps its own
+    name -- while `report_skill_name` is the candidate's name, which is the
+    heading both arms group under in the report.
+    """
+
+    skill: Skill
+    case: EvalCase
+    runner: Runner
+    arm: Arm
+    repeat_index: int
+    report_skill_name: str
+
+
+@dataclass
+class _Plan:
+    """Everything discovery produced, before anything has been run."""
+
+    items: list[_WorkItem] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    tag_filtered: list[str] = field(default_factory=list)
+    notes: list[BaselineNote] = field(default_factory=list)
+
+
+def _plan_work(
+    skills: list[Skill],
+    runners: list[Runner],
+    evals_path: Path | None,
+    tag: str | None,
+    baseline: BaselineKind | None,
+    repeat: int,
+) -> _Plan:
+    """Discovery, filtering and baseline resolution -- always sequential.
+
+    Baseline resolution shells out to git once per skill; parallelising it
+    would multiply subprocess spawns to save nothing. The nesting order here is
+    what defines report order, so it must not change.
+    """
+    plan = _Plan()
+    for skill in skills:
+        cases = load_cases_for_skill(skill, evals_path=evals_path)
+        if not cases:
+            plan.skipped.append(skill.name)
+            continue
+        if tag is not None:
+            cases = [c for c in cases if tag in c.tags]
+            if not cases:
+                plan.tag_filtered.append(skill.name)
+                continue
+        baseline_skill = None if baseline is None else _baseline_skill(skill, baseline, plan.notes)
+        for case in cases:
+            for arm, arm_skill in _arms(case, skill, baseline_skill, baseline, plan.notes):
+                for runner in runners:
+                    for index in range(repeat):
+                        plan.items.append(
+                            _WorkItem(
+                                skill=arm_skill,
+                                case=case,
+                                runner=runner,
+                                arm=arm,
+                                repeat_index=index,
+                                report_skill_name=skill.name,
+                            )
+                        )
+    return plan
+
+
+def _run_item(item: _WorkItem, evaluators: list[Evaluator]) -> CaseOutcome:
+    return _run_one(
+        item.skill,
+        item.case,
+        item.runner,
+        evaluators,
+        arm=item.arm,
+        repeat_index=item.repeat_index,
+        report_skill_name=item.report_skill_name,
+    )
+
+
+def _default_executor(concurrency: int) -> Executor:
+    return ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="skill-eval")
+
+
+def _execute(
+    items: list[_WorkItem],
+    evaluators: list[Evaluator],
+    concurrency: int,
+    executor_factory: Callable[[int], Executor] | None,
+) -> list[CaseOutcome]:
+    """Run every work item, in submission order.
+
+    At `concurrency == 1` no executor is constructed at all. That is not an
+    optimisation: it is what keeps the default path byte-identical to the
+    single-threaded run -- same ordering, same exception propagation, and a
+    cassette tier that vcrpy (order-sensitive, not thread-safe) can still match.
+
+    Above 1, futures are collected and read in submission order so results
+    never reorder by completion time, and an exception aborts without waiting
+    on every in-flight provider call.
+    """
+    if concurrency == 1:
+        return [_run_item(item, evaluators) for item in items]
+
+    executor = (executor_factory or _default_executor)(concurrency)
+    futures = [executor.submit(_run_item, item, evaluators) for item in items]
+    outcomes: list[CaseOutcome] = []
+    try:
+        for future in futures:
+            outcomes.append(future.result())
+    except BaseException:
+        # An authoring error must abort the whole run. `with executor:` would
+        # shut down with wait=True and block on every call still in flight.
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    executor.shutdown(wait=True)
+    return outcomes
+
+
 def run_evals(
     skills: list[Skill],
     runners: list[Runner],
@@ -135,6 +259,8 @@ def run_evals(
     judge: Judge | None = None,
     baseline: BaselineKind | None = None,
     repeat: int = 1,
+    concurrency: int = 1,
+    executor_factory: Callable[[int], Executor] | None = None,
 ) -> RunReport:
     """Run every (skill, case, runner, arm, repetition) and aggregate the results.
 
@@ -157,6 +283,15 @@ def run_evals(
     outcome. A `BaselineUnavailable` is not an authoring error -- it is a fact
     about the user's checkout -- so it becomes a note on the report rather than
     aborting the run.
+
+    `concurrency` bounds how many work items run at once. It defaults to 1,
+    which constructs no executor and behaves exactly like the single-threaded
+    run -- upgrading must never change ordering or spend on its own. The work
+    is network-bound, so threads (not processes) are the right unit; the
+    parameter is typed against `concurrent.futures.Executor` via
+    `executor_factory` so a different pool can be swapped in without touching
+    call sites. Runners, judges and evaluators must therefore be safe to share
+    across threads: no mutable instance state touched by run/evaluate/judge.
     """
     if evaluators is not None and judge is not None:
         raise ValueError(
@@ -165,6 +300,8 @@ def run_evals(
         )
     if repeat < 1:
         raise ValueError(f"repeat must be at least 1, got {repeat}")
+    if concurrency < 1:
+        raise ValueError(f"concurrency must be at least 1, got {concurrency}")
     evaluators = (
         evaluators
         if evaluators is not None
@@ -178,43 +315,13 @@ def run_evals(
             JudgeEvaluator(judge if judge is not None else FakeJudge()),
         ]
     )
-    outcomes: list[CaseOutcome] = []
-    skipped: list[str] = []
-    tag_filtered: list[str] = []
-    notes: list[BaselineNote] = []
-    for skill in skills:
-        cases = load_cases_for_skill(skill, evals_path=evals_path)
-        if not cases:
-            skipped.append(skill.name)
-            continue
-        if tag is not None:
-            cases = [c for c in cases if tag in c.tags]
-            if not cases:
-                tag_filtered.append(skill.name)
-                continue
-        # Resolved once per skill, never per case or per repetition: it shells
-        # out to git.
-        baseline_skill = None if baseline is None else _baseline_skill(skill, baseline, notes)
-        for case in cases:
-            for arm, arm_skill in _arms(case, skill, baseline_skill, baseline, notes):
-                for runner in runners:
-                    for index in range(repeat):
-                        outcomes.append(
-                            _run_one(
-                                arm_skill,
-                                case,
-                                runner,
-                                evaluators,
-                                arm=arm,
-                                repeat_index=index,
-                                report_skill_name=skill.name,
-                            )
-                        )
+    plan = _plan_work(skills, runners, evals_path, tag, baseline, repeat)
+    outcomes = _execute(plan.items, evaluators, concurrency, executor_factory)
     return RunReport(
         outcomes=outcomes,
-        skipped_skills=skipped,
-        tag_filtered_skills=tag_filtered,
+        skipped_skills=plan.skipped,
+        tag_filtered_skills=plan.tag_filtered,
         baseline_kind=baseline,
         repeat=repeat,
-        baseline_notes=notes,
+        baseline_notes=plan.notes,
     )

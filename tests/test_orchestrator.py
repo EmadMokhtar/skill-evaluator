@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from skill_eval.evaluators.assertion import UnknownAssertionKind
@@ -284,3 +286,120 @@ def test_passing_both_evaluators_and_judge_raises(tmp_path):
         )
     assert "evaluators" in str(excinfo.value)
     assert "judge" in str(excinfo.value)
+
+
+def _concurrency_skill(tmp_path, count=6):
+    """A skill with `count` cases, each trivially passing under FakeRunner."""
+    skill_dir = tmp_path / "concurrent"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: concurrent\ndescription: d\n---\n\nbody\n", encoding="utf-8"
+    )
+    cases = "cases:\n" + "".join(
+        f"  - name: case-{i}\n    task: task-{i}\n    assertions:\n"
+        f"      - kind: contains\n        value: '[fake]'\n"
+        for i in range(count)
+    )
+    evals = skill_dir / "evals"
+    evals.mkdir(exist_ok=True)
+    (evals / "concurrent.eval.yaml").write_text(cases, encoding="utf-8")
+    return load_skills(skill_dir)
+
+
+def test_concurrency_produces_the_same_outcomes_in_the_same_order(tmp_path):
+    """Order is submission order, never completion order: render_console
+    iterates report.outcomes and build_delta groups by insertion order, so
+    completion-order results would make output churn between identical runs.
+    """
+    skills = _concurrency_skill(tmp_path)
+    sequential = run_evals(skills, [FakeRunner()])
+    parallel = run_evals(skills, [FakeRunner()], concurrency=4)
+
+    assert [(o.skill_name, o.case_name, o.arm, o.repeat_index) for o in parallel.outcomes] == [
+        (o.skill_name, o.case_name, o.arm, o.repeat_index) for o in sequential.outcomes
+    ]
+    assert [o.status for o in parallel.outcomes] == [o.status for o in sequential.outcomes]
+    assert parallel.pass_rate == sequential.pass_rate
+
+
+def test_concurrency_one_never_constructs_an_executor(tmp_path):
+    """Not an optimisation: no executor is what keeps the default path
+    byte-identical and the order-sensitive cassette tier deterministic."""
+    skills = _concurrency_skill(tmp_path, count=2)
+
+    def explode(_workers):
+        raise AssertionError("an executor must not be built at concurrency == 1")
+
+    report = run_evals(skills, [FakeRunner()], executor_factory=explode)
+    assert report.total == 2
+
+
+def test_a_custom_executor_factory_is_used_above_one(tmp_path):
+    skills = _concurrency_skill(tmp_path, count=2)
+    seen: list[int] = []
+
+    def factory(workers):
+        seen.append(workers)
+        return ThreadPoolExecutor(max_workers=workers)
+
+    report = run_evals(skills, [FakeRunner()], concurrency=3, executor_factory=factory)
+    assert seen == [3]
+    assert report.total == 2
+
+
+def test_an_authoring_error_still_aborts_the_run_under_concurrency(tmp_path):
+    """A malformed assertion is a mistake in the user's files, not a signal
+    about the skill. It must abort, never score as a failed case."""
+    skill_dir = tmp_path / "bad"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: bad\ndescription: d\n---\n\nbody\n", encoding="utf-8"
+    )
+    evals = skill_dir / "evals"
+    evals.mkdir()
+    (evals / "bad.eval.yaml").write_text(
+        "cases:\n"
+        + "".join(
+            f"  - name: case-{i}\n    task: t{i}\n    assertions:\n"
+            f"      - kind: no-such-kind\n        value: x\n"
+            for i in range(4)
+        ),
+        encoding="utf-8",
+    )
+    skills = load_skills(skill_dir)
+    with pytest.raises(UnknownAssertionKind):
+        run_evals(skills, [FakeRunner()], concurrency=4)
+
+
+def test_the_surfaced_authoring_error_is_deterministic(tmp_path):
+    """Reading futures in submission order means the same error surfaces every
+    time, so the message a user sees does not depend on thread scheduling."""
+    skill_dir = tmp_path / "mixed"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: mixed\ndescription: d\n---\n\nbody\n", encoding="utf-8"
+    )
+    evals = skill_dir / "evals"
+    evals.mkdir()
+    (evals / "mixed.eval.yaml").write_text(
+        "cases:\n"
+        "  - name: first\n    task: t1\n    assertions:\n"
+        "      - kind: first-bad-kind\n        value: x\n"
+        "  - name: second\n    task: t2\n    assertions:\n"
+        "      - kind: second-bad-kind\n        value: x\n",
+        encoding="utf-8",
+    )
+    skills = load_skills(skill_dir)
+    messages = set()
+    for _ in range(5):
+        with pytest.raises(UnknownAssertionKind) as caught:
+            run_evals(skills, [FakeRunner()], concurrency=4)
+        messages.add(str(caught.value))
+    assert len(messages) == 1
+    assert "first-bad-kind" in messages.pop()
+
+
+def test_concurrency_below_one_is_rejected(tmp_path):
+    skills = _concurrency_skill(tmp_path, count=1)
+    with pytest.raises(ValueError, match="concurrency must be at least 1"):
+        run_evals(skills, [FakeRunner()], concurrency=0)
