@@ -75,7 +75,9 @@ with a trusted publisher, a protected `pypi` environment, a `main`-push credenti
    defaults to unset and the action supplies the value.
 8. **`--concurrency 1` creates no executor and behaves identically to today.** Same as
    `baseline` defaulting to `""` and `judge` to `"fake"`: upgrading must never change spend,
-   ordering, or behavior on its own.
+   ordering, or behavior on its own. No executor is constructed and execution is sequential,
+   but discovery now happens up front, so a load-time authoring error surfaces before any case
+   runs.
 9. **Outcome order is submission order, never completion order.** `render_console` iterates
    `report.outcomes` and `build_delta` groups by dict insertion order, so completion-order
    results would make console output and case ordering churn between identical runs.
@@ -279,7 +281,9 @@ runner, repetition — is preserved exactly.
 - **`concurrency == 1` never constructs an executor** and runs the plain loop (§2.8). Not an
   optimisation: it is what makes the default path byte-identical, keeps the cassette tier
   (vcrpy is order-sensitive and not thread-safe) deterministic, and keeps exception
-  propagation exactly as it is today.
+  propagation exactly as it is today. No executor is constructed and execution is sequential,
+  but discovery now happens up front, so a load-time authoring error surfaces before any case
+  runs.
 - **Above 1**, `executor_factory(concurrency)` — defaulting to
   `ThreadPoolExecutor(max_workers=n, thread_name_prefix="skill-eval")` — receives every work
   item via `submit`. Futures are kept in submission order and read in that order (§2.9), so
@@ -452,7 +456,9 @@ New:
    Optional blocks are dropped first; gate reasons that still do not fit are elided behind a
    truthful `+N more reasons` count rather than being cut in silence; only a budget too small to
    hold the verdict itself falls back to a hard character cut. (Corrected 2026-08-06 — see §4.)
-6. **`--concurrency 1` constructs no executor and is byte-identical to a sequential run.**
+6. **`--concurrency 1` constructs no executor and is byte-identical to a sequential run.** No
+   executor is constructed and execution is sequential, but discovery now happens up front, so
+   a load-time authoring error surfaces before any case runs.
 7. **Outcome order is submission order, never completion order.**
 8. **Concurrency never turns an authoring error into a case failure**, and the surfaced error
    is deterministic.

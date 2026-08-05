@@ -41,6 +41,10 @@ to hold even the verdict) that falls back to a hard character cut.
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
+This repository has no tags yet, so `@v1` does not resolve until the first release. Until then,
+pin the action to a commit SHA, or reference it as `uses: ./` from a workflow inside this
+repository.
+
 Every `skill-eval run` flag is available as a kebab-cased input (`--min-pass-rate` becomes
 `min-pass-rate`), plus three inputs about the environment rather than the run:
 
