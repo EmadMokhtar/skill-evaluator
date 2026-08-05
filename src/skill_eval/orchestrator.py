@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import CancelledError, Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 from skill_eval.cases.loader import load_cases_for_skill
@@ -252,26 +253,43 @@ def _execute(
         # handler would finish the work this abort exists to abandon.
         futures = [executor.submit(_run_item, item, evaluators) for item in items]
 
-        def _cancel_queued_on_failure(finished: Future) -> None:
+        def _cancel_queued_after(index: int, finished: Future) -> None:
             # Runs on the worker thread, before it picks up its next item.
+            #
+            # Only work *after* the failure is cancelled. A lower-index future
+            # can still be PENDING -- a worker dequeues an item before it marks
+            # the future RUNNING -- and cancelling one would let a higher-index
+            # error surface instead of the lowest-index one, which is the
+            # determinism this reads futures in submission order to preserve.
             if finished.cancelled() or finished.exception() is None:
                 return
-            for queued in futures:
+            for queued in futures[index + 1 :]:
                 queued.cancel()
 
-        for future in futures:
-            future.add_done_callback(_cancel_queued_on_failure)
+        for index, future in enumerate(futures):
+            future.add_done_callback(partial(_cancel_queued_after, index))
 
         outcomes: list[CaseOutcome] = []
         for future in futures:
             try:
                 outcomes.append(future.result())
             except CancelledError:
-                # Cancelled by the callback above, so the failure that caused
-                # it is on some other future. Keep scanning in submission order
-                # until we reach it -- at least one future holds a real
-                # exception, or nothing would have been cancelled.
+                # Defensive: our own callback never cancels a future below the
+                # failing index, so this should not trigger from our own
+                # cancellations. The totality check below is what actually
+                # catches an executor that abandons work for its own reasons.
                 continue
+
+        if len(outcomes) != len(futures):
+            # Only reachable with a custom executor that abandons work on its
+            # own: our own callback only ever cancels after a failure, and that
+            # failure is always raised above. Returning a short list would let
+            # the gate compute a pass rate over a subset of the suite, which is
+            # the silent partial run that the zero-cases rule exists to reject.
+            raise RuntimeError(
+                f"the executor returned {len(outcomes)} of {len(futures)} results; "
+                "work was abandoned with no failure to explain it"
+            )
     except BaseException:
         executor.shutdown(wait=False, cancel_futures=True)
         raise

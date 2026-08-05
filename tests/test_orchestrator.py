@@ -482,8 +482,9 @@ def test_a_failure_cancels_work_that_is_still_queued(tmp_path):
                 release.wait(timeout=10)
             return RunResult(output="x")
 
-    # Let the failing case abort the run, then free the blocked worker so the
-    # submission-order read can finish and surface the error.
+    # Liveness backstop, not the mechanism under test -- see the docstring
+    # above for why the cancel itself is deterministic. This timer only frees
+    # the blocked worker so the run can finish and the failure can surface.
     timer = threading.Timer(1.0, release.set)
     timer.start()
     try:
@@ -500,8 +501,6 @@ def test_a_failure_cancels_work_that_is_still_queued(tmp_path):
 def test_a_submit_failure_still_shuts_the_executor_down():
     """An executor left running keeps its workers alive, and the interpreter's
     exit handler then joins them -- finishing the work the abort abandoned."""
-    from concurrent.futures import ThreadPoolExecutor
-
     shutdowns: list[tuple[bool, bool]] = []
 
     class _FailingExecutor(ThreadPoolExecutor):
@@ -533,3 +532,38 @@ def test_a_submit_failure_still_shuts_the_executor_down():
     with pytest.raises(RuntimeError, match="can't start new thread"):
         _execute(items, [], concurrency=2, executor_factory=lambda _n: _FailingExecutor())
     assert shutdowns == [(False, True)]
+
+
+def test_work_abandoned_without_a_failure_is_an_error_not_a_short_report():
+    """A short result list would let the gate score a subset of the suite.
+
+    Our own callback only cancels after a failure, and that failure is raised
+    -- but `executor_factory` is public, and a pool that abandons queued work
+    for its own reasons must not produce a quietly partial run.
+    """
+
+    class _AbandoningExecutor(ThreadPoolExecutor):
+        def __init__(self):
+            super().__init__(max_workers=1)
+            self._submits = 0
+
+        def submit(self, fn, /, *args, **kwargs):
+            self._submits += 1
+            future = super().submit(fn, *args, **kwargs)
+            if self._submits > 1:
+                future.cancel()
+            return future
+
+    items = [
+        _WorkItem(
+            skill=Skill(name="s", description="d", instructions="i", path=Path("s")),
+            case=EvalCase(name=f"c{i}", task="t"),
+            runner=FakeRunner(),
+            arm="candidate",
+            repeat_index=0,
+            report_skill_name="s",
+        )
+        for i in range(4)
+    ]
+    with pytest.raises(RuntimeError, match="work was abandoned"):
+        _execute(items, [], concurrency=2, executor_factory=lambda _n: _AbandoningExecutor())
