@@ -33,7 +33,8 @@ jobs:
           repeat: 3
           concurrency: 4
           # GitHub caps a comment at 65536 characters. Detail blocks are
-          # dropped first; the verdict and the gate reasons always survive.
+          # dropped first, then gate reasons are elided behind a "+N more"
+          # count; a budget too small for the verdict itself is cut outright.
           markdown-max-chars: "60000"
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

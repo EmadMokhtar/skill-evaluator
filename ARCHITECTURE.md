@@ -99,7 +99,7 @@ matrix: for each (skill × case × arm × repeat × runner)
                                                        └─► CaseOutcome (arm, repeat_index)
 
 aggregate ──► RunReport ──► comparison.build_delta ──► Delta | None
-                        └─► reporters/  ──► console + JSON
+                        └─► reporters/  ──► console + JSON + JUnit + Markdown
                         └─► gating      ──► exit code
 ```
 
