@@ -32,8 +32,14 @@ def _xml_safe(text: str) -> str:
 
 
 def _message(body: str) -> str:
-    """The attribute form of a body: its first line, capped."""
-    first = body.splitlines()[0] if body else ""
+    """The attribute form of a body: its first line, capped.
+
+    `str.splitlines()` also breaks on exotic separators (`\x0b`, `\x0c`,
+    `\x1c`-`\x1e`, `\x85`, U+2028, U+2029) that are not line breaks as far as
+    the element body is concerned -- splitting on those would cut the
+    attribute short of what the body itself shows.
+    """
+    first = body.split("\n")[0] if body else ""
     return _xml_safe(first[:_MESSAGE_LIMIT])
 
 

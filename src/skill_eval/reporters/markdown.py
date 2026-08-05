@@ -32,18 +32,35 @@ def _code(text: str) -> str:
     return f"{delim}{pad}{text}{pad}{delim}"
 
 
-def _safe_text(text: str) -> str:
+_MARKDOWN_SPECIALS = re.compile(r"([\\`*_\[\]<>])")
+
+
+def _escape(text: str) -> str:
+    """Neutralise Markdown and HTML in prose we did not author.
+
+    Skill names come from `SKILL.md` frontmatter, which in the documented
+    pull-request flow can come from a fork.
+    """
+    return _MARKDOWN_SPECIALS.sub(r"\\\1", text)
+
+
+def _safe_text(text: str, indent: str = "") -> str:
     """Evaluator detail and judge evidence, safe to embed in Markdown.
 
     Both are model-controlled, so a stray backtick would open an unterminated
     code span and a literal `</details>` would close the block this sits in.
     A code span renders either literally. Multi-line content gets a fence
-    instead, so it is not squashed onto one line.
+    instead, so it is not squashed onto one line. `indent` keeps a multi-line
+    fence inside the list item it is nested under -- a fence flush at column 0
+    would otherwise end the surrounding GFM list.
     """
     if not text:
         return ""
     if "\n" in text:
-        return "\n\n" + _fenced(text) + "\n"
+        fenced = _fenced(text)
+        if indent:
+            fenced = "\n".join(indent + line for line in fenced.splitlines())
+        return "\n\n" + fenced + "\n"
     return _code(text)
 
 
@@ -172,7 +189,7 @@ def _no_baseline_block(report: RunReport) -> str:
     notes = format_baseline_notes(report.baseline_notes)
     if notes:
         lines.append("")
-        lines.extend(f"- {note}" for note in notes)
+        lines.extend(f"- {_escape(note)}" for note in notes)
     return "\n".join(lines)
 
 
@@ -180,18 +197,23 @@ def _details(summary: str, body_lines: list[str]) -> str:
     return "\n".join([f"<details><summary>{summary}</summary>", "", *body_lines, "", "</details>"])
 
 
-def _failure_lines(outcome: CaseOutcome) -> list[str]:
+def _failure_lines(outcome: CaseOutcome, repeat: int) -> list[str]:
+    label = outcome.case_name
+    if repeat > 1:
+        # Matches the JUnit reporter's suffix: without it, --repeat 5 renders
+        # five byte-identical blocks for one case.
+        label = f"{label} [run {outcome.repeat_index + 1}/{repeat}]"
     lines = [
-        f"**{_cell(outcome.skill_name)} :: {_cell(outcome.case_name)}** "
-        f"({outcome.runner}) — {outcome.status}"
+        f"**{_code(outcome.skill_name)} :: {_code(label)}** ({outcome.runner}) — {outcome.status}"
     ]
     for score in outcome.scores:
         if score.passed:
             continue
-        lines.append(f"- {_code(score.evaluator)}: {_safe_text(score.detail)}")
+        detail = _safe_text(score.detail, indent="  ")
+        lines.append(f"- {_code(score.evaluator)}: {detail}")
         for check in score.checks:
             if not check.passed:
-                evidence = _safe_text(check.evidence) or "no evidence given"
+                evidence = _safe_text(check.evidence, indent="      ") or "no evidence given"
                 lines.append(f"    - {_code(check.id)}: {evidence}")
     if outcome.result is not None and outcome.result.error:
         lines.extend(["", _fenced(outcome.result.error)])
@@ -203,10 +225,18 @@ def _failures(report: RunReport) -> str:
     failing = [o for o in report.candidate_outcomes if o.status != "passed"]
     if not failing:
         return ""
+    errored = sum(1 for o in failing if o.status == "errored")
+    failed = len(failing) - errored
+    if errored and failed:
+        title = f"Failures and errors ({failed} failed, {errored} errored)"
+    elif errored:
+        title = f"Errors ({errored})"
+    else:
+        title = f"Failures ({failed})"
     body: list[str] = []
     for outcome in failing:
-        body.extend(_failure_lines(outcome))
-    return _details(f"Failures ({len(failing)})", body)
+        body.extend(_failure_lines(outcome, report.repeat))
+    return _details(title, body)
 
 
 def _low_signal(delta: Delta) -> str:
@@ -217,7 +247,7 @@ def _low_signal(delta: Delta) -> str:
         "",
     ]
     body.extend(
-        f"- {_cell(c.skill_name)} :: {_cell(c.case_name)}: `{c.check_id}`" for c in delta.low_signal
+        f"- {_code(c.skill_name)} :: {_code(c.case_name)}: `{c.check_id}`" for c in delta.low_signal
     )
     body.extend(["", _ADVISORY])
     return _details(f"Low-signal checks ({len(delta.low_signal)})", body)
@@ -228,7 +258,7 @@ def _high_variance(delta: Delta) -> str:
         return ""
     body = ["Repetitions disagreed — often a sign of ambiguous skill instructions.", ""]
     body.extend(
-        f"- {_cell(r.skill_name)} :: {_cell(r.case_name)} ({r.arm}): "
+        f"- {_code(r.skill_name)} :: {_code(r.case_name)} ({r.arm}): "
         f"{r.pass_rate:.0%}, stddev {r.stddev:.2f}"
         for r in delta.high_variance
     )
@@ -239,9 +269,11 @@ def _high_variance(delta: Delta) -> str:
 def _skipped(report: RunReport) -> str:
     bits = []
     if report.skipped_skills:
-        bits.append(f"Skipped (no eval cases): {', '.join(report.skipped_skills)}")
+        names = ", ".join(_escape(name) for name in report.skipped_skills)
+        bits.append(f"Skipped (no eval cases): {names}")
     if report.tag_filtered_skills:
-        bits.append(f"Skipped (no cases matched --tag): {', '.join(report.tag_filtered_skills)}")
+        names = ", ".join(_escape(name) for name in report.tag_filtered_skills)
+        bits.append(f"Skipped (no cases matched --tag): {names}")
     return "<sub>" + "<br>".join(bits) + "</sub>" if bits else ""
 
 

@@ -66,3 +66,19 @@ def test_every_action_input_is_described():
 def test_the_action_declares_its_report_outputs():
     outputs = set(_action()["outputs"])
     assert {"exit-code", "passed", "pass-rate"} <= outputs
+
+
+def test_every_cli_backed_input_is_actually_forwarded_to_the_command():
+    """Name-matching alone would pass an input that is declared, wired into the
+    step's env, and then never handed to the CLI -- it would silently do nothing.
+    """
+    step = next(s for s in _action()["runs"]["steps"] if s.get("id") == "run")
+    script = step["run"]
+    env = step.get("env", {})
+    for name in _action_inputs() - ENVIRONMENT_INPUTS - ARGUMENT_INPUTS:
+        reference = "${{ inputs." + name + " }}"
+        variable = next((k for k, v in env.items() if v.strip() == reference), None)
+        assert variable is not None, f"input {name!r} is not exposed to the run step's env"
+        assert f'add --{name} "${variable}"' in script, (
+            f"input {name!r} reaches the step as ${variable} but is never passed to skill-eval"
+        )

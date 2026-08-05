@@ -325,3 +325,44 @@ def test_judge_evidence_containing_markup_cannot_break_the_report():
     assert "``said `hello` then </details>``" in text
     # One from the evidence rendered literally, one real closing tag.
     assert text.count("</details>") == 2
+
+
+def test_errored_cases_are_not_counted_as_failures_in_the_details_header():
+    """The summary and the details header must not disagree about how many
+    cases failed -- errored is an infra signal, not a low score."""
+    report = RunReport(
+        outcomes=[
+            _outcome(name="scored-low", status="failed"),
+            _outcome(
+                name="blew-up",
+                status="errored",
+                scores=[],
+                result=RunResult(error="APIConnectionError: boom"),
+            ),
+        ]
+    )
+    text = render_markdown(report)
+    assert "1 failed" in text
+    assert "1 errored" in text
+    assert "Failures and errors (1 failed, 1 errored)" in text
+    assert "Failures (2)" not in text
+
+
+def test_baseline_errors_are_reported_apart_from_candidate_errors():
+    """An errored baseline invalidates a comparison; it is not a case that broke."""
+    report = RunReport(
+        outcomes=[
+            _outcome(name="extracts", arm="candidate"),
+            _outcome(
+                name="extracts",
+                arm="baseline",
+                status="errored",
+                scores=[],
+                result=RunResult(error="boom"),
+            ),
+        ],
+        baseline_kind="none",
+    )
+    text = render_markdown(report)
+    assert "Baseline errored" in text
+    assert "0 errored" in text
