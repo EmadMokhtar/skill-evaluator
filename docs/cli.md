@@ -35,7 +35,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--min-delta <float>` | unset | Require the candidate arm to beat the baseline by at least this much. Requires `--baseline`. |
 | `--junit-output <path>` | none | Write a JUnit XML report here, for CI test panes |
 | `--markdown-output <path>` | none | Write a Markdown summary here, for a job summary or PR comment |
-| `--markdown-max-chars <int>` | unset | Truncate the Markdown summary. Detail blocks are dropped first; the verdict and every gate reason always survive |
+| `--markdown-max-chars <int>` | unset | Truncate the Markdown summary to fit a comment. Detail blocks are dropped first, then gate reasons are elided behind a `+N more` count; a budget too small to hold even the verdict is cut outright. Requires `--markdown-output` |
 | `--concurrency <int>` | `1` | Run this many cases at once. The work is network-bound, so the practical ceiling is your provider's rate limit |
 
 Each flag overrides the corresponding key in [configuration](configuration.md).

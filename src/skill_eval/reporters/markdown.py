@@ -263,6 +263,11 @@ def render_markdown(
     absolute either way -- GitHub rejects an over-length comment outright, so
     overflowing would cost the reader the whole report rather than part of it.
     """
+    if max_chars is not None:
+        # A negative budget must mean "nothing fits", not "slice from the end":
+        # `s[:-5]` returns almost the whole report while claiming to be a
+        # ceiling, which is the one thing this parameter must never do.
+        max_chars = max(0, max_chars)
     optional = [
         _totals(report),
         _per_skill(report),

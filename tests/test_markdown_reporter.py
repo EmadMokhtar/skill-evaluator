@@ -287,6 +287,15 @@ def test_elided_gate_reasons_are_counted_never_silently_dropped():
     assert shown + hidden == 80, f"{shown} shown + {hidden} counted != 80 reasons"
 
 
+def test_a_negative_budget_is_treated_as_nothing_fits_not_as_a_slice_from_the_end():
+    """`s[:-5]` strips from the end rather than capping length, so a negative
+    budget would return nearly the whole report while claiming to be a ceiling."""
+    report = RunReport(outcomes=[_outcome(name="x", status="failed")])
+    gate = evaluate_gate(report)
+    for budget in (-1, -5, -1000):
+        assert render_markdown(report, gate=gate, max_chars=budget) == ""
+
+
 def test_judge_evidence_containing_markup_cannot_break_the_report():
     """Evidence quotes the agent's own response, so a stray backtick or a
     literal closing details tag would otherwise escape the block it sits in."""

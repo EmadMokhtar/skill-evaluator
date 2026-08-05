@@ -143,6 +143,13 @@ def run(
         resolved_concurrency = concurrency if concurrency is not None else settings.concurrency
         if resolved_concurrency < 1:
             raise typer.BadParameter("--concurrency must be at least 1")
+        if markdown_max_chars is not None:
+            if markdown_max_chars < 1:
+                raise typer.BadParameter("--markdown-max-chars must be at least 1")
+            if markdown_output is None:
+                # A flag that silently does nothing hides a mistake rather than
+                # reporting it -- the same reason --min-delta requires --baseline.
+                raise typer.BadParameter("--markdown-max-chars requires --markdown-output")
         resolved_min_delta = min_delta if min_delta is not None else settings.min_delta
         # Checked against resolved values so a baseline in skill-eval.toml
         # satisfies a --min-delta on the command line. A gate that verified

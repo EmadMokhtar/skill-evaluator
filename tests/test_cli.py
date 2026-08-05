@@ -563,6 +563,31 @@ def test_markdown_max_chars_truncates(tmp_path):
     assert len(out.read_text(encoding="utf-8")) <= 80
 
 
+def test_markdown_max_chars_below_one_is_a_user_error(tmp_path):
+    _make_skill(tmp_path / "skills")
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(tmp_path / "skills"),
+            "--markdown-output",
+            str(tmp_path / "summary.md"),
+            "--markdown-max-chars",
+            "0",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "--markdown-max-chars must be at least 1" in plain(result.output)
+
+
+def test_markdown_max_chars_without_markdown_output_is_a_user_error(tmp_path):
+    """A flag that silently does nothing hides a mistake instead of reporting it."""
+    _make_skill(tmp_path / "skills")
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--markdown-max-chars", "500"])
+    assert result.exit_code == 2
+    assert "--markdown-max-chars requires --markdown-output" in plain(result.output)
+
+
 def test_a_junit_write_failure_does_not_mask_a_failing_gate(tmp_path):
     """Exit codes are the CI contract: a red gate must stay visible rather
     than being escalated to 2 by an unrelated write problem."""
