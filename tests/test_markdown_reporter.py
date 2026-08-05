@@ -6,8 +6,10 @@ lost the reason CI went red is worse than no comment at all.
 
 from __future__ import annotations
 
+import re
+
 from skill_eval.comparison import build_delta
-from skill_eval.gating import evaluate_gate
+from skill_eval.gating import GateResult, evaluate_gate
 from skill_eval.models import (
     BaselineNote,
     CaseOutcome,
@@ -251,3 +253,66 @@ def test_an_over_budget_verdict_is_hard_truncated_rather_than_overflowing():
     report = RunReport(outcomes=[_outcome(name="x", status="failed")])
     clipped = render_markdown(report, gate=evaluate_gate(report), max_chars=60)
     assert len(clipped) <= 60
+
+
+def test_truncation_never_returns_more_than_the_budget():
+    """The budget is a hard ceiling: GitHub rejects an over-length comment
+    outright, so overflowing costs the reader the whole report, not part of it.
+    The truncation marker is itself longer than some budgets, so it cannot be
+    exempt from the limit it advertises."""
+    report = RunReport(outcomes=[_outcome(name=f"case-{i}", status="failed") for i in range(30)])
+    gate = evaluate_gate(report)
+    for budget in (5, 20, 44, 45, 60, 200, 900, 5000):
+        clipped = render_markdown(report, gate=gate, max_chars=budget)
+        assert len(clipped) <= budget, f"budget {budget} overflowed to {len(clipped)}"
+
+
+def test_elided_gate_reasons_are_counted_never_silently_dropped():
+    """A clipped report must never imply the reasons it lists are all of them.
+
+    Eighty reasons is realistic: per_skill_min and unresolvable baselines each
+    append one per skill.
+    """
+    report = RunReport(outcomes=[_outcome(name="x", status="failed")])
+    gate = GateResult(
+        passed=False,
+        exit_code=1,
+        reasons=[f"skill 'skill-{i}' pass rate 0% is below its required 100%" for i in range(80)],
+    )
+    clipped = render_markdown(report, gate=gate, max_chars=600)
+    assert len(clipped) <= 600
+    assert "gate failed" in clipped
+    shown = clipped.count("is below its required")
+    hidden = int(re.search(r"\+(\d+) more reason", clipped).group(1))
+    assert shown + hidden == 80, f"{shown} shown + {hidden} counted != 80 reasons"
+
+
+def test_judge_evidence_containing_markup_cannot_break_the_report():
+    """Evidence quotes the agent's own response, so a stray backtick or a
+    literal closing details tag would otherwise escape the block it sits in."""
+    report = RunReport(
+        outcomes=[
+            _outcome(
+                name="cites",
+                status="failed",
+                scores=[
+                    EvalScore(
+                        evaluator="judge",
+                        passed=False,
+                        detail="1 of 1 checks failed",
+                        checks=[
+                            CheckResult(
+                                id="quotes-source",
+                                passed=False,
+                                evidence="said `hello` then </details>",
+                            )
+                        ],
+                    )
+                ],
+            )
+        ]
+    )
+    text = render_markdown(report)
+    assert "``said `hello` then </details>``" in text
+    # One from the evidence rendered literally, one real closing tag.
+    assert text.count("</details>") == 2

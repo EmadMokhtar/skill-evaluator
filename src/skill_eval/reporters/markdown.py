@@ -8,7 +8,6 @@ and token scopes inside a pure function.
 from __future__ import annotations
 
 import re
-from typing import NamedTuple
 
 from skill_eval.comparison import Delta, format_baseline_notes
 from skill_eval.gating import GateResult
@@ -18,32 +17,46 @@ _TRUNCATION_NOTE = "_Truncated — see the JSON report artifact._"
 _ADVISORY = "These flags are advice about the eval suite; they never fail the gate."
 
 
-class _Block(NamedTuple):
-    """One section, and whether it may be dropped to fit a size budget.
-
-    Essential means a reader who sees only this still learns the verdict and
-    why. Everything else is detail, and detail is what gets sacrificed.
-    """
-
-    text: str
-    essential: bool
-
-
-def _cell(text: str) -> str:
-    """A table cell: pipes escaped, wrapped in inline code.
-
-    Content containing a backtick needs the double-backtick delimiter form,
-    which is the only way to put one inside inline code.
-    """
-    escaped = text.replace("|", r"\|")
-    return f"`` {escaped} ``" if "`" in escaped else f"`{escaped}`"
-
-
 def _fenced(text: str) -> str:
     """A fenced block whose fence outlives any run of backticks inside it."""
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
     fence = "`" * max(3, longest + 1)
     return f"{fence}\n{text}\n{fence}"
+
+
+def _code(text: str) -> str:
+    """`text` as an inline code span, delimited by more backticks than it holds."""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    delim = "`" * (longest + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{delim}{pad}{text}{pad}{delim}"
+
+
+def _safe_text(text: str) -> str:
+    """Evaluator detail and judge evidence, safe to embed in Markdown.
+
+    Both are model-controlled, so a stray backtick would open an unterminated
+    code span and a literal `</details>` would close the block this sits in.
+    A code span renders either literally. Multi-line content gets a fence
+    instead, so it is not squashed onto one line.
+    """
+    if not text:
+        return ""
+    if "\n" in text:
+        return "\n\n" + _fenced(text) + "\n"
+    return _code(text)
+
+
+def _cell(text: str) -> str:
+    """A table cell: pipe escaped, then wrapped in a code span.
+
+    GFM's table extension splits rows on `|` *before* inline parsing, so a
+    pipe inside a code span still breaks the row unless it is backslash
+    escaped -- and the table parser consumes that backslash, so it never
+    renders. Verified against the GFM table extension: without the escape the
+    row splits and the rest of the cell is discarded.
+    """
+    return _code(text.replace("|", r"\|"))
 
 
 def _table(headers: list[str], rows: list[list[str]]) -> str:
@@ -68,8 +81,23 @@ def _summary(report: RunReport) -> str:
     )
 
 
-def _gate_block(gate: GateResult) -> str:
-    return "### Gate failed\n" + "\n".join(f"- {reason}" for reason in gate.reasons)
+def _gate_block(gate: GateResult, limit: int | None = None) -> str:
+    """The gate's reasons, optionally showing only the first `limit` of them.
+
+    Eliding is not dropping: the number left out is printed, so a clipped
+    report can never imply the reasons it lists were all of them.
+    """
+    reasons = gate.reasons
+    if limit is None or limit >= len(reasons):
+        shown, hidden = reasons, 0
+    else:
+        shown, hidden = reasons[:limit], len(reasons) - limit
+    lines = ["### Gate failed"]
+    lines.extend(f"- {reason}" for reason in shown)
+    if hidden:
+        word = "reason" if hidden == 1 else "reasons"
+        lines.append(f"- _+{hidden} more {word} — see the JSON report._")
+    return "\n".join(lines)
 
 
 def _totals(report: RunReport) -> str:
@@ -160,10 +188,11 @@ def _failure_lines(outcome: CaseOutcome) -> list[str]:
     for score in outcome.scores:
         if score.passed:
             continue
-        lines.append(f"- `{score.evaluator}`: {score.detail}")
+        lines.append(f"- {_code(score.evaluator)}: {_safe_text(score.detail)}")
         for check in score.checks:
             if not check.passed:
-                lines.append(f"    - `{check.id}`: {check.evidence or 'no evidence given'}")
+                evidence = _safe_text(check.evidence) or "no evidence given"
+                lines.append(f"    - {_code(check.id)}: {evidence}")
     if outcome.result is not None and outcome.result.error:
         lines.extend(["", _fenced(outcome.result.error)])
     lines.append("")
@@ -216,38 +245,6 @@ def _skipped(report: RunReport) -> str:
     return "<sub>" + "<br>".join(bits) + "</sub>" if bits else ""
 
 
-def _join(blocks: list[_Block]) -> str:
-    return "\n\n".join(block.text for block in blocks if block.text)
-
-
-def _fit(blocks: list[_Block], max_chars: int | None) -> str:
-    """Trim to a size budget by dropping whole optional blocks, last first.
-
-    Structural, not a string slice: only this module knows where a <details>
-    block ends, so a caller slicing the result would cut one open. The budget
-    is a hard ceiling -- GitHub rejects an over-length comment outright -- so
-    the essential blocks are hard-truncated as a last resort rather than
-    allowed to overflow.
-    """
-    text = _join(blocks)
-    if max_chars is None or len(text) <= max_chars:
-        return text
-
-    kept = list(blocks)
-    while any(not block.essential for block in kept):
-        for index in range(len(kept) - 1, -1, -1):
-            if not kept[index].essential:
-                del kept[index]
-                break
-        text = _join(kept) + "\n\n" + _TRUNCATION_NOTE
-        if len(text) <= max_chars:
-            return text
-
-    note = "\n\n" + _TRUNCATION_NOTE
-    room = max(0, max_chars - len(note))
-    return _join(kept)[:room] + note
-
-
 def render_markdown(
     report: RunReport,
     gate: GateResult | None = None,
@@ -259,19 +256,52 @@ def render_markdown(
     `max_chars` is left to the caller because 65,536 is a fact about GitHub
     comments, not about skill-eval; a step summary allows 1 MiB and should not
     be trimmed at all.
+
+    Trimming gives up detail before it gives up meaning: optional blocks go
+    first, then gate reasons are elided behind a count, and only a budget too
+    small to hold the verdict itself falls back to a hard cut. The ceiling is
+    absolute either way -- GitHub rejects an over-length comment outright, so
+    overflowing would cost the reader the whole report rather than part of it.
     """
-    blocks = [_Block(_verdict(gate), True), _Block(_summary(report), True)]
-    if gate is not None and not gate.passed:
-        blocks.append(_Block(_gate_block(gate), True))
-    blocks.append(_Block(_totals(report), False))
-    blocks.append(_Block(_per_skill(report), False))
-    if delta is not None:
-        blocks.append(_Block(_delta_block(delta), False))
-    elif report.baseline_kind is not None:
-        blocks.append(_Block(_no_baseline_block(report), False))
-    blocks.append(_Block(_failures(report), False))
-    if delta is not None:
-        blocks.append(_Block(_low_signal(delta), False))
-        blocks.append(_Block(_high_variance(delta), False))
-    blocks.append(_Block(_skipped(report), False))
-    return _fit(blocks, max_chars)
+    optional = [
+        _totals(report),
+        _per_skill(report),
+        _delta_block(delta)
+        if delta is not None
+        else (_no_baseline_block(report) if report.baseline_kind is not None else ""),
+        _failures(report),
+        _low_signal(delta) if delta is not None else "",
+        _high_variance(delta) if delta is not None else "",
+        _skipped(report),
+    ]
+    gated = gate is not None and not gate.passed
+
+    def assemble(kept: int, reason_limit: int | None, trimmed: bool) -> str:
+        parts = [_verdict(gate), _summary(report)]
+        if gated:
+            parts.append(_gate_block(gate, reason_limit))
+        parts.extend(optional[:kept])
+        text = "\n\n".join(part for part in parts if part)
+        return f"{text}\n\n{_TRUNCATION_NOTE}" if trimmed else text
+
+    full = assemble(len(optional), None, False)
+    if max_chars is None or len(full) <= max_chars:
+        return full
+
+    # Detail first: drop optional blocks from the end.
+    for kept in range(len(optional) - 1, -1, -1):
+        text = assemble(kept, None, True)
+        if len(text) <= max_chars:
+            return text
+
+    # Then elide reasons, each elision announcing how many it stands for.
+    reason_count = len(gate.reasons) if gated else 0
+    for limit in range(reason_count - 1, -1, -1):
+        text = assemble(0, limit, True)
+        if len(text) <= max_chars:
+            return text
+
+    # A budget too small to hold even the verdict cannot carry a report. Cut to
+    # the ceiling, marker included -- the marker is itself longer than some
+    # budgets, so it cannot be exempt from the limit it advertises.
+    return assemble(0, 0, True)[:max_chars]
