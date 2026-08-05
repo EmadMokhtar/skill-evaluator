@@ -1,7 +1,10 @@
+import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
+from skill_eval.cases.loader import CaseParseError
 from skill_eval.evaluators.assertion import UnknownAssertionKind
 from skill_eval.judges.fake import FakeJudge
 from skill_eval.models import (
@@ -13,7 +16,7 @@ from skill_eval.models import (
     Skill,
     ToolCall,
 )
-from skill_eval.orchestrator import run_evals
+from skill_eval.orchestrator import _execute, _WorkItem, run_evals
 from skill_eval.runners.fake import FakeRunner
 from skill_eval.skills.loader import load_skills
 
@@ -403,3 +406,130 @@ def test_concurrency_below_one_is_rejected(tmp_path):
     skills = _concurrency_skill(tmp_path, count=1)
     with pytest.raises(ValueError, match="concurrency must be at least 1"):
         run_evals(skills, [FakeRunner()], concurrency=0)
+
+
+def test_a_malformed_eval_file_aborts_before_any_case_runs(tmp_path):
+    """Discovery is a separate, sequential pass, so every skill's cases are
+    loaded before any case is run -- and a malformed eval file therefore costs
+    nothing, even when an earlier skill's cases would have run fine."""
+    for name, cases in (
+        (
+            "a",
+            "cases:\n  - name: fine\n    task: t\n    assertions:\n"
+            "      - kind: contains\n        value: x\n",
+        ),
+        ("b", "cases:\n  - name: broken\n    task: t\n    nonsense_key: 1\n"),
+    ):
+        skill_dir = tmp_path / name
+        (skill_dir / "evals").mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: d\n---\n\nbody\n", encoding="utf-8"
+        )
+        (skill_dir / "evals" / f"{name}.eval.yaml").write_text(cases, encoding="utf-8")
+
+    ran: list[str] = []
+
+    class _RecordingRunner:
+        name = "recording"
+
+        def run(self, skill, case):
+            ran.append(case.name)
+            return RunResult(output="x")
+
+    with pytest.raises(CaseParseError):
+        run_evals(load_skills(tmp_path), [_RecordingRunner()])
+    assert ran == []
+
+
+def test_a_failure_cancels_work_that_is_still_queued(tmp_path):
+    """Every case is a paid provider call, so an authoring error has to stop
+    the run rather than let the pool drain the queue behind it.
+
+    The first case holds a worker while the second fails, so the assertion is
+    about cancellation rather than about which thread won a race: a worker runs
+    a future's done callbacks before it picks up its next item, so the cancel
+    lands before any queued case can start.
+    """
+    skill_dir = tmp_path / "big"
+    (skill_dir / "evals").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: big\ndescription: d\n---\n\nbody\n", encoding="utf-8"
+    )
+    cases = (
+        "cases:\n"
+        "  - name: aaa-blocker\n    task: block\n    assertions:\n"
+        "      - kind: contains\n        value: x\n"
+        "  - name: bbb-bad\n    task: bad\n    assertions:\n"
+        "      - kind: no-such-kind\n        value: x\n"
+    ) + "".join(
+        f"  - name: rest-{i}\n    task: t{i}\n    assertions:\n"
+        f"      - kind: contains\n        value: x\n"
+        for i in range(10)
+    )
+    (skill_dir / "evals" / "big.eval.yaml").write_text(cases, encoding="utf-8")
+
+    release = threading.Event()
+    lock = threading.Lock()
+    seen: list[str] = []
+
+    class _GatedRunner:
+        name = "gated"
+
+        def run(self, skill, case):
+            with lock:
+                seen.append(case.name)
+            if case.name == "aaa-blocker":
+                release.wait(timeout=10)
+            return RunResult(output="x")
+
+    # Let the failing case abort the run, then free the blocked worker so the
+    # submission-order read can finish and surface the error.
+    timer = threading.Timer(1.0, release.set)
+    timer.start()
+    try:
+        with pytest.raises(UnknownAssertionKind):
+            run_evals(load_skills(skill_dir), [_GatedRunner()], concurrency=2)
+    finally:
+        timer.cancel()
+        release.set()
+
+    assert "bbb-bad" in seen
+    assert len(seen) <= 4, f"queued work was not cancelled; ran {len(seen)}: {seen}"
+
+
+def test_a_submit_failure_still_shuts_the_executor_down():
+    """An executor left running keeps its workers alive, and the interpreter's
+    exit handler then joins them -- finishing the work the abort abandoned."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    shutdowns: list[tuple[bool, bool]] = []
+
+    class _FailingExecutor(ThreadPoolExecutor):
+        def __init__(self):
+            super().__init__(max_workers=2)
+            self._submits = 0
+
+        def submit(self, fn, /, *args, **kwargs):
+            self._submits += 1
+            if self._submits > 1:
+                raise RuntimeError("can't start new thread")
+            return super().submit(fn, *args, **kwargs)
+
+        def shutdown(self, wait=True, *, cancel_futures=False):
+            shutdowns.append((wait, cancel_futures))
+            super().shutdown(wait=wait, cancel_futures=cancel_futures)
+
+    items = [
+        _WorkItem(
+            skill=Skill(name="s", description="d", instructions="i", path=Path("s")),
+            case=EvalCase(name=f"c{i}", task="t"),
+            runner=FakeRunner(),
+            arm="candidate",
+            repeat_index=0,
+            report_skill_name="s",
+        )
+        for i in range(3)
+    ]
+    with pytest.raises(RuntimeError, match="can't start new thread"):
+        _execute(items, [], concurrency=2, executor_factory=lambda _n: _FailingExecutor())
+    assert shutdowns == [(False, True)]

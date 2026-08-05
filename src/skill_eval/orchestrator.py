@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import Executor, ThreadPoolExecutor
+from concurrent.futures import CancelledError, Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -221,29 +221,58 @@ def _execute(
     concurrency: int,
     executor_factory: Callable[[int], Executor] | None,
 ) -> list[CaseOutcome]:
-    """Run every work item, in submission order.
+    """Run every work item, reporting them in submission order.
 
     At `concurrency == 1` no executor is constructed at all. That is not an
-    optimisation: it is what keeps the default path byte-identical to the
-    single-threaded run -- same ordering, same exception propagation, and a
-    cassette tier that vcrpy (order-sensitive, not thread-safe) can still match.
+    optimisation: it is what keeps the default path single-threaded -- same
+    ordering, same exception propagation, and a cassette tier that vcrpy
+    (order-sensitive, not thread-safe) can still match.
 
-    Above 1, futures are collected and read in submission order so results
-    never reorder by completion time, and an exception aborts without waiting
-    on every in-flight provider call.
+    Above 1, futures are read in submission order so results never reorder by
+    completion time. A failure cancels whatever is still queued rather than
+    letting the pool drain: an authoring error must abort the run, and every
+    case it would otherwise still run is a paid provider call. Work already in
+    flight cannot be un-sent, so the waste is bounded by `concurrency` rather
+    than by the size of the suite.
+
+    The executor must run work **in this process**. `_run_item` is handed
+    runner and judge instances and closure-backed mock tools, none of which
+    pickle, so a process pool would fail at submit. A thread pool is a
+    requirement here, not a preference -- which is fine, because the work is
+    network-bound and threads release the GIL while waiting on a socket.
     """
     if concurrency == 1:
         return [_run_item(item, evaluators) for item in items]
 
     executor = (executor_factory or _default_executor)(concurrency)
-    futures = [executor.submit(_run_item, item, evaluators) for item in items]
-    outcomes: list[CaseOutcome] = []
     try:
+        # Inside the try: `submit` itself can raise -- a pool that cannot start
+        # another OS thread, a broken pool, a custom factory -- and an executor
+        # left un-shut-down keeps its workers alive, so the interpreter's exit
+        # handler would finish the work this abort exists to abandon.
+        futures = [executor.submit(_run_item, item, evaluators) for item in items]
+
+        def _cancel_queued_on_failure(finished: Future) -> None:
+            # Runs on the worker thread, before it picks up its next item.
+            if finished.cancelled() or finished.exception() is None:
+                return
+            for queued in futures:
+                queued.cancel()
+
         for future in futures:
-            outcomes.append(future.result())
+            future.add_done_callback(_cancel_queued_on_failure)
+
+        outcomes: list[CaseOutcome] = []
+        for future in futures:
+            try:
+                outcomes.append(future.result())
+            except CancelledError:
+                # Cancelled by the callback above, so the failure that caused
+                # it is on some other future. Keep scanning in submission order
+                # until we reach it -- at least one future holds a real
+                # exception, or nothing would have been cancelled.
+                continue
     except BaseException:
-        # An authoring error must abort the whole run. `with executor:` would
-        # shut down with wait=True and block on every call still in flight.
         executor.shutdown(wait=False, cancel_futures=True)
         raise
     executor.shutdown(wait=True)
@@ -285,13 +314,16 @@ def run_evals(
     aborting the run.
 
     `concurrency` bounds how many work items run at once. It defaults to 1,
-    which constructs no executor and behaves exactly like the single-threaded
-    run -- upgrading must never change ordering or spend on its own. The work
-    is network-bound, so threads (not processes) are the right unit; the
-    parameter is typed against `concurrent.futures.Executor` via
-    `executor_factory` so a different pool can be swapped in without touching
-    call sites. Runners, judges and evaluators must therefore be safe to share
-    across threads: no mutable instance state touched by run/evaluate/judge.
+    which constructs no executor and runs sequentially -- upgrading must
+    never change ordering or spend on its own. Discovery is a separate,
+    sequential pass that loads every skill's cases before any case runs, so a
+    malformed eval file now aborts before any case runs, whichever skill it
+    belongs to. The work is network-bound, so threads (not processes) are the
+    right unit; the parameter is typed against `concurrent.futures.Executor`
+    via `executor_factory` so a different pool can be swapped in without
+    touching call sites. Runners, judges and evaluators must therefore be
+    safe to share across threads: no mutable instance state touched by
+    run/evaluate/judge.
     """
     if evaluators is not None and judge is not None:
         raise ValueError(
