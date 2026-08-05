@@ -1,5 +1,5 @@
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -542,17 +542,26 @@ def test_work_abandoned_without_a_failure_is_an_error_not_a_short_report():
     for its own reasons must not produce a quietly partial run.
     """
 
-    class _AbandoningExecutor(ThreadPoolExecutor):
+    class _AbandoningExecutor(Executor):
+        """Runs the first item, abandons the rest. No threads, so no race."""
+
         def __init__(self):
-            super().__init__(max_workers=1)
-            self._submits = 0
+            self._ran = 0
 
         def submit(self, fn, /, *args, **kwargs):
-            self._submits += 1
-            future = super().submit(fn, *args, **kwargs)
-            if self._submits > 1:
+            future: Future = Future()
+            if self._ran == 0:
+                self._ran += 1
+                future.set_result(fn(*args, **kwargs))
+            else:
+                # A fresh future is PENDING, so this cancel always succeeds --
+                # which is the whole point: no worker to race.
                 future.cancel()
+                future.set_running_or_notify_cancel()
             return future
+
+        def shutdown(self, wait=True, *, cancel_futures=False):
+            pass
 
     items = [
         _WorkItem(
