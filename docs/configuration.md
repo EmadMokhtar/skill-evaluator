@@ -29,6 +29,7 @@ greeting = 0.9
 | `baseline` | `""` | `--baseline` |
 | `repeat` | `1` | `--repeat` |
 | `min_delta` | unset | `--min-delta` |
+| `concurrency` | `1` | `--concurrency` |
 
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
@@ -39,6 +40,13 @@ per case. `min_delta` has no default — leaving it unset means the delta is rep
 gated, and `0.0` is a real, stricter choice ("must not regress") rather than the same as
 unset. All three are detailed in [Comparative evals](comparative-evals.md), including why
 `min_delta` requires `baseline` to be set.
+
+`concurrency` bounds how many cases run at once. It defaults to `1`, which runs everything
+sequentially and behaves exactly as it did before the option existed. The work is
+network-bound — one provider round trip per case against sub-millisecond of local work — so
+raising it overlaps waiting, not computation; the practical ceiling is your provider's rate
+limit, not your CPU. Runners and evaluators are shared across threads, so a custom one must
+have no mutable state its `run`/`evaluate` touches.
 
 `model`, `retries`, and `retry_backoff_seconds` only matter to components that reach a
 provider (`pydantic-ai`, as a runner or a judge); `FakeRunner` and `FakeJudge` ignore them.

@@ -194,3 +194,12 @@ def test_an_unknown_baseline_kind_is_a_config_error(tmp_path):
     path.write_text('baseline = "yesterday"\n', encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(path=path)
+
+
+def test_concurrency_defaults_to_one_and_can_be_set(tmp_path):
+    """Default 1 for the same reason judge defaults to "fake": upgrading must
+    never change spend or behavior on its own."""
+    assert Config().concurrency == 1
+    path = tmp_path / "skill-eval.toml"
+    path.write_text("concurrency = 8\n", encoding="utf-8")
+    assert load_config(path=path).concurrency == 8

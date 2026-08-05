@@ -3,7 +3,9 @@
 ```
 skill-eval run <path> [--evals <path>] [--runner <name>] [--model <name>]
                       [--judge-model <name>] [--tag <tag>] [--min-pass-rate <float>]
-                      [--json-output <path>] [--config <file>] [--baseline <kind>]
+                      [--json-output <path>] [--junit-output <path>]
+                      [--markdown-output <path>] [--markdown-max-chars <int>]
+                      [--concurrency <int>] [--config <file>] [--baseline <kind>]
                       [--repeat <int>] [--min-delta <float>]
 skill-eval list <path> [--evals <path>]
 skill-eval init <path> [--force]
@@ -31,6 +33,10 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--baseline <kind>` | off | Run a second, baseline arm: `none` (no skill loaded) or `previous` (the prior version, from git). Omit for a single-arm run. |
 | `--repeat <int>` | `1` | Sample each arm this many times. Each repetition is its own outcome. |
 | `--min-delta <float>` | unset | Require the candidate arm to beat the baseline by at least this much. Requires `--baseline`. |
+| `--junit-output <path>` | none | Write a JUnit XML report here, for CI test panes |
+| `--markdown-output <path>` | none | Write a Markdown summary here, for a job summary or PR comment |
+| `--markdown-max-chars <int>` | unset | Truncate the Markdown summary. Detail blocks are dropped first; the verdict and every gate reason always survive |
+| `--concurrency <int>` | `1` | Run this many cases at once. The work is network-bound, so the practical ceiling is your provider's rate limit |
 
 Each flag overrides the corresponding key in [configuration](configuration.md).
 Exit codes are documented in [Gating](gating.md). `--baseline`, `--repeat` and `--min-delta`
