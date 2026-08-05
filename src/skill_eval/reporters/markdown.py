@@ -59,7 +59,10 @@ def _safe_text(text: str, indent: str = "") -> str:
     if "\n" in text:
         fenced = _fenced(text)
         if indent:
-            fenced = "\n".join(indent + line for line in fenced.splitlines())
+            # split("\n"), not splitlines(): the latter also breaks on \x0b,
+            # \x0c, \x1c-\x1e, \x85 and U+2028/9, so those characters inside
+            # model output would silently become real newlines here.
+            fenced = "\n".join(indent + line for line in fenced.split("\n"))
         return "\n\n" + fenced + "\n"
     return _code(text)
 
