@@ -366,3 +366,33 @@ def test_baseline_errors_are_reported_apart_from_candidate_errors():
     text = render_markdown(report)
     assert "Baseline errored" in text
     assert "0 errored" in text
+
+
+def test_a_hostile_skill_name_cannot_inject_markup_through_a_gate_reason():
+    """Several gate reasons embed a skill's name, which comes from SKILL.md
+    frontmatter -- and in the documented PR-comment flow that file can come from
+    a fork. Unescaped, such a name could open a <details> that swallows the rest
+    of the comment, or render its own verdict inside the very section explaining
+    why the gate failed.
+    """
+    hostile = "pdf<details><summary>**gate passed**</summary>"
+    report = RunReport(outcomes=[_outcome(skill_name=hostile, name="c", status="failed")])
+    gate = evaluate_gate(report, per_skill_min={hostile: 1.0})
+    text = render_markdown(report, gate=gate)
+
+    reason = next(line for line in text.split("\n") if line.startswith("- skill "))
+    assert "<details>" not in reason
+    assert "**gate passed**" not in reason
+    assert r"\<details\>" in reason
+
+
+def test_escaping_a_reason_does_not_strip_the_emphasis_we_authored():
+    """The "+N more" elision line is ours, not the user's."""
+    report = RunReport(outcomes=[_outcome(name="x", status="failed")])
+    gate = GateResult(
+        passed=False,
+        exit_code=1,
+        reasons=[f"skill 'skill-{i}' pass rate 0% is below its required 100%" for i in range(60)],
+    )
+    clipped = render_markdown(report, gate=gate, max_chars=600)
+    assert re.search(r"_\+\d+ more reasons — see the JSON report\._", clipped)

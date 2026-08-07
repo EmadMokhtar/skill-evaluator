@@ -106,6 +106,13 @@ def _gate_block(gate: GateResult, limit: int | None = None) -> str:
 
     Eliding is not dropping: the number left out is printed, so a clipped
     report can never imply the reasons it lists were all of them.
+
+    Reasons are escaped because several of them embed a skill's name, which
+    comes from `SKILL.md` frontmatter -- and in the documented pull-request
+    flow that file can come from a fork. Unescaped, a name could open a
+    `<details>` that swallows the rest of the comment, or render its own
+    `**gate passed**` inside the section explaining why the gate failed. The
+    elision line below is ours, not theirs, so it keeps its emphasis.
     """
     reasons = gate.reasons
     if limit is None or limit >= len(reasons):
@@ -113,7 +120,7 @@ def _gate_block(gate: GateResult, limit: int | None = None) -> str:
     else:
         shown, hidden = reasons[:limit], len(reasons) - limit
     lines = ["### Gate failed"]
-    lines.extend(f"- {reason}" for reason in shown)
+    lines.extend(f"- {_escape(reason)}" for reason in shown)
     if hidden:
         word = "reason" if hidden == 1 else "reasons"
         lines.append(f"- _+{hidden} more {word} — see the JSON report._")
