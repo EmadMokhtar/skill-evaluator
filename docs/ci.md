@@ -59,6 +59,12 @@ Outputs: `exit-code`, `passed`, `pass-rate`, `json-report`, `junit-report`, `mar
 `json-output`, `junit-output` and `markdown-output` default to real paths rather than being
 unset, because the action reads the JSON back to produce `passed` and `pass-rate`.
 
+`json-report`, `junit-report` and `markdown-report` are always **absolute** paths, resolved
+against `working-directory` before they are written to `$GITHUB_OUTPUT`. A relative path is only
+meaningful inside the directory the run step used; a later step (`upload-artifact`, a custom
+script) has no reason to share that directory, so a relative output would be wrong whenever
+`working-directory` is not `.`.
+
 The action runs its steps with `shell: bash`, which GitHub Actions executes under
 `bash --noprofile --norc -eo pipefail` — `-e` is already on before the action's own script
 runs a line. The run step captures the CLI's exit code explicitly (`code=0; skill-eval run
@@ -68,6 +74,12 @@ summary published and its outputs read, and the final step re-raises with `exit
 "${CODE:-1}"` — an *empty* code (the run step never completing at all: a failed install, a
 cancelled job) fails closed rather than defaulting to success. A gate that cannot prove it
 passed must fail.
+
+The run step also deletes any report already sitting at `json-output`, `junit-output` and
+`markdown-output` before invoking the CLI. Exit code `2` means the CLI wrote nothing, so without
+that deletion a report left over from an earlier invocation in the same job — same `working-directory`,
+same default filenames — would be published and read as if it belonged to the run that just
+failed.
 
 Two CI jobs guard that behavior end to end, beyond the unit test that only compares
 `action.yml`'s inputs against the CLI's flags: **`action-smoke`** runs the action against a

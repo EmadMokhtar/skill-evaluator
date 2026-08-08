@@ -77,13 +77,18 @@ def _error_body(outcome: CaseOutcome) -> str:
     return "\n".join(details) if details else "no detail was reported"
 
 
-def _case_name(outcome: CaseOutcome, repeat: int) -> str:
-    """Repetitions need distinct names: consumers key on classname+name and
-    silently collapse duplicates. No suffix at repeat == 1 keeps the ordinary
-    case clean."""
-    if repeat <= 1:
-        return outcome.case_name
-    return f"{outcome.case_name} [run {outcome.repeat_index + 1}/{repeat}]"
+def _case_name(outcome: CaseOutcome, repeat: int, name_the_runner: bool) -> str:
+    """Repetitions and runners need distinct names: consumers key on
+    classname+name and silently collapse duplicates. Both suffixes are added
+    only when something would otherwise collide, so the ordinary
+    one-runner, one-repetition case keeps clean names.
+    """
+    name = outcome.case_name
+    if name_the_runner:
+        name = f"{name} ({outcome.runner})"
+    if repeat > 1:
+        name = f"{name} [run {outcome.repeat_index + 1}/{repeat}]"
+    return name
 
 
 def _by_skill(outcomes: list[CaseOutcome]) -> dict[str, list[CaseOutcome]]:
@@ -128,6 +133,9 @@ def render_junit(
     root = Element("testsuites", name="skill-eval")
     tests = failures = errors = skipped = 0
     total_time = 0.0
+    # Only disambiguate by runner when the matrix actually has more than one,
+    # so the ordinary single-runner report keeps its clean case names.
+    name_the_runner = len({o.runner for o in report.candidate_outcomes}) > 1
 
     for skill_name, outcomes in _by_skill(report.candidate_outcomes).items():
         suite = SubElement(root, "testsuite", name=_xml_safe(skill_name))
@@ -140,7 +148,7 @@ def render_junit(
                 suite,
                 "testcase",
                 classname=_xml_safe(skill_name),
-                name=_xml_safe(_case_name(outcome, report.repeat)),
+                name=_xml_safe(_case_name(outcome, report.repeat, name_the_runner)),
                 time=f"{seconds:.3f}",
             )
             if outcome.status == "failed":

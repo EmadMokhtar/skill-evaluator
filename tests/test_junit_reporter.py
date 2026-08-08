@@ -14,13 +14,15 @@ from skill_eval.models import CaseOutcome, CheckResult, EvalScore, RunReport, Ru
 from skill_eval.reporters.junit import render_junit
 
 
-def _outcome(name="extracts", status="passed", arm="candidate", repeat_index=0, **kwargs):
+def _outcome(
+    name="extracts", status="passed", arm="candidate", repeat_index=0, runner="fake", **kwargs
+):
     scores = kwargs.pop("scores", [EvalScore(evaluator="assertion", passed=True, score=1.0)])
     result = kwargs.pop("result", RunResult(output="yes", latency_ms=800))
     return CaseOutcome(
         skill_name=kwargs.pop("skill_name", "pdf"),
         case_name=name,
-        runner="fake",
+        runner=runner,
         status=status,
         scores=scores,
         result=result,
@@ -226,3 +228,19 @@ def test_an_errored_evaluator_reports_its_own_diagnostic():
     error = _parse(report).find("testsuite/testcase/error")
     assert "judge: judge failed: connection reset" in error.text
     assert "runner" not in error.text
+
+
+def test_two_runners_for_one_case_get_distinct_identities():
+    """Consumers key on classname+name and silently collapse duplicates, so a
+    skill x case x runner matrix must not emit the same identity twice."""
+    report = RunReport(
+        outcomes=[_outcome(name="extracts"), _outcome(name="extracts", runner="pydantic-ai")]
+    )
+    names = [c.get("name") for c in _parse(report).findall("testsuite/testcase")]
+    assert names == ["extracts (fake)", "extracts (pydantic-ai)"]
+    assert len(set(names)) == 2
+
+
+def test_a_single_runner_keeps_clean_names():
+    report = RunReport(outcomes=[_outcome(name="extracts")])
+    assert _parse(report).find("testsuite/testcase").get("name") == "extracts"

@@ -45,9 +45,9 @@ jobs:
         with:
           name: skill-eval-reports
           path: |
-            skill-eval-report.json
-            skill-eval-junit.xml
-            skill-eval-summary.md
+            ${{ steps.eval.outputs.json-report }}
+            ${{ steps.eval.outputs.junit-report }}
+            ${{ steps.eval.outputs.markdown-report }}
 
       - name: Comment on the pull request
         # GitHub withholds write tokens from fork-triggered `pull_request` runs,
@@ -58,18 +58,22 @@ jobs:
         # `pull_request_target` is not the answer.
         if: github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v7
+        env:
+          SUMMARY: ${{ steps.eval.outputs.markdown-report }}
         with:
           script: |
             const fs = require('fs');
-            if (!fs.existsSync('skill-eval-summary.md')) {
+            const summaryPath = process.env.SUMMARY;
+            if (!summaryPath || !fs.existsSync(summaryPath)) {
               core.info('No Markdown summary was written; skipping the comment.');
               return;
             }
             const marker = '<!-- skill-eval -->';
-            const body = marker + '\n' + fs.readFileSync('skill-eval-summary.md', 'utf8');
-            const { data: comments } = await github.rest.issues.listComments({
+            const body = marker + '\n' + fs.readFileSync(summaryPath, 'utf8');
+            const comments = await github.paginate(github.rest.issues.listComments, {
               ...context.repo,
               issue_number: context.issue.number,
+              per_page: 100,
             });
             const existing = comments.find(
               (c) => c.user.type === 'Bot' && c.body.includes(marker)

@@ -396,3 +396,34 @@ def test_escaping_a_reason_does_not_strip_the_emphasis_we_authored():
     )
     clipped = render_markdown(report, gate=gate, max_chars=600)
     assert re.search(r"_\+\d+ more reasons — see the JSON report\._", clipped)
+
+
+def test_a_line_break_in_a_name_cannot_start_a_new_block():
+    """YAML lets a skill name carry newlines, and a code span does not make an
+    embedded newline safe -- the row or list item ends and what follows is
+    parsed as a fresh block."""
+    report = RunReport(outcomes=[_outcome(skill_name="pdf\n\n## gate passed", status="failed")])
+    text = render_markdown(report)
+    assert "\n## gate passed" not in text
+    assert "pdf   ## gate passed" in text or "pdf ## gate passed" in text
+
+
+def test_a_backtick_in_a_check_id_cannot_close_its_code_span():
+    """Check ids embed `trajectory.called` entries, which are not validated as
+    identifiers the way tool names are."""
+    from skill_eval.comparison import Delta, LowSignalCheck
+
+    delta = Delta(
+        baseline_kind="none",
+        low_signal=[
+            LowSignalCheck(
+                skill_name="pdf",
+                case_name="extracts",
+                evaluator="trajectory",
+                check_id="called:a`b",
+            )
+        ],
+    )
+    report = RunReport(outcomes=[_outcome()], baseline_kind="none")
+    text = render_markdown(report, delta=delta)
+    assert "``called:a`b``" in text

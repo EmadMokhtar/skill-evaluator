@@ -67,14 +67,14 @@ outputs:
     description: Overall candidate pass rate, 0.0–1.0. Empty if no report was written.
     value: ${{ steps.report.outputs.pass-rate }}
   json-report:
-    description: Path to the JSON report.
-    value: ${{ inputs.json-output }}
+    description: Absolute path to the JSON report.
+    value: ${{ steps.run.outputs.json-report }}
   junit-report:
-    description: Path to the JUnit XML report.
-    value: ${{ inputs.junit-output }}
+    description: Absolute path to the JUnit XML report.
+    value: ${{ steps.run.outputs.junit-report }}
   markdown-report:
-    description: Path to the Markdown summary.
-    value: ${{ inputs.markdown-output }}
+    description: Absolute path to the Markdown summary.
+    value: ${{ steps.run.outputs.markdown-report }}
 
 runs:
   using: composite
@@ -138,6 +138,12 @@ runs:
         add --markdown-output "$SE_MARKDOWN"
         add --markdown-max-chars "$SE_MARKDOWN_MAX"
 
+        # A report from an earlier invocation must not be read as this one's.
+        # On exit 2 the CLI writes nothing, so without this the steps below
+        # would publish the previous run's summary and take `passed=true` from
+        # its JSON.
+        rm -f "$SE_JSON" "$SE_JUNIT" "$SE_MARKDOWN"
+
         # `shell: bash` runs with -e already set, so a bare failing command
         # would abort this step before the code could be recorded -- and the
         # summary and outputs below would never be written. `|| code=$?` is
@@ -145,6 +151,21 @@ runs:
         code=0
         skill-eval run "${args[@]}" || code=$?
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+
+        # A relative output path is written under `working-directory`, but a
+        # later step reads these outputs from the job's own directory. Absolute
+        # paths are the only form that means the same thing in both places.
+        absolute() {
+          case "$1" in
+            /*) printf '%s\n' "$1" ;;
+            *)  printf '%s\n' "$PWD/$1" ;;
+          esac
+        }
+        {
+          echo "json-report=$(absolute "$SE_JSON")"
+          echo "junit-report=$(absolute "$SE_JUNIT")"
+          echo "markdown-report=$(absolute "$SE_MARKDOWN")"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Publish the step summary
       if: always() && inputs.step-summary == 'true'

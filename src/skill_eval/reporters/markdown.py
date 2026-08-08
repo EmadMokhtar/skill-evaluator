@@ -24,8 +24,29 @@ def _fenced(text: str) -> str:
     return f"{fence}\n{text}\n{fence}"
 
 
+_LINE_BREAKS = re.compile(r"[\r\n\x0b\x0c]+")
+
+
+def _one_line(text: str) -> str:
+    """Collapse line breaks so untrusted text cannot escape an inline context.
+
+    A code span does not make an embedded newline safe: a multi-line name ends
+    the table row or list item it sits in, and whatever follows is parsed as a
+    fresh block. Names come from `SKILL.md` frontmatter, which YAML lets carry
+    newlines, and which in the documented pull-request flow can come from a
+    fork.
+
+    U+0085, U+2028 and U+2029 are deliberately absent: CommonMark counts only
+    carriage return and line feed as line endings, so those characters cannot
+    end a row or start a block, and collapsing them would corrupt a name for
+    no benefit.
+    """
+    return _LINE_BREAKS.sub(" ", text)
+
+
 def _code(text: str) -> str:
     """`text` as an inline code span, delimited by more backticks than it holds."""
+    text = _one_line(text)
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
     delim = "`" * (longest + 1)
     pad = " " if text.startswith("`") or text.endswith("`") else ""
@@ -41,7 +62,7 @@ def _escape(text: str) -> str:
     Skill names come from `SKILL.md` frontmatter, which in the documented
     pull-request flow can come from a fork.
     """
-    return _MARKDOWN_SPECIALS.sub(r"\\\1", text)
+    return _MARKDOWN_SPECIALS.sub(r"\\\1", _one_line(text))
 
 
 def _safe_text(text: str, indent: str = "") -> str:
@@ -257,7 +278,8 @@ def _low_signal(delta: Delta) -> str:
         "",
     ]
     body.extend(
-        f"- {_code(c.skill_name)} :: {_code(c.case_name)}: `{c.check_id}`" for c in delta.low_signal
+        f"- {_code(c.skill_name)} :: {_code(c.case_name)}: {_code(c.check_id)}"
+        for c in delta.low_signal
     )
     body.extend(["", _ADVISORY])
     return _details(f"Low-signal checks ({len(delta.low_signal)})", body)
