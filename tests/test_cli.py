@@ -1,5 +1,6 @@
 import json
 import re
+import xml.etree.ElementTree as ET
 
 from typer.testing import CliRunner
 
@@ -524,3 +525,102 @@ def test_the_run_plan_counts_only_cases_the_tag_filter_keeps(tmp_path, monkeypat
         app, ["run", str(tmp_path), "--runner", "pydantic-ai", "--tag", "no-such-tag"]
     )
     assert "0 case(s) = 0 runs" in plain(result.stdout)
+
+
+def test_junit_output_writes_parseable_xml(tmp_path):
+    _make_skill(tmp_path / "skills")
+    out = tmp_path / "reports" / "junit.xml"
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--junit-output", str(out)])
+    assert result.exit_code == 0
+    root = ET.fromstring(out.read_text(encoding="utf-8"))
+    assert root.tag == "testsuites"
+    assert root.get("tests") == "1"
+
+
+def test_markdown_output_writes_a_summary(tmp_path):
+    _make_skill(tmp_path / "skills")
+    out = tmp_path / "summary.md"
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--markdown-output", str(out)])
+    assert result.exit_code == 0
+    assert "gate passed" in out.read_text(encoding="utf-8")
+
+
+def test_markdown_max_chars_truncates(tmp_path):
+    _make_skill(tmp_path / "skills")
+    out = tmp_path / "summary.md"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(tmp_path / "skills"),
+            "--markdown-output",
+            str(out),
+            "--markdown-max-chars",
+            "80",
+        ],
+    )
+    assert result.exit_code == 0
+    assert len(out.read_text(encoding="utf-8")) <= 80
+
+
+def test_markdown_max_chars_below_one_is_a_user_error(tmp_path):
+    _make_skill(tmp_path / "skills")
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(tmp_path / "skills"),
+            "--markdown-output",
+            str(tmp_path / "summary.md"),
+            "--markdown-max-chars",
+            "0",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "--markdown-max-chars must be at least 1" in plain(result.output)
+
+
+def test_markdown_max_chars_without_markdown_output_is_a_user_error(tmp_path):
+    """A flag that silently does nothing hides a mistake instead of reporting it."""
+    _make_skill(tmp_path / "skills")
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--markdown-max-chars", "500"])
+    assert result.exit_code == 2
+    assert "--markdown-max-chars requires --markdown-output" in plain(result.output)
+
+
+def test_a_junit_write_failure_does_not_mask_a_failing_gate(tmp_path):
+    """Exit codes are the CI contract: a red gate must stay visible rather
+    than being escalated to 2 by an unrelated write problem."""
+    _make_skill(tmp_path / "skills", cases=FAILING_CASES_YAML)
+    blocking = tmp_path / "blocking"
+    blocking.write_text("I am a file")
+    out = blocking / "junit.xml"
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--junit-output", str(out)])
+    assert result.exit_code == 1
+    assert "Failed to write JUnit report" in result.stdout
+
+
+def test_a_markdown_write_failure_with_a_passing_gate_exits_two(tmp_path):
+    _make_skill(tmp_path / "skills")
+    blocking = tmp_path / "blocking"
+    blocking.write_text("I am a file")
+    out = blocking / "summary.md"
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--markdown-output", str(out)])
+    assert result.exit_code == 2
+    assert "Failed to write Markdown report" in result.stdout
+
+
+def test_concurrency_below_one_is_a_user_error(tmp_path):
+    _make_skill(tmp_path / "skills")
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--concurrency", "0"])
+    assert result.exit_code == 2
+    # typer.BadParameter renders through Click's UsageError handling, which
+    # writes to stderr -- result.output is the combined stream, matching every
+    # other BadParameter-message assertion in this file (e.g. --model, --baseline).
+    assert "--concurrency must be at least 1" in plain(result.output)
+
+
+def test_concurrency_above_one_runs_the_suite(tmp_path):
+    _make_skill(tmp_path / "skills")
+    result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--concurrency", "4"])
+    assert result.exit_code == 0

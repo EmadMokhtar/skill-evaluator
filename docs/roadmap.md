@@ -7,7 +7,7 @@
 | M2 | PydanticAI runner, trajectory + budget evaluators, cost/latency capture, cassette test tier | shipped |
 | M3 | LLM-as-judge evaluator (per-check verdicts), triggering evals with negative controls | shipped |
 | M4 | Comparative evals: `--baseline`/`--repeat`, delta reporting, `--min-delta` gating | shipped |
-| M5 | CI/CD polish: JUnit XML + Markdown/HTML reporters, GitHub Action, automated release | planned |
+| M5 | CI/CD polish: JUnit XML + Markdown reporters, GitHub Action, bounded concurrency | shipped (part 1) |
 | M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions | planned |
 | M7 | DX: `skill-eval init` scaffolder, more examples | `init` shipped; examples planned |
 | M8 | LangChain adapter (optional) | planned |
@@ -27,3 +27,19 @@ Deferred out of M4, tracked for a later milestone: a per-skill `min_delta`, effi
 regression gates, an explicit `--baseline-ref <rev>` escape hatch, flagging checks that fail
 in *both* arms, and bounded concurrency across arms and repeats (M5's territory once
 concurrency lands generally).
+
+## What M5 part 1 shipped
+
+`--junit-output` and `--markdown-output` render a run for CI test panes and for GitHub's step
+summary and PR comments. `--concurrency N` overlaps the network waits that dominate a run.
+A composite GitHub Action wraps the CLI, with example workflows in
+[CI integration](ci.md).
+
+An HTML reporter was dropped as YAGNI — nothing in the milestone consumes it. Process and
+subinterpreter pools were deferred: the work is network-bound, so multi-core buys nothing
+today, and the orchestrator is typed against `concurrent.futures.Executor` so a different pool
+is a one-line change if M6's real tool execution introduces CPU-bound work.
+
+Part 2 — the automated release pipeline (`cz bump` on merge to main, Trusted Publishing to
+PyPI) and the manual cassette-refresh workflow — is specified and waiting on the PyPI project
+and repository secrets it needs.

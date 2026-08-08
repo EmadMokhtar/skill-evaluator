@@ -100,3 +100,27 @@ which is candidate-only, for the same reason the gate itself only reads the cand
 `summary`'s token, cost and latency totals sum **both** arms — money spent is money spent —
 while `summary.passed` / `summary.failed` / `summary.errored` / `summary.pass_rate` stay
 candidate-only, because those are what the gate reads.
+
+## JUnit XML
+
+`--junit-output` writes a JUnit report, the format GitHub, GitLab, Jenkins, CircleCI and
+Buildkite all ingest natively.
+
+| skill-eval | JUnit |
+| --- | --- |
+| `passed` | `<testcase>` with no child |
+| `failed` | `<testcase>` with `<failure>` |
+| `errored` | `<testcase>` with `<error>` |
+| a skill with no cases | `<testcase>` with `<skipped>` |
+
+The `failed`/`errored` split is the same one the exit code and the JSON report use: a
+`<failure>` means the case ran and scored below bar, an `<error>` means the runner or an
+evaluator blew up.
+
+Only the **candidate** arm becomes test cases. Under `--baseline`, a failing baseline is the
+evidence that the skill helped, so rendering it as a `<failure>` would turn CI red for the
+skill working.
+
+A run with no eval cases emits a single `<testcase>` carrying an `<error>` that repeats the
+gate's reasons. An empty `tests="0"` file renders green in most CI UIs, which would contradict
+the exit code of 1.

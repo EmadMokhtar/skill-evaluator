@@ -1,0 +1,9 @@
+# Asserts on FakeRunner's default response ("[fake] {skill} handled: {task}"),
+# so the whole CLI path runs offline, deterministically and for free. This is a
+# smoke test of the action's plumbing, not of any model's behaviour.
+cases:
+  - name: the fake runner answers
+    task: say hello
+    assertions:
+      - kind: contains
+        value: "[fake]"

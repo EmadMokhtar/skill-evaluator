@@ -1,0 +1,10 @@
+# Deliberately unsatisfiable under FakeRunner, whose default response is
+# "[fake] {skill} handled: {task}". The action's failure path -- non-zero exit
+# code, outputs still set, summary still published -- is the path that broke
+# once and cannot be covered by a fixture that passes.
+cases:
+  - name: the gate must fail
+    task: say hello
+    assertions:
+      - kind: contains
+        value: "this string never appears in a fake response"

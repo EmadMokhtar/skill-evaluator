@@ -57,7 +57,7 @@ problem (errored) from a low score (failed).
 | --- | --- |
 | `models.py` | Every Pydantic model in the project. No other module defines a data shape. |
 | `cli.py` | Typer entry point. Wires config → loaders → runner → orchestrator → reporters → gate, and owns the exit-code contract. |
-| `orchestrator.py` | Builds and runs the skill × case × runner matrix, applying every evaluator to each result. |
+| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. |
 | `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. |
 | `config.py` | Loads `skill-eval.toml` by explicit path or upward discovery. Never reads secrets. |
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
@@ -83,6 +83,8 @@ problem (errored) from a low score (failed).
 | `judges/pydantic_ai.py` | The PydanticAI judge adapter. **The other module that imports an agent framework.** |
 | `reporters/console.py` | Human-readable run summary. |
 | `reporters/json_reporter.py` | Machine-readable run report. |
+| `reporters/junit.py` | JUnit XML for CI test panes. `failed`/`errored` map onto `<failure>`/`<error>`, candidate arm only. |
+| `reporters/markdown.py` | GitHub-flavored Markdown for step summaries and PR comments, with optional `max_chars` truncation. |
 
 ## Data flow
 
@@ -97,7 +99,7 @@ matrix: for each (skill × case × arm × repeat × runner)
                                                        └─► CaseOutcome (arm, repeat_index)
 
 aggregate ──► RunReport ──► comparison.build_delta ──► Delta | None
-                        └─► reporters/  ──► console + JSON
+                        └─► reporters/  ──► console + JSON + JUnit + Markdown
                         └─► gating      ──► exit code
 ```
 
@@ -277,6 +279,80 @@ result) so the same id names the same check in both arms: `{kind}[{index}]` for 
 `called:{tool}` / `forbidden:{tool}` / `order` / `max_calls` / `skill_triggered` for
 trajectory, `max_tokens` / `max_cost_usd` / `max_latency_ms` for budget. This is what lets
 `comparison.py` name a specific low-signal check rather than only flag a whole case.
+
+### CI surfaces (M5)
+
+**JUnit reports the candidate arm only.** Under `--baseline`, a failing baseline is the
+evidence that the skill helped. Rendering it as `<failure>` would paint CI red for the skill
+working — the same reason every `RunReport` aggregate reads `candidate_outcomes`.
+
+**`<failure>` is `failed`; `<error>` is `errored`.** The project's central distinction, given a
+native rendering: an exploded runner must not look like a skill that got worse. `errored`
+covers two different sources, and both must render as `<error>`: a runner that raised, and an
+evaluator that did (a judge endpoint returning 500 leaves `RunResult.error` unset and puts its
+diagnostic on `EvalScore.detail` instead). `reporters/junit.py`'s `_error_body` reads the
+runner's error first and falls back to the errored evaluators' own details, so an evaluator's
+own diagnostic is what gets reported — never attributed to the runner that ran cleanly.
+
+**JUnit output is always well-formed XML.** `ElementTree` escapes `&`, `<` and `>` but emits
+control characters raw, so a model returning `\x00` would produce a file every parser rejects.
+Illegal characters are stripped before they reach the tree.
+
+**A zero-case run produces a JUnit `<error>`, not an empty green suite.** `tests="0"` renders
+green in most CI UIs, which would contradict the exit code of 1.
+
+**Markdown truncation gives up detail before it gives up meaning, and never hides how much it
+gave up.** Optional blocks (totals, per-skill table, delta, failure detail, low-signal /
+high-variance, skipped skills) are dropped first, from the end. If gate reasons still do not
+fit, they are elided behind a truthful `+N more reasons` count rather than being cut silently,
+so a clipped comment can never imply the reasons it shows were all of them. Only a budget too
+small to hold even the verdict and summary falls back to a hard character cut on the assembled
+text. Truncation lives in the renderer, not the caller — a caller slicing the returned string
+after the fact would cut a `<details>` block open, or a count line in half.
+
+**Reporters never do IO to a service.** They return a string. The CLI writes files; the
+workflow posts comments. A GitHub client inside a reporter would put token scopes and network
+failure inside a pure function.
+
+**`--concurrency 1` constructs no executor.** The plain sequential loop it falls back to
+produces the same ordering and the same exception propagation as any other concurrency level
+reading its futures in submission order, and it is what lets the cassette tier (vcrpy is
+order-sensitive and not thread-safe) still match requests. It is not, though, a literal replay
+of pre-M5 behavior in every respect: discovery is now always a separate, sequential pass that
+loads every skill's cases before any of them run, so a malformed eval file anywhere aborts the
+whole run before a single case runs — where before M5, discovery and execution were interleaved
+per skill, and an earlier skill's cases could complete (and be paid for) before a later skill's
+bad file was even read.
+
+**Outcome order is submission order, never completion order.** `render_console` iterates
+`report.outcomes` and `build_delta` groups by insertion order, so completion-order results
+would make output churn between identical runs.
+
+**Concurrency never turns an authoring error into a case failure, and the surfaced error is
+deterministic.** Futures are read in submission order, so the lowest-index failure is always
+the one that propagates out of `run_evals`. On a failure, only the futures queued *after* it
+are cancelled — a worker dequeues an item before marking its own future running, so a
+lower-index future can still be pending, and cancelling it would let a higher-index error
+surface instead of the lowest one. The executor is shut down with `cancel_futures=True` on any
+exception, including a `submit` call that itself raises (an executor left running keeps its
+workers alive, so the interpreter's own exit handler would finish the very work the abort
+exists to abandon). If a custom `executor_factory` ever returns fewer results than work items
+with no exception to explain it, `_execute` raises rather than handing the gate a quietly
+partial run.
+
+**Runners, judges and evaluators must be safe to share across threads.** No mutable instance
+state touched by `run`/`evaluate`/`judge`. This holds today for free: the fakes read immutable
+dicts and return `model_copy(deep=True)`, the deterministic evaluators have no instance state,
+and `PydanticAIRunner` builds a fresh agent per run. It is a constraint on what comes next.
+
+**The action fails closed.** `shell: bash` steps already run under `bash --noprofile --norc
+-eo pipefail`, so `-e` is on before the action's own script runs a line; the run step captures
+the CLI's exit code itself (`code=0; skill-eval run ... || code=$?`) before `-e` gets a chance
+to discard it. Every step after that — publishing the step summary, reading the JSON report,
+re-raising the exit code — carries `if: always()`, so a failing run still gets its summary
+published and its outputs read. The final step exits `"${CODE:-1}"`: an *empty* code means the
+run step never completed at all (a failed install, a cancelled job), and a gate that cannot
+prove it passed must fail rather than default to success.
 
 ## Extension points
 
