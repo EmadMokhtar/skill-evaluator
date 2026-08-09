@@ -11,11 +11,14 @@ Skills and their eval cases are **inputs** to the tool. Nothing about a skill un
 test is vendored here, so any skill repository can adopt `skill-eval` without
 embedding it.
 
-!!! info "Status: M2"
+!!! info "Status: M5 (part 1)"
     The full pipeline — discovery, scoring, reporting, gating — runs offline against
     `FakeRunner` (the default, scripted, free) and against real agents through
     `pydantic-ai`. It scores output text, tool-use trajectories, and efficiency
-    budgets. See the [roadmap](roadmap.md).
+    budgets, plus output quality via a rubric-based LLM judge with per-check evidence.
+    Each case can also run against a baseline for comparative, delta-gated evals, and
+    JUnit/Markdown reporters with a composite GitHub Action make a run CI-legible.
+    See the [roadmap](roadmap.md).
 
 ## Install
 

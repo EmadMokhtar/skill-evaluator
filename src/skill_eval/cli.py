@@ -26,6 +26,8 @@ from skill_eval.judges.pydantic_ai import PydanticAIJudge
 from skill_eval.orchestrator import run_evals
 from skill_eval.reporters.console import render_console
 from skill_eval.reporters.json_reporter import render_json
+from skill_eval.reporters.junit import render_junit
+from skill_eval.reporters.markdown import render_markdown
 from skill_eval.runners.fake import FakeRunner
 from skill_eval.runners.preflight import MissingAPIKey, check_api_key
 from skill_eval.runners.pydantic_ai import PydanticAIRunner, RunnerDependencyError
@@ -83,6 +85,16 @@ def main(
     """skill-eval — evaluate Agent Skills."""
 
 
+def _write_report(path: Path, text: str, label: str) -> str | None:
+    """Write one report file. Returns an error message, or None on success."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        return f"Failed to write {label} report to {path}: {exc}"
+    return None
+
+
 @app.command()
 def run(
     path: Annotated[Path, typer.Argument(help="A skill directory, or a directory of skills.")],
@@ -106,6 +118,17 @@ def run(
         float | None,
         typer.Option(help="Required improvement over the baseline; needs --baseline."),
     ] = None,
+    junit_output: Annotated[
+        Path | None, typer.Option(help="Write a JUnit XML report here.")
+    ] = None,
+    markdown_output: Annotated[
+        Path | None, typer.Option(help="Write a Markdown summary here.")
+    ] = None,
+    markdown_max_chars: Annotated[
+        int | None,
+        typer.Option(help="Truncate the Markdown summary to this many characters."),
+    ] = None,
+    concurrency: Annotated[int | None, typer.Option(help="Run this many cases at once.")] = None,
 ) -> None:
     """Discover skills, run their eval cases, and gate on the results."""
     try:
@@ -117,6 +140,16 @@ def run(
         resolved_repeat = repeat if repeat is not None else settings.repeat
         if resolved_repeat < 1:
             raise typer.BadParameter("--repeat must be at least 1")
+        resolved_concurrency = concurrency if concurrency is not None else settings.concurrency
+        if resolved_concurrency < 1:
+            raise typer.BadParameter("--concurrency must be at least 1")
+        if markdown_max_chars is not None:
+            if markdown_max_chars < 1:
+                raise typer.BadParameter("--markdown-max-chars must be at least 1")
+            if markdown_output is None:
+                # A flag that silently does nothing hides a mistake rather than
+                # reporting it -- the same reason --min-delta requires --baseline.
+                raise typer.BadParameter("--markdown-max-chars requires --markdown-output")
         resolved_min_delta = min_delta if min_delta is not None else settings.min_delta
         # Checked against resolved values so a baseline in skill-eval.toml
         # satisfies a --min-delta on the command line. A gate that verified
@@ -186,6 +219,7 @@ def run(
             judge=active_judge,
             baseline=baseline_kind or None,
             repeat=resolved_repeat,
+            concurrency=resolved_concurrency,
         )
     except _AUTHORING_ERRORS as exc:
         typer.echo(str(exc))
@@ -202,19 +236,29 @@ def run(
     )
 
     typer.echo(render_console(report, gate=gate, delta=delta))
-    if json_output is not None:
-        try:
-            json_output.parent.mkdir(parents=True, exist_ok=True)
-            json_output.write_text(render_json(report, gate=gate, delta=delta), encoding="utf-8")
-        except OSError as exc:
-            typer.echo(f"Failed to write JSON report to {json_output}: {exc}")
-            # Exit codes are the CI contract: a gate that already failed (1)
-            # must stay visible rather than being masked by an unrelated
-            # write problem escalating to 2. Only elevate to 2 when the gate
-            # itself passed, so the write failure doesn't silently look like
-            # success.
-            if gate.exit_code == EXIT_OK:
-                raise typer.Exit(code=2) from exc
+    # One loop over every requested report. A write failure escalates to exit 2
+    # only when the gate itself passed -- exit codes are the CI contract, and an
+    # already-red gate must stay visible rather than being masked by an
+    # unrelated write problem.
+    writes = (
+        (json_output, "JSON", lambda: render_json(report, gate=gate, delta=delta)),
+        (junit_output, "JUnit", lambda: render_junit(report, gate=gate, delta=delta)),
+        (
+            markdown_output,
+            "Markdown",
+            lambda: render_markdown(report, gate=gate, delta=delta, max_chars=markdown_max_chars),
+        ),
+    )
+    write_failed = False
+    for target, label, render in writes:
+        if target is None:
+            continue
+        error = _write_report(target, render(), label)
+        if error is not None:
+            typer.echo(error)
+            write_failed = True
+    if write_failed and gate.exit_code == EXIT_OK:
+        raise typer.Exit(code=2)
 
     raise typer.Exit(code=gate.exit_code)
 

@@ -1,0 +1,98 @@
+# Gate pull requests on a skill-eval run, using the composite action.
+#
+# Copy this into .github/workflows/ in your own repository. Files under
+# examples/ are inert -- only .github/workflows/ is executed by GitHub.
+name: skill-eval
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # --baseline previous resolves the skill's prior version from git
+          # history, so a shallow clone would leave it with nothing to compare.
+          fetch-depth: 0
+
+      - name: Evaluate the skills
+        id: eval
+        uses: EmadMokhtar/skill-evaluator@v1
+        continue-on-error: true
+        with:
+          path: ./skills
+          runner: pydantic-ai
+          model: openai:gpt-4o-mini
+          baseline: previous
+          repeat: 3
+          concurrency: 4
+          # GitHub caps a comment at 65536 characters. Detail blocks are
+          # dropped first, then gate reasons are elided behind a "+N more"
+          # count; a budget too small for the verdict itself is cut outright.
+          markdown-max-chars: "60000"
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-eval-reports
+          path: |
+            ${{ steps.eval.outputs.json-report }}
+            ${{ steps.eval.outputs.junit-report }}
+            ${{ steps.eval.outputs.markdown-report }}
+
+      - name: Comment on the pull request
+        # GitHub withholds write tokens from fork-triggered `pull_request` runs,
+        # so an unguarded comment step fails on exactly the PRs an open-source
+        # project gets most. Fork PRs still get the step summary, the JUnit
+        # rendering and the correct exit code. See docs/ci.md for the
+        # `workflow_run` pattern if you need comments on forks too --
+        # `pull_request_target` is not the answer.
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v7
+        env:
+          SUMMARY: ${{ steps.eval.outputs.markdown-report }}
+        with:
+          script: |
+            const fs = require('fs');
+            const summaryPath = process.env.SUMMARY;
+            if (!summaryPath || !fs.existsSync(summaryPath)) {
+              core.info('No Markdown summary was written; skipping the comment.');
+              return;
+            }
+            const marker = '<!-- skill-eval -->';
+            const body = marker + '\n' + fs.readFileSync(summaryPath, 'utf8');
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find(
+              (c) => c.user.type === 'Bot' && c.body.includes(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: context.issue.number, body,
+              });
+            }
+
+      - name: Fail the build if the gate failed
+        # `continue-on-error` above let the comment and artifact steps run, so
+        # the gate's verdict is re-raised here. An empty exit code means the
+        # evaluation never completed, which must fail rather than pass.
+        if: always() && steps.eval.outputs.exit-code != '0'
+        env:
+          CODE: ${{ steps.eval.outputs.exit-code }}
+        run: exit "${CODE:-1}"

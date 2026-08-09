@@ -1,0 +1,217 @@
+name: skill-eval
+description: Run evaluations on Agent Skills (SKILL.md) and gate the build on the result.
+branding:
+  icon: check-circle
+  color: purple
+
+inputs:
+  path:
+    description: A skill directory, or a directory of skills.
+    required: true
+  evals:
+    description: Explicit eval file or directory, overriding discovery.
+  runner:
+    description: Runner to use — fake or pydantic-ai.
+  model:
+    description: Model id, e.g. openai:gpt-4o-mini.
+  judge-model:
+    description: Model id for the LLM judge. Falls back to model.
+  tag:
+    description: Only run cases carrying this tag.
+  config:
+    description: Path to skill-eval.toml.
+  baseline:
+    description: Run a second, baseline arm — none or previous.
+  repeat:
+    description: Sample each arm this many times.
+  min-pass-rate:
+    description: Required overall pass rate, 0.0–1.0.
+  min-delta:
+    description: Required improvement over the baseline. Needs baseline.
+  concurrency:
+    description: Run this many cases at once.
+  json-output:
+    description: Where to write the JSON report. Also read back for this action's outputs.
+    default: skill-eval-report.json
+  junit-output:
+    description: Where to write the JUnit XML report.
+    default: skill-eval-junit.xml
+  markdown-output:
+    description: Where to write the Markdown summary.
+    default: skill-eval-summary.md
+  markdown-max-chars:
+    description: >-
+      Truncate the Markdown summary to this many characters. Leave unset for the step
+      summary, which allows 1 MiB; set roughly 60000 when the summary will be posted as a
+      PR comment, which GitHub caps at 65536.
+  install-spec:
+    description: >-
+      Passed verbatim to `uv tool install`. A PyPI name, a pinned version, a git ref
+      (git+https://github.com/EmadMokhtar/skill-evaluator@main) or a local path.
+    default: skill-eval[pydantic-ai]
+  working-directory:
+    description: Directory to run in.
+    default: .
+  step-summary:
+    description: Append the Markdown summary to $GITHUB_STEP_SUMMARY.
+    default: "true"
+
+outputs:
+  exit-code:
+    description: The CLI's exit code — 0 gate passed, 1 gate failed, 2 user error.
+    value: ${{ steps.run.outputs.exit-code }}
+  passed:
+    description: Whether the gate passed, as "true" or "false".
+    value: ${{ steps.report.outputs.passed }}
+  pass-rate:
+    description: Overall candidate pass rate, 0.0–1.0. Empty if no report was written.
+    value: ${{ steps.report.outputs.pass-rate }}
+  json-report:
+    description: Absolute path to the JSON report.
+    value: ${{ steps.run.outputs.json-report }}
+  junit-report:
+    description: Absolute path to the JUnit XML report.
+    value: ${{ steps.run.outputs.junit-report }}
+  markdown-report:
+    description: Absolute path to the Markdown summary.
+    value: ${{ steps.run.outputs.markdown-report }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
+    - name: Install skill-eval
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INSTALL_SPEC: ${{ inputs.install-spec }}
+      run: |
+        set -euo pipefail
+        uv tool install --force "$INSTALL_SPEC"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Run skill-eval
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      # Every input arrives as an environment variable rather than being
+      # interpolated into the script body, so nothing a caller passes can be
+      # read as shell.
+      env:
+        SE_PATH: ${{ inputs.path }}
+        SE_EVALS: ${{ inputs.evals }}
+        SE_RUNNER: ${{ inputs.runner }}
+        SE_MODEL: ${{ inputs.model }}
+        SE_JUDGE_MODEL: ${{ inputs.judge-model }}
+        SE_TAG: ${{ inputs.tag }}
+        SE_CONFIG: ${{ inputs.config }}
+        SE_BASELINE: ${{ inputs.baseline }}
+        SE_REPEAT: ${{ inputs.repeat }}
+        SE_MIN_PASS_RATE: ${{ inputs.min-pass-rate }}
+        SE_MIN_DELTA: ${{ inputs.min-delta }}
+        SE_CONCURRENCY: ${{ inputs.concurrency }}
+        SE_JSON: ${{ inputs.json-output }}
+        SE_JUNIT: ${{ inputs.junit-output }}
+        SE_MARKDOWN: ${{ inputs.markdown-output }}
+        SE_MARKDOWN_MAX: ${{ inputs.markdown-max-chars }}
+      run: |
+        set -uo pipefail
+        args=("$SE_PATH")
+        add() { if [ -n "${2:-}" ]; then args+=("$1" "$2"); fi; }
+        add --evals "$SE_EVALS"
+        add --runner "$SE_RUNNER"
+        add --model "$SE_MODEL"
+        add --judge-model "$SE_JUDGE_MODEL"
+        add --tag "$SE_TAG"
+        add --config "$SE_CONFIG"
+        add --baseline "$SE_BASELINE"
+        add --repeat "$SE_REPEAT"
+        add --min-pass-rate "$SE_MIN_PASS_RATE"
+        add --min-delta "$SE_MIN_DELTA"
+        add --concurrency "$SE_CONCURRENCY"
+        add --json-output "$SE_JSON"
+        add --junit-output "$SE_JUNIT"
+        add --markdown-output "$SE_MARKDOWN"
+        add --markdown-max-chars "$SE_MARKDOWN_MAX"
+
+        # A report from an earlier invocation must not be read as this one's.
+        # On exit 2 the CLI writes nothing, so without this the steps below
+        # would publish the previous run's summary and take `passed=true` from
+        # its JSON.
+        rm -f "$SE_JSON" "$SE_JUNIT" "$SE_MARKDOWN"
+
+        # `shell: bash` runs with -e already set, so a bare failing command
+        # would abort this step before the code could be recorded -- and the
+        # summary and outputs below would never be written. `|| code=$?` is
+        # exempt from -e because the command is not the last in the list.
+        code=0
+        skill-eval run "${args[@]}" || code=$?
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+
+        # A relative output path is written under `working-directory`, but a
+        # later step reads these outputs from the job's own directory. Absolute
+        # paths are the only form that means the same thing in both places.
+        absolute() {
+          case "$1" in
+            /*) printf '%s\n' "$1" ;;
+            *)  printf '%s\n' "$PWD/$1" ;;
+          esac
+        }
+        {
+          echo "json-report=$(absolute "$SE_JSON")"
+          echo "junit-report=$(absolute "$SE_JUNIT")"
+          echo "markdown-report=$(absolute "$SE_MARKDOWN")"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Publish the step summary
+      if: always() && inputs.step-summary == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SE_MARKDOWN: ${{ inputs.markdown-output }}
+      run: |
+        set -uo pipefail
+        if [ -f "$SE_MARKDOWN" ]; then
+          cat "$SE_MARKDOWN" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Read the report
+      id: report
+      if: always()
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SE_JSON: ${{ inputs.json-output }}
+      run: |
+        set -uo pipefail
+        # Exit code 2 means an authoring error aborted before any report was
+        # written, so a missing file is expected and must not kill the step.
+        python3 - >> "$GITHUB_OUTPUT" <<'PY'
+        import json
+        import os
+        import pathlib
+
+        path = pathlib.Path(os.environ["SE_JSON"])
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            print(f"pass-rate={data['summary']['pass_rate']}")
+            print(f"passed={str(data.get('gate', {}).get('passed', False)).lower()}")
+        else:
+            print("pass-rate=")
+            print("passed=false")
+        PY
+
+    - name: Re-raise the gate result
+      if: always()
+      shell: bash
+      env:
+        CODE: ${{ steps.run.outputs.exit-code }}
+      run: |
+        # An empty CODE means the run step never completed at all -- a failed
+        # install, a cancelled job. A gate that cannot prove it passed must
+        # fail, never default to success.
+        exit "${CODE:-1}"

@@ -344,6 +344,36 @@ class RunReport(BaseModel):
         """
         return sum(score.cost_usd for o in self.outcomes for score in o.scores)
 
+    @property
+    def total_tokens(self) -> int:
+        """Tokens across **both** arms: money spent is money spent.
+
+        Unlike `passed`/`failed`/`pass_rate`, which read the candidate arm
+        only, this reads every outcome -- a baseline run still burned real
+        tokens even though the gate never looks at it.
+        """
+        return sum(o.result.tokens for o in self.outcomes if o.result)
+
+    @property
+    def total_cost_usd(self) -> float:
+        """Cost across **both** arms. See `total_tokens` for why."""
+        return sum(o.result.cost_usd for o in self.outcomes if o.result)
+
+    @property
+    def total_latency_ms(self) -> int:
+        """Latency across **both** arms. See `total_tokens` for why."""
+        return sum(o.result.latency_ms for o in self.outcomes if o.result)
+
+    @property
+    def pricing_degraded(self) -> bool:
+        """True when any outcome (either arm) couldn't be priced.
+
+        `total_cost_usd == 0.0` means both "the run was free" and "pricing
+        failed for every outcome" -- `cost_note` is the only thing that tells
+        those apart, so this flag exists to surface the distinction.
+        """
+        return any(o.result.cost_note for o in self.outcomes if o.result)
+
     def pass_rate_by_skill(self) -> dict[str, float]:
         """Pass rate per skill name, for per-skill gating and reporting."""
         buckets: dict[str, list[CaseOutcome]] = {}

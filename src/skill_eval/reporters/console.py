@@ -154,9 +154,9 @@ def render_console(
         f"{report.errored} errored — pass rate {report.pass_rate:.0%}"
     )
 
-    total_cost = sum(o.result.cost_usd for o in report.outcomes if o.result)
-    total_latency_ms = sum(o.result.latency_ms for o in report.outcomes if o.result)
-    pricing_degraded = any(o.result.cost_note for o in report.outcomes if o.result)
+    total_cost = report.total_cost_usd
+    total_latency_ms = report.total_latency_ms
+    pricing_degraded = report.pricing_degraded
 
     # Build totals line with cost and latency. `total_cost` is 0.0 both when a
     # run genuinely cost nothing and when pricing failed for every outcome --

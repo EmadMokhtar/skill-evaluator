@@ -45,6 +45,13 @@ class Config(BaseModel):
     value is what turns comparison off. `min_delta` has no default because 0.0
     is a real, stricter choice ("must not regress") -- silently assuming it
     would gate runs nobody asked to gate.
+
+    `concurrency` defaults to 1 -- no executor is constructed and behavior is
+    identical to a single-threaded run. The work is network-bound (one provider
+    round trip per item against sub-millisecond of local CPU), so raising it
+    overlaps waits rather than using more cores; the practical ceiling is the
+    provider's rate limit. Validation lives in the CLI, not here, so a config
+    value and a flag are checked the same way `repeat` already is.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -63,6 +70,7 @@ class Config(BaseModel):
     baseline: Literal["", "none", "previous"] = ""
     repeat: int = 1
     min_delta: float | None = None
+    concurrency: int = 1
 
 
 def find_config_file(start: Path) -> Path | None:

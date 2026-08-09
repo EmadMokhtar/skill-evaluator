@@ -7,12 +7,14 @@ Run evaluations on Agent Skills (`SKILL.md`) — in CI/CD or on demand.
 Skills and their eval cases are **inputs** to the tool. Nothing about a skill under test
 is vendored here, so any skill repo can adopt `skill-eval` without embedding it.
 
-> **Status:** M4. The full pipeline — discovery, scoring, reporting, gating — runs offline
+> **Status:** M5 (part 1). The full pipeline — discovery, scoring, reporting, gating — runs offline
 > against `FakeRunner` (the default, scripted, free) and against real agents through
 > `pydantic-ai` (provider-flexible), scoring output text, tool-use trajectories, and
 > efficiency budgets. A rubric-based LLM judge scores output quality, and `mode: offered`
 > measures whether an agent reached for the skill at all. [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparative-evals/)
-> let each case run against a baseline, reporting delta and gating on improvement.
+> let each case run against a baseline, reporting delta and gating on improvement, and JUnit
+> and Markdown reporters plus a composite GitHub Action make a run legible to CI. M5 part 2 —
+> the automated release pipeline and cassette-refresh workflow — is specified and still pending.
 
 ## Install
 
