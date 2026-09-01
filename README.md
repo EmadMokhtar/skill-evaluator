@@ -49,10 +49,14 @@ cd skill-evaluator
 uv sync
 ```
 
-A skill is any directory containing `SKILL.md`. Its eval cases live beside it:
+A skill is any directory containing `SKILL.md`. Its eval cases live beside it — the clone
+you just made ships two:
 
 ```
-skills/
+examples/
+  greeting/
+    SKILL.md
+    greeting.eval.yaml
   order-support/
     SKILL.md
     order-support.eval.yaml
@@ -103,6 +107,16 @@ cases:
 
 ## A run reads like a test suite
 
+Your own repository follows the same layout — one directory per skill, eval cases beside the
+`SKILL.md`:
+
+```
+skills/
+  order-support/
+    SKILL.md
+    order-support.eval.yaml
+```
+
 ```bash
 uv run skill-eval run ./skills
 ```
@@ -151,8 +165,16 @@ Once that is green, `baseline: previous` and `repeat: 3` turn the same job into 
 carries the delta —
 see [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparative-evals/).
 
-> The repository has no tags yet, so `@v1` does not resolve until the first release. Until
-> then, pin the action to a commit SHA.
+> **Before the first release, two things in that snippet do not resolve yet.** There are no
+> tags, so `@v1` is not a valid ref; and the action's default `install-spec` names a PyPI
+> package that has not been published. Pin both to the same commit until then:
+>
+> ```yaml
+> - uses: EmadMokhtar/skill-evaluator@<commit-sha>
+>   with:
+>     path: ./skills
+>     install-spec: "skill-eval[pydantic-ai] @ git+https://github.com/EmadMokhtar/skill-evaluator@<commit-sha>"
+> ```
 
 ## Why a green run means something
 
