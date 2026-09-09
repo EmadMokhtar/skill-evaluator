@@ -219,7 +219,10 @@ about the skill; raising would surface it as an infra error instead.
 A missing cassette skips; a mismatched request fails rather than reaching the network.
 
 **`skill_lens` (underscore) never appears in user-facing output.** The user-facing name is
-`skill-lens` everywhere: command, config file, distribution.
+`skill-lens` everywhere: command, config file, distribution. The GitHub repository keeps its
+older name, `skill-evaluator`, so `uses: EmadMokhtar/skill-evaluator@v<version>` installing
+`skill-lens` is expected, not a mistake. `tests/test_naming.py` fails if the pre-rename name
+reappears outside `docs/superpowers/`, which is a historical archive and is never rewritten.
 
 **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
 
