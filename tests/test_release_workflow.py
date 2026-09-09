@@ -52,3 +52,25 @@ def test_the_pushed_tag_is_verified_before_the_build(workflow):
     steps = workflow["jobs"]["release"]["steps"]
     verify_step = next(step for step in steps if "ls-remote" in str(step.get("run", "")))
     assert verify_step["if"] == "steps.bump.outputs.bumped == 'true'"
+
+
+def test_nothing_runs_before_the_tests_pass(workflow):
+    """Publishing is irreversible: PyPI refuses a re-upload of a version."""
+    assert workflow["jobs"]["release"]["needs"] == "verify"
+    assert workflow["jobs"]["publish"]["needs"] == "release"
+
+
+def test_publish_is_skipped_when_no_version_was_cut(workflow):
+    condition = workflow["jobs"]["publish"]["if"]
+    assert "bumped" in condition and "true" in condition
+
+
+def test_publish_can_mint_an_identity_but_cannot_write_to_the_repository(workflow):
+    permissions = workflow["jobs"]["publish"]["permissions"]
+    assert permissions["id-token"] == "write"
+    assert permissions.get("contents", "read") == "read"
+
+
+def test_publish_is_gated_by_the_protected_environment(workflow):
+    """The pending publisher on PyPI is bound to this environment name."""
+    assert workflow["jobs"]["publish"]["environment"]["name"] == "pypi"

@@ -137,3 +137,27 @@ jobs:
           name: dist
           path: dist/
           if-no-files-found: error
+
+  publish:
+    needs: release
+    if: needs.release.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      # Trusted Publishing proves this job's identity to PyPI with a
+      # short-lived signed token. No stored API token exists anywhere.
+      id-token: write
+      contents: read
+    environment:
+      name: pypi
+      url: https://pypi.org/p/skill-lens
+    steps:
+      - name: Download the distributions
+        # The artifact the release job built and verified. Rebuilding here
+        # would publish bytes that nothing tested.
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
