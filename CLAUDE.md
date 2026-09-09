@@ -102,7 +102,10 @@ form, that file is the explanation.
   stops YAML 1.1 from turning bare `yes`/`no`/`on`/`off` into booleans.
 - **Secrets come from environment variables only** — never from `skill-lens.toml`.
 - **`skill_lens` (underscore) never appears in user-facing output.** The user-facing name is
-  `skill-lens` everywhere: command, config file, distribution.
+  `skill-lens` everywhere: command, config file, distribution. The GitHub repository keeps its
+  older name, `skill-evaluator`, so `uses: EmadMokhtar/skill-evaluator@v<version>` installing
+  `skill-lens` is expected, not a mistake. `tests/test_naming.py` fails if the pre-rename name
+  reappears outside `docs/superpowers/`, which is a historical archive and is never rewritten.
 - **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
 - **No agent-framework type may appear outside `runners/pydantic_ai.py` and
   `judges/pydantic_ai.py`.** `runners/tools.py` builds framework-neutral `MockTool`s (name +

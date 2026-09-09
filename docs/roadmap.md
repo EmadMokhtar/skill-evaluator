@@ -43,3 +43,10 @@ is a one-line change if M6's real tool execution introduces CPU-bound work.
 Part 2 — the automated release pipeline (`cz bump` on merge to main, Trusted Publishing to
 PyPI) and the manual cassette-refresh workflow — is specified and waiting on the PyPI project
 and repository secrets it needs.
+
+## The rename to skill-lens
+
+The project's original name could not be registered on PyPI — the registry folds separators
+and look-alike characters before comparing, which collapsed it onto the existing project
+`skilleval`. The distribution, the command, the config file and the Python package all moved
+to `skill-lens` together. The GitHub repository keeps its name.
