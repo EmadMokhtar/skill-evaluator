@@ -64,6 +64,11 @@ select = ["E", "F", "I", "UP", "B"]
 name = "cz_conventional_commits"
 version_provider = "uv"
 tag_format = "v$version"
+# Commitizen creates a lightweight tag unless told otherwise, and
+# `git push --follow-tags` (release.yml) pushes only annotated tags — without
+# this, every release commit would reach main while its tag stayed on the
+# ephemeral runner and vanished when the job ended.
+annotated_tag = true
 update_changelog_on_bump = true
 # Keep breaking changes inside 0.x. M6 and M7 still expect to change the eval
 # file format, so a "!" commit must not declare the CLI surface stable.

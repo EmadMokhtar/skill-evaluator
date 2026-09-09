@@ -41,3 +41,14 @@ def test_the_bump_reads_the_whole_history(workflow):
         step for step in workflow["jobs"]["release"]["steps"] if "checkout" in str(step.get("uses"))
     )
     assert checkout["with"]["fetch-depth"] == 0
+
+
+def test_the_pushed_tag_is_verified_before_the_build(workflow):
+    """`git push --follow-tags` pushes only annotated tags. If the tag never
+    reached origin, nothing else would catch it: the `publish` job (added in
+    a later task) is reached through `needs:`, not through the tag. So this
+    step must exist, and must not run when no version was cut.
+    """
+    steps = workflow["jobs"]["release"]["steps"]
+    verify_step = next(step for step in steps if "ls-remote" in str(step.get("run", "")))
+    assert verify_step["if"] == "steps.bump.outputs.bumped == 'true'"

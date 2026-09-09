@@ -72,9 +72,13 @@ jobs:
         id: bump
         shell: bash
         run: |
-          set -uo pipefail
+          set -u
           # `set -e` is deliberately not used: cz signals "nothing to release"
           # through its exit code, and -e would discard it before we can read it.
+          # That omission applies to the whole step, so every command below
+          # that can fail is checked by hand instead of relying on -e.
+          # (No pipeline runs in this step, so `pipefail` would be inert —
+          # dropped rather than left in to imply a check that isn't there.)
           code=0
           uv run cz bump --yes || code=$?
           # 21 = NoneIncrementExit (commits exist, none warrant a release).
@@ -88,7 +92,14 @@ jobs:
             echo "cz bump failed with exit code $code" >&2
             exit "$code"
           fi
-          version="$(uv run cz version --project)"
+          if ! version="$(uv run cz version --project)"; then
+            echo "cz version --project failed after a successful bump; aborting so a broken release does not report bumped=true with no version." >&2
+            exit 1
+          fi
+          if [ -z "$version" ]; then
+            echo "cz version --project returned an empty string after a successful bump; aborting so a broken release does not report bumped=true with no version." >&2
+            exit 1
+          fi
           echo "bumped=true" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Released version $version." >> "$GITHUB_STEP_SUMMARY"
@@ -96,6 +107,24 @@ jobs:
       - name: Push the bump commit and its tag
         if: steps.bump.outputs.bumped == 'true'
         run: git push --follow-tags origin HEAD:main
+
+      - name: Verify the tag reached origin
+        # `--follow-tags` pushes only annotated tags. `annotated_tag = true`
+        # in [tool.commitizen] makes cz create one, but if that setting were
+        # ever removed, or the push otherwise dropped the tag, the failure
+        # would be silent: the `publish` job (added in a later task) is
+        # reached through `needs:`, not through the tag, so nothing else
+        # would stop a release with no reproducible tag from reaching PyPI.
+        if: steps.bump.outputs.bumped == 'true'
+        shell: bash
+        run: |
+          set -eu
+          tag="v${{ steps.bump.outputs.version }}"
+          if [ -z "$(git ls-remote --tags origin "refs/tags/$tag")" ]; then
+            echo "Tag $tag was pushed but is not on origin. The bump commit may now be on main with no matching tag, which makes this release unreproducible." >&2
+            exit 1
+          fi
+          echo "Confirmed tag $tag reached origin." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build the distributions
         if: steps.bump.outputs.bumped == 'true'
