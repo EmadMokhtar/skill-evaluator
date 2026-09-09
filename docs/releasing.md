@@ -92,10 +92,33 @@ Open the pull request yourself from the link in the job summary. A pull request 
 workflow's own token would carry no CI checks, and on a cassette refresh those checks are the
 review.
 
-## Releasing by hand
+## There is no manual path to PyPI
 
-Rarely needed. `uv run cz bump` locally, push the commit and tag, then re-run the `publish`
-job. Note that pushing a tag does not by itself publish: the `publish` job is reached through
-`needs:`, not through a tag trigger — GitHub does not start new workflow runs from a
-`GITHUB_TOKEN` push in the first place, so a tag-triggered publish job would never fire on an
-automated release either.
+Do not run `cz bump` locally to release. It will tag a version without publishing it, and the
+tag it leaves behind cannot be reused: it looks like a real release happened, but nothing
+reached PyPI.
+
+Here is why. `publish` only runs as part of the same workflow run whose `release` job just
+built and uploaded the `dist` artifact it downloads — it is reached through `needs: release`,
+gated on `needs.release.outputs.bumped == 'true'`, not through a tag push. That is deliberate:
+a tag pushed with `GITHUB_TOKEN` starts no new workflow run at all, so a tag-triggered `publish`
+job could never fire on an automated release either, and chaining the jobs with `needs:` is
+what makes it fire at all.
+
+Running `cz bump` locally and pushing the commit and its tag does trigger a new run — the push
+lands on `main` — but that run's own `release` job finds the tag it would create already sitting
+on `HEAD`, since you just pushed it. `cz bump` sees no commit since that tag warranting a
+release, exits `3` or `21` (both a no-op, not an error), and the run records "nothing to
+release": no build, no artifact, no `publish`. You are left with a real, permanent tag and no
+published package behind it, which is worse than doing nothing — the tag cannot simply be
+re-cut, since `vX.Y.Z` would then mean two different things depending on which push you ask
+about.
+
+The only real recovery path is for a run whose `release` job already succeeded — tests passed,
+the tag reached origin, the `dist` artifact was built and uploaded — where only the final
+"Publish to PyPI" step itself failed (a PyPI outage, an expired trusted-publisher binding, a
+transient network error). Open that run in the Actions tab and re-run the `publish` job: it
+re-downloads the artifact its own `release` job already built and retries the upload; nothing
+upstream of it runs again. Starting a fresh run instead, or re-running `release`, is not a
+substitute — a fresh run's `release` job faces the same already-tagged `HEAD` as the local
+`cz bump` case above and reports nothing to release.

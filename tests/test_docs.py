@@ -121,9 +121,21 @@ def test_the_nav_has_no_missing_pages():
 
 def test_releasing_documents_every_piece_of_external_setup():
     """The four settings live outside this repository, so nothing in CI can
-    check them. The docs are the only place they are recorded."""
+    check them. The docs are the only place they are recorded.
+
+    Each needle below is text that only occurs when the specific setup item
+    it names is actually documented. A loose word like "pypi" or "pending
+    publisher" also shows up in unrelated prose elsewhere on the page (PyPI
+    the package index, "pending publisher does not reserve the name"), so
+    checking for those alone would still pass with the setup item deleted.
+    """
     text = RELEASING.read_text(encoding="utf-8")
-    for required in ("Read and write", "pending publisher", "pypi", "OPENAI_API_KEY"):
+    for required in (
+        "Read and write",
+        "`pypi` GitHub Environment",
+        "pending publisher on PyPI",
+        "OPENAI_API_KEY",
+    ):
         assert required in text, f"docs/releasing.md does not mention {required!r}"
 
 
