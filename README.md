@@ -6,7 +6,7 @@
 [![CI](https://github.com/EmadMokhtar/skill-evaluator/actions/workflows/ci.yml/badge.svg)](https://github.com/EmadMokhtar/skill-evaluator/actions/workflows/ci.yml)
 [![Docs](https://github.com/EmadMokhtar/skill-evaluator/actions/workflows/docs.yml/badge.svg)](https://emadmokhtar.github.io/skill-evaluator/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/EmadMokhtar/skill-evaluator/blob/main/LICENSE)
 
 **📖 Full documentation: <https://emadmokhtar.github.io/skill-evaluator/>**
 
@@ -41,7 +41,15 @@ without embedding it.
 
 ## Try it — free, offline, no API key
 
-No release has shipped yet, so install from source:
+```bash
+uv tool install "skill-lens[pydantic-ai]"
+```
+
+(`pip install "skill-lens[pydantic-ai]"` works too. Drop the extra for the offline default
+runner alone.)
+
+Working on `skill-lens` itself, or want the example skills to hand? Install from a checkout
+instead — then prefix every command below with `uv run`:
 
 ```bash
 git clone https://github.com/EmadMokhtar/skill-evaluator.git
@@ -49,8 +57,8 @@ cd skill-evaluator
 uv sync
 ```
 
-A skill is any directory containing `SKILL.md`. Its eval cases live beside it — the clone
-you just made ships two:
+A skill is any directory containing `SKILL.md`. Its eval cases live beside it — this
+repository ships two:
 
 ```
 examples/
@@ -65,7 +73,7 @@ examples/
 Point the CLI at one skill directory or at a parent of many — discovery is recursive:
 
 ```bash
-uv run skill-lens list ./examples
+skill-lens list ./examples
 ```
 
 ```
@@ -118,7 +126,7 @@ skills/
 ```
 
 ```bash
-uv run skill-lens run ./skills
+skill-lens run ./skills
 ```
 
 ```
@@ -138,8 +146,8 @@ Exit code `0` means the gate passed, `1` means it failed, and `2` means somethin
 own files is wrong. That is the whole contract with your pipeline.
 
 The default runner is scripted and offline, so the pipeline above costs nothing to try. To
-score a real agent, install the extra (`uv sync --extra pydantic-ai`) and pass
-`--runner pydantic-ai` — see
+score a real agent, pass `--runner pydantic-ai` — the `[pydantic-ai]` extra in the install
+above is what supplies it (from a checkout: `uv sync --extra pydantic-ai`). See
 [Runners](https://emadmokhtar.github.io/skill-evaluator/runners/).
 
 ## Gate your pull requests
@@ -160,7 +168,7 @@ floating `v0` tag to follow.
 The run publishes a JUnit XML report for your provider's test pane, a Markdown summary for
 the job summary or a pull-request comment, and a JSON report for anything else. `skill-lens`
 never calls the GitHub API itself — it renders files, your workflow decides where they go.
-Copy-pasteable workflows live in [`examples/ci/`](examples/ci/) and in
+Copy-pasteable workflows live in [`examples/ci/`](https://github.com/EmadMokhtar/skill-evaluator/tree/main/examples/ci) and in
 [CI integration](https://emadmokhtar.github.io/skill-evaluator/ci/).
 
 Once that is green, `baseline: previous` and `repeat: 3` turn the same job into a
@@ -168,9 +176,9 @@ Once that is green, `baseline: previous` and `repeat: 3` turn the same job into 
 carries the delta —
 see [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparative-evals/).
 
-> **Before the first release, two things in that snippet do not resolve yet.** There are no
-> git tags, so `@v0.1.0` is not a valid ref (the action has not been released yet); and the action's default
-> `install-spec` names a PyPI package that has not been published. Pin both to the same commit until then:
+> **Running against an unreleased commit?** The action's default `install-spec` pins the
+> released version matching its own tag, so point both at the same commit and they cannot
+> drift apart:
 >
 > ```yaml
 > - uses: EmadMokhtar/skill-evaluator@<commit-sha>
@@ -195,7 +203,7 @@ deliberate design decisions, each with a test holding it in place:
 - **Authoring mistakes stop the run.** A malformed regex or an unknown assertion kind is a
   bug in your files, not a verdict on your skill — exit `2`, naming the file and the field.
 
-The full list, with the reasoning behind each, is in [ARCHITECTURE.md](ARCHITECTURE.md).
+The full list, with the reasoning behind each, is in [ARCHITECTURE.md](https://github.com/EmadMokhtar/skill-evaluator/blob/main/ARCHITECTURE.md).
 
 ## Documentation
 
@@ -210,7 +218,7 @@ The full list, with the reasoning behind each, is in [ARCHITECTURE.md](ARCHITECT
 | Baselines, deltas, `--min-delta` | [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparative-evals/) |
 | Exit codes and reports | [Gating](https://emadmokhtar.github.io/skill-evaluator/gating/) |
 | The action and example workflows | [CI integration](https://emadmokhtar.github.io/skill-evaluator/ci/) |
-| How it is built | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| How it is built | [ARCHITECTURE.md](https://github.com/EmadMokhtar/skill-evaluator/blob/main/ARCHITECTURE.md) |
 | What's shipped, what's next | [Roadmap](https://emadmokhtar.github.io/skill-evaluator/roadmap/) |
 
 ## Contributing
@@ -244,12 +252,13 @@ contribution.
 
 ## Status
 
-Milestone 5, part 1. Discovery, scoring, judging, comparison, reporting and gating all ship
-and are tested; the remaining work is the automated release pipeline, which is why there is
-no PyPI package yet — install from source for now. See the
+Milestone 5. Discovery, scoring, judging, comparison, reporting, gating and the automated
+release pipeline all ship and are tested. Versions are derived from the commit history and
+published to PyPI on merge. This is `0.x`: a minor release may still change behaviour, so pin
+what you depend on. See the
 [roadmap](https://emadmokhtar.github.io/skill-evaluator/roadmap/) for what is shipped and
 what is planned.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/EmadMokhtar/skill-evaluator/blob/main/LICENSE).

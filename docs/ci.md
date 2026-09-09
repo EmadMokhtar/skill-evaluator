@@ -42,9 +42,13 @@ to hold even the verdict) that falls back to a hard character cut.
 ```
 
 Pin an exact tag, as shown above — until 1.0 a minor release may change behaviour, so there is
-no floating `v0` tag to follow. This repository has no tags yet, so `@v0.1.0` will not resolve
-until the first release is tagged. Until then, pin the action to a commit SHA, or reference it
-as `uses: ./` from a workflow inside this repository.
+no floating `v0` tag to follow. Every release tags the tree in which `install-spec` already
+pins the matching version, so the action and the CLI it installs cannot drift apart.
+
+To run against a commit that has not been released, pin the action to that commit SHA and give
+`install-spec` the same ref (`skill-lens[pydantic-ai] @
+git+https://github.com/EmadMokhtar/skill-evaluator@<commit-sha>`), or reference the action as
+`uses: ./` from a workflow inside this repository.
 
 Every `skill-lens run` flag is available as a kebab-cased input (`--min-pass-rate` becomes
 `min-pass-rate`), plus three inputs about the environment rather than the run:

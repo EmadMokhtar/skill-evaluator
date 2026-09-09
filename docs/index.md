@@ -11,32 +11,35 @@ Skills and their eval cases are **inputs** to the tool. Nothing about a skill un
 test is vendored here, so any skill repository can adopt `skill-lens` without
 embedding it.
 
-!!! info "Status: M5 (part 1)"
+!!! info "Status: M5"
     The full pipeline — discovery, scoring, reporting, gating — runs offline against
     `FakeRunner` (the default, scripted, free) and against real agents through
     `pydantic-ai`. It scores output text, tool-use trajectories, and efficiency
     budgets, plus output quality via a rubric-based LLM judge with per-check evidence.
     Each case can also run against a baseline for comparative, delta-gated evals, and
     JUnit/Markdown reporters with a composite GitHub Action make a run CI-legible.
-    See the [roadmap](roadmap.md).
+    Merging to `main` versions the change from its commit history and publishes it to
+    PyPI (see [Releasing](releasing.md)). This is `0.x`: a minor release may still
+    change behaviour, so pin what you depend on. See the [roadmap](roadmap.md).
 
 ## Install
 
-No release has shipped yet (see the [roadmap](roadmap.md)), so install from source:
+```bash
+uv tool install "skill-lens[pydantic-ai]"
+```
+
+`pip install "skill-lens[pydantic-ai]"` works the same way. The `pydantic-ai` extra is only
+needed to evaluate against a real agent; `skill-lens` on its own is enough for the offline
+default runner.
+
+To work on `skill-lens` itself, or to have the example skills to hand, install from a
+checkout instead — every command then runs as `uv run skill-lens ...`:
 
 ```bash
 git clone https://github.com/EmadMokhtar/skill-evaluator.git
 cd skill-evaluator
-uv sync
+uv sync                      # add --extra pydantic-ai for the real-agent runner
 ```
-
-For evaluating against a real agent, install the extra:
-
-```bash
-uv sync --extra pydantic-ai
-```
-
-Once a release ships, `pip install skill-lens` (or `skill-lens[pydantic-ai]`) will work too.
 
 ## Where to go next
 
