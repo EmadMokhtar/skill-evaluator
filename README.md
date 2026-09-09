@@ -145,7 +145,7 @@ score a real agent, install the extra (`uv sync --extra pydantic-ai`) and pass
 ## Gate your pull requests
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v1
+- uses: EmadMokhtar/skill-evaluator@v0.1.0
   with:
     path: ./skills
     runner: pydantic-ai
@@ -153,6 +153,9 @@ score a real agent, install the extra (`uv sync --extra pydantic-ai`) and pass
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
+
+Pin an exact tag. Until 1.0 a minor release may change behaviour, so there is no
+floating `v0` tag to follow.
 
 The run publishes a JUnit XML report for your provider's test pane, a Markdown summary for
 the job summary or a pull-request comment, and a JSON report for anything else. `skill-lens`

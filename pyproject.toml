@@ -65,3 +65,14 @@ name = "cz_conventional_commits"
 version_provider = "uv"
 tag_format = "v$version"
 update_changelog_on_bump = true
+# Keep breaking changes inside 0.x. M6 and M7 still expect to change the eval
+# file format, so a "!" commit must not declare the CLI surface stable.
+major_version_zero = true
+# Files that spell the version. cz bump rewrites them inside the bump commit
+# itself, so the tree at tag vX.Y.Z already installs and documents X.Y.Z.
+version_files = [
+    "action.yml:skill-lens\\[pydantic-ai\\]==",
+    "docs/ci.md:skill-evaluator@v",
+    "README.md:skill-evaluator@v",
+]
+bump_message = "bump: version $current_version → $new_version [skip ci]"

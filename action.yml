@@ -48,7 +48,9 @@ inputs:
     description: >-
       Passed verbatim to `uv tool install`. A PyPI name, a pinned version, a git ref
       (git+https://github.com/EmadMokhtar/skill-evaluator@main) or a local path.
-    default: skill-lens[pydantic-ai]
+      Pinned by default so the action and the CLI it installs cannot drift apart;
+      cz bump rewrites this line on every release.
+    default: skill-lens[pydantic-ai]==0.1.0
   working-directory:
     description: Directory to run in.
     default: .

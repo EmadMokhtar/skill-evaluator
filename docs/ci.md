@@ -32,7 +32,7 @@ to hold even the verdict) that falls back to a hard character cut.
 ## The composite action
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v1
+- uses: EmadMokhtar/skill-evaluator@v0.1.0
   with:
     path: ./skills
     runner: pydantic-ai
@@ -41,9 +41,8 @@ to hold even the verdict) that falls back to a hard character cut.
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-This repository has no tags yet, so `@v1` does not resolve until the first release. Until then,
-pin the action to a commit SHA, or reference it as `uses: ./` from a workflow inside this
-repository.
+Pin an exact tag. Until 1.0 a minor release may change behaviour, so there is no
+floating `v0` tag to follow.
 
 Every `skill-lens run` flag is available as a kebab-cased input (`--min-pass-rate` becomes
 `min-pass-rate`), plus three inputs about the environment rather than the run:
