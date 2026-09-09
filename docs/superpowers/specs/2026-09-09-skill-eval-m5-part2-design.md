@@ -10,6 +10,8 @@ Part 1 made a run legible to CI. Part 2 makes the tool itself shippable: a merge
 bumps the version, tags it, and publishes to PyPI without anyone typing a command, and a
 maintainer can refresh the recorded provider traffic that the replay test tier depends on.
 
+- **A rename to `skill-lens`** — a prerequisite, not a flourish: the name `skill-eval`
+  cannot be registered on PyPI (§10). Ships as its own pull request, before the automation.
 - **`release.yml`** — one workflow, three jobs: verify, release, publish.
 - **`refresh-cassettes.yml`** — manual re-recording, delivered as a branch to review.
 - **Version pinning made self-maintaining** — Commitizen rewrites every file that spells a
@@ -56,7 +58,7 @@ rather than a silent correction, so the archive stays honest about what was beli
 
 3. **Commitizen owns version pinning, not a workflow step.** `version_files` rewrites the
    version inside the bump commit itself, so the tree at tag `vX.Y.Z` already installs
-   `skill-eval[pydantic-ai]==X.Y.Z` and already documents `@vX.Y.Z`. A workflow step doing
+   `skill-lens[pydantic-ai]==X.Y.Z` and already documents `@vX.Y.Z`. A workflow step doing
    the same rewrite would have to run between `cz bump`'s commit and its tag, which means
    amending a commit that a tag already points at. Configuration beats sequencing.
 
@@ -87,6 +89,17 @@ rather than a silent correction, so the archive stays honest about what was beli
    publish job would be a second build of the same source, and only one of the two would have
    been verified.
 
+9. **The rename lands first, as its own pull request.** Everything here hard-codes the
+   distribution name — the pending publisher, the environment URL, `version_files`, the
+   action's `install-spec`. Renaming and automating in one change would mean reviewing a
+   1,501-occurrence mechanical diff and a new release pipeline in the same breath, and the
+   pipeline's correctness would be invisible under the noise.
+
+10. **`major_version_zero = true`.** The rename is a breaking change and carries a `!`
+    marker, which by default takes a `0.x` project straight to `1.0.0`. That would declare
+    the CLI surface stable while M6 and M7 are still expected to change the eval file format.
+    The setting keeps breaking changes inside `0.x`, where SemVer already allows them.
+
 ## 3. `release.yml`
 
 ```
@@ -105,7 +118,7 @@ release   (contents: write) needs: verify
   if bumped: push the commit and the tag; uv build; upload dist/
 
 publish   (id-token: write) needs: release, if: bumped == 'true'
-  environment: {name: pypi, url: https://pypi.org/p/skill-eval}
+  environment: {name: pypi, url: https://pypi.org/p/skill-lens}
   download dist/ → pypa/gh-action-pypi-publish
 ```
 
@@ -121,7 +134,7 @@ reviewer would go if a human gate before publishing is wanted later.
 ```toml
 [tool.commitizen]
 version_files = [
-    "action.yml:skill-eval\\[pydantic-ai\\]==",
+    "action.yml:skill-lens\\[pydantic-ai\\]==",
     "docs/ci.md:skill-evaluator@v",
     "README.md:skill-evaluator@v",
 ]
@@ -131,7 +144,7 @@ bump_message = "bump: version $current_version → $new_version [skip ci]"
 Each entry is `path:pattern`; Commitizen replaces the current version string on lines the
 pattern matches. Three files change as a result:
 
-- **`action.yml`** — `install-spec`'s default becomes `skill-eval[pydantic-ai]==0.1.0`.
+- **`action.yml`** — `install-spec`'s default becomes `skill-lens[pydantic-ai]==0.1.0`.
   Previously unpinned, so a user pinning the action to an exact ref still received whatever
   release was newest on PyPI. The action reference and the tool it installs now move together.
 - **`README.md:148` and `docs/ci.md:35`** — `@v1` becomes an exact tag that exists. `v1` was
@@ -165,7 +178,7 @@ None of this can be done from a workflow file. `docs/releasing.md` carries the l
 | # | Setting | Current state |
 | --- | --- | --- |
 | 1 | Settings → Actions → General → Workflow permissions → **Read and write** | `read` — this caps every job, so `permissions: contents: write` would still resolve to read-only and the bump could not push |
-| 2 | PyPI → Publishing → **pending publisher**: owner `EmadMokhtar`, repo `skill-evaluator`, workflow `release.yml`, environment `pypi` | absent; the name `skill-eval` is unregistered and free |
+| 2 | PyPI → Publishing → **pending publisher**: project `skill-lens`, owner `EmadMokhtar`, repo `skill-evaluator`, workflow `release.yml`, environment `pypi` | absent; `skill-lens` is unregistered and clears PyPI's similarity guard (§10) |
 | 3 | The **`pypi`** GitHub Environment | absent (`copilot` and `github-pages` exist) |
 | 4 | An **`OPENAI_API_KEY`** secret for the refresh workflow | the repository has no secrets |
 
@@ -224,3 +237,57 @@ New:
 
 Preserved: Conventional Commits are what `cz bump` reads, so the existing PR-title and
 branch-commit checks in `ci.yml` become load-bearing for versioning rather than stylistic.
+
+## 10. The rename to `skill-lens`
+
+### Why the name had to change
+
+PyPI refused `skill-eval`: *"This project name is too similar to an existing project."* The
+registry applies a typosquatting guard on top of PEP 503 normalisation — it strips `-`, `_`
+and `.` entirely and folds look-alike characters (`l`/`i` → `1`, `o` → `0`) before comparing.
+`skill-eval` collapses to `skilleval`, and **`skilleval` is a published project** (0.1.0,
+"Find the cheapest LLM that gets your task 100% right").
+
+The obvious fallbacks were also unavailable. `skills-eval` exists at 0.3.3 — summary
+*"Evaluate Claude skills plugins"*, the same product category. So do `skillgate`,
+`skillbench`, `skillprobe`, `skillrig`, `skillcheck`, `skill-test`, `skill-audit`,
+`skill-vet`, `skillsmith`, `skillforge` and `skillwright`, each of which blocks its
+hyphenated form too. The `skill-*` namespace is crowded precisely because the category is.
+
+`skill-lens` is free in every form (`skill-lens`, `skilllens`, `skill_lens`) and clears the
+guard: it folds to `sk1111ens`, while the nearest published name, `skillens` (an unrelated
+tool for rating learning material), folds to `sk111ens`. Different strings, different length.
+
+### Scope
+
+Every identity moves together — there is no released version and no user to migrate, so a
+split identity would be a permanent cost paid to avoid a one-off change:
+
+| Surface | Before | After |
+| --- | --- | --- |
+| Distribution | `skill-eval` | `skill-lens` |
+| Command | `skill-eval` | `skill-lens` |
+| Config file | `skill-eval.toml` | `skill-lens.toml` |
+| Python package | `skill_eval` | `skill_lens` |
+| Repository | `EmadMokhtar/skill-evaluator` | unchanged |
+
+The repository keeps its name. GitHub would redirect old URLs, but renaming it would
+invalidate every documented `uses:` reference and the published docs site URL for no gain
+the rename itself does not already deliver. `uses: EmadMokhtar/skill-evaluator@vX.Y.Z`
+installing `skill-lens` is a mild mismatch, and it is cheaper than the alternative.
+
+### The one lookup that is not a string
+
+`src/skill_eval/__init__.py:6` calls `version("skill-eval")` to populate `__version__`. It
+resolves the *distribution*, not the module, so a rename that misses it does not raise —
+`PackageNotFoundError` is caught and `__version__` silently becomes `"0.0.0"`. The
+version-pinning test in §7 is what turns that silence into a failure.
+
+### Invariant preserved, not amended
+
+`skill_eval` (underscore) never appearing in user-facing output survives intact, now reading
+`skill_lens`. That is the whole reason for renaming every surface rather than the
+distribution alone: the invariant says the user-facing name is the same everywhere, and a
+`pip install` name that differs from the command would have made it false.
+
+`major_version_zero = true` (§2.10) keeps the breaking rename inside `0.x`.
