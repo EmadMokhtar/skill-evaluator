@@ -357,6 +357,47 @@ published and its outputs read. The final step exits `"${CODE:-1}"`: an *empty* 
 run step never completed at all (a failed install, a cancelled job), and a gate that cannot
 prove it passed must fail rather than default to success.
 
+**Nothing publishes that has not been verified in the same run.** `release.yml` chains three
+jobs — `verify` (lint, format, the full suite), `release` (`cz bump`, push, build, upload) and
+`publish` (download that artifact, upload to PyPI) — with `needs:`, not across separate
+workflows. That shape is forced: GitHub starts no new workflow run from a push made with
+`GITHUB_TOKEN`, so a `publish` workflow listening on tag pushes would never fire, and the
+release would tag and then silently ship nothing. Chaining also gives the property worth
+having — `publish` is unreachable except through a green `verify`, and it uploads the artifact
+`release` built rather than rebuilding, so the bytes that ship are the bytes that were tested.
+Publishing is irreversible: PyPI refuses a re-upload of a version that already exists, which is
+why every gate here fails closed. The corollary is that there is **no manual path to PyPI**; a
+locally bumped and pushed tag produces a run with nothing to release.
+
+**A merge with no releasable commit publishes nothing and fails nothing.** `cz bump` signals
+"nothing to release" through its exit code — `21` (`NoneIncrementExit`) and `3`
+(`NoCommitsFoundError`) — so the bump step deliberately runs without `set -e`, which would
+discard the code before it could be read, and checks every other command by hand instead.
+
+**The pushed release tag is annotated, and the job proves it reached `origin`.**
+`git push --follow-tags` pushes only *annotated* tags, and Commitizen creates a lightweight one
+unless told otherwise, so `annotated_tag = true` is what stops the bump commit reaching `main`
+while its tag dies on the runner. Because `publish` is reached through `needs:` and not through
+the tag, that loss would not stop a release: a `git ls-remote` check runs right after the push
+and fails loudly instead. The push is `--atomic` so the commit and tag land together or not at
+all, and `cz bump --check-consistency` aborts before writing anything if a file listed in
+`version_files` no longer contains the current version — a flag on the command, because
+Commitizen reads it only from the CLI and never from `pyproject.toml`.
+
+**No long-lived publishing credential exists.** PyPI accepts the upload because the job proves
+its identity with a short-lived token (Trusted Publishing, over OIDC), so `publish` needs
+`id-token: write` and nothing else — it cannot write to the repository. Permissions are granted
+per job against a workflow-level `permissions: {}`, so a job added later inherits nothing.
+
+**A cassette refresh proves its recordings replay, and checks them for secrets, before pushing.**
+It re-records with `--record-mode=rewrite`: `once` only fills in a *missing* cassette and
+write-protects one already loaded, so it cannot refresh an existing recording. It then stages
+the recordings before either check, because `git diff` cannot see an untracked file and a
+freshly recorded cassette is exactly that — without staging, the scan would read as a lock while
+checking nothing on the one path that creates a file. It hands back a **branch**, never a pull
+request, because a pull request opened with `GITHUB_TOKEN` gets no CI checks, and on a cassette
+refresh those checks are the whole point of the review.
+
 ## Extension points
 
 **Adding a runner.** Implement `Runner` in a new module under `runners/`, register it in

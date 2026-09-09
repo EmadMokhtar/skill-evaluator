@@ -1,13 +1,16 @@
 # Runners
 
 The default runner is `fake` (offline, scripted, free). To evaluate a skill with a
-real agent, install the extra and pick a model:
+real agent you need the `pydantic-ai` extra, a key in the environment, and a model:
 
 ```bash
-uv sync --extra pydantic-ai
+uv tool install "skill-lens[pydantic-ai]"
 export OPENAI_API_KEY=...
-uv run skill-lens run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
+skill-lens run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
 ```
+
+From a checkout instead, the extra comes from `uv sync --extra pydantic-ai` and every
+command runs as `uv run skill-lens ...`.
 
 API keys are read from the environment only — never from `skill-lens.toml`.
 `skill-lens` checks for the key before making any request, so a missing key costs
