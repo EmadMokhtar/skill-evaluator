@@ -73,6 +73,8 @@ major_version_zero = true
 version_files = [
     "action.yml:skill-lens\\[pydantic-ai\\]==",
     "docs/ci.md:skill-evaluator@v",
+    "docs/ci.md:skill-lens\\[pydantic-ai\\]==",
     "README.md:skill-evaluator@v",
+    "examples/ci/skill-lens.yml:skill-evaluator@v",
 ]
 bump_message = "bump: version $current_version → $new_version [skip ci]"

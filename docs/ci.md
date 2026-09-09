@@ -41,15 +41,17 @@ to hold even the verdict) that falls back to a hard character cut.
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-Pin an exact tag. Until 1.0 a minor release may change behaviour, so there is no
-floating `v0` tag to follow.
+Pin an exact tag, as shown above — until 1.0 a minor release may change behaviour, so there is
+no floating `v0` tag to follow. This repository has no tags yet, so `@v0.1.0` will not resolve
+until the first release is tagged. Until then, pin the action to a commit SHA, or reference it
+as `uses: ./` from a workflow inside this repository.
 
 Every `skill-lens run` flag is available as a kebab-cased input (`--min-pass-rate` becomes
 `min-pass-rate`), plus three inputs about the environment rather than the run:
 
 | Input | Default | Purpose |
 | --- | --- | --- |
-| `install-spec` | `skill-lens[pydantic-ai]` | Passed verbatim to `uv tool install`. Accepts a PyPI name, a pinned version, a git ref, or a local path. |
+| `install-spec` | `skill-lens[pydantic-ai]==0.1.0` | Passed verbatim to `uv tool install`. Accepts a PyPI name, a pinned version, a git ref, or a local path. |
 | `working-directory` | `.` | Directory to run in. |
 | `step-summary` | `true` | Append the Markdown summary to `$GITHUB_STEP_SUMMARY`. |
 
