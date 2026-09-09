@@ -1,0 +1,71 @@
+name: Refresh cassettes
+
+# Manual only. Re-recording spends money and needs a real API key, so it is
+# never part of the normal CI path.
+on: workflow_dispatch
+
+permissions: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Re-record
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: uv run pytest tests/test_cassettes.py --record-mode=once
+
+      - name: Prove the new recordings replay
+        # A recording that cannot be replayed is worthless, and a reviewer
+        # reading YAML would not notice. Catch it here.
+        run: uv run pytest tests/test_cassettes.py --record-mode=none
+
+      - name: Refuse to push a secret
+        # Scrubbing already runs on both sides of the exchange in
+        # tests/conftest.py. This is a second lock on a locked door: the
+        # replay tier's whole value rests on cassettes being secret-free.
+        run: |
+          set -euo pipefail
+          if git diff -- tests/cassettes | grep -nE "sk-[A-Za-z0-9]|Bearer [A-Za-z0-9]"; then
+            echo "A credential appears in the re-recorded cassettes. Refusing to push." >&2
+            exit 1
+          fi
+
+      - name: Push a branch for review
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- tests/cassettes; then
+            echo "The cassettes already match the provider. Nothing to review." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          branch="chore/refresh-cassettes-${{ github.run_id }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add tests/cassettes
+          git commit -m "test: refresh the recorded provider traffic"
+          git push origin "$branch"
+          # A pull request opened with GITHUB_TOKEN gets no CI checks, and for
+          # re-recorded cassettes those checks are the point. A human opening
+          # it is what starts them.
+          {
+            echo "### Cassettes refreshed"
+            echo
+            echo "Open the pull request to run CI on the new recordings:"
+            echo
+            echo "${{ github.server_url }}/${{ github.repository }}/compare/${branch}?expand=1"
+          } >> "$GITHUB_STEP_SUMMARY"
