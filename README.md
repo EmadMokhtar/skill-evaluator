@@ -169,8 +169,8 @@ carries the delta —
 see [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparative-evals/).
 
 > **Before the first release, two things in that snippet do not resolve yet.** There are no
-> tags, so `@v1` is not a valid ref; and the action's default `install-spec` names a PyPI
-> package that has not been published. Pin both to the same commit until then:
+> git tags, so `@v0.1.0` is not a valid ref (the action has not been released yet); and the action's default
+> `install-spec` names a PyPI package that has not been published. Pin both to the same commit until then:
 >
 > ```yaml
 > - uses: EmadMokhtar/skill-evaluator@<commit-sha>
