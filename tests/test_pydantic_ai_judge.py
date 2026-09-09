@@ -4,9 +4,9 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from skill_eval.judges.base import Judge
-from skill_eval.judges.pydantic_ai import PydanticAIJudge
-from skill_eval.models import JudgeRequest, RubricCheck
+from skill_lens.judges.base import Judge
+from skill_lens.judges.pydantic_ai import PydanticAIJudge
+from skill_lens.models import JudgeRequest, RubricCheck
 
 REQUEST = JudgeRequest(
     task="Why can't I return this?",
@@ -178,11 +178,11 @@ def test_a_failure_while_capturing_the_result_is_reported_not_raised(monkeypatch
     # The never-raise contract covers our own capture code, not just the
     # provider. A real provider can emit shapes the judge's own capture code
     # can't serialise, and that must not crash the whole eval run -- only the
-    # one case. Patched on skill_eval.judges.pydantic_ai, not
-    # skill_eval.runners.pydantic_ai: the judge imports calculate_cost by
+    # one case. Patched on skill_lens.judges.pydantic_ai, not
+    # skill_lens.runners.pydantic_ai: the judge imports calculate_cost by
     # name at import time, so patching the runner's module would silently
     # miss.
-    import skill_eval.judges.pydantic_ai as judge_module
+    import skill_lens.judges.pydantic_ai as judge_module
 
     def boom(usage, model_name, provider):
         raise RuntimeError("cost calc exploded")

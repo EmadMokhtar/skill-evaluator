@@ -1,6 +1,6 @@
-# Running skill-eval in CI
+# Running skill-lens in CI
 
-skill-eval is built to be a CI gate: the exit code is the contract — `0` gate passed, `1` gate
+skill-lens is built to be a CI gate: the exit code is the contract — `0` gate passed, `1` gate
 failed, `2` a user or authoring error. Everything else on this page is about making that
 verdict legible.
 
@@ -16,7 +16,7 @@ The JUnit mapping — including why only the candidate arm becomes test cases, a
 `<error>` can carry an evaluator's own diagnostic rather than the runner's — is documented in
 [Gating and exit codes](gating.md#junit-xml).
 
-skill-eval never talks to the GitHub API. It renders a Markdown file; your workflow decides
+skill-lens never talks to the GitHub API. It renders a Markdown file; your workflow decides
 where that goes.
 
 `--markdown-max-chars` only makes sense together with `--markdown-output`: it is rejected as a
@@ -45,12 +45,12 @@ This repository has no tags yet, so `@v1` does not resolve until the first relea
 pin the action to a commit SHA, or reference it as `uses: ./` from a workflow inside this
 repository.
 
-Every `skill-eval run` flag is available as a kebab-cased input (`--min-pass-rate` becomes
+Every `skill-lens run` flag is available as a kebab-cased input (`--min-pass-rate` becomes
 `min-pass-rate`), plus three inputs about the environment rather than the run:
 
 | Input | Default | Purpose |
 | --- | --- | --- |
-| `install-spec` | `skill-eval[pydantic-ai]` | Passed verbatim to `uv tool install`. Accepts a PyPI name, a pinned version, a git ref, or a local path. |
+| `install-spec` | `skill-lens[pydantic-ai]` | Passed verbatim to `uv tool install`. Accepts a PyPI name, a pinned version, a git ref, or a local path. |
 | `working-directory` | `.` | Directory to run in. |
 | `step-summary` | `true` | Append the Markdown summary to `$GITHUB_STEP_SUMMARY`. |
 
@@ -67,7 +67,7 @@ script) has no reason to share that directory, so a relative output would be wro
 
 The action runs its steps with `shell: bash`, which GitHub Actions executes under
 `bash --noprofile --norc -eo pipefail` — `-e` is already on before the action's own script
-runs a line. The run step captures the CLI's exit code explicitly (`code=0; skill-eval run
+runs a line. The run step captures the CLI's exit code explicitly (`code=0; skill-lens run
 "${args[@]}" || code=$?`) precisely so that `-e` cannot swallow a red gate before it is
 recorded, every reporting step after it carries `if: always()` so a failed run still gets its
 summary published and its outputs read, and the final step re-raises with `exit
@@ -93,13 +93,13 @@ only a fixture that is *supposed* to go red can catch a regression in how red ge
 ## A complete workflow
 
 ```yaml
---8<-- "examples/ci/skill-eval.yml"
+--8<-- "examples/ci/skill-lens.yml"
 ```
 
 ## Without the action
 
 ```yaml
---8<-- "examples/ci/skill-eval-cli.yml"
+--8<-- "examples/ci/skill-lens-cli.yml"
 ```
 
 ## Pull request comments on forks
@@ -131,7 +131,7 @@ case against sub-millisecond of local work — so this overlaps waiting rather t
 cores, and the practical ceiling is your provider's rate limit.
 
 It does not change what a run costs. `--baseline` and `--repeat` do: `--baseline previous
---repeat 3` is six runs per case, not one. `skill-eval run` prints a ceiling estimate before it
+--repeat 3` is six runs per case, not one. `skill-lens run` prints a ceiling estimate before it
 starts whenever the runner needs an API key.
 
 Discovery (walking skills, loading eval files, filtering by `--tag`) always finishes, for every

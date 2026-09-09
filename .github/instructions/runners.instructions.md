@@ -1,5 +1,5 @@
 ---
-applyTo: "src/skill_eval/runners/**,src/skill_eval/judges/**"
+applyTo: "src/skill_lens/runners/**,src/skill_lens/judges/**"
 ---
 
 # Reviewing runner and judge code
@@ -21,7 +21,7 @@ unless one is named.
   schema and a callable — and the adapters wrap them.
   `tests/test_framework_isolation.py` enforces the boundary across the whole package.
 - **A judge reports per-check verdicts only** — never an overall verdict or a blended
-  score. skill-eval derives `passed` and `score` from the per-check results, because an
+  score. skill-lens derives `passed` and `score` from the per-check results, because an
   unsupported PASS hidden inside a single number is invisible. `JudgeOutput` is deliberately
   narrower than `JudgeVerdict` so the model cannot assert its own cost or outcome.
 - **`FakeJudge` unscripted returns an error, not a pass.** That is what makes

@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
-from skill_eval.models import EvalCase, RunResult, Skill, ToolCall
-from skill_eval.runners.base import Runner
-from skill_eval.runners.fake import FakeRunner
+from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
+from skill_lens.runners.base import Runner
+from skill_lens.runners.fake import FakeRunner
 
 SKILL = Skill(name="pdf", description="", instructions="", path=Path("."))
 

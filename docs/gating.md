@@ -106,7 +106,7 @@ candidate-only, because those are what the gate reads.
 `--junit-output` writes a JUnit report, the format GitHub, GitLab, Jenkins, CircleCI and
 Buildkite all ingest natively.
 
-| skill-eval | JUnit |
+| skill-lens | JUnit |
 | --- | --- |
 | `passed` | `<testcase>` with no child |
 | `failed` | `<testcase>` with `<failure>` |

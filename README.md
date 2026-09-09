@@ -1,6 +1,6 @@
-# skill-eval
+# skill-lens
 
-**An Agent Skill is a prompt. Prompts regress.** `skill-eval` turns *"I think this
+**An Agent Skill is a prompt. Prompts regress.** `skill-lens` turns *"I think this
 `SKILL.md` got better"* into a score, a report, and an exit code your pipeline can gate on.
 
 [![CI](https://github.com/EmadMokhtar/skill-evaluator/actions/workflows/ci.yml/badge.svg)](https://github.com/EmadMokhtar/skill-evaluator/actions/workflows/ci.yml)
@@ -16,11 +16,11 @@ You edit a `SKILL.md`, read the new answer once, and it looks better. Two weeks 
 teammate edits the same file, and nobody can say whether the agent still looks an order up
 *before* refunding it — or whether it now refunds orders it should refuse.
 
-`skill-eval` gives that question a real answer. You write eval cases next to your skill. It
+`skill-lens` gives that question a real answer. You write eval cases next to your skill. It
 runs them, scores what came back, and reports one verdict for the whole run.
 
 Your skills stay yours. Skills and their eval cases are **inputs** to the tool — nothing
-about a skill under test is vendored here, so any skill repository can adopt `skill-eval`
+about a skill under test is vendored here, so any skill repository can adopt `skill-lens`
 without embedding it.
 
 ## What it measures
@@ -65,7 +65,7 @@ examples/
 Point the CLI at one skill directory or at a parent of many — discovery is recursive:
 
 ```bash
-uv run skill-eval list ./examples
+uv run skill-lens list ./examples
 ```
 
 ```
@@ -74,7 +74,7 @@ order-support	5 case(s)	examples/order-support
 ```
 
 `list` discovers skills and validates every eval file without calling a runner: no API key,
-no spend. Starting on your own skill? `skill-eval init ./skills/my-skill` writes a starter
+no spend. Starting on your own skill? `skill-lens init ./skills/my-skill` writes a starter
 suite with the placeholders marked, so you fill in the blanks instead of starting from one.
 
 ## A case is a few lines of YAML
@@ -118,7 +118,7 @@ skills/
 ```
 
 ```bash
-uv run skill-eval run ./skills
+uv run skill-lens run ./skills
 ```
 
 ```
@@ -155,7 +155,7 @@ score a real agent, install the extra (`uv sync --extra pydantic-ai`) and pass
 ```
 
 The run publishes a JUnit XML report for your provider's test pane, a Markdown summary for
-the job summary or a pull-request comment, and a JSON report for anything else. `skill-eval`
+the job summary or a pull-request comment, and a JSON report for anything else. `skill-lens`
 never calls the GitHub API itself — it renders files, your workflow decides where they go.
 Copy-pasteable workflows live in [`examples/ci/`](examples/ci/) and in
 [CI integration](https://emadmokhtar.github.io/skill-evaluator/ci/).
@@ -173,7 +173,7 @@ see [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparativ
 > - uses: EmadMokhtar/skill-evaluator@<commit-sha>
 >   with:
 >     path: ./skills
->     install-spec: "skill-eval[pydantic-ai] @ git+https://github.com/EmadMokhtar/skill-evaluator@<commit-sha>"
+>     install-spec: "skill-lens[pydantic-ai] @ git+https://github.com/EmadMokhtar/skill-evaluator@<commit-sha>"
 > ```
 
 ## Why a green run means something
@@ -182,7 +182,7 @@ Eval tools are easy to fool — mostly by accident, and usually by yourself. The
 deliberate design decisions, each with a test holding it in place:
 
 - **No vacuous passes.** A typo like `assertion:` is rejected rather than silently producing
-  a case that checks nothing. An unfilled `TODO(skill-eval)` scaffold stops the run. A judge
+  a case that checks nothing. An unfilled `TODO(skill-lens)` scaffold stops the run. A judge
   check that passes without citing evidence is recorded as a failure. A run that executed
   zero cases fails the gate — "nothing ran" is a broken run, not a pass.
 - **`errored` is not `failed`.** A provider returning 500 is an infrastructure signal, not
@@ -202,7 +202,7 @@ The full list, with the reasoning behind each, is in [ARCHITECTURE.md](ARCHITECT
 | Deciding what to test | [Writing evals](https://emadmokhtar.github.io/skill-evaluator/writing-evals/) |
 | Eval YAML reference | [Eval files](https://emadmokhtar.github.io/skill-evaluator/eval-files/) |
 | Commands and flags | [CLI](https://emadmokhtar.github.io/skill-evaluator/cli/) |
-| `skill-eval.toml` | [Configuration](https://emadmokhtar.github.io/skill-evaluator/configuration/) |
+| `skill-lens.toml` | [Configuration](https://emadmokhtar.github.io/skill-evaluator/configuration/) |
 | Real agents, tools, budgets | [Runners](https://emadmokhtar.github.io/skill-evaluator/runners/) |
 | Baselines, deltas, `--min-delta` | [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparative-evals/) |
 | Exit codes and reports | [Gating](https://emadmokhtar.github.io/skill-evaluator/gating/) |

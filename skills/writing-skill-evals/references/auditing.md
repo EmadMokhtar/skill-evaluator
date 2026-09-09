@@ -24,7 +24,7 @@ user's suite unasked.
       run checks nothing; one at the current spend turns every prompt change red.
 - [ ] **A cost limit as the only budget check** on a model with no pricing entry — the
       check is skipped, so the case fails for having verified nothing.
-- [ ] **Leftover placeholders.** `TODO(skill-eval)` anywhere.
+- [ ] **Leftover placeholders.** `TODO(skill-lens)` anywhere.
 - [ ] **Tags.** Is there a `smoke` subset a fast CI job could run?
 - [ ] **Cases that error under the configured runner or judge.** An `errored` case never
       ran to a verdict; it says nothing about the skill. Check whether the harness is

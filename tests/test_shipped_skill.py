@@ -10,10 +10,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from skill_eval.cases.loader import load_cases_for_skill
-from skill_eval.evaluators.assertion import ASSERTION_KINDS
-from skill_eval.models import EvalCase
-from skill_eval.skills.loader import load_skills, parse_skill_file
+from skill_lens.cases.loader import load_cases_for_skill
+from skill_lens.evaluators.assertion import ASSERTION_KINDS
+from skill_lens.models import EvalCase
+from skill_lens.skills.loader import load_skills, parse_skill_file
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILL_DIR = REPO_ROOT / "skills" / "writing-skill-evals"

@@ -1,6 +1,6 @@
-# Copilot instructions for skill-eval
+# Copilot instructions for skill-lens
 
-`skill-eval` is a standalone CLI and library that runs evaluations on Agent Skills
+`skill-lens` is a standalone CLI and library that runs evaluations on Agent Skills
 (`SKILL.md` files). Skills under test and their eval cases are **inputs** — nothing about a
 skill under test is vendored here. The tool runs as a CI gate where the exit code is the
 contract. Full design: [`ARCHITECTURE.md`](../ARCHITECTURE.md).
@@ -29,13 +29,13 @@ These are decided behaviors with tests asserting them, not accidents.
    yields a case that passes vacuously.
 6. **All file IO pins `encoding="utf-8"`** and re-raises as a typed parse error naming the
    file and field.
-7. **YAML goes through `skill_eval.yaml_loading.safe_load`**, never `yaml.safe_load`.
-8. **Secrets come from environment variables only** — never from `skill-eval.toml`.
+7. **YAML goes through `skill_lens.yaml_loading.safe_load`**, never `yaml.safe_load`.
+8. **Secrets come from environment variables only** — never from `skill-lens.toml`.
 9. **No agent-framework type appears outside `runners/pydantic_ai.py`.**
 10. **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` and a
     `cost_note`. An unpriceable budget check is *skipped*, not passed.
-11. **`skill_eval` (underscore) never appears in user-facing output.** The user-facing name
-    is `skill-eval` everywhere.
+11. **`skill_lens` (underscore) never appears in user-facing output.** The user-facing name
+    is `skill-lens` everywhere.
 
 ## Do not suggest
 

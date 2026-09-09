@@ -34,7 +34,7 @@ block hands those to an LLM judge.
 | `expected` | no | Free text describing what a good answer looks like |
 | `rubric` | yes | One statement per line, each checked independently |
 
-The judge returns **one verdict per rubric entry, with the evidence for it**. skill-eval
+The judge returns **one verdict per rubric entry, with the evidence for it**. skill-lens
 derives the verdict and the score from those per-check results; the judge is never asked for
 a blended number, because an unsupported PASS hidden inside one is invisible.
 
@@ -49,7 +49,7 @@ An empty `rubric`, or a blank entry within one, is an authoring error: a check t
 nothing would score as a pass nobody verified.
 
 Judging costs money, so it is opted into explicitly with `judge = "pydantic-ai"` in
-[`skill-eval.toml`](configuration.md). The default `judge = "fake"` does not grade at all —
+[`skill-lens.toml`](configuration.md). The default `judge = "fake"` does not grade at all —
 and rather than passing a rubric it never checked, it reports the case as **errored**. Judge
 spend is reported as "judge overhead", separately from what the runs themselves cost, and
 never counts against a case's `budget:`.
@@ -93,7 +93,7 @@ that does not support the mode is **errored**, never a quiet pass.
 
 ## Unfilled scaffolds
 
-`skill-eval init` writes placeholder fields holding the literal `TODO(skill-eval)`.
+`skill-lens init` writes placeholder fields holding the literal `TODO(skill-lens)`.
 Loading a case that still contains one is an **authoring error**: the run aborts with
 exit `2` naming the file, the case, and the field.
 

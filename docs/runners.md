@@ -6,11 +6,11 @@ real agent, install the extra and pick a model:
 ```bash
 uv sync --extra pydantic-ai
 export OPENAI_API_KEY=...
-uv run skill-eval run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
+uv run skill-lens run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
 ```
 
-API keys are read from the environment only — never from `skill-eval.toml`.
-`skill-eval` checks for the key before making any request, so a missing key costs
+API keys are read from the environment only — never from `skill-lens.toml`.
+`skill-lens` checks for the key before making any request, so a missing key costs
 nothing and exits 2.
 
 ## Declaring tools and scoring the trajectory
@@ -77,10 +77,10 @@ every declared limit to hold, and a skipped cost limit never holds. **A budget b
 priced limits all hold still fails the case if it also declares an unpriceable
 `max_cost_usd`** — the skipped check counts as a failure of that one check, even though it
 does not lower `score` below what the priced checks alone would give it. If you adopt
-`skill-eval` against a provider `genai-prices` cannot price, omit `max_cost_usd` from the
+`skill-lens` against a provider `genai-prices` cannot price, omit `max_cost_usd` from the
 budget block for that provider rather than expecting it to be silently ignored.
 
-If you are upgrading from a version of `skill-eval` where this budget block previously passed
+If you are upgrading from a version of `skill-lens` where this budget block previously passed
 some other way, note the change: a repo that runs an unpriced model with a `budget:` block
 mixing a priced limit (e.g. `max_tokens`) and `max_cost_usd` will now see those cases turn red
 — they always failed to verify the cost limit; only the reporting of `passed` has caught up

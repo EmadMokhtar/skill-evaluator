@@ -1,5 +1,5 @@
 ---
-applyTo: "src/skill_eval/evaluators/**"
+applyTo: "src/skill_lens/evaluators/**"
 ---
 
 # Reviewing evaluator code

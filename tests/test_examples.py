@@ -7,8 +7,8 @@ work on real files. The full run path is covered by the cassette tier.
 
 from pathlib import Path
 
-from skill_eval.cases.loader import load_cases_for_skill
-from skill_eval.skills.loader import load_skills
+from skill_lens.cases.loader import load_cases_for_skill
+from skill_lens.skills.loader import load_skills
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 

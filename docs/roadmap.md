@@ -9,7 +9,7 @@
 | M4 | Comparative evals: `--baseline`/`--repeat`, delta reporting, `--min-delta` gating | shipped |
 | M5 | CI/CD polish: JUnit XML + Markdown reporters, GitHub Action, bounded concurrency | shipped (part 1) |
 | M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions | planned |
-| M7 | DX: `skill-eval init` scaffolder, more examples | `init` shipped; examples planned |
+| M7 | DX: `skill-lens init` scaffolder, more examples | `init` shipped; examples planned |
 | M8 | LangChain adapter (optional) | planned |
 
 ## What M4 shipped

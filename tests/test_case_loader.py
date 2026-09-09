@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from skill_eval.cases.loader import CaseParseError, load_cases_for_skill, parse_cases_file
-from skill_eval.models import Skill
+from skill_lens.cases.loader import CaseParseError, load_cases_for_skill, parse_cases_file
+from skill_lens.models import Skill
 
 CASES_YAML = """cases:
   - name: extracts text
@@ -133,7 +133,7 @@ def test_bare_yes_no_on_off_assertion_values_parse_as_strings(tmp_path):
 
 
 def test_genuine_true_false_still_parse_as_bool_via_shared_loader():
-    from skill_eval.yaml_loading import safe_load
+    from skill_lens.yaml_loading import safe_load
 
     data = safe_load("flag_true: true\nflag_false: false\n")
     assert data["flag_true"] is True
@@ -399,13 +399,13 @@ def test_a_sentinel_in_a_case_is_an_authoring_error(tmp_path):
     path.write_text(
         "cases:\n"
         "  - name: handles the common case\n"
-        "    task: TODO(skill-eval) the prompt a user would type\n",
+        "    task: TODO(skill-lens) the prompt a user would type\n",
         encoding="utf-8",
     )
     with pytest.raises(CaseParseError) as exc:
         parse_cases_file(path)
     message = str(exc.value)
-    assert "TODO(skill-eval)" in message
+    assert "TODO(skill-lens)" in message
     assert "task" in message
     assert str(path) in message
 
@@ -419,7 +419,7 @@ def test_a_sentinel_nested_in_a_tool_names_the_field(tmp_path):
         "    tools:\n"
         "      - name: lookup_order\n"
         "        description: look an order up\n"
-        "        returns: 'TODO(skill-eval) the JSON this tool returns'\n",
+        "        returns: 'TODO(skill-lens) the JSON this tool returns'\n",
         encoding="utf-8",
     )
     with pytest.raises(CaseParseError) as exc:
@@ -436,7 +436,7 @@ def test_a_sentinel_in_a_rubric_entry_names_its_position(tmp_path):
         "    judge:\n"
         "      rubric:\n"
         "        - The reply names order 1234\n"
-        "        - TODO(skill-eval) what else a good answer does\n",
+        "        - TODO(skill-lens) what else a good answer does\n",
         encoding="utf-8",
     )
     with pytest.raises(CaseParseError) as exc:
@@ -449,7 +449,7 @@ def test_a_self_referential_yaml_anchor_is_an_authoring_error_not_a_recursion_er
     # a naive recursive walk loop forever. It's still a malformed eval file --
     # the loader must exit cleanly with CaseParseError, the same clean "exit 2
     # naming the file" contract as any other bad input, not a raw
-    # RecursionError traceback out of skill-eval list.
+    # RecursionError traceback out of skill-lens list.
     path = tmp_path / "cyclic.eval.yaml"
     path.write_text(
         "cases:\n  - &a\n    name: x\n    task: t\n    self: *a\n",
@@ -464,7 +464,7 @@ def test_a_sentinel_in_a_comment_is_not_a_sentinel(tmp_path):
     # which is what lets the generated file explain the token it uses.
     path = tmp_path / "filled.eval.yaml"
     path.write_text(
-        "# Replace every TODO(skill-eval) before running this file.\n"
+        "# Replace every TODO(skill-lens) before running this file.\n"
         "cases:\n"
         "  - name: handles the common case\n"
         "    task: greet Ada\n"

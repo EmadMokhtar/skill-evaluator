@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
-from skill_eval.gating import evaluate_gate
-from skill_eval.models import CaseOutcome, CheckResult, EvalScore, RunReport, RunResult
-from skill_eval.reporters.junit import render_junit
+from skill_lens.gating import evaluate_gate
+from skill_lens.models import CaseOutcome, CheckResult, EvalScore, RunReport, RunResult
+from skill_lens.reporters.junit import render_junit
 
 
 def _outcome(

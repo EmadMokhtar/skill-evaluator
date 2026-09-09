@@ -3,8 +3,8 @@
 import hashlib
 import re
 
-from skill_eval.judges.prompt import SYSTEM_PROMPT, render_request
-from skill_eval.models import JudgeRequest, RubricCheck
+from skill_lens.judges.prompt import SYSTEM_PROMPT, render_request
+from skill_lens.models import JudgeRequest, RubricCheck
 
 
 def request(**kwargs) -> JudgeRequest:

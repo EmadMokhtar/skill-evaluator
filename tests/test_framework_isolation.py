@@ -2,7 +2,7 @@
 
 The rule is about *importing the framework*, not about the string
 `pydantic_ai` appearing in a file: `cli.py` legitimately writes
-`from skill_eval.runners.pydantic_ai import ...`, which is an import of our own
+`from skill_lens.runners.pydantic_ai import ...`, which is an import of our own
 module. So this matches top-level `import pydantic_ai` / `from pydantic_ai...`
 forms only.
 """
@@ -10,7 +10,7 @@ forms only.
 import re
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent.parent / "src" / "skill_eval"
+SRC = Path(__file__).resolve().parent.parent / "src" / "skill_lens"
 
 ALLOWED = {
     Path("runners/pydantic_ai.py"),

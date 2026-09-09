@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail a PR that changes skill-eval source without touching documentation.
+"""Fail a PR that changes skill-lens source without touching documentation.
 
 This is deliberately a heuristic, not a proof. It cannot tell a stale sentence
 from a fresh one; it only notices that the package changed and no documented
@@ -17,7 +17,7 @@ import subprocess
 import sys
 from collections.abc import Iterable, Sequence
 
-SOURCE_PREFIX = "src/skill_eval/"
+SOURCE_PREFIX = "src/skill_lens/"
 
 # What counts as having documented the change. docs/superpowers/ is deliberately
 # absent: it is a historical archive of specs and plans, and adding one is not
@@ -64,7 +64,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     listed = "\n".join(f"  - {path}" for path in sources)
     print(
-        "This PR changes skill-eval source but no documentation:\n"
+        "This PR changes skill-lens source but no documentation:\n"
         f"{listed}\n\n"
         "Update whichever of these the change affects:\n"
         "  - docs/            user-facing documentation\n"

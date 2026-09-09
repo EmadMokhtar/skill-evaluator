@@ -22,13 +22,13 @@ Every case can run in two **arms**:
 
 **Omitting `--baseline` is what turns comparison off.** `none` names a *kind* of baseline (an
 empty skill), not the absence of one — so leaving the flag unset, not passing `--baseline
-none`, is the only way to get a single-arm run. With no flag, `skill-eval run` keeps the same
+none`, is the only way to get a single-arm run. With no flag, `skill-lens run` keeps the same
 layout it had before M4: one arm, one line per outcome, no delta block. It is not
 byte-identical, though — a failing case's assertion, trajectory and budget evaluators now
 emit per-check evidence (an M4 addition, previously only the judge evaluator did this), so a
 failing outcome prints one indented line per failed check where it printed none before. That
 is strictly more information, not a behavior change in what runs. Upgrading to a version of
-`skill-eval` that supports comparison must never silently double anyone's bill.
+`skill-lens` that supports comparison must never silently double anyone's bill.
 
 The baseline skill is built once per skill, per run — not once per case, and not once per
 repetition:
@@ -131,7 +131,7 @@ more than one to compare.
 
 ## The delta block
 
-`skill-eval` compares the two arms and reports the difference — the **delta**. Every delta is
+`skill-lens` compares the two arms and reports the difference — the **delta**. Every delta is
 **candidate minus baseline**:
 
 | Metric | Sign convention |
@@ -257,7 +257,7 @@ content instead (see [above](#how-previous-is-resolved)).
 ## Worked CI example
 
 ```bash
-skill-eval run ./skills --runner pydantic-ai --baseline previous --repeat 3 --min-delta 0.0
+skill-lens run ./skills --runner pydantic-ai --baseline previous --repeat 3 --min-delta 0.0
 ```
 
 This runs every case three times in each arm, compares the candidate's current `SKILL.md`

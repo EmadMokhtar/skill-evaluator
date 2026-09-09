@@ -7,7 +7,7 @@ uv sync
 uv run pytest                  # test suite
 uv run ruff check .            # lint
 uv run ruff format --check .   # formatting (as CI runs it)
-uv run skill-eval list ./examples
+uv run skill-lens list ./examples
 ```
 
 `.python-version` pins the interpreter to 3.13, so `uv sync` uses the same one CI does — no
@@ -17,7 +17,7 @@ still supports `>=3.11` (`requires-python`); CI does not currently exercise that
 Tests marked `integration` hit real provider APIs and are deselected by default; run them with
 `uv run pytest -m integration`. Tests marked `cassette` replay recorded provider traffic —
 zero cost, no key needed, and selected by default. Everything else passes offline with no API
-spend. `uv run skill-eval run ./examples` needs the `pydantic-ai` runner (see
+spend. `uv run skill-lens run ./examples` needs the `pydantic-ai` runner (see
 [Running against a real agent](runners.md)); the shipped examples now
 assert real model behavior, so `list` is what dogfoods discovery for free.
 
@@ -44,7 +44,7 @@ uv run pytest tests/test_docs.py
 
 Documentation ships with the change, not as a follow-up. Two CI jobs enforce it: `docs`
 builds the site with `--strict`, and `docs-freshness` fails a PR that changes
-`src/skill_eval/**` without touching `docs/`, `README.md`, `ARCHITECTURE.md` or
+`src/skill_lens/**` without touching `docs/`, `README.md`, `ARCHITECTURE.md` or
 `mkdocs.yml`. When a change genuinely needs no documentation — a pure refactor, a
 dependency bump — add the `no-docs-needed` label to the PR.
 

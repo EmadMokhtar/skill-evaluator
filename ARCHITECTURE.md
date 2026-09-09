@@ -1,17 +1,17 @@
 # Architecture
 
-How `skill-eval` is built, and why it is built this way. For how to *use* it, see the
+How `skill-lens` is built, and why it is built this way. For how to *use* it, see the
 [documentation site](https://emadmokhtar.github.io/skill-evaluator/).
 
 ## Scope and non-goals
 
-`skill-eval` runs evaluations on Anthropic-style Agent Skills — directories containing a
+`skill-lens` runs evaluations on Anthropic-style Agent Skills — directories containing a
 `SKILL.md` file. It is a CLI and a library, designed to run as a CI gate where the exit
 code is the contract, or on demand during development.
 
 Skills under test and their eval cases are **inputs**. Nothing about a skill under test is
-vendored here. That is the central constraint: any skill repository can adopt `skill-eval`
-without embedding it, and `skill-eval` can be released independently of anything it evaluates.
+vendored here. That is the central constraint: any skill repository can adopt `skill-lens`
+without embedding it, and `skill-lens` can be released independently of anything it evaluates.
 
 Non-goals: authoring skills, running skills in production, and hosting a results dashboard.
 
@@ -59,12 +59,12 @@ problem (errored) from a low score (failed).
 | `cli.py` | Typer entry point. Wires config → loaders → runner → orchestrator → reporters → gate, and owns the exit-code contract. |
 | `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. |
 | `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. |
-| `config.py` | Loads `skill-eval.toml` by explicit path or upward discovery. Never reads secrets. |
+| `config.py` | Loads `skill-lens.toml` by explicit path or upward discovery. Never reads secrets. |
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
 | `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
 | `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models. |
-| `scaffold.py` | Renders the starter eval suite `skill-eval init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. |
+| `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. |
 | `runners/base.py` | The `Runner` protocol. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of only two modules that import an agent framework.** |
@@ -160,8 +160,8 @@ propagate; `cli.py` catches them via `_AUTHORING_ERRORS` and exits 2.
 error `2`. In `cli.py`, a JSON-write failure escalates to 2 only when the gate itself
 passed — a write problem must never mask an already-failing gate.
 
-**An unfilled scaffold is an authoring error, not a failure.** `skill-eval init` writes
-`TODO(skill-eval)` into every field the author must supply, and `cases/loader.py`
+**An unfilled scaffold is an authoring error, not a failure.** `skill-lens init` writes
+`TODO(skill-lens)` into every field the author must supply, and `cases/loader.py`
 rejects any case still containing it — before schema validation, so the message names
 the field rather than its type. Enforcing this in the loader rather than the generator
 makes it unconditional: hand-written stubs get it too, and no CI configuration can opt
@@ -180,14 +180,14 @@ a total that silently disagrees with the split it was priced from.
 which turns bare `yes`/`no`/`on`/`off` into booleans. An assertion `value: yes` is meant as
 the string.
 
-**Secrets come from environment variables only** — never from `skill-eval.toml`. A config
+**Secrets come from environment variables only** — never from `skill-lens.toml`. A config
 file is committed; a key must not be.
 
 **Agent-framework imports appear in exactly two modules** — `runners/pydantic_ai.py` and
 `judges/pydantic_ai.py`. `runners/tools.py` builds framework-neutral mock tools and the
 adapter wraps them. `tests/test_framework_isolation.py` scans the whole package for
 top-level framework imports and allows only those two files; it matches import *forms*, so
-`cli.py` importing our own `skill_eval.runners.pydantic_ai` is not a false positive. This is
+`cli.py` importing our own `skill_lens.runners.pydantic_ai` is not a false positive. This is
 what keeps the `Runner` and `Judge` seams real rather than nominal.
 
 **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` plus a
@@ -218,8 +218,8 @@ about the skill; raising would surface it as an infra error instead.
 **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act.
 A missing cassette skips; a mismatched request fails rather than reaching the network.
 
-**`skill_eval` (underscore) never appears in user-facing output.** The user-facing name is
-`skill-eval` everywhere: command, config file, distribution.
+**`skill_lens` (underscore) never appears in user-facing output.** The user-facing name is
+`skill-lens` everywhere: command, config file, distribution.
 
 **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
 
@@ -347,7 +347,7 @@ and `PydanticAIRunner` builds a fresh agent per run. It is a constraint on what 
 
 **The action fails closed.** `shell: bash` steps already run under `bash --noprofile --norc
 -eo pipefail`, so `-e` is on before the action's own script runs a line; the run step captures
-the CLI's exit code itself (`code=0; skill-eval run ... || code=$?`) before `-e` gets a chance
+the CLI's exit code itself (`code=0; skill-lens run ... || code=$?`) before `-e` gets a chance
 to discard it. Every step after that — publishing the step summary, reading the JSON report,
 re-raising the exit code — carries `if: always()`, so a failing run still gets its summary
 published and its outputs read. The final step exits `"${CODE:-1}"`: an *empty* code means the

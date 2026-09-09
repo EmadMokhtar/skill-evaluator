@@ -1,4 +1,4 @@
-from skill_eval.yaml_loading import StrictBoolLoader, safe_load
+from skill_lens.yaml_loading import StrictBoolLoader, safe_load
 
 
 def test_bare_yes_no_on_off_parse_as_strings():

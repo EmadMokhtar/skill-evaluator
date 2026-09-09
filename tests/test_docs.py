@@ -17,11 +17,11 @@ from pathlib import Path
 import pytest
 from typer.main import get_command
 
-from skill_eval.cli import app
-from skill_eval.config import Config
-from skill_eval.evaluators.assertion import ASSERTION_KINDS
-from skill_eval.models import EvalCase
-from skill_eval.yaml_loading import safe_load
+from skill_lens.cli import app
+from skill_lens.config import Config
+from skill_lens.evaluators.assertion import ASSERTION_KINDS
+from skill_lens.models import EvalCase
+from skill_lens.yaml_loading import safe_load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCS = REPO_ROOT / "docs"

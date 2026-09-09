@@ -1,6 +1,6 @@
 # Configuration
 
-`skill-eval.toml` is optional. It is located via `--config`, or otherwise discovered by
+`skill-lens.toml` is optional. It is located via `--config`, or otherwise discovered by
 searching upward from the current directory — the repo root is the conventional home, not a
 requirement.
 

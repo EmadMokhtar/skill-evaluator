@@ -1,7 +1,7 @@
 """Scoring what the agent did, not what it said."""
 
-from skill_eval.evaluators.trajectory import TrajectoryEvaluator
-from skill_eval.models import EvalCase, RunResult, ToolCall, TrajectorySpec
+from skill_lens.evaluators.trajectory import TrajectoryEvaluator
+from skill_lens.models import EvalCase, RunResult, ToolCall, TrajectorySpec
 
 EVALUATOR = TrajectoryEvaluator()
 

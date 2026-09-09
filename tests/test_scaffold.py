@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from skill_eval.cases.loader import UNFILLED_SENTINEL, CaseParseError, parse_cases_file
-from skill_eval.models import Skill
-from skill_eval.scaffold import render_scaffold
-from skill_eval.yaml_loading import safe_load
+from skill_lens.cases.loader import UNFILLED_SENTINEL, CaseParseError, parse_cases_file
+from skill_lens.models import Skill
+from skill_lens.scaffold import render_scaffold
+from skill_lens.yaml_loading import safe_load
 
 SKILL = Skill(
     name="order-support",

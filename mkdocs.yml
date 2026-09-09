@@ -1,4 +1,4 @@
-site_name: skill-eval
+site_name: skill-lens
 site_description: Run evaluations on Agent Skills (SKILL.md) — in CI/CD or on demand.
 site_url: https://emadmokhtar.github.io/skill-evaluator/
 repo_url: https://github.com/EmadMokhtar/skill-evaluator

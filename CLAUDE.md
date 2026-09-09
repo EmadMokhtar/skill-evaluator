@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`skill-eval` is a standalone CLI + library that runs evaluations on Anthropic-style Agent
+`skill-lens` is a standalone CLI + library that runs evaluations on Anthropic-style Agent
 Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs** — nothing
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
@@ -39,7 +39,7 @@ uv run pytest -m integration          # opt-in tier; needs OPENAI_API_KEY, costs
 uv run pytest tests/test_cassettes.py --record-mode=once   # re-record cassettes (needs a key)
 uv run ruff check .                  # lint
 uv run ruff format .                 # format (CI runs --check)
-uv run skill-eval list ./examples     # dogfood discovery; CI runs this as a self-check
+uv run skill-lens list ./examples     # dogfood discovery; CI runs this as a self-check
 uv run pre-commit install --hook-type commit-msg   # once per clone
 ```
 
@@ -90,7 +90,7 @@ form, that file is the explanation.
 - **Exit codes are the CI contract:** gate pass `0`, gate fail `1`, user/authoring error `2`.
   In `cli.py`, a JSON-write failure only escalates to 2 when the gate itself passed — it must
   not mask an already-failing gate.
-- **An unfilled scaffold aborts the run.** A case still containing `TODO(skill-eval)` is
+- **An unfilled scaffold aborts the run.** A case still containing `TODO(skill-lens)` is
   an authoring error (exit 2), checked in `cases/loader.py` before validation so the
   message names the field. The rule is the loader's, so hand-written stubs get it too.
 - **`extra="forbid"`** on `EvalCase` / `AssertionSpec` / `ToolSpec` / `TrajectorySpec` /
@@ -100,14 +100,14 @@ form, that file is the explanation.
   (`SkillParseError` / `CaseParseError` / `ConfigError`) naming the file and field.
 - **YAML goes through `yaml_loading.safe_load`**, never `yaml.safe_load`. The custom loader
   stops YAML 1.1 from turning bare `yes`/`no`/`on`/`off` into booleans.
-- **Secrets come from environment variables only** — never from `skill-eval.toml`.
-- **`skill_eval` (underscore) never appears in user-facing output.** The user-facing name is
-  `skill-eval` everywhere: command, config file, distribution.
+- **Secrets come from environment variables only** — never from `skill-lens.toml`.
+- **`skill_lens` (underscore) never appears in user-facing output.** The user-facing name is
+  `skill-lens` everywhere: command, config file, distribution.
 - **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
 - **No agent-framework type may appear outside `runners/pydantic_ai.py` and
   `judges/pydantic_ai.py`.** `runners/tools.py` builds framework-neutral `MockTool`s (name +
   JSON schema + callable); the adapters wrap them. `tests/test_framework_isolation.py` guards
-  this: it asserts no other module under `src/skill_eval/` imports `pydantic_ai` at the top
+  this: it asserts no other module under `src/skill_lens/` imports `pydantic_ai` at the top
   level.
 - **`RunResult.tokens` is derived**, not stored — `extra="forbid"` makes writing it a loud
   error rather than a total that silently disagrees with the input/output split it was priced from.
@@ -128,7 +128,7 @@ form, that file is the explanation.
 - **An errored *evaluator* errors the case.** `errored` ≠ `failed` now applies to evaluators
   too: a judge endpoint returning 500 must not read as a skill that got worse.
 - **Judges never raise for provider failures** — they set `JudgeVerdict.error`.
-- **skill-eval derives `passed` and `score` from per-check verdicts.** The judge is never
+- **skill-lens derives `passed` and `score` from per-check verdicts.** The judge is never
   asked for a blended number, and a check that passes without evidence is recorded as a
   failure.
 - **An unscripted `FakeJudge` errors rather than passing.** That is what makes
@@ -182,7 +182,7 @@ form, that file is the explanation.
   execution, so a malformed eval file anywhere aborts before any case runs. Runners, judges and
   evaluators must have no mutable state touched by `run`/`evaluate`/`judge`.
 - **The action fails closed.** `shell: bash` already runs under `-e`; the run step captures the
-  CLI's exit code itself (`code=0; skill-eval run ... || code=$?`) before `-e` can discard it,
+  CLI's exit code itself (`code=0; skill-lens run ... || code=$?`) before `-e` can discard it,
   every later step carries `if: always()`, and the final step re-raises with `exit
   "${CODE:-1}"` — an empty code (the run step never finishing at all) fails rather than
   defaulting to success.
@@ -231,7 +231,7 @@ the `no-docs-needed` label to the PR to satisfy the `docs-freshness` gate.
   main** — it must be conventional too. `scripts/legacy-commits.txt` exempts two pre-convention
   commits and should only ever shrink.
 - `tests/conftest.py` chdirs every test into a fresh `tmp_path` so config upward-discovery
-  can't pick up an ambient `skill-eval.toml`. Tests needing real discovery pass an explicit
+  can't pick up an ambient `skill-lens.toml`. Tests needing real discovery pass an explicit
   `start=`.
 - `docs/superpowers/plans/` is a **historical record** — its code blocks were superseded by
   what shipped. Read `src/` as the source of truth; the design spec in `docs/superpowers/specs/`

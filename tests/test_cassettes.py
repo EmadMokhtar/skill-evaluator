@@ -18,12 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from skill_eval.evaluators.assertion import AssertionEvaluator
-from skill_eval.evaluators.budget import BudgetEvaluator
-from skill_eval.evaluators.judge import JudgeEvaluator
-from skill_eval.evaluators.trajectory import TrajectoryEvaluator
-from skill_eval.judges.pydantic_ai import PydanticAIJudge
-from skill_eval.models import (
+from skill_lens.evaluators.assertion import AssertionEvaluator
+from skill_lens.evaluators.budget import BudgetEvaluator
+from skill_lens.evaluators.judge import JudgeEvaluator
+from skill_lens.evaluators.trajectory import TrajectoryEvaluator
+from skill_lens.judges.pydantic_ai import PydanticAIJudge
+from skill_lens.models import (
     BudgetSpec,
     EvalCase,
     JudgeRequest,
@@ -33,7 +33,7 @@ from skill_eval.models import (
     ToolSpec,
     TrajectorySpec,
 )
-from skill_eval.runners.pydantic_ai import BASELINE_PREAMBLE, PydanticAIRunner
+from skill_lens.runners.pydantic_ai import BASELINE_PREAMBLE, PydanticAIRunner
 
 
 def _request_body(request) -> str:

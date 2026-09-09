@@ -1,11 +1,11 @@
-"""`skill-eval init` writes a starter suite, and refuses rather than clobbers."""
+"""`skill-lens init` writes a starter suite, and refuses rather than clobbers."""
 
 from __future__ import annotations
 
 from typer.testing import CliRunner
 
-from skill_eval.cases.loader import UNFILLED_SENTINEL
-from skill_eval.cli import app
+from skill_lens.cases.loader import UNFILLED_SENTINEL
+from skill_lens.cli import app
 
 runner = CliRunner()
 

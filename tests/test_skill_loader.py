@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from skill_eval.skills.loader import (
+from skill_lens.skills.loader import (
     SkillParseError,
     load_skills,
     parse_skill_file,

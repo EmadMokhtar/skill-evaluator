@@ -1,5 +1,5 @@
 ---
-applyTo: "src/skill_eval/cli.py,src/skill_eval/gating.py,src/skill_eval/orchestrator.py,src/skill_eval/reporters/**"
+applyTo: "src/skill_lens/cli.py,src/skill_lens/gating.py,src/skill_lens/orchestrator.py,src/skill_lens/reporters/**"
 ---
 
 # Reviewing the CLI, gate, orchestrator and reporters
@@ -19,8 +19,8 @@ This is the contract surface. CI depends on the exit code; humans depend on the 
   propagate; `cli.py` catches them via `_AUTHORING_ERRORS` and prints the message without a
   traceback. Flag any `try`/`except` in the orchestrator that would swallow one into a
   failing score.
-- **`skill_eval` (underscore) never appears in user-facing output.** The name is
-  `skill-eval`: command, config file, distribution, prose.
+- **`skill_lens` (underscore) never appears in user-facing output.** The name is
+  `skill-lens`: command, config file, distribution, prose.
 - A new runner must be registered in `cli._RUNNERS`, and if it spends money it needs the
   preflight key check before construction so a missing key costs nothing and exits 2.
 - Gate reasons are read by whoever is staring at a red pipeline. Each should say what failed

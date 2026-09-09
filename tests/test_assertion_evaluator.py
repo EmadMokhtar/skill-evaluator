@@ -1,8 +1,8 @@
 import pytest
 
-from skill_eval.evaluators.assertion import AssertionEvaluator, UnknownAssertionKind
-from skill_eval.evaluators.base import Evaluator
-from skill_eval.models import AssertionSpec, EvalCase, RunResult
+from skill_lens.evaluators.assertion import AssertionEvaluator, UnknownAssertionKind
+from skill_lens.evaluators.base import Evaluator
+from skill_lens.models import AssertionSpec, EvalCase, RunResult
 
 
 def _case(*specs):
@@ -100,7 +100,7 @@ def test_unknown_kind_raises():
 
 
 def test_invalid_regex_raises_invalid_assertion_value():
-    from skill_eval.evaluators.assertion import InvalidAssertionValue
+    from skill_lens.evaluators.assertion import InvalidAssertionValue
 
     with pytest.raises(InvalidAssertionValue, match=r"\[unclosed"):
         AssertionEvaluator().evaluate(
@@ -114,14 +114,14 @@ def test_assertion_kinds_lists_every_supported_kind():
     The docs test in tests/test_docs.py enumerates this tuple, so a kind that
     dispatches but is missing here would ship undocumented.
     """
-    from skill_eval.evaluators.assertion import ASSERTION_KINDS
+    from skill_lens.evaluators.assertion import ASSERTION_KINDS
 
     assert ASSERTION_KINDS == ("contains", "not_contains", "regex", "equals")
 
 
 def test_every_listed_kind_actually_dispatches():
     """No entry in ASSERTION_KINDS may raise UnknownAssertionKind."""
-    from skill_eval.evaluators.assertion import ASSERTION_KINDS, AssertionEvaluator
+    from skill_lens.evaluators.assertion import ASSERTION_KINDS, AssertionEvaluator
 
     for kind in ASSERTION_KINDS:
         case = EvalCase(
