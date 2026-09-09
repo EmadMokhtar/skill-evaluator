@@ -5,11 +5,41 @@ description = "Run evaluations on Agent Skills (SKILL.md) in CI/CD or manually"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
+keywords = [
+    "agent-skills",
+    "skill",
+    "evals",
+    "evaluation",
+    "llm",
+    "ci",
+    "testing",
+]
+classifiers = [
+    # 0.x: the CLI and the eval file format may still change in a minor release.
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
     "pydantic>=2.7",
     "typer>=0.12",
     "pyyaml>=6.0",
 ]
+
+# The distribution is `skill-lens` but the repository is `skill-evaluator`, so a
+# reader who lands on the PyPI page has no way to guess where the source lives.
+# These links are the only thing connecting the two names.
+[project.urls]
+Homepage = "https://emadmokhtar.github.io/skill-evaluator/"
+Documentation = "https://emadmokhtar.github.io/skill-evaluator/"
+Source = "https://github.com/EmadMokhtar/skill-evaluator"
+Issues = "https://github.com/EmadMokhtar/skill-evaluator/issues"
 
 [project.scripts]
 skill-lens = "skill_lens.cli:app"
@@ -35,7 +65,10 @@ docs = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+# Bounded rather than floating: the release runner builds with whatever it
+# resolves on the day, and an unpinned major could change the artifact the
+# release publishes without a single commit in this repository.
+requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
