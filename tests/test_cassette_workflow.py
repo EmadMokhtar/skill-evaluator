@@ -119,8 +119,8 @@ def test_refuses_to_push_when_a_credential_appears_in_the_recordings(steps):
     secret_step = steps[_step_index_by_name(steps, "Refuse to push a secret")]
     run = secret_step["run"]
     assert "git diff --cached -- tests/cassettes" in run
-    assert r"\bsk-[A-Za-z0-9]{20,}" in run
-    assert r"\bBearer [A-Za-z0-9._-]{20,}" in run
+    assert "sk-[A-Za-z0-9]{20,}" in run
+    assert "Bearer [A-Za-z0-9._-]{20,}" in run
     assert "exit 1" in run
     assert "continue-on-error" not in secret_step
     assert secret_step.get("if") is None
@@ -142,19 +142,29 @@ def test_the_secret_scan_checks_gits_own_exit_status_before_grepping(steps):
 def test_the_secret_patterns_ignore_ordinary_prose_but_catch_a_credential(steps):
     """A bare `sk-[A-Za-z0-9]` matches ordinary English compounds a model
     might generate ("risk-averse", "task-oriented", "desk-based"). The
-    pattern must require a word boundary before `sk-` and a realistic
-    minimum length of key material, and the same for `Bearer`, so it stays
-    quiet on prose but still catches a realistic credential shape."""
+    pattern must require a boundary before `sk-` and a realistic minimum
+    length of key material, and the same for `Bearer`, so it stays quiet on
+    prose but still catches a realistic credential shape.
+
+    The boundary must be written in portable ERE, not as `\\b`. Both GNU and
+    BSD grep accept `\\b`, but it is a GNU extension rather than a POSIX ERE
+    feature, and this step fails OPEN -- a pattern that quietly stops
+    matching lets a credential through and nothing downstream notices."""
     secret_step = steps[_step_index_by_name(steps, "Refuse to push a secret")]
     run = secret_step["run"]
     match = re.search(r"grep -nE '([^']*)'", run)
     assert match, "expected a single-quoted grep -nE pattern"
+    assert "\\b" not in match.group(1), (
+        "the boundary must not rely on \\b, which POSIX ERE does not define"
+    )
     pattern = re.compile(match.group(1))
     assert pattern.search("sk-" + "a1B2c3D4e5F6g7H8i9J0") is not None
     assert pattern.search("Bearer " + "a1B2c3D4e5F6g7H8i9J0") is not None
     assert pattern.search("risk-averse") is None
     assert pattern.search("task-oriented") is None
     assert pattern.search("desk-based") is None
+    # A credential mid-line, after a space or a YAML key, must still be seen.
+    assert pattern.search('  authorization: "Bearer a1B2c3D4e5F6g7H8i9J0"') is not None
 
 
 def test_the_secret_check_runs_before_the_push(steps):

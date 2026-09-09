@@ -48,14 +48,19 @@ uv tool install "skill-lens[pydantic-ai]"
 (`pip install "skill-lens[pydantic-ai]"` works too. Drop the extra for the offline default
 runner alone.)
 
-Working on `skill-lens` itself, or want the example skills to hand? Install from a checkout
-instead — then prefix every command below with `uv run`:
+That puts `skill-lens` on your `PATH`, so the commands below run as written.
+
+The walkthrough uses this repository's own example skills, so clone it too — or point
+`skill-lens` at your own directory of `SKILL.md` files instead:
 
 ```bash
 git clone https://github.com/EmadMokhtar/skill-evaluator.git
 cd skill-evaluator
-uv sync
 ```
+
+Working on `skill-lens` itself rather than using it? Run `uv sync` in that checkout for the
+development environment, and prefix the commands below with `uv run` — you can then skip the
+`uv tool install` above.
 
 A skill is any directory containing `SKILL.md`. Its eval cases live beside it — this
 repository ships two:

@@ -60,17 +60,24 @@ jobs:
         # `git diff` failure read as a clean scan instead of aborting the
         # job.
         #
-        # The patterns require a word boundary before "sk-" and a realistic
+        # The patterns require a boundary before "sk-" and a realistic
         # minimum length of key material, so ordinary prose a model might
         # generate ("risk-averse", "task-oriented", "desk-based") cannot
         # trip them the way a bare `sk-[A-Za-z0-9]` would.
+        #
+        # That boundary is spelled `(^|[^A-Za-z0-9])` rather than `\b`. Both
+        # GNU and BSD grep do accept `\b` here -- it is a documented GNU
+        # extension, not a POSIX ERE feature -- but this step fails OPEN: a
+        # pattern that quietly stops matching lets a credential through, and
+        # nothing downstream would notice. The portable spelling behaves
+        # identically on the runner and removes the assumption entirely.
         run: |
           set -euo pipefail
           if ! diff_output="$(git diff --cached -- tests/cassettes)"; then
             echo "git diff failed; cannot verify the recordings are secret-free. Refusing to push." >&2
             exit 1
           fi
-          if echo "$diff_output" | grep -nE '\bsk-[A-Za-z0-9]{20,}|\bBearer [A-Za-z0-9._-]{20,}'; then
+          if echo "$diff_output" | grep -nE '(^|[^A-Za-z0-9])(sk-[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._-]{20,})'; then
             echo "A credential appears in the re-recorded cassettes. Refusing to push." >&2
             exit 1
           fi
