@@ -28,12 +28,33 @@ pushes only **annotated** tags. Commitizen creates a lightweight tag unless told
 `--follow-tags` see it; without that setting, every release would push the bump commit to
 `main` while its tag stayed on the ephemeral runner and vanished when the job ended.
 
+The push is `--atomic`, so the commit and the tag are one update: if either ref is rejected —
+`main` moved under the job, the tag already exists — neither lands, and there is no half-pushed
+state to reason about afterwards.
+
 Because a silently dropped tag would otherwise be invisible — the `publish` job is reached
 through `needs:`, not through the tag itself, so nothing downstream would notice — the
 `release` job runs a `git ls-remote --tags origin` check right after the push and fails loudly
-if the tag is not there. If you ever see this step fail, it means the bump commit reached
-`main` but its tag did not: the release is not reproducible from a tag, and the fix is to
-re-tag and re-push by hand rather than re-run the job (which would try to bump again).
+if the tag is not there. That check tests the command's exit status separately from its output:
+a failed lookup prints nothing, exactly like a missing tag, so treating "no output" as the only
+signal would report a missing tag for one that is very likely present. If you ever see the
+"is not on origin" message, it means the bump commit reached `main` but its tag did not: the
+release is not reproducible from a tag, and the fix is to re-tag and re-push by hand rather
+than re-run the job (which would try to bump again).
+
+### A pin that stops matching aborts the bump
+
+`cz bump` rewrites `version_files` line by line, gated on each entry's regex, and a file where
+nothing matched is written back unchanged with no error. Reformat `action.yml`'s pinned
+`install-spec` and the next release would tag a tree still pinning the previous version — the
+exact drift the pin exists to prevent — with nothing to report it, because the bump commit
+carries `[skip ci]` and the bumped tree is never tested.
+
+The workflow therefore runs `cz bump --yes --check-consistency`. That flag turns "matched
+nothing" into a hard failure (exit `17`), raised before the new version is written, before
+`git add`, and before the tag — so an inconsistent tree stops the release with nothing pushed.
+Commitizen reads it from the command line only, never from `[tool.commitizen]`, which is why it
+lives in the workflow rather than in `pyproject.toml`.
 
 ## One-time setup
 
@@ -105,20 +126,43 @@ a tag pushed with `GITHUB_TOKEN` starts no new workflow run at all, so a tag-tri
 job could never fire on an automated release either, and chaining the jobs with `needs:` is
 what makes it fire at all.
 
-Running `cz bump` locally and pushing the commit and its tag does trigger a new run — the push
-lands on `main` — but that run's own `release` job finds the tag it would create already sitting
-on `HEAD`, since you just pushed it. `cz bump` sees no commit since that tag warranting a
-release, exits `3` or `21` (both a no-op, not an error), and the run records "nothing to
-release": no build, no artifact, no `publish`. You are left with a real, permanent tag and no
-published package behind it, which is worse than doing nothing — the tag cannot simply be
-re-cut, since `vX.Y.Z` would then mean two different things depending on which push you ask
-about.
+Running `cz bump` locally and pushing the commit and its tag starts **no run at all**:
+`bump_message` ends in `[skip ci]`, and GitHub creates no workflow run for a push whose head
+commit carries that marker. Nothing downstream ever hears about the version you just cut.
 
-The only real recovery path is for a run whose `release` job already succeeded — tests passed,
-the tag reached origin, the `dist` artifact was built and uploaded — where only the final
-"Publish to PyPI" step itself failed (a PyPI outage, an expired trusted-publisher binding, a
-transient network error). Open that run in the Actions tab and re-run the `publish` job: it
-re-downloads the artifact its own `release` job already built and retries the upload; nothing
-upstream of it runs again. Starting a fresh run instead, or re-running `release`, is not a
-substitute — a fresh run's `release` job faces the same already-tagged `HEAD` as the local
-`cz bump` case above and reports nothing to release.
+And a run started some other way would not save you either. Its `release` job would find the
+tag it wants to create already sitting on `HEAD`, since you just pushed it; `cz bump` sees no
+commit since that tag warranting a release, exits `3` or `21` (both a no-op, not an error), and
+the run records "nothing to release": no build, no artifact, no `publish`. Either way you are
+left with a real, permanent tag and no published package behind it, which is worse than doing
+nothing — the tag cannot simply be re-cut, since `vX.Y.Z` would then mean two different things
+depending on which push you ask about.
+
+### Recovering a failed publish
+
+The one recoverable failure is a run whose `release` job fully succeeded — tests passed, the tag
+reached origin, the `dist` artifact was built and uploaded — where only the final "Publish to
+PyPI" step failed (a PyPI outage, an expired trusted-publisher binding, a transient network
+error). Open that run in the Actions tab and re-run the `publish` job: it re-downloads the
+artifact its own `release` job already built and retries the upload; nothing upstream of it runs
+again. The publish step sets `skip-existing: true`, so a retry after a *partial* upload — the
+wheel landed, the sdist did not — uploads what is missing instead of dying on "File already
+exists". Starting a fresh run instead, or re-running `release`, is not a substitute: a fresh
+run's `release` job faces the same already-tagged `HEAD` as the local `cz bump` case above and
+reports nothing to release.
+
+### Recovering a failure *after* the tag but *before* the artifact
+
+There is one state with no re-run at all. If `uv build` or the artifact upload fails once the
+tag has already reached origin, `main` carries a permanent tag `vX.Y.Z`, `publish` was never
+eligible (`needs.release.outputs.bumped` never reached it), so there is no `publish` job to
+re-run, and a fresh run's `cz bump` exits `3` — nothing to release — for the same
+already-tagged-`HEAD` reason as above. Version `X.Y.Z` is spent: it exists as a tag and will
+never exist on PyPI.
+
+This is self-healing, and the right response is to fix the cause and move on. The next merge
+that warrants a release computes its increment from the commits after `vX.Y.Z` and publishes
+`X.Y.Z+1` (or whatever the history warrants) normally. The only lasting trace is a gap in the
+published version sequence, which is a cosmetic cost, not a broken repository. Do not try to
+reclaim `vX.Y.Z` by deleting and re-pushing the tag: a tag that once existed publicly and later
+points at different code is the failure mode this whole section exists to avoid.

@@ -108,6 +108,16 @@ update_changelog_on_bump = true
 major_version_zero = true
 # Files that spell the version. cz bump rewrites them inside the bump commit
 # itself, so the tree at tag vX.Y.Z already installs and documents X.Y.Z.
+#
+# Each entry gates per line on its regex, and a file where nothing matched is
+# rewritten unchanged with no error -- so reformatting a pinned line would
+# silently ship a stale pin. The guard against that is `--check-consistency`,
+# which release.yml passes to `cz bump`; it turns "matched nothing" into a
+# hard failure before the version is written, before `git add`, and before the
+# tag. It is a CLI flag only: Commitizen 4.17 reads it from the command line
+# (commands/bump.py: `arguments["check_consistency"]`), never from this file,
+# so writing `check_consistency = true` here would be an inert no-op. The
+# workflow test asserts the flag is on the command.
 version_files = [
     "action.yml:skill-lens\\[pydantic-ai\\]==",
     "docs/ci.md:skill-evaluator@v",

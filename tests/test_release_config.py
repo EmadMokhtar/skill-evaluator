@@ -61,6 +61,22 @@ def _tracked_files() -> list[Path]:
     ]
 
 
+def _version_file_patterns() -> dict[str, list[re.Pattern]]:
+    """`version_files`, as {file: [compiled pattern, ...]}.
+
+    Each entry is `path:regex`, and cz bump gates *per line* on that regex: it
+    rewrites the version only on lines the pattern matches, leaving every other
+    line alone. So coverage is a property of the (file, pattern) pair, not of
+    the file -- one file can appear under several patterns, and a line matched
+    by none of them is never bumped even though its file is listed.
+    """
+    patterns: dict[str, list[re.Pattern]] = {}
+    for entry in _commitizen()["version_files"]:
+        name, _, regex = entry.partition(":")
+        patterns.setdefault(name, []).append(re.compile(regex))
+    return patterns
+
+
 def test_the_action_pins_the_current_version():
     default = safe_load(ACTION.read_text(encoding="utf-8"))["inputs"]["install-spec"]["default"]
     match = VERSION_IN_SPEC.fullmatch(default)
@@ -78,8 +94,14 @@ def test_every_file_spelling_a_version_is_bumped_with_it():
     (`skill-lens[pydantic-ai]==<version>`) -- rather than checking a fixed
     list of filenames, so a new file that starts spelling a version is caught
     the moment it exists instead of being invisible to this test forever.
+
+    The check is per line, and mirrors what cz bump itself does: a spelling is
+    covered only when one of *its own file's* `version_files` patterns matches
+    the same line. Treating a listed filename as blanket coverage would hide a
+    second spelling added to an already-listed file -- exactly the case where
+    the file looks protected and is not.
     """
-    listed = {entry.split(":", 1)[0] for entry in _commitizen()["version_files"]}
+    listed = _version_file_patterns()
     offenders = []
     for path in _tracked_files():
         try:
@@ -87,16 +109,39 @@ def test_every_file_spelling_a_version_is_bumped_with_it():
         except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
             continue
         name = str(path.relative_to(REPO_ROOT))
-        if name in listed:
-            continue
-        for pattern in VERSION_SPELLINGS.values():
-            if pattern.search(text):
-                offenders.append(name)
-                break
-    assert not offenders, f"spells a version but is not in version_files: {offenders}"
+        covered = listed.get(name, [])
+        for number, line in enumerate(text.splitlines(), start=1):
+            for label, spelling in VERSION_SPELLINGS.items():
+                if not spelling.search(line):
+                    continue
+                if any(pattern.search(line) for pattern in covered):
+                    continue
+                offenders.append(f"{name}:{number} ({label})")
+    assert not offenders, (
+        "spells a version on a line no version_files pattern rewrites: " + ", ".join(offenders)
+    )
 
 
 def test_breaking_changes_stay_inside_zero_x():
     """M6 and M7 are still expected to change the eval file format, so a
     breaking change must not promote the project to 1.0."""
     assert _commitizen()["major_version_zero"] is True
+
+
+def test_the_tag_is_annotated_and_spelled_the_way_the_workflow_expects():
+    """Two settings release.yml leans on, neither of which fails visibly.
+
+    `annotated_tag = true`: `git push --follow-tags` pushes only *annotated*
+    tags. Commitizen creates a lightweight one by default, which that push
+    would skip while still exiting 0 -- the bump commit reaches main and its
+    tag never leaves the runner.
+
+    `tag_format = "v$version"`: release.yml builds the ref it verifies as
+    `tag="v${{ steps.bump.outputs.version }}"`, hardcoding the `v` this
+    setting configures. Nothing links the two at runtime, so this assertion is
+    the link: changing the format has to break here and be changed on purpose,
+    in both places.
+    """
+    settings = _commitizen()
+    assert settings["annotated_tag"] is True
+    assert settings["tag_format"] == "v$version"

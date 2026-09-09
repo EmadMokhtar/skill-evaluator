@@ -80,7 +80,17 @@ jobs:
           # (No pipeline runs in this step, so `pipefail` would be inert —
           # dropped rather than left in to imply a check that isn't there.)
           code=0
-          uv run cz bump --yes || code=$?
+          # --check-consistency turns a version_files pattern that matched
+          # nothing into a hard failure (exit 17) instead of a file rewritten
+          # unchanged. Without it, reformatting a pinned line -- action.yml's
+          # install-spec, say -- would tag a tree still pinning the previous
+          # version, and nothing would report it: the bump commit carries
+          # [skip ci], so the bumped tree is never tested. Commitizen reads
+          # this from the command line only, never from [tool.commitizen], so
+          # it has to live here. It is checked before the version is written,
+          # before `git add` and before the tag, so an inconsistent tree
+          # aborts with nothing pushed.
+          uv run cz bump --yes --check-consistency || code=$?
           # 21 = NoneIncrementExit (commits exist, none warrant a release).
           # 3  = NoCommitsFoundError (no commits since the last tag at all).
           if [ "$code" = "21" ] || [ "$code" = "3" ]; then
@@ -105,8 +115,15 @@ jobs:
           echo "Released version $version." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Push the bump commit and its tag
+        # --atomic makes the commit and the tag one update: if either ref is
+        # rejected (main moved under us, the tag already exists), neither
+        # lands. Without it git pushes the refs independently, so a rejected
+        # tag would leave the bump commit on main with no tag -- and the
+        # ls-remote check below, guarded by the implicit success() of the
+        # step before it, would be skipped in exactly the state it exists to
+        # report.
         if: steps.bump.outputs.bumped == 'true'
-        run: git push --follow-tags origin HEAD:main
+        run: git push --atomic --follow-tags origin HEAD:main
 
       - name: Verify the tag reached origin
         # `--follow-tags` pushes only annotated tags. `annotated_tag = true`
@@ -120,7 +137,16 @@ jobs:
         run: |
           set -eu
           tag="v${{ steps.bump.outputs.version }}"
-          if [ -z "$(git ls-remote --tags origin "refs/tags/$tag")" ]; then
+          # The lookup's exit status is checked separately from its output. A
+          # failed `git ls-remote` (network fault, auth) also prints nothing,
+          # so testing emptiness alone would report "the tag is missing" for a
+          # tag that is very likely there, and send a maintainer to re-tag by
+          # hand over a transient error.
+          if ! remote_refs="$(git ls-remote --tags origin "refs/tags/$tag")"; then
+            echo "git ls-remote failed, so whether tag $tag reached origin is unknown. Check origin by hand before re-running anything." >&2
+            exit 1
+          fi
+          if [ -z "$remote_refs" ]; then
             echo "Tag $tag was pushed but is not on origin. The bump commit may now be on main with no matching tag, which makes this release unreproducible." >&2
             exit 1
           fi
@@ -164,3 +190,11 @@ jobs:
         # third-party action here — this is PyPA's own recommendation for
         # this action, not an oversight to be "fixed" into consistency.
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A partial upload is the case the documented "re-run publish"
+          # recovery exists for: the wheel landed, the sdist did not. The
+          # action defaults to skip-existing: false, which fails that retry on
+          # "File already exists" — the one state it was meant to survive.
+          # This skips only files PyPI already has and still uploads the rest;
+          # it cannot overwrite or silently replace a published file.
+          skip-existing: true
