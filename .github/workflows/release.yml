@@ -160,4 +160,7 @@ jobs:
           path: dist/
 
       - name: Publish to PyPI
+        # Pinned to the release branch, not a numeric tag like every other
+        # third-party action here — this is PyPA's own recommendation for
+        # this action, not an oversight to be "fixed" into consistency.
         uses: pypa/gh-action-pypi-publish@release/v1

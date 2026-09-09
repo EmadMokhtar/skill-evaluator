@@ -4,8 +4,8 @@ A workflow cannot be executed by the test suite, so what is testable is its
 shape. Each assertion below corresponds to a decision that is invisible once
 made and expensive when silently removed.
 
-Task 5 adds the `publish` job and its own tests for it; this file covers only
-the `verify` and `release` jobs this task adds.
+Task 5 adds the `publish` job and its own tests for it; this file covers the
+`verify`, `release`, and `publish` jobs.
 """
 
 from __future__ import annotations
@@ -62,13 +62,12 @@ def test_nothing_runs_before_the_tests_pass(workflow):
 
 def test_publish_is_skipped_when_no_version_was_cut(workflow):
     condition = workflow["jobs"]["publish"]["if"]
-    assert "bumped" in condition and "true" in condition
+    assert condition == "needs.release.outputs.bumped == 'true'"
 
 
 def test_publish_can_mint_an_identity_but_cannot_write_to_the_repository(workflow):
     permissions = workflow["jobs"]["publish"]["permissions"]
-    assert permissions["id-token"] == "write"
-    assert permissions.get("contents", "read") == "read"
+    assert permissions == {"id-token": "write", "contents": "read"}
 
 
 def test_publish_is_gated_by_the_protected_environment(workflow):
