@@ -17,6 +17,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # inside it would make the archive lie about the past.
 EXCLUDED_DIRS = ("docs/superpowers/",)
 
+# This file itself is excluded from the offender scan below. A test that
+# searches the repository for a literal string necessarily contains that
+# literal string (in its own regex and docstrings) to describe what it is
+# looking for -- that self-reference is inherent, not a naming leak, so it
+# is excluded by exact path rather than folded into a broader pattern that
+# could hide a real offender elsewhere.
+SELF_PATH = "tests/test_naming.py"
+
 # Tokens that merely start with the old name and are not this project's name.
 ALLOWED = re.compile(r"skill-eval(?:uator|s\b|-m\d|-design)")
 
@@ -31,7 +39,9 @@ def _tracked_files() -> list[Path]:
         text=True,
         check=True,
     ).stdout.split()
-    return [REPO_ROOT / name for name in out if not name.startswith(EXCLUDED_DIRS)]
+    return [
+        REPO_ROOT / name for name in out if not name.startswith(EXCLUDED_DIRS) and name != SELF_PATH
+    ]
 
 
 def test_the_old_name_survives_nowhere_outside_the_archive():
