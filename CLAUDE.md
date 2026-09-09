@@ -207,8 +207,18 @@ form, that file is the explanation.
   `needs:`, not through the tag, a silently dropped tag would otherwise go unnoticed all the
   way to PyPI; `release` runs `git ls-remote --tags origin` right after the push and fails
   loudly if the tag is missing.
-- **The version in `action.yml` always equals the package version**, and every file spelling a
-  version is listed in `version_files`. Both are asserted by `tests/test_release_config.py`.
+- **The version in `action.yml` always equals the package version**, and the pairing between a
+  version spelling and a `version_files` pattern is guarded in *both* directions — every
+  spelling has a pattern that rewrites it, and every pattern still matches a line carrying the
+  current version. All three live in `tests/test_release_config.py`. The second direction is
+  what stops a reformatted pin from becoming a no-op rewrite, and it fails on the pull request
+  rather than at release time, where `cz bump --check-consistency` would abort the release
+  instead.
+- **The tag prefix is derived, not duplicated.** `release.yml` reconstructs the tag to look it
+  up after pushing, and `tests/test_release_workflow.py` requires that spelling to match
+  `[tool.commitizen] tag_format`. Changing the format alone would leave the release correctly
+  tagged but the lookup wrong — failing *after* the push, which spends a version that can
+  never be published.
 - **No long-lived publishing credential exists.** Trusted Publishing only.
 - **A cassette refresh re-records with `--record-mode=rewrite`, never `once`** — `once` only
   fills in a missing cassette and write-protects one already loaded, so it cannot refresh an

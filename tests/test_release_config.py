@@ -122,6 +122,41 @@ def test_every_file_spelling_a_version_is_bumped_with_it():
     )
 
 
+def test_every_version_files_entry_still_matches_a_line_carrying_the_version():
+    """The converse of the test above, and the half that fails *late*.
+
+    That test asks "does every spelling have a pattern?". This one asks "does
+    every pattern still have a spelling?" -- because a pattern that matches
+    nothing is not an error to cz bump by default. It rewrites the file
+    unchanged and says nothing, which is why the release job passes
+    `--check-consistency`.
+
+    But `--check-consistency` only fires during a release, on `main`, after
+    the pull request that broke the pattern has already merged. The job then
+    aborts with exit 17 before writing, committing or tagging -- so nothing
+    ships broken -- yet the release is lost until someone repairs the pattern
+    and merges again. Asserting it here moves that failure onto the pull
+    request that causes it, where it costs a line of feedback instead of a
+    skipped release.
+
+    The rule mirrors cz bump exactly (`commitizen/bump.py`): a line counts
+    only when the pattern matches it *and* it carries the current version,
+    since the rewrite is a `str.replace` of that version on matched lines.
+    """
+    current = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]["version"]
+    unmatched = []
+    for name, patterns in _version_file_patterns().items():
+        lines = (REPO_ROOT / name).read_text(encoding="utf-8").splitlines()
+        for pattern in patterns:
+            if not any(pattern.search(line) and current in line for line in lines):
+                unmatched.append(f"{name} :: {pattern.pattern}")
+    assert not unmatched, (
+        f"version_files patterns that match no line carrying the current version {current!r}, "
+        "so cz bump would silently leave the file alone (and --check-consistency will abort "
+        "the release): " + ", ".join(unmatched)
+    )
+
+
 def test_breaking_changes_stay_inside_zero_x():
     """M6 and M7 are still expected to change the eval file format, so a
     breaking change must not promote the project to 1.0."""

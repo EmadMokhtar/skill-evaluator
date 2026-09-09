@@ -10,6 +10,7 @@ Task 5 adds the `publish` job and its own tests for it; this file covers the
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from skill_lens.yaml_loading import safe_load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RELEASE = REPO_ROOT / ".github" / "workflows" / "release.yml"
+PYPROJECT = REPO_ROOT / "pyproject.toml"
 
 
 @pytest.fixture
@@ -77,6 +79,38 @@ def test_the_pushed_tag_is_verified_before_the_build(workflow):
     steps = workflow["jobs"]["release"]["steps"]
     verify_step = next(step for step in steps if "ls-remote" in str(step.get("run", "")))
     assert verify_step["if"] == "steps.bump.outputs.bumped == 'true'"
+
+
+def test_the_verification_spells_the_tag_the_way_commitizen_does(workflow):
+    """The step above reconstructs the tag name to look it up, and hardcodes
+    the prefix while `[tool.commitizen] tag_format` configures it. Two copies
+    of one string, in different files, with nothing tying them together.
+
+    Change `tag_format` alone and the release still tags correctly, the push
+    still succeeds, and only the lookup goes wrong -- reporting a tag missing
+    that is in fact on origin, and failing the job *after* the commit and tag
+    have been pushed. That is the one unrecoverable state in this pipeline:
+    the version is spent, `publish` never became eligible so it cannot be
+    re-run, and a fresh run finds nothing to release. It fails closed rather
+    than shipping something wrong, but it costs a version and sends whoever
+    reads the error to the wrong file.
+
+    So derive the prefix from `tag_format` and require the workflow to use
+    the same one. Changing the format now forces changing both.
+    """
+    tag_format = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["tool"]["commitizen"][
+        "tag_format"
+    ]
+    prefix, sentinel, suffix = tag_format.partition("$version")
+    assert sentinel, f"tag_format {tag_format!r} does not interpolate $version"
+    assert not suffix, f"tag_format {tag_format!r} has a suffix this test cannot express"
+
+    steps = workflow["jobs"]["release"]["steps"]
+    verify_step = next(step for step in steps if "ls-remote" in str(step.get("run", "")))
+    expected = 'tag="' + prefix + '${{ steps.bump.outputs.version }}"'
+    assert expected in verify_step["run"], (
+        f"tag_format is {tag_format!r}, so the verification step must build {expected!r}"
+    )
 
 
 def test_nothing_runs_before_the_tests_pass(workflow):

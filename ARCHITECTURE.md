@@ -382,7 +382,18 @@ the tag, that loss would not stop a release: a `git ls-remote` check runs right 
 and fails loudly instead. The push is `--atomic` so the commit and tag land together or not at
 all, and `cz bump --check-consistency` aborts before writing anything if a file listed in
 `version_files` no longer contains the current version — a flag on the command, because
-Commitizen reads it only from the CLI and never from `pyproject.toml`.
+Commitizen reads it only from the CLI and never from `pyproject.toml`. That abort is the last
+line rather than the first: `tests/test_release_config.py` asserts the same property on every
+pull request, so a reformatted pin is caught where it is cheap to fix instead of costing a
+release on `main`.
+
+The tag the lookup builds is checked against `tag_format` rather than trusted. The workflow
+hardcodes the `v` prefix that `[tool.commitizen] tag_format` configures — two copies of one
+string in two files — so `tests/test_release_workflow.py` derives the prefix from the setting
+and requires the workflow to use it. Changing the format alone would tag correctly, push
+successfully, and break only the lookup, failing *after* the push: the one unrecoverable state
+here, since the version is spent, `publish` never became eligible to re-run, and a fresh run
+finds nothing to release.
 
 **No long-lived publishing credential exists.** PyPI accepts the upload because the job proves
 its identity with a short-lived token (Trusted Publishing, over OIDC), so `publish` needs

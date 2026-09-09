@@ -56,6 +56,11 @@ nothing" into a hard failure (exit `17`), raised before the new version is writt
 Commitizen reads it from the command line only, never from `[tool.commitizen]`, which is why it
 lives in the workflow rather than in `pyproject.toml`.
 
+You should not normally see it fire. The same property is asserted on every pull request by
+`tests/test_release_config.py`, which checks that each `version_files` entry still matches a
+line carrying the current version — so a reformatted pin fails review rather than costing a
+release. `--check-consistency` is the backstop for whatever reaches `main` anyway.
+
 ## One-time setup
 
 None of this can live in a workflow file. A maintainer or a fork needs all four; the current
