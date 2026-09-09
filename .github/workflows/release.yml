@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# A release must never be cancelled halfway: the tag may already be pushed
+# while the build is not. Queue instead.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Nothing by default; each job asks for exactly what it uses.
+permissions: {}
+
+jobs:
+  verify:
+    # ci.yml runs on this same push, so without this job the release would race
+    # it and could tag a commit whose tests are still running, or already red.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Test
+        run: uv run pytest
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      bumped: ${{ steps.bump.outputs.bumped }}
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # cz bump reads every commit since the last tag to compute the
+          # increment, so a shallow clone would under-report the change.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Configure the committer
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump the version
+        id: bump
+        shell: bash
+        run: |
+          set -uo pipefail
+          # `set -e` is deliberately not used: cz signals "nothing to release"
+          # through its exit code, and -e would discard it before we can read it.
+          code=0
+          uv run cz bump --yes || code=$?
+          # 21 = NoneIncrementExit (commits exist, none warrant a release).
+          # 3  = NoCommitsFoundError (no commits since the last tag at all).
+          if [ "$code" = "21" ] || [ "$code" = "3" ]; then
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "No commit since the last tag warrants a release." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$code" != "0" ]; then
+            echo "cz bump failed with exit code $code" >&2
+            exit "$code"
+          fi
+          version="$(uv run cz version --project)"
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Released version $version." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push the bump commit and its tag
+        if: steps.bump.outputs.bumped == 'true'
+        run: git push --follow-tags origin HEAD:main
+
+      - name: Build the distributions
+        if: steps.bump.outputs.bumped == 'true'
+        run: uv build
+
+      - name: Upload the distributions
+        if: steps.bump.outputs.bumped == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
