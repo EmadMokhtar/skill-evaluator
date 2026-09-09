@@ -57,6 +57,7 @@ nav:
       - Gating and exit codes: gating.md
       - Comparative evals: comparative-evals.md
       - CI integration: ci.md
+      - Releasing: releasing.md
   - Roadmap: roadmap.md
   - Architecture: architecture.md
   - Contributing: contributing.md

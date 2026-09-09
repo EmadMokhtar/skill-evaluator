@@ -26,6 +26,7 @@ from skill_lens.yaml_loading import safe_load
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCS = REPO_ROOT / "docs"
 MKDOCS_YML = REPO_ROOT / "mkdocs.yml"
+RELEASING = REPO_ROOT / "docs" / "releasing.md"
 
 # docs/superpowers/ is a historical record of specs and plans, excluded from the
 # site (see mkdocs.yml) and from every check here.
@@ -116,6 +117,19 @@ def test_every_page_is_reachable_from_the_nav():
 def test_the_nav_has_no_missing_pages():
     missing = _nav_pages() - _site_pages()
     assert not missing, f"nav entries with no file on disk: {sorted(missing)}"
+
+
+def test_releasing_documents_every_piece_of_external_setup():
+    """The four settings live outside this repository, so nothing in CI can
+    check them. The docs are the only place they are recorded."""
+    text = RELEASING.read_text(encoding="utf-8")
+    for required in ("Read and write", "pending publisher", "pypi", "OPENAI_API_KEY"):
+        assert required in text, f"docs/releasing.md does not mention {required!r}"
+
+
+def test_releasing_is_in_the_nav():
+    nav = safe_load((REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8"))["nav"]
+    assert "releasing.md" in str(nav)
 
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")

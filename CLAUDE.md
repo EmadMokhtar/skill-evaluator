@@ -9,7 +9,7 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M5 (part 1)**: the pipeline runs real agents through `PydanticAIRunner`
+Currently at **M5 (complete)**: the pipeline runs real agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
 remains the default and the backbone of the zero-cost test tier. M3 adds a
@@ -21,7 +21,11 @@ comparative: each case can run in a candidate arm and a baseline arm
 sampled `--repeat N` times, with the report gaining a delta and `--min-delta`
 gating on it. M5 part 1 makes a run legible to CI: `--junit-output` and
 `--markdown-output` reporters, `--concurrency N` over the work matrix, and a
-composite GitHub Action with example workflows. Milestones are defined in
+composite GitHub Action with example workflows. M5 part 2 automates releasing
+itself: a merge to `main` verifies, bumps the version from the commit history
+with `cz bump`, tags it, and publishes to PyPI over Trusted Publishing, with a
+manual workflow to refresh the recorded provider traffic. See
+[Releasing](docs/releasing.md). Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
 is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
@@ -190,6 +194,29 @@ form, that file is the explanation.
   every later step carries `if: always()`, and the final step re-raises with `exit
   "${CODE:-1}"` — an empty code (the run step never finishing at all) fails rather than
   defaulting to success.
+- **Nothing publishes that has not been verified in the same run.** `publish` is reachable
+  only through `needs:` on a green `verify`; publishing is irreversible, since PyPI refuses a
+  re-upload of a version that already exists.
+- **A merge with no releasable commit publishes nothing and fails nothing.** `cz bump` exit
+  codes 21 and 3 are no-ops, not errors.
+- **The pushed release tag is annotated, and the job verifies it actually reached `origin`
+  before building.** `git push --follow-tags` pushes only annotated tags, so
+  `[tool.commitizen] annotated_tag = true` exists specifically to make Commitizen create one
+  instead of its default lightweight tag — without it, the bump commit would reach `main`
+  while the tag stayed on the runner and vanished. Because `publish` is reached through
+  `needs:`, not through the tag, a silently dropped tag would otherwise go unnoticed all the
+  way to PyPI; `release` runs `git ls-remote --tags origin` right after the push and fails
+  loudly if the tag is missing.
+- **The version in `action.yml` always equals the package version**, and every file spelling a
+  version is listed in `version_files`. Both are asserted by `tests/test_release_config.py`.
+- **No long-lived publishing credential exists.** Trusted Publishing only.
+- **A cassette refresh re-records with `--record-mode=rewrite`, never `once`** — `once` only
+  fills in a missing cassette and write-protects one already loaded, so it cannot refresh an
+  existing recording, which is the workflow's whole purpose. It then stages the recordings
+  (`git add -A -- tests/cassettes`) before either check that follows, because `git diff` can't
+  see an untracked file and a freshly re-recorded cassette is exactly that; proves the new
+  recordings replay under `--record-mode=none`; and checks the staged diff for secrets —
+  all before pushing, and it never opens a pull request that CI has not run on.
 
 ## Documentation
 
@@ -205,6 +232,7 @@ Documentation ships **with** the change, never as a follow-up. Two CI jobs enfor
 | Gate rules, exit codes, the JSON report | `docs/gating.md` |
 | A protocol, an invariant, or the module map | `ARCHITECTURE.md` |
 | CI integration, the action, example workflows | `docs/ci.md` |
+| The release pipeline, its one-time setup, or the cassette-refresh workflow | `docs/releasing.md` |
 | Anything needing a new page | the page plus `nav:` in `mkdocs.yml` |
 
 `README.md` is a landing page only. Reference prose lives in `docs/` — do not reintroduce

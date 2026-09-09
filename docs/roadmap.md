@@ -7,7 +7,7 @@
 | M2 | PydanticAI runner, trajectory + budget evaluators, cost/latency capture, cassette test tier | shipped |
 | M3 | LLM-as-judge evaluator (per-check verdicts), triggering evals with negative controls | shipped |
 | M4 | Comparative evals: `--baseline`/`--repeat`, delta reporting, `--min-delta` gating | shipped |
-| M5 | CI/CD polish: JUnit XML + Markdown reporters, GitHub Action, bounded concurrency | shipped (part 1) |
+| M5 | CI/CD polish: JUnit XML + Markdown reporters, GitHub Action, bounded concurrency | shipped |
 | M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions | planned |
 | M7 | DX: `skill-lens init` scaffolder, more examples | `init` shipped; examples planned |
 | M8 | LangChain adapter (optional) | planned |
@@ -40,9 +40,12 @@ subinterpreter pools were deferred: the work is network-bound, so multi-core buy
 today, and the orchestrator is typed against `concurrent.futures.Executor` so a different pool
 is a one-line change if M6's real tool execution introduces CPU-bound work.
 
-Part 2 — the automated release pipeline (`cz bump` on merge to main, Trusted Publishing to
-PyPI) and the manual cassette-refresh workflow — is specified and waiting on the PyPI project
-and repository secrets it needs.
+## What M5 part 2 shipped
+
+A merge to `main` now verifies the commit, bumps the version from the commit history, tags
+it, and publishes to PyPI over Trusted Publishing — no stored credential anywhere. A manual
+workflow refreshes the recorded provider traffic and hands it back as a branch to review.
+See [Releasing](releasing.md).
 
 ## The rename to skill-lens
 
