@@ -26,8 +26,8 @@ check = _load()
 
 
 def test_source_changes_finds_package_files():
-    paths = ["src/skill_eval/gating.py", "tests/test_gating.py", "README.md"]
-    assert check.source_changes(paths) == ["src/skill_eval/gating.py"]
+    paths = ["src/skill_lens/gating.py", "tests/test_gating.py", "README.md"]
+    assert check.source_changes(paths) == ["src/skill_lens/gating.py"]
 
 
 def test_source_changes_ignores_everything_outside_the_package():
@@ -49,7 +49,7 @@ def test_touches_docs_rejects_the_historical_record():
 
 
 def test_touches_docs_rejects_unrelated_paths():
-    assert not check.touches_docs(["src/skill_eval/cli.py", "tests/test_cli.py"])
+    assert not check.touches_docs(["src/skill_lens/cli.py", "tests/test_cli.py"])
 
 
 def test_main_passes_when_no_source_changed(monkeypatch, capsys):
@@ -59,14 +59,14 @@ def test_main_passes_when_no_source_changed(monkeypatch, capsys):
 
 def test_main_passes_when_source_and_docs_both_changed(monkeypatch):
     monkeypatch.setattr(
-        check, "changed_files", lambda base, head: ["src/skill_eval/cli.py", "docs/cli.md"]
+        check, "changed_files", lambda base, head: ["src/skill_lens/cli.py", "docs/cli.md"]
     )
     assert check.main(["BASE", "HEAD"]) == 0
 
 
 def test_main_fails_when_source_changed_without_docs(monkeypatch, capsys):
-    monkeypatch.setattr(check, "changed_files", lambda base, head: ["src/skill_eval/cli.py"])
+    monkeypatch.setattr(check, "changed_files", lambda base, head: ["src/skill_lens/cli.py"])
     assert check.main(["BASE", "HEAD"]) == 1
     out = capsys.readouterr().out
-    assert "src/skill_eval/cli.py" in out
+    assert "src/skill_lens/cli.py" in out
     assert "no-docs-needed" in out

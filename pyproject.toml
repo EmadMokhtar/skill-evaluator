@@ -1,18 +1,48 @@
 [project]
-name = "skill-eval"
+name = "skill-lens"
 version = "0.1.0"
 description = "Run evaluations on Agent Skills (SKILL.md) in CI/CD or manually"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
+keywords = [
+    "agent-skills",
+    "skill",
+    "evals",
+    "evaluation",
+    "llm",
+    "ci",
+    "testing",
+]
+classifiers = [
+    # 0.x: the CLI and the eval file format may still change in a minor release.
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
     "pydantic>=2.7",
     "typer>=0.12",
     "pyyaml>=6.0",
 ]
 
+# The distribution is `skill-lens` but the repository is `skill-evaluator`, so a
+# reader who lands on the PyPI page has no way to guess where the source lives.
+# These links are the only thing connecting the two names.
+[project.urls]
+Homepage = "https://emadmokhtar.github.io/skill-evaluator/"
+Documentation = "https://emadmokhtar.github.io/skill-evaluator/"
+Source = "https://github.com/EmadMokhtar/skill-evaluator"
+Issues = "https://github.com/EmadMokhtar/skill-evaluator/issues"
+
 [project.scripts]
-skill-eval = "skill_eval.cli:app"
+skill-lens = "skill_lens.cli:app"
 
 [project.optional-dependencies]
 pydantic-ai = ["pydantic-ai-slim[openai]>=2.22"]
@@ -35,11 +65,14 @@ docs = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+# Bounded rather than floating: the release runner builds with whatever it
+# resolves on the day, and an unpinned major could change the artifact the
+# release publishes without a single commit in this repository.
+requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/skill_eval"]
+packages = ["src/skill_lens"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -64,4 +97,32 @@ select = ["E", "F", "I", "UP", "B"]
 name = "cz_conventional_commits"
 version_provider = "uv"
 tag_format = "v$version"
+# Commitizen creates a lightweight tag unless told otherwise, and
+# `git push --follow-tags` (release.yml) pushes only annotated tags — without
+# this, every release commit would reach main while its tag stayed on the
+# ephemeral runner and vanished when the job ended.
+annotated_tag = true
 update_changelog_on_bump = true
+# Keep breaking changes inside 0.x. M6 and M7 still expect to change the eval
+# file format, so a "!" commit must not declare the CLI surface stable.
+major_version_zero = true
+# Files that spell the version. cz bump rewrites them inside the bump commit
+# itself, so the tree at tag vX.Y.Z already installs and documents X.Y.Z.
+#
+# Each entry gates per line on its regex, and a file where nothing matched is
+# rewritten unchanged with no error -- so reformatting a pinned line would
+# silently ship a stale pin. The guard against that is `--check-consistency`,
+# which release.yml passes to `cz bump`; it turns "matched nothing" into a
+# hard failure before the version is written, before `git add`, and before the
+# tag. It is a CLI flag only: Commitizen 4.17 reads it from the command line
+# (commands/bump.py: `arguments["check_consistency"]`), never from this file,
+# so writing `check_consistency = true` here would be an inert no-op. The
+# workflow test asserts the flag is on the command.
+version_files = [
+    "action.yml:skill-lens\\[pydantic-ai\\]==",
+    "docs/ci.md:skill-evaluator@v",
+    "docs/ci.md:skill-lens\\[pydantic-ai\\]==",
+    "README.md:skill-evaluator@v",
+    "examples/ci/skill-lens.yml:skill-evaluator@v",
+]
+bump_message = "bump: version $current_version → $new_version [skip ci]"

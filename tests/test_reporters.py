@@ -1,8 +1,8 @@
 import json
 
-from skill_eval.comparison import build_delta
-from skill_eval.gating import evaluate_gate
-from skill_eval.models import (
+from skill_lens.comparison import build_delta
+from skill_lens.gating import evaluate_gate
+from skill_lens.models import (
     BaselineNote,
     CaseOutcome,
     CheckResult,
@@ -10,8 +10,8 @@ from skill_eval.models import (
     RunReport,
     RunResult,
 )
-from skill_eval.reporters.console import render_console
-from skill_eval.reporters.json_reporter import render_json
+from skill_lens.reporters.console import render_console
+from skill_lens.reporters.json_reporter import render_json
 
 
 def _report():

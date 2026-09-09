@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from skill_eval.comparison import build_delta
-from skill_eval.models import (
+from skill_lens.comparison import build_delta
+from skill_lens.models import (
     BaselineNote,
     CaseOutcome,
     CheckResult,

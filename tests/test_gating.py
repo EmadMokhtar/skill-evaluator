@@ -1,6 +1,6 @@
-from skill_eval.comparison import ArmStats, CaseStats, Delta
-from skill_eval.gating import EXIT_FAILED, EXIT_OK, evaluate_gate
-from skill_eval.models import BaselineNote, CaseOutcome, RunReport
+from skill_lens.comparison import ArmStats, CaseStats, Delta
+from skill_lens.gating import EXIT_FAILED, EXIT_OK, evaluate_gate
+from skill_lens.models import BaselineNote, CaseOutcome, RunReport
 
 
 def _report(*statuses_by_skill):

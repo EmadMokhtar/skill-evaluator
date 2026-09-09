@@ -1,15 +1,15 @@
 # CLI
 
 ```
-skill-eval run <path> [--evals <path>] [--runner <name>] [--model <name>]
+skill-lens run <path> [--evals <path>] [--runner <name>] [--model <name>]
                       [--judge-model <name>] [--tag <tag>] [--min-pass-rate <float>]
                       [--json-output <path>] [--junit-output <path>]
                       [--markdown-output <path>] [--markdown-max-chars <int>]
                       [--concurrency <int>] [--config <file>] [--baseline <kind>]
                       [--repeat <int>] [--min-delta <float>]
-skill-eval list <path> [--evals <path>]
-skill-eval init <path> [--force]
-skill-eval --version
+skill-lens list <path> [--evals <path>]
+skill-lens init <path> [--force]
+skill-lens --version
 ```
 
 `<path>` is a skill directory or a directory of skill directories. Discovery is
@@ -29,7 +29,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--tag <tag>` | none | Only run cases carrying this tag |
 | `--min-pass-rate <float>` | `1.0` | Required overall pass rate, `0.0`–`1.0` |
 | `--json-output <path>` | none | Write a machine-readable report here |
-| `--config <file>` | upward discovery | Path to `skill-eval.toml` |
+| `--config <file>` | upward discovery | Path to `skill-lens.toml` |
 | `--baseline <kind>` | off | Run a second, baseline arm: `none` (no skill loaded) or `previous` (the prior version, from git). Omit for a single-arm run. |
 | `--repeat <int>` | `1` | Sample each arm this many times. Each repetition is its own outcome. |
 | `--min-delta <float>` | unset | Require the candidate arm to beat the baseline by at least this much. Requires `--baseline`. |
@@ -57,7 +57,7 @@ cannot be resolved skips it for that whole skill). Both of those only ever *redu
 count from what the plan line shows.
 
 `--judge-model` names the model the judge grades with, but it does not turn judging on: the
-judge is selected by the `judge` key in [`skill-eval.toml`](configuration.md#judging), which
+judge is selected by the `judge` key in [`skill-lens.toml`](configuration.md#judging), which
 defaults to `"fake"` so that upgrading never starts spending money on its own. A blank model
 id is rejected as a user error (exit 2) rather than reaching a provider.
 
@@ -71,7 +71,7 @@ validates every eval file without calling a runner — free, and no API key requ
 | `--evals <path>` | discovery | An explicit eval file or directory, overriding discovery |
 
 ```bash
-uv run skill-eval list ./examples
+uv run skill-lens list ./examples
 ```
 
 ```
@@ -82,7 +82,7 @@ order-support	5 case(s)	examples/order-support
 ## `init`
 
 ```bash
-skill-eval init <skill-dir> [--force]
+skill-lens init <skill-dir> [--force]
 ```
 
 `<skill-dir>` names exactly one skill directory containing `SKILL.md` — unlike `run` and
@@ -92,7 +92,7 @@ Writes a starter eval suite to `<skill-dir>/evals/<skill-name>.eval.yaml`: a com
 case, a policy-edge case carrying `tools:` and `trajectory:`, and both halves of the
 `mode: offered` triggering pair.
 
-Every field you have to supply holds the placeholder `TODO(skill-eval)`, and a case still
+Every field you have to supply holds the placeholder `TODO(skill-lens)`, and a case still
 containing one aborts the run as an [authoring error](eval-files.md#unfilled-scaffolds).
 The generated file is therefore never a green suite that checks nothing.
 

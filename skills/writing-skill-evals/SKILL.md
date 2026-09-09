@@ -1,6 +1,6 @@
 ---
 name: writing-skill-evals
-description: Use when writing, running, or auditing skill-eval eval suites for an Agent Skill — deciding which cases a skill needs, choosing between assertions, judge rubrics and trajectory checks, and reading a failing case correctly
+description: Use when writing, running, or auditing skill-lens eval suites for an Agent Skill — deciding which cases a skill needs, choosing between assertions, judge rubrics and trajectory checks, and reading a failing case correctly
 ---
 
 # Writing skill evals
@@ -12,9 +12,9 @@ the eval was wrong. Everything here exists to prevent one of those.
 ## Workflow
 
 1. **Orient.** Read the target `SKILL.md`. Look for existing evals in `evals/` or
-   `*.eval.yaml` beside it, and run `skill-eval list <path>` to see what the tool already
+   `*.eval.yaml` beside it, and run `skill-lens list <path>` to see what the tool already
    discovers.
-2. **Scaffold, or extend.** If step 1 found no suite, run `skill-eval init <skill-dir>` —
+2. **Scaffold, or extend.** If step 1 found no suite, run `skill-lens init <skill-dir>` —
    do not hand-roll the file structure, the generated file already carries the triggering
    pair and the placeholders that stop an unfinished suite from running. If a suite
    already exists, do not run `init`: it exits 2 rather than touch an existing file. Read
@@ -28,12 +28,12 @@ the eval was wrong. Everything here exists to prevent one of those.
    one line each, before writing any YAML. Ask only for what `SKILL.md` cannot tell you:
    which tools exist and what they return, which policy edges are real, what a good answer
    sounds like. Do not ask for what the file already says.
-5. **Write the cases.** Replace every `TODO(skill-eval)`. Read
+5. **Write the cases.** Replace every `TODO(skill-lens)`. Read
    `references/eval-file-syntax.md` for the fields, and `references/case-design.md` for
    patterns to draw from.
-6. **Validate, then run.** `skill-eval list <path>` is the structural check — it parses
+6. **Validate, then run.** `skill-lens list <path>` is the structural check — it parses
    every case at zero cost and catches a malformed file before anything else runs; it is
-   what this repo's own CI self-check uses. `skill-eval run <path>` is a different thing:
+   what this repo's own CI self-check uses. `skill-lens run <path>` is a different thing:
    it needs a configured runner, and under the defaults (`FakeRunner`, `FakeJudge`) a
    `mode: offered` case and any case with a `judge:` block come back `errored`, not
    `failed` — the fake runner cannot report a triggering decision and the fake judge does
@@ -59,7 +59,7 @@ in before you look at anything else.
 **The eval is wrong** when the case `failed` and the output was actually fine: a regex
 tight enough to feel rigorous but that rejects phrasing a model may legitimately vary, an
 assertion on wording the skill never promised, a budget below what the task honestly
-costs. `examples/greeting/greeting.eval.yaml` in the skill-eval repo documents a real
+costs. `examples/greeting/greeting.eval.yaml` in the skill-lens repo documents a real
 instance — a single-sentence regex relaxed after real model output failed it for no good
 reason.
 
@@ -87,10 +87,10 @@ its own subject rewritten to match it has stopped measuring anything.
   `judge` — a case with none of the three passes without checking anything. `mode:
   offered` cases legitimately carry `trajectory.skill_triggered` and no `assertions`;
   that still counts as a check.
-- **Every rubric entry must be independently checkable and evidenced.** skill-eval records
+- **Every rubric entry must be independently checkable and evidenced.** skill-lens records
   a check that passes without citing evidence as a failure, so a vague entry costs a case
   rather than buying coverage.
-- **Never leave a `TODO(skill-eval)` behind.** The run will refuse it, which is the point,
+- **Never leave a `TODO(skill-lens)` behind.** The run will refuse it, which is the point,
   but a suite that cannot run is not a suite.
 
 ## Auditing an existing suite

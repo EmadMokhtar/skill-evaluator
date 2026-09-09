@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from skill_eval.runners.pricing import calculate_cost, provider_of
+from skill_lens.runners.pricing import calculate_cost, provider_of
 
 
 @dataclass

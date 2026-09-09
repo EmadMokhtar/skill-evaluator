@@ -72,8 +72,8 @@ jobs:
         # tool/trajectory/budget schema validation on real files at zero cost;
         # the full run path is covered every PR by the cassette tier.
         run: |
-          uv run skill-eval list ./examples
-          uv run skill-eval list ./skills
+          uv run skill-lens list ./examples
+          uv run skill-lens list ./skills
 
   docs:
     runs-on: ubuntu-latest

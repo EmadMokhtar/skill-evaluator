@@ -1,8 +1,8 @@
 """The offline judge that keeps the zero-cost tier honest."""
 
-from skill_eval.judges.base import Judge
-from skill_eval.judges.fake import FakeJudge
-from skill_eval.models import CheckResult, JudgeRequest, JudgeVerdict, RubricCheck
+from skill_lens.judges.base import Judge
+from skill_lens.judges.fake import FakeJudge
+from skill_lens.models import CheckResult, JudgeRequest, JudgeVerdict, RubricCheck
 
 
 def request(task: str = "t") -> JudgeRequest:

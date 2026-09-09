@@ -1,6 +1,6 @@
 # The eval-writing skill
 
-`skill-eval init` gives you the structure of a suite. It cannot tell you which cases
+`skill-lens init` gives you the structure of a suite. It cannot tell you which cases
 *this* skill needs, or what a red case means. That judgment ships as an Agent Skill.
 
 ## What it does
@@ -26,15 +26,12 @@ Then ask for it by name, or describe the task — "write evals for my order-supp
 
 ## Using it
 
-It expects `skill-eval` on `PATH`. skill-eval is not yet published to PyPI, so get it from
-source the same way [`getting-started.md`](getting-started.md) does:
+It expects `skill-lens` on `PATH`:
 
 ```bash
-git clone https://github.com/EmadMokhtar/skill-evaluator
-cd skill-evaluator
-uv sync
+uv tool install "skill-lens[pydantic-ai]"
 ```
 
-`uv run skill-eval` then works from that checkout, or run it inside a project that already
-depends on it. Everything the skill writes is an ordinary eval file: nothing about the
-suite depends on the skill afterwards.
+A checkout works as well — `uv sync` there, and `uv run skill-lens` then works from inside
+it, as does running it in a project that already depends on it. Everything the skill writes
+is an ordinary eval file: nothing about the suite depends on the skill afterwards.

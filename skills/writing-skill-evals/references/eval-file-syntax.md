@@ -81,10 +81,10 @@ nothing was verified.
         - The reply explains that the return window has closed
 ```
 
-One verdict per rubric entry, each with its evidence; skill-eval derives pass and score
+One verdict per rubric entry, each with its evidence; skill-lens derives pass and score
 from those. A check that passes without evidence is recorded as a failure. An empty
 rubric, or a blank entry, is an authoring error. Judging costs money and is opted into
-with `judge = "pydantic-ai"` in `skill-eval.toml`; the default `judge = "fake"` reports a
+with `judge = "pydantic-ai"` in `skill-lens.toml`; the default `judge = "fake"` reports a
 judged case as **errored** rather than passing a rubric nobody checked.
 
 ## Triggering (`mode: offered`)
@@ -96,5 +96,5 @@ tool in `called:`. Setting `skill_triggered` on a `loaded` case is an authoring 
 
 ## Placeholders
 
-`skill-eval init` writes `TODO(skill-eval)` into every field you must supply. A case still
+`skill-lens init` writes `TODO(skill-lens)` into every field you must supply. A case still
 containing one aborts the run with exit 2, naming the field.

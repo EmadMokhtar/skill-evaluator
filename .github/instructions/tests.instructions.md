@@ -13,7 +13,7 @@ applyTo: "tests/**"
   recorded provider traffic, free, selected by default; `integration` = real API spend,
   opt-in only.
 - **`conftest.py` chdirs every test into a fresh `tmp_path`** so config upward-discovery
-  cannot pick up an ambient `skill-eval.toml`. A test that reads repository files must
+  cannot pick up an ambient `skill-lens.toml`. A test that reads repository files must
   anchor on `Path(__file__).resolve().parents[1]`, never `Path.cwd()`. Flag any test relying
   on the working directory.
 - **Cassettes must be secret-free.** Both request and response headers are scrubbed, on two

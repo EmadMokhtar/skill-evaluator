@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the skill-eval test suite."""
+"""Shared pytest fixtures for the skill-lens test suite."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ def isolate_cwd(tmp_path, monkeypatch):
     `load_config` falls back to searching upward from `Path.cwd()` to `/`
     when no `--config` is given. No CLI test passes `--config`, so without
     this fixture every CLI `run` test silently depends on there being no
-    `skill-eval.toml` in any ancestor of the pytest working directory --
+    `skill-lens.toml` in any ancestor of the pytest working directory --
     the day this repo (or any checkout of it) grows its own root-level
-    `skill-eval.toml`, those tests would start reading it and change
+    `skill-lens.toml`, those tests would start reading it and change
     behavior for reasons invisible to the test itself.
 
     Chdir into a fresh, empty `tmp_path` before each test so any code path
@@ -96,9 +96,9 @@ def configure_replay_key(monkeypatch, record_mode, environ=None):
     """Set (or deliberately withhold) OPENAI_API_KEY for a cassette-backed test.
 
     Provider clients refuse to construct without a key even when every response
-    is replayed, so a placeholder is required in replay-only mode. However, when
-    recording cassettes (--record-mode=once), the real API key must survive so
-    the recording request succeeds.
+    is replayed, so a placeholder is required in replay-only mode. However, in
+    any recording mode -- `once`, `rewrite`, `all`, `new_episodes` -- the real
+    API key must survive so the recording request succeeds.
 
     In replay-only mode (`record_mode == "none"`, the default), a dummy key is
     set via `monkeypatch`, which is scoped to the test and un-sets it afterward.
@@ -123,9 +123,15 @@ def configure_replay_key(monkeypatch, record_mode, environ=None):
         # presence-only check would let it through and the recording would die
         # at the provider with an opaque auth error instead of here.
         if not environ.get("OPENAI_API_KEY"):
+            # The mode is interpolated rather than spelled out: this branch
+            # fires for every mode except "none", and the refresh-cassettes
+            # workflow uses `rewrite`. Naming `once` here would be the first
+            # thing anyone running that workflow sees, pointing them at a flag
+            # they did not pass.
             pytest.fail(
-                "Recording mode (--record-mode=once) requires a real OPENAI_API_KEY "
-                "in the environment. Run: export OPENAI_API_KEY=<your-key>"
+                f"Recording mode (--record-mode={record_mode}) requires a real "
+                "OPENAI_API_KEY in the environment. "
+                "Run: export OPENAI_API_KEY=<your-key>"
             )
 
 

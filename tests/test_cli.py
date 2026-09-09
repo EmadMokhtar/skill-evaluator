@@ -4,9 +4,9 @@ import xml.etree.ElementTree as ET
 
 from typer.testing import CliRunner
 
-from skill_eval.cli import app
-from skill_eval.judges.pydantic_ai import PydanticAIJudge
-from skill_eval.runners.pydantic_ai import PydanticAIRunner
+from skill_lens.cli import app
+from skill_lens.judges.pydantic_ai import PydanticAIJudge
+from skill_lens.runners.pydantic_ai import PydanticAIRunner
 
 runner = CliRunner()
 
@@ -241,7 +241,7 @@ def test_preflight_names_the_missing_variable(tmp_path, monkeypatch):
     )
     assert result.exit_code == 2
     assert "ANTHROPIC_API_KEY" in result.output
-    assert "skill-eval.toml" in result.output
+    assert "skill-lens.toml" in result.output
 
 
 def test_the_fake_runner_needs_no_key(tmp_path, monkeypatch):
@@ -255,7 +255,7 @@ def test_the_fake_runner_needs_no_key(tmp_path, monkeypatch):
 def test_model_flag_beats_the_config_file(tmp_path, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     skill_dir = _make_skill(tmp_path)
-    config_file = tmp_path / "skill-eval.toml"
+    config_file = tmp_path / "skill-lens.toml"
     config_file.write_text('model = "anthropic:claude-sonnet-4-6"\n', encoding="utf-8")
     result = runner.invoke(
         app,
@@ -277,9 +277,9 @@ def test_model_flag_beats_the_config_file(tmp_path, monkeypatch):
 
 def test_an_unknown_judge_in_config_is_a_user_error(tmp_path):
     skill_dir = _make_skill(tmp_path)
-    (tmp_path / "skill-eval.toml").write_text('judge = "psychic"\n', encoding="utf-8")
+    (tmp_path / "skill-lens.toml").write_text('judge = "psychic"\n', encoding="utf-8")
     result = runner.invoke(
-        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-lens.toml")]
     )
     assert result.exit_code == 2
     assert "psychic" in result.output
@@ -288,11 +288,11 @@ def test_an_unknown_judge_in_config_is_a_user_error(tmp_path):
 def test_a_real_judge_without_its_api_key_fails_preflight(tmp_path, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     skill_dir = _make_skill(tmp_path)
-    (tmp_path / "skill-eval.toml").write_text(
+    (tmp_path / "skill-lens.toml").write_text(
         'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\n', encoding="utf-8"
     )
     result = runner.invoke(
-        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-lens.toml")]
     )
     assert result.exit_code == 2
     assert "OPENAI_API_KEY" in result.output
@@ -302,12 +302,12 @@ def test_the_judge_model_falls_back_to_the_run_model(tmp_path, monkeypatch):
     # An empty judge_model must not reach the provider as an empty model id.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     skill_dir = _make_skill(tmp_path)
-    (tmp_path / "skill-eval.toml").write_text(
+    (tmp_path / "skill-lens.toml").write_text(
         'judge = "pydantic-ai"\nmodel = "anthropic:claude-haiku-4-5-20251001"\n',
         encoding="utf-8",
     )
     result = runner.invoke(
-        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-lens.toml")]
     )
     assert result.exit_code == 2
     assert "ANTHROPIC_API_KEY" in result.output
@@ -321,7 +321,7 @@ def test_judge_temperature_is_independent_of_the_runner_temperature(tmp_path, mo
     """
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     skill_dir = _make_skill(tmp_path)
-    (tmp_path / "skill-eval.toml").write_text(
+    (tmp_path / "skill-lens.toml").write_text(
         'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\ntemperature = 0.7\n',
         encoding="utf-8",
     )
@@ -332,7 +332,7 @@ def test_judge_temperature_is_independent_of_the_runner_temperature(tmp_path, mo
         raise AssertionError("stop before any network call")
 
     monkeypatch.setattr(PydanticAIJudge, "__init__", _capture)
-    runner.invoke(app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")])
+    runner.invoke(app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-lens.toml")])
 
     assert captured["temperature"] == 0.0
 
@@ -343,7 +343,7 @@ def test_judge_temperature_unset_reaches_the_judge(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     skill_dir = _make_skill(tmp_path)
-    (tmp_path / "skill-eval.toml").write_text(
+    (tmp_path / "skill-lens.toml").write_text(
         'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\njudge_temperature = "unset"\n',
         encoding="utf-8",
     )
@@ -354,7 +354,7 @@ def test_judge_temperature_unset_reaches_the_judge(tmp_path, monkeypatch):
         raise AssertionError("stop before any network call")
 
     monkeypatch.setattr(PydanticAIJudge, "__init__", _capture)
-    runner.invoke(app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")])
+    runner.invoke(app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-lens.toml")])
 
     assert captured["temperature"] == "unset"
 
@@ -412,7 +412,7 @@ def test_judge_preflight_wins_the_race_against_construction(tmp_path, monkeypatc
     """
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     skill_dir = _make_skill(tmp_path)
-    (tmp_path / "skill-eval.toml").write_text(
+    (tmp_path / "skill-lens.toml").write_text(
         'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\n', encoding="utf-8"
     )
 
@@ -421,7 +421,7 @@ def test_judge_preflight_wins_the_race_against_construction(tmp_path, monkeypatc
 
     monkeypatch.setattr(PydanticAIJudge, "__init__", _boom)
     result = runner.invoke(
-        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-eval.toml")]
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-lens.toml")]
     )
     assert result.exit_code == 2
     assert "OPENAI_API_KEY" in result.output
@@ -441,7 +441,7 @@ def test_a_blank_model_is_a_user_error_not_a_broken_run(tmp_path):
 
 def test_a_blank_judge_model_is_a_user_error_not_a_broken_run(tmp_path):
     skill_dir = _make_skill(tmp_path)
-    config = tmp_path / "skill-eval.toml"
+    config = tmp_path / "skill-lens.toml"
     config.write_text('judge = "pydantic-ai"\n', encoding="utf-8")
     result = runner.invoke(
         app, ["run", str(skill_dir), "--config", str(config), "--judge-model", "   "]
@@ -451,10 +451,10 @@ def test_a_blank_judge_model_is_a_user_error_not_a_broken_run(tmp_path):
 
 
 def test_a_blank_model_in_the_config_file_is_caught_too(tmp_path):
-    # Checked on the resolved value, so a blank in skill-eval.toml is rejected
+    # Checked on the resolved value, so a blank in skill-lens.toml is rejected
     # exactly like a blank flag.
     skill_dir = _make_skill(tmp_path)
-    config = tmp_path / "skill-eval.toml"
+    config = tmp_path / "skill-lens.toml"
     config.write_text('default_runner = "pydantic-ai"\nmodel = ""\n', encoding="utf-8")
     result = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
     assert result.exit_code == 2
@@ -481,10 +481,10 @@ def test_an_unknown_baseline_kind_is_a_user_error(tmp_path):
 
 
 def test_min_delta_is_satisfied_by_a_baseline_from_config(tmp_path):
-    # The check runs against resolved values, so a baseline in skill-eval.toml
+    # The check runs against resolved values, so a baseline in skill-lens.toml
     # satisfies a --min-delta passed on the command line.
     _make_skill(tmp_path)
-    config = tmp_path / "skill-eval.toml"
+    config = tmp_path / "skill-lens.toml"
     config.write_text('baseline = "none"\n', encoding="utf-8")
     result = runner.invoke(
         app, ["run", str(tmp_path), "--config", str(config), "--min-delta", "0.0"]

@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from skill_eval.cases.loader import CaseParseError
-from skill_eval.evaluators.assertion import UnknownAssertionKind
-from skill_eval.judges.fake import FakeJudge
-from skill_eval.models import (
+from skill_lens.cases.loader import CaseParseError
+from skill_lens.evaluators.assertion import UnknownAssertionKind
+from skill_lens.judges.fake import FakeJudge
+from skill_lens.models import (
     CheckResult,
     EvalCase,
     EvalScore,
@@ -16,9 +16,9 @@ from skill_eval.models import (
     Skill,
     ToolCall,
 )
-from skill_eval.orchestrator import _execute, _WorkItem, run_evals
-from skill_eval.runners.fake import FakeRunner
-from skill_eval.skills.loader import load_skills
+from skill_lens.orchestrator import _execute, _WorkItem, run_evals
+from skill_lens.runners.fake import FakeRunner
+from skill_lens.skills.loader import load_skills
 
 CASES_YAML = """cases:
   - name: passes

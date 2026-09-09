@@ -5,13 +5,13 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from skill_eval.models import Skill
-from skill_eval.skills.baseline import (
+from skill_lens.models import Skill
+from skill_lens.skills.baseline import (
     HISTORY_LIMIT,
     BaselineUnavailable,
     resolve_previous,
 )
-from skill_eval.skills.loader import parse_skill_file
+from skill_lens.skills.loader import parse_skill_file
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -127,7 +127,7 @@ def test_a_directory_outside_a_repository_reports_why(tmp_path):
 
 
 def test_a_missing_git_binary_reports_why_and_does_not_raise(tmp_path, monkeypatch):
-    monkeypatch.setattr("skill_eval.skills.baseline.shutil.which", lambda _: None)
+    monkeypatch.setattr("skill_lens.skills.baseline.shutil.which", lambda _: None)
     (tmp_path / "SKILL.md").write_text(_skill_md("1.0.0", "x"), encoding="utf-8")
 
     result = resolve_previous(parse_skill_file(tmp_path / "SKILL.md"))

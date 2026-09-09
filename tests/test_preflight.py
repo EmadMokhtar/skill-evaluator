@@ -2,7 +2,7 @@
 
 import pytest
 
-from skill_eval.runners.preflight import MissingAPIKey, check_api_key
+from skill_lens.runners.preflight import MissingAPIKey, check_api_key
 
 
 def test_a_present_key_passes():
@@ -24,7 +24,7 @@ def test_the_message_never_suggests_putting_secrets_in_config():
     with pytest.raises(MissingAPIKey) as exc:
         check_api_key("openai:gpt-4o-mini", {})
     message = str(exc.value)
-    assert "skill-eval.toml" in message
+    assert "skill-lens.toml" in message
     assert "never" in message.lower()
 
 

@@ -1,7 +1,7 @@
 """Efficiency is a goal in its own right, not a footnote on the report."""
 
-from skill_eval.evaluators.budget import BudgetEvaluator
-from skill_eval.models import BudgetSpec, EvalCase, RunResult
+from skill_lens.evaluators.budget import BudgetEvaluator
+from skill_lens.models import BudgetSpec, EvalCase, RunResult
 
 EVALUATOR = BudgetEvaluator()
 

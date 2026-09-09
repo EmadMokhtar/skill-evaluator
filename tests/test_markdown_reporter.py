@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import re
 
-from skill_eval.comparison import build_delta
-from skill_eval.gating import GateResult, evaluate_gate
-from skill_eval.models import (
+from skill_lens.comparison import build_delta
+from skill_lens.gating import GateResult, evaluate_gate
+from skill_lens.models import (
     BaselineNote,
     CaseOutcome,
     CheckResult,
@@ -18,7 +18,7 @@ from skill_eval.models import (
     RunReport,
     RunResult,
 )
-from skill_eval.reporters.markdown import render_markdown
+from skill_lens.reporters.markdown import render_markdown
 
 
 def _outcome(name="extracts", status="passed", arm="candidate", repeat_index=0, **kwargs):
@@ -411,7 +411,7 @@ def test_a_line_break_in_a_name_cannot_start_a_new_block():
 def test_a_backtick_in_a_check_id_cannot_close_its_code_span():
     """Check ids embed `trajectory.called` entries, which are not validated as
     identifiers the way tool names are."""
-    from skill_eval.comparison import Delta, LowSignalCheck
+    from skill_lens.comparison import Delta, LowSignalCheck
 
     delta = Delta(
         baseline_kind="none",

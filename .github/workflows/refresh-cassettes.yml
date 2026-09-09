@@ -1,0 +1,109 @@
+name: Refresh cassettes
+
+# Manual only. Re-recording spends money and needs a real API key, so it is
+# never part of the normal CI path.
+on: workflow_dispatch
+
+permissions: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Re-record
+        # --record-mode=once only fills in a cassette that is missing. Once a
+        # cassette is loaded it write-protects it: a matching request replays
+        # instead of hitting the provider, and a request that no longer
+        # matches raises CannotOverwriteExistingCassetteException instead of
+        # being re-recorded. Refreshing an *existing* recording -- this
+        # workflow's whole purpose -- needs --record-mode=rewrite, which
+        # discards each cassette it touches and records it fresh.
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: uv run pytest tests/test_cassettes.py --record-mode=rewrite
+
+      - name: Prove the new recordings replay
+        # A recording that cannot be replayed is worthless, and a reviewer
+        # reading YAML would not notice. Catch it here.
+        run: uv run pytest tests/test_cassettes.py --record-mode=none
+
+      - name: Stage the recordings
+        # git diff does not see untracked files, and a freshly re-recorded
+        # cassette that did not exist before is exactly that: untracked.
+        # Both checks below need to see it, so stage everything under
+        # tests/cassettes once, here, and have both compare against the
+        # index (git diff --cached) rather than the working tree.
+        run: git add -A -- tests/cassettes
+
+      - name: Refuse to push a secret
+        # Scrubbing already runs on both sides of the exchange in
+        # tests/conftest.py. This is a second lock on a locked door: the
+        # replay tier's whole value rests on cassettes being secret-free.
+        #
+        # The diff is captured on its own line, with its exit status
+        # checked explicitly, rather than piped straight into grep: under
+        # pipefail a pipeline's exit status is its LAST command's, and grep
+        # fed empty input exits 1 ("no lines selected") -- indistinguishable
+        # from "no secret found". Piping the two together would make a
+        # `git diff` failure read as a clean scan instead of aborting the
+        # job.
+        #
+        # The patterns require a boundary before "sk-" and a realistic
+        # minimum length of key material, so ordinary prose a model might
+        # generate ("risk-averse", "task-oriented", "desk-based") cannot
+        # trip them the way a bare `sk-[A-Za-z0-9]` would.
+        #
+        # That boundary is spelled `(^|[^A-Za-z0-9])` rather than `\b`. Both
+        # GNU and BSD grep do accept `\b` here -- it is a documented GNU
+        # extension, not a POSIX ERE feature -- but this step fails OPEN: a
+        # pattern that quietly stops matching lets a credential through, and
+        # nothing downstream would notice. The portable spelling behaves
+        # identically on the runner and removes the assumption entirely.
+        run: |
+          set -euo pipefail
+          if ! diff_output="$(git diff --cached -- tests/cassettes)"; then
+            echo "git diff failed; cannot verify the recordings are secret-free. Refusing to push." >&2
+            exit 1
+          fi
+          if echo "$diff_output" | grep -nE '(^|[^A-Za-z0-9])(sk-[A-Za-z0-9]{20,}|Bearer [A-Za-z0-9._-]{20,})'; then
+            echo "A credential appears in the re-recorded cassettes. Refusing to push." >&2
+            exit 1
+          fi
+
+      - name: Push a branch for review
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --cached --quiet -- tests/cassettes; then
+            echo "The cassettes already match the provider. Nothing to review." \
+              >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          branch="chore/refresh-cassettes-${{ github.run_id }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -m "test: refresh the recorded provider traffic"
+          git push origin "$branch"
+          # A pull request opened with GITHUB_TOKEN gets no CI checks, and for
+          # re-recorded cassettes those checks are the point. A human opening
+          # it is what starts them.
+          {
+            echo "### Cassettes refreshed"
+            echo
+            echo "Open the pull request to run CI on the new recordings:"
+            echo
+            echo "${{ github.server_url }}/${{ github.repository }}/compare/${branch}?expand=1"
+          } >> "$GITHUB_STEP_SUMMARY"

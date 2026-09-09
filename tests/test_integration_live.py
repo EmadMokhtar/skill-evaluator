@@ -26,9 +26,9 @@ from pathlib import Path
 
 import pytest
 
-from skill_eval.orchestrator import run_evals
-from skill_eval.runners.pydantic_ai import PydanticAIRunner
-from skill_eval.skills.loader import load_skills
+from skill_lens.orchestrator import run_evals
+from skill_lens.runners.pydantic_ai import PydanticAIRunner
+from skill_lens.skills.loader import load_skills
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 

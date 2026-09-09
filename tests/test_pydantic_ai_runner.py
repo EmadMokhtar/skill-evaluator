@@ -7,10 +7,10 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from skill_eval.models import EvalCase, Skill, ToolSpec
-from skill_eval.runners.base import Runner
-from skill_eval.runners.pydantic_ai import BASELINE_PREAMBLE, OFFERED_PREAMBLE, PydanticAIRunner
-from skill_eval.runners.tools import skill_tool_name
+from skill_lens.models import EvalCase, Skill, ToolSpec
+from skill_lens.runners.base import Runner
+from skill_lens.runners.pydantic_ai import BASELINE_PREAMBLE, OFFERED_PREAMBLE, PydanticAIRunner
+from skill_lens.runners.tools import skill_tool_name
 
 SKILL = Skill(
     name="order-support",
@@ -266,7 +266,7 @@ def test_a_failure_while_capturing_the_result_is_reported_not_raised(monkeypatch
     # The never-raise contract covers our own capture code, not just the
     # provider. A real provider can emit message shapes FunctionModel never
     # does, and a serialisation failure must not crash the run.
-    import skill_eval.runners.pydantic_ai as adapter
+    import skill_lens.runners.pydantic_ai as adapter
 
     def boom(messages):
         raise RuntimeError("transcript exploded")
@@ -325,7 +325,7 @@ def test_a_missing_optional_extra_propagates_rather_than_becoming_an_errored_cas
     # optional extra -- it's a user/setup error the CLI turns into a clean
     # exit 2 (see _AUTHORING_ERRORS in cli.py), not something the runner
     # should swallow into RunResult.error like a provider failure.
-    import skill_eval.runners.pydantic_ai as adapter
+    import skill_lens.runners.pydantic_ai as adapter
 
     def explode() -> None:
         raise adapter.RunnerDependencyError("the 'pydantic-ai' runner needs its optional extra")

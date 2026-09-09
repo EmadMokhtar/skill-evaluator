@@ -415,6 +415,11 @@ including the skipped-skill wording), `tests/test_gating.py`, `tests/test_config
 
 ## 10. Part 2 — release automation (separate PR)
 
+> **Superseded by `2026-09-09-skill-eval-m5-part2-design.md`.** This section assumed a
+> credential able to push to a protected `main`. The real constraint is different, and this
+> milestone also renamed the project to `skill-lens`. Kept unedited as a record of what was
+> believed on 2026-08-05.
+
 Specified here so the milestone is whole, implemented after the external setup exists.
 
 - **`release.yml`** — on push to `main`: `cz bump`, commit the version and changelog back,

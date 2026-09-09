@@ -11,8 +11,8 @@ from pathlib import Path
 
 from typer.main import get_command
 
-from skill_eval.cli import app
-from skill_eval.yaml_loading import safe_load
+from skill_lens.cli import app
+from skill_lens.yaml_loading import safe_load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ACTION = REPO_ROOT / "action.yml"
@@ -80,5 +80,5 @@ def test_every_cli_backed_input_is_actually_forwarded_to_the_command():
         variable = next((k for k, v in env.items() if v.strip() == reference), None)
         assert variable is not None, f"input {name!r} is not exposed to the run step's env"
         assert f'add --{name} "${variable}"' in script, (
-            f"input {name!r} reaches the step as ${variable} but is never passed to skill-eval"
+            f"input {name!r} reaches the step as ${variable} but is never passed to skill-lens"
         )

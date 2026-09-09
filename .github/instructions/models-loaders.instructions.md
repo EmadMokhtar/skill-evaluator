@@ -1,5 +1,5 @@
 ---
-applyTo: "src/skill_eval/models.py,src/skill_eval/config.py,src/skill_eval/yaml_loading.py,src/skill_eval/cases/**,src/skill_eval/skills/**"
+applyTo: "src/skill_lens/models.py,src/skill_lens/config.py,src/skill_lens/yaml_loading.py,src/skill_lens/cases/**,src/skill_lens/skills/**"
 ---
 
 # Reviewing models and loaders
@@ -18,7 +18,7 @@ This is where user-authored files become typed objects. Every mistake here is si
 - **YAML goes through `yaml_loading.safe_load`.** PyYAML's `SafeLoader` is YAML 1.1 and
   turns bare `yes`/`no`/`on`/`off` into booleans; an assertion `value: yes` is meant as the
   string.
-- **Secrets never come from `skill-eval.toml`.** A config file is committed; a key must not
+- **Secrets never come from `skill-lens.toml`.** A config file is committed; a key must not
   be. Flag any new config field that would hold a credential.
 - **Derived values are properties, not stored fields** — `RunResult.tokens`, `errored`, and
   the `RunReport` aggregates. A stored copy can disagree with its source.

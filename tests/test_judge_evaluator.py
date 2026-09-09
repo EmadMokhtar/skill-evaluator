@@ -1,9 +1,9 @@
 """Rubric scoring. The judge is scripted, so every test here is free."""
 
-from skill_eval.evaluators.base import Evaluator
-from skill_eval.evaluators.judge import JudgeEvaluator, build_request
-from skill_eval.judges.fake import FakeJudge
-from skill_eval.models import CheckResult, EvalCase, JudgeSpec, JudgeVerdict, RunResult
+from skill_lens.evaluators.base import Evaluator
+from skill_lens.evaluators.judge import JudgeEvaluator, build_request
+from skill_lens.judges.fake import FakeJudge
+from skill_lens.models import CheckResult, EvalCase, JudgeSpec, JudgeVerdict, RunResult
 
 RESULT = RunResult(output="The return window is 30 days.")
 

@@ -81,3 +81,15 @@ def test_recording_mode_treats_an_empty_key_as_missing():
     """
     with pytest.raises(pytest.fail.Exception, match="export OPENAI_API_KEY"):
         configure_replay_key(monkeypatch=None, record_mode="once", environ={"OPENAI_API_KEY": ""})
+
+
+def test_the_recording_failure_names_the_mode_actually_in_play():
+    """The message must name the mode that fired, not a hardcoded `once`.
+
+    The refresh-cassettes workflow records with `rewrite`, and it runs without
+    `OPENAI_API_KEY` set, so this failure is the first thing anyone running it
+    sees. A message naming `--record-mode=once` would send them looking for a
+    flag the workflow never passed.
+    """
+    with pytest.raises(pytest.fail.Exception, match=r"--record-mode=rewrite"):
+        configure_replay_key(monkeypatch=None, record_mode="rewrite", environ={})

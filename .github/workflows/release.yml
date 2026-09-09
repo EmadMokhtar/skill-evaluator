@@ -1,0 +1,200 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# A release must never be cancelled halfway: the tag may already be pushed
+# while the build is not. Queue instead.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# Nothing by default; each job asks for exactly what it uses.
+permissions: {}
+
+jobs:
+  verify:
+    # ci.yml runs on this same push, so without this job the release would race
+    # it and could tag a commit whose tests are still running, or already red.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Test
+        run: uv run pytest
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      bumped: ${{ steps.bump.outputs.bumped }}
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # cz bump reads every commit since the last tag to compute the
+          # increment, so a shallow clone would under-report the change.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: Configure the committer
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump the version
+        id: bump
+        shell: bash
+        run: |
+          set -u
+          # `set -e` is deliberately not used: cz signals "nothing to release"
+          # through its exit code, and -e would discard it before we can read it.
+          # That omission applies to the whole step, so every command below
+          # that can fail is checked by hand instead of relying on -e.
+          # (No pipeline runs in this step, so `pipefail` would be inert —
+          # dropped rather than left in to imply a check that isn't there.)
+          code=0
+          # --check-consistency turns a version_files pattern that matched
+          # nothing into a hard failure (exit 17) instead of a file rewritten
+          # unchanged. Without it, reformatting a pinned line -- action.yml's
+          # install-spec, say -- would tag a tree still pinning the previous
+          # version, and nothing would report it: the bump commit carries
+          # [skip ci], so the bumped tree is never tested. Commitizen reads
+          # this from the command line only, never from [tool.commitizen], so
+          # it has to live here. It is checked before the version is written,
+          # before `git add` and before the tag, so an inconsistent tree
+          # aborts with nothing pushed.
+          uv run cz bump --yes --check-consistency || code=$?
+          # 21 = NoneIncrementExit (commits exist, none warrant a release).
+          # 3  = NoCommitsFoundError (no commits since the last tag at all).
+          if [ "$code" = "21" ] || [ "$code" = "3" ]; then
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "No commit since the last tag warrants a release." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$code" != "0" ]; then
+            echo "cz bump failed with exit code $code" >&2
+            exit "$code"
+          fi
+          if ! version="$(uv run cz version --project)"; then
+            echo "cz version --project failed after a successful bump; aborting so a broken release does not report bumped=true with no version." >&2
+            exit 1
+          fi
+          if [ -z "$version" ]; then
+            echo "cz version --project returned an empty string after a successful bump; aborting so a broken release does not report bumped=true with no version." >&2
+            exit 1
+          fi
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Released version $version." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push the bump commit and its tag
+        # --atomic makes the commit and the tag one update: if either ref is
+        # rejected (main moved under us, the tag already exists), neither
+        # lands. Without it git pushes the refs independently, so a rejected
+        # tag would leave the bump commit on main with no tag -- and the
+        # ls-remote check below, guarded by the implicit success() of the
+        # step before it, would be skipped in exactly the state it exists to
+        # report.
+        if: steps.bump.outputs.bumped == 'true'
+        run: git push --atomic --follow-tags origin HEAD:main
+
+      - name: Verify the tag reached origin
+        # `--follow-tags` pushes only annotated tags. `annotated_tag = true`
+        # in [tool.commitizen] makes cz create one, but if that setting were
+        # ever removed, or the push otherwise dropped the tag, the failure
+        # would be silent: the `publish` job (added in a later task) is
+        # reached through `needs:`, not through the tag, so nothing else
+        # would stop a release with no reproducible tag from reaching PyPI.
+        if: steps.bump.outputs.bumped == 'true'
+        shell: bash
+        run: |
+          set -eu
+          tag="v${{ steps.bump.outputs.version }}"
+          # The lookup's exit status is checked separately from its output. A
+          # failed `git ls-remote` (network fault, auth) also prints nothing,
+          # so testing emptiness alone would report "the tag is missing" for a
+          # tag that is very likely there, and send a maintainer to re-tag by
+          # hand over a transient error.
+          if ! remote_refs="$(git ls-remote --tags origin "refs/tags/$tag")"; then
+            echo "git ls-remote failed, so whether tag $tag reached origin is unknown. Check origin by hand before re-running anything." >&2
+            exit 1
+          fi
+          if [ -z "$remote_refs" ]; then
+            echo "Tag $tag was pushed but is not on origin. The bump commit may now be on main with no matching tag, which makes this release unreproducible." >&2
+            exit 1
+          fi
+          echo "Confirmed tag $tag reached origin." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build the distributions
+        if: steps.bump.outputs.bumped == 'true'
+        run: uv build
+
+      - name: Upload the distributions
+        if: steps.bump.outputs.bumped == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: release
+    if: needs.release.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      # Trusted Publishing proves this job's identity to PyPI with a
+      # short-lived signed token. No stored API token exists anywhere.
+      id-token: write
+      contents: read
+    environment:
+      name: pypi
+      url: https://pypi.org/p/skill-lens
+    steps:
+      - name: Download the distributions
+        # The artifact the release job built and verified. Rebuilding here
+        # would publish bytes that nothing tested.
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        # Pinned to the release branch, not a numeric tag like every other
+        # third-party action here — this is PyPA's own recommendation for
+        # this action, not an oversight to be "fixed" into consistency.
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # A partial upload is the case the documented "re-run publish"
+          # recovery exists for: the wheel landed, the sdist did not. The
+          # action defaults to skip-existing: false, which fails that retry on
+          # "File already exists" — the one state it was meant to survive.
+          # This skips only files PyPI already has and still uploads the rest;
+          # it cannot overwrite or silently replace a published file.
+          skip-existing: true

@@ -2,9 +2,9 @@
 
 from pathlib import Path
 
-import skill_eval.runners.tools as tools_module
-from skill_eval.models import Skill, ToolSpec
-from skill_eval.runners.tools import build_mock_tool, build_skill_tool, skill_tool_name
+import skill_lens.runners.tools as tools_module
+from skill_lens.models import Skill, ToolSpec
+from skill_lens.runners.tools import build_mock_tool, build_skill_tool, skill_tool_name
 
 
 def test_schema_describes_every_declared_parameter():

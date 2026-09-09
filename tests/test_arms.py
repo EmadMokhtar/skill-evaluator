@@ -6,9 +6,9 @@ import subprocess
 
 import pytest
 
-from skill_eval.models import RunResult, Skill
-from skill_eval.orchestrator import run_evals
-from skill_eval.runners.fake import FakeRunner
+from skill_lens.models import RunResult, Skill
+from skill_lens.orchestrator import run_evals
+from skill_lens.runners.fake import FakeRunner
 
 CASES_YAML = """cases:
   - name: passes
@@ -123,7 +123,7 @@ def test_an_offered_case_runs_both_arms_under_previous(tmp_path):
     subprocess.run(["git", "commit", "-q", "-m", "feat: v1"], cwd=repo, check=True)
     skill_md.write_text("---\nname: pdf\nversion: 1.1.0\n---\n\nnew\n", encoding="utf-8")
 
-    from skill_eval.skills.loader import load_skills
+    from skill_lens.skills.loader import load_skills
 
     report = run_evals(load_skills(skill_dir), [_runner()], baseline="previous")
 

@@ -1,17 +1,17 @@
 # Architecture
 
-How `skill-eval` is built, and why it is built this way. For how to *use* it, see the
+How `skill-lens` is built, and why it is built this way. For how to *use* it, see the
 [documentation site](https://emadmokhtar.github.io/skill-evaluator/).
 
 ## Scope and non-goals
 
-`skill-eval` runs evaluations on Anthropic-style Agent Skills — directories containing a
+`skill-lens` runs evaluations on Anthropic-style Agent Skills — directories containing a
 `SKILL.md` file. It is a CLI and a library, designed to run as a CI gate where the exit
 code is the contract, or on demand during development.
 
 Skills under test and their eval cases are **inputs**. Nothing about a skill under test is
-vendored here. That is the central constraint: any skill repository can adopt `skill-eval`
-without embedding it, and `skill-eval` can be released independently of anything it evaluates.
+vendored here. That is the central constraint: any skill repository can adopt `skill-lens`
+without embedding it, and `skill-lens` can be released independently of anything it evaluates.
 
 Non-goals: authoring skills, running skills in production, and hosting a results dashboard.
 
@@ -59,12 +59,12 @@ problem (errored) from a low score (failed).
 | `cli.py` | Typer entry point. Wires config → loaders → runner → orchestrator → reporters → gate, and owns the exit-code contract. |
 | `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. |
 | `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. |
-| `config.py` | Loads `skill-eval.toml` by explicit path or upward discovery. Never reads secrets. |
+| `config.py` | Loads `skill-lens.toml` by explicit path or upward discovery. Never reads secrets. |
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
 | `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
 | `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models. |
-| `scaffold.py` | Renders the starter eval suite `skill-eval init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. |
+| `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. |
 | `runners/base.py` | The `Runner` protocol. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of only two modules that import an agent framework.** |
@@ -160,8 +160,8 @@ propagate; `cli.py` catches them via `_AUTHORING_ERRORS` and exits 2.
 error `2`. In `cli.py`, a JSON-write failure escalates to 2 only when the gate itself
 passed — a write problem must never mask an already-failing gate.
 
-**An unfilled scaffold is an authoring error, not a failure.** `skill-eval init` writes
-`TODO(skill-eval)` into every field the author must supply, and `cases/loader.py`
+**An unfilled scaffold is an authoring error, not a failure.** `skill-lens init` writes
+`TODO(skill-lens)` into every field the author must supply, and `cases/loader.py`
 rejects any case still containing it — before schema validation, so the message names
 the field rather than its type. Enforcing this in the loader rather than the generator
 makes it unconditional: hand-written stubs get it too, and no CI configuration can opt
@@ -180,14 +180,14 @@ a total that silently disagrees with the split it was priced from.
 which turns bare `yes`/`no`/`on`/`off` into booleans. An assertion `value: yes` is meant as
 the string.
 
-**Secrets come from environment variables only** — never from `skill-eval.toml`. A config
+**Secrets come from environment variables only** — never from `skill-lens.toml`. A config
 file is committed; a key must not be.
 
 **Agent-framework imports appear in exactly two modules** — `runners/pydantic_ai.py` and
 `judges/pydantic_ai.py`. `runners/tools.py` builds framework-neutral mock tools and the
 adapter wraps them. `tests/test_framework_isolation.py` scans the whole package for
 top-level framework imports and allows only those two files; it matches import *forms*, so
-`cli.py` importing our own `skill_eval.runners.pydantic_ai` is not a false positive. This is
+`cli.py` importing our own `skill_lens.runners.pydantic_ai` is not a false positive. This is
 what keeps the `Runner` and `Judge` seams real rather than nominal.
 
 **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` plus a
@@ -218,8 +218,11 @@ about the skill; raising would surface it as an infra error instead.
 **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act.
 A missing cassette skips; a mismatched request fails rather than reaching the network.
 
-**`skill_eval` (underscore) never appears in user-facing output.** The user-facing name is
-`skill-eval` everywhere: command, config file, distribution.
+**`skill_lens` (underscore) never appears in user-facing output.** The user-facing name is
+`skill-lens` everywhere: command, config file, distribution. The GitHub repository keeps its
+older name, `skill-evaluator`, so `uses: EmadMokhtar/skill-evaluator@v<version>` installing
+`skill-lens` is expected, not a mistake. `tests/test_naming.py` fails if the pre-rename name
+reappears outside `docs/superpowers/`, which is a historical archive and is never rewritten.
 
 **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
 
@@ -347,12 +350,64 @@ and `PydanticAIRunner` builds a fresh agent per run. It is a constraint on what 
 
 **The action fails closed.** `shell: bash` steps already run under `bash --noprofile --norc
 -eo pipefail`, so `-e` is on before the action's own script runs a line; the run step captures
-the CLI's exit code itself (`code=0; skill-eval run ... || code=$?`) before `-e` gets a chance
+the CLI's exit code itself (`code=0; skill-lens run ... || code=$?`) before `-e` gets a chance
 to discard it. Every step after that — publishing the step summary, reading the JSON report,
 re-raising the exit code — carries `if: always()`, so a failing run still gets its summary
 published and its outputs read. The final step exits `"${CODE:-1}"`: an *empty* code means the
 run step never completed at all (a failed install, a cancelled job), and a gate that cannot
 prove it passed must fail rather than default to success.
+
+**Nothing publishes that has not been verified in the same run.** `release.yml` chains three
+jobs — `verify` (lint, format, the full suite), `release` (`cz bump`, push, build, upload) and
+`publish` (download that artifact, upload to PyPI) — with `needs:`, not across separate
+workflows. That shape is forced: GitHub starts no new workflow run from a push made with
+`GITHUB_TOKEN`, so a `publish` workflow listening on tag pushes would never fire, and the
+release would tag and then silently ship nothing. Chaining also gives the property worth
+having — `publish` is unreachable except through a green `verify`, and it uploads the artifact
+`release` built rather than rebuilding, so the bytes that ship are the bytes that were tested.
+Publishing is irreversible: PyPI refuses a re-upload of a version that already exists, which is
+why every gate here fails closed. The corollary is that there is **no manual path to PyPI**; a
+locally bumped and pushed tag produces a run with nothing to release.
+
+**A merge with no releasable commit publishes nothing and fails nothing.** `cz bump` signals
+"nothing to release" through its exit code — `21` (`NoneIncrementExit`) and `3`
+(`NoCommitsFoundError`) — so the bump step deliberately runs without `set -e`, which would
+discard the code before it could be read, and checks every other command by hand instead.
+
+**The pushed release tag is annotated, and the job proves it reached `origin`.**
+`git push --follow-tags` pushes only *annotated* tags, and Commitizen creates a lightweight one
+unless told otherwise, so `annotated_tag = true` is what stops the bump commit reaching `main`
+while its tag dies on the runner. Because `publish` is reached through `needs:` and not through
+the tag, that loss would not stop a release: a `git ls-remote` check runs right after the push
+and fails loudly instead. The push is `--atomic` so the commit and tag land together or not at
+all, and `cz bump --check-consistency` aborts before writing anything if a file listed in
+`version_files` no longer contains the current version — a flag on the command, because
+Commitizen reads it only from the CLI and never from `pyproject.toml`. That abort is the last
+line rather than the first: `tests/test_release_config.py` asserts the same property on every
+pull request, so a reformatted pin is caught where it is cheap to fix instead of costing a
+release on `main`.
+
+The tag the lookup builds is checked against `tag_format` rather than trusted. The workflow
+hardcodes the `v` prefix that `[tool.commitizen] tag_format` configures — two copies of one
+string in two files — so `tests/test_release_workflow.py` derives the prefix from the setting
+and requires the workflow to use it. Changing the format alone would tag correctly, push
+successfully, and break only the lookup, failing *after* the push: the one unrecoverable state
+here, since the version is spent, `publish` never became eligible to re-run, and a fresh run
+finds nothing to release.
+
+**No long-lived publishing credential exists.** PyPI accepts the upload because the job proves
+its identity with a short-lived token (Trusted Publishing, over OIDC), so `publish` needs
+`id-token: write` and nothing else — it cannot write to the repository. Permissions are granted
+per job against a workflow-level `permissions: {}`, so a job added later inherits nothing.
+
+**A cassette refresh proves its recordings replay, and checks them for secrets, before pushing.**
+It re-records with `--record-mode=rewrite`: `once` only fills in a *missing* cassette and
+write-protects one already loaded, so it cannot refresh an existing recording. It then stages
+the recordings before either check, because `git diff` cannot see an untracked file and a
+freshly recorded cassette is exactly that — without staging, the scan would read as a lock while
+checking nothing on the one path that creates a file. It hands back a **branch**, never a pull
+request, because a pull request opened with `GITHUB_TOKEN` gets no CI checks, and on a cassette
+refresh those checks are the whole point of the review.
 
 ## Extension points
 

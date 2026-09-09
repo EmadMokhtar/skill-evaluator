@@ -1,12 +1,12 @@
-# skill-eval
+# skill-lens
 
-**An Agent Skill is a prompt. Prompts regress.** `skill-eval` turns *"I think this
+**An Agent Skill is a prompt. Prompts regress.** `skill-lens` turns *"I think this
 `SKILL.md` got better"* into a score, a report, and an exit code your pipeline can gate on.
 
 [![CI](https://github.com/EmadMokhtar/skill-evaluator/actions/workflows/ci.yml/badge.svg)](https://github.com/EmadMokhtar/skill-evaluator/actions/workflows/ci.yml)
 [![Docs](https://github.com/EmadMokhtar/skill-evaluator/actions/workflows/docs.yml/badge.svg)](https://emadmokhtar.github.io/skill-evaluator/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/EmadMokhtar/skill-evaluator/blob/main/LICENSE)
 
 **📖 Full documentation: <https://emadmokhtar.github.io/skill-evaluator/>**
 
@@ -16,11 +16,11 @@ You edit a `SKILL.md`, read the new answer once, and it looks better. Two weeks 
 teammate edits the same file, and nobody can say whether the agent still looks an order up
 *before* refunding it — or whether it now refunds orders it should refuse.
 
-`skill-eval` gives that question a real answer. You write eval cases next to your skill. It
+`skill-lens` gives that question a real answer. You write eval cases next to your skill. It
 runs them, scores what came back, and reports one verdict for the whole run.
 
 Your skills stay yours. Skills and their eval cases are **inputs** to the tool — nothing
-about a skill under test is vendored here, so any skill repository can adopt `skill-eval`
+about a skill under test is vendored here, so any skill repository can adopt `skill-lens`
 without embedding it.
 
 ## What it measures
@@ -41,16 +41,29 @@ without embedding it.
 
 ## Try it — free, offline, no API key
 
-No release has shipped yet, so install from source:
+```bash
+uv tool install "skill-lens[pydantic-ai]"
+```
+
+(`pip install "skill-lens[pydantic-ai]"` works too. Drop the extra for the offline default
+runner alone.)
+
+That puts `skill-lens` on your `PATH`, so the commands below run as written.
+
+The walkthrough uses this repository's own example skills, so clone it too — or point
+`skill-lens` at your own directory of `SKILL.md` files instead:
 
 ```bash
 git clone https://github.com/EmadMokhtar/skill-evaluator.git
 cd skill-evaluator
-uv sync
 ```
 
-A skill is any directory containing `SKILL.md`. Its eval cases live beside it — the clone
-you just made ships two:
+Working on `skill-lens` itself rather than using it? Run `uv sync` in that checkout for the
+development environment, and prefix the commands below with `uv run` — you can then skip the
+`uv tool install` above.
+
+A skill is any directory containing `SKILL.md`. Its eval cases live beside it — this
+repository ships two:
 
 ```
 examples/
@@ -65,7 +78,7 @@ examples/
 Point the CLI at one skill directory or at a parent of many — discovery is recursive:
 
 ```bash
-uv run skill-eval list ./examples
+skill-lens list ./examples
 ```
 
 ```
@@ -74,7 +87,7 @@ order-support	5 case(s)	examples/order-support
 ```
 
 `list` discovers skills and validates every eval file without calling a runner: no API key,
-no spend. Starting on your own skill? `skill-eval init ./skills/my-skill` writes a starter
+no spend. Starting on your own skill? `skill-lens init ./skills/my-skill` writes a starter
 suite with the placeholders marked, so you fill in the blanks instead of starting from one.
 
 ## A case is a few lines of YAML
@@ -118,7 +131,7 @@ skills/
 ```
 
 ```bash
-uv run skill-eval run ./skills
+skill-lens run ./skills
 ```
 
 ```
@@ -138,14 +151,14 @@ Exit code `0` means the gate passed, `1` means it failed, and `2` means somethin
 own files is wrong. That is the whole contract with your pipeline.
 
 The default runner is scripted and offline, so the pipeline above costs nothing to try. To
-score a real agent, install the extra (`uv sync --extra pydantic-ai`) and pass
-`--runner pydantic-ai` — see
+score a real agent, pass `--runner pydantic-ai` — the `[pydantic-ai]` extra in the install
+above is what supplies it (from a checkout: `uv sync --extra pydantic-ai`). See
 [Runners](https://emadmokhtar.github.io/skill-evaluator/runners/).
 
 ## Gate your pull requests
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v1
+- uses: EmadMokhtar/skill-evaluator@v0.1.0
   with:
     path: ./skills
     runner: pydantic-ai
@@ -154,10 +167,13 @@ score a real agent, install the extra (`uv sync --extra pydantic-ai`) and pass
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
+Pin an exact tag. Until 1.0 a minor release may change behaviour, so there is no
+floating `v0` tag to follow.
+
 The run publishes a JUnit XML report for your provider's test pane, a Markdown summary for
-the job summary or a pull-request comment, and a JSON report for anything else. `skill-eval`
+the job summary or a pull-request comment, and a JSON report for anything else. `skill-lens`
 never calls the GitHub API itself — it renders files, your workflow decides where they go.
-Copy-pasteable workflows live in [`examples/ci/`](examples/ci/) and in
+Copy-pasteable workflows live in [`examples/ci/`](https://github.com/EmadMokhtar/skill-evaluator/tree/main/examples/ci) and in
 [CI integration](https://emadmokhtar.github.io/skill-evaluator/ci/).
 
 Once that is green, `baseline: previous` and `repeat: 3` turn the same job into a
@@ -165,15 +181,15 @@ Once that is green, `baseline: previous` and `repeat: 3` turn the same job into 
 carries the delta —
 see [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparative-evals/).
 
-> **Before the first release, two things in that snippet do not resolve yet.** There are no
-> tags, so `@v1` is not a valid ref; and the action's default `install-spec` names a PyPI
-> package that has not been published. Pin both to the same commit until then:
+> **Running against an unreleased commit?** The action's default `install-spec` pins the
+> released version matching its own tag, so point both at the same commit and they cannot
+> drift apart:
 >
 > ```yaml
 > - uses: EmadMokhtar/skill-evaluator@<commit-sha>
 >   with:
 >     path: ./skills
->     install-spec: "skill-eval[pydantic-ai] @ git+https://github.com/EmadMokhtar/skill-evaluator@<commit-sha>"
+>     install-spec: "skill-lens[pydantic-ai] @ git+https://github.com/EmadMokhtar/skill-evaluator@<commit-sha>"
 > ```
 
 ## Why a green run means something
@@ -182,7 +198,7 @@ Eval tools are easy to fool — mostly by accident, and usually by yourself. The
 deliberate design decisions, each with a test holding it in place:
 
 - **No vacuous passes.** A typo like `assertion:` is rejected rather than silently producing
-  a case that checks nothing. An unfilled `TODO(skill-eval)` scaffold stops the run. A judge
+  a case that checks nothing. An unfilled `TODO(skill-lens)` scaffold stops the run. A judge
   check that passes without citing evidence is recorded as a failure. A run that executed
   zero cases fails the gate — "nothing ran" is a broken run, not a pass.
 - **`errored` is not `failed`.** A provider returning 500 is an infrastructure signal, not
@@ -192,7 +208,7 @@ deliberate design decisions, each with a test holding it in place:
 - **Authoring mistakes stop the run.** A malformed regex or an unknown assertion kind is a
   bug in your files, not a verdict on your skill — exit `2`, naming the file and the field.
 
-The full list, with the reasoning behind each, is in [ARCHITECTURE.md](ARCHITECTURE.md).
+The full list, with the reasoning behind each, is in [ARCHITECTURE.md](https://github.com/EmadMokhtar/skill-evaluator/blob/main/ARCHITECTURE.md).
 
 ## Documentation
 
@@ -202,12 +218,12 @@ The full list, with the reasoning behind each, is in [ARCHITECTURE.md](ARCHITECT
 | Deciding what to test | [Writing evals](https://emadmokhtar.github.io/skill-evaluator/writing-evals/) |
 | Eval YAML reference | [Eval files](https://emadmokhtar.github.io/skill-evaluator/eval-files/) |
 | Commands and flags | [CLI](https://emadmokhtar.github.io/skill-evaluator/cli/) |
-| `skill-eval.toml` | [Configuration](https://emadmokhtar.github.io/skill-evaluator/configuration/) |
+| `skill-lens.toml` | [Configuration](https://emadmokhtar.github.io/skill-evaluator/configuration/) |
 | Real agents, tools, budgets | [Runners](https://emadmokhtar.github.io/skill-evaluator/runners/) |
 | Baselines, deltas, `--min-delta` | [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparative-evals/) |
 | Exit codes and reports | [Gating](https://emadmokhtar.github.io/skill-evaluator/gating/) |
 | The action and example workflows | [CI integration](https://emadmokhtar.github.io/skill-evaluator/ci/) |
-| How it is built | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| How it is built | [ARCHITECTURE.md](https://github.com/EmadMokhtar/skill-evaluator/blob/main/ARCHITECTURE.md) |
 | What's shipped, what's next | [Roadmap](https://emadmokhtar.github.io/skill-evaluator/roadmap/) |
 
 ## Contributing
@@ -241,12 +257,13 @@ contribution.
 
 ## Status
 
-Milestone 5, part 1. Discovery, scoring, judging, comparison, reporting and gating all ship
-and are tested; the remaining work is the automated release pipeline, which is why there is
-no PyPI package yet — install from source for now. See the
+Milestone 5. Discovery, scoring, judging, comparison, reporting, gating and the automated
+release pipeline all ship and are tested. Versions are derived from the commit history and
+published to PyPI on merge. This is `0.x`: a minor release may still change behaviour, so pin
+what you depend on. See the
 [roadmap](https://emadmokhtar.github.io/skill-evaluator/roadmap/) for what is shipped and
 what is planned.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/EmadMokhtar/skill-evaluator/blob/main/LICENSE).

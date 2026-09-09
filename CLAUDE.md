@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`skill-eval` is a standalone CLI + library that runs evaluations on Anthropic-style Agent
+`skill-lens` is a standalone CLI + library that runs evaluations on Anthropic-style Agent
 Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs** — nothing
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M5 (part 1)**: the pipeline runs real agents through `PydanticAIRunner`
+Currently at **M5 (complete)**: the pipeline runs real agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
 remains the default and the backbone of the zero-cost test tier. M3 adds a
@@ -21,7 +21,11 @@ comparative: each case can run in a candidate arm and a baseline arm
 sampled `--repeat N` times, with the report gaining a delta and `--min-delta`
 gating on it. M5 part 1 makes a run legible to CI: `--junit-output` and
 `--markdown-output` reporters, `--concurrency N` over the work matrix, and a
-composite GitHub Action with example workflows. Milestones are defined in
+composite GitHub Action with example workflows. M5 part 2 automates releasing
+itself: a merge to `main` verifies, bumps the version from the commit history
+with `cz bump`, tags it, and publishes to PyPI over Trusted Publishing, with a
+manual workflow to refresh the recorded provider traffic. See
+[Releasing](docs/releasing.md). Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
 is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
@@ -36,10 +40,11 @@ uv sync                              # install (dev deps included)
 uv run pytest                        # test suite (integration marker deselected by default)
 uv run pytest tests/test_gating.py::test_name -v   # single test
 uv run pytest -m integration          # opt-in tier; needs OPENAI_API_KEY, costs real money
-uv run pytest tests/test_cassettes.py --record-mode=once   # re-record cassettes (needs a key)
+uv run pytest tests/test_cassettes.py --record-mode=once      # record a cassette that doesn't exist yet (needs a key)
+uv run pytest tests/test_cassettes.py --record-mode=rewrite   # refresh cassettes that already exist (needs a key)
 uv run ruff check .                  # lint
 uv run ruff format .                 # format (CI runs --check)
-uv run skill-eval list ./examples     # dogfood discovery; CI runs this as a self-check
+uv run skill-lens list ./examples     # dogfood discovery; CI runs this as a self-check
 uv run pre-commit install --hook-type commit-msg   # once per clone
 ```
 
@@ -90,7 +95,7 @@ form, that file is the explanation.
 - **Exit codes are the CI contract:** gate pass `0`, gate fail `1`, user/authoring error `2`.
   In `cli.py`, a JSON-write failure only escalates to 2 when the gate itself passed — it must
   not mask an already-failing gate.
-- **An unfilled scaffold aborts the run.** A case still containing `TODO(skill-eval)` is
+- **An unfilled scaffold aborts the run.** A case still containing `TODO(skill-lens)` is
   an authoring error (exit 2), checked in `cases/loader.py` before validation so the
   message names the field. The rule is the loader's, so hand-written stubs get it too.
 - **`extra="forbid"`** on `EvalCase` / `AssertionSpec` / `ToolSpec` / `TrajectorySpec` /
@@ -100,14 +105,17 @@ form, that file is the explanation.
   (`SkillParseError` / `CaseParseError` / `ConfigError`) naming the file and field.
 - **YAML goes through `yaml_loading.safe_load`**, never `yaml.safe_load`. The custom loader
   stops YAML 1.1 from turning bare `yes`/`no`/`on`/`off` into booleans.
-- **Secrets come from environment variables only** — never from `skill-eval.toml`.
-- **`skill_eval` (underscore) never appears in user-facing output.** The user-facing name is
-  `skill-eval` everywhere: command, config file, distribution.
+- **Secrets come from environment variables only** — never from `skill-lens.toml`.
+- **`skill_lens` (underscore) never appears in user-facing output.** The user-facing name is
+  `skill-lens` everywhere: command, config file, distribution. The GitHub repository keeps its
+  older name, `skill-evaluator`, so `uses: EmadMokhtar/skill-evaluator@v<version>` installing
+  `skill-lens` is expected, not a mistake. `tests/test_naming.py` fails if the pre-rename name
+  reappears outside `docs/superpowers/`, which is a historical archive and is never rewritten.
 - **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
 - **No agent-framework type may appear outside `runners/pydantic_ai.py` and
   `judges/pydantic_ai.py`.** `runners/tools.py` builds framework-neutral `MockTool`s (name +
   JSON schema + callable); the adapters wrap them. `tests/test_framework_isolation.py` guards
-  this: it asserts no other module under `src/skill_eval/` imports `pydantic_ai` at the top
+  this: it asserts no other module under `src/skill_lens/` imports `pydantic_ai` at the top
   level.
 - **`RunResult.tokens` is derived**, not stored — `extra="forbid"` makes writing it a loud
   error rather than a total that silently disagrees with the input/output split it was priced from.
@@ -128,7 +136,7 @@ form, that file is the explanation.
 - **An errored *evaluator* errors the case.** `errored` ≠ `failed` now applies to evaluators
   too: a judge endpoint returning 500 must not read as a skill that got worse.
 - **Judges never raise for provider failures** — they set `JudgeVerdict.error`.
-- **skill-eval derives `passed` and `score` from per-check verdicts.** The judge is never
+- **skill-lens derives `passed` and `score` from per-check verdicts.** The judge is never
   asked for a blended number, and a check that passes without evidence is recorded as a
   failure.
 - **An unscripted `FakeJudge` errors rather than passing.** That is what makes
@@ -182,10 +190,43 @@ form, that file is the explanation.
   execution, so a malformed eval file anywhere aborts before any case runs. Runners, judges and
   evaluators must have no mutable state touched by `run`/`evaluate`/`judge`.
 - **The action fails closed.** `shell: bash` already runs under `-e`; the run step captures the
-  CLI's exit code itself (`code=0; skill-eval run ... || code=$?`) before `-e` can discard it,
+  CLI's exit code itself (`code=0; skill-lens run ... || code=$?`) before `-e` can discard it,
   every later step carries `if: always()`, and the final step re-raises with `exit
   "${CODE:-1}"` — an empty code (the run step never finishing at all) fails rather than
   defaulting to success.
+- **Nothing publishes that has not been verified in the same run.** `publish` is reachable
+  only through `needs:` on a green `verify`; publishing is irreversible, since PyPI refuses a
+  re-upload of a version that already exists.
+- **A merge with no releasable commit publishes nothing and fails nothing.** `cz bump` exit
+  codes 21 and 3 are no-ops, not errors.
+- **The pushed release tag is annotated, and the job verifies it actually reached `origin`
+  before building.** `git push --follow-tags` pushes only annotated tags, so
+  `[tool.commitizen] annotated_tag = true` exists specifically to make Commitizen create one
+  instead of its default lightweight tag — without it, the bump commit would reach `main`
+  while the tag stayed on the runner and vanished. Because `publish` is reached through
+  `needs:`, not through the tag, a silently dropped tag would otherwise go unnoticed all the
+  way to PyPI; `release` runs `git ls-remote --tags origin` right after the push and fails
+  loudly if the tag is missing.
+- **The version in `action.yml` always equals the package version**, and the pairing between a
+  version spelling and a `version_files` pattern is guarded in *both* directions — every
+  spelling has a pattern that rewrites it, and every pattern still matches a line carrying the
+  current version. All three live in `tests/test_release_config.py`. The second direction is
+  what stops a reformatted pin from becoming a no-op rewrite, and it fails on the pull request
+  rather than at release time, where `cz bump --check-consistency` would abort the release
+  instead.
+- **The tag prefix is derived, not duplicated.** `release.yml` reconstructs the tag to look it
+  up after pushing, and `tests/test_release_workflow.py` requires that spelling to match
+  `[tool.commitizen] tag_format`. Changing the format alone would leave the release correctly
+  tagged but the lookup wrong — failing *after* the push, which spends a version that can
+  never be published.
+- **No long-lived publishing credential exists.** Trusted Publishing only.
+- **A cassette refresh re-records with `--record-mode=rewrite`, never `once`** — `once` only
+  fills in a missing cassette and write-protects one already loaded, so it cannot refresh an
+  existing recording, which is the workflow's whole purpose. It then stages the recordings
+  (`git add -A -- tests/cassettes`) before either check that follows, because `git diff` can't
+  see an untracked file and a freshly re-recorded cassette is exactly that; proves the new
+  recordings replay under `--record-mode=none`; and checks the staged diff for secrets —
+  all before pushing, and it never opens a pull request that CI has not run on.
 
 ## Documentation
 
@@ -201,6 +242,7 @@ Documentation ships **with** the change, never as a follow-up. Two CI jobs enfor
 | Gate rules, exit codes, the JSON report | `docs/gating.md` |
 | A protocol, an invariant, or the module map | `ARCHITECTURE.md` |
 | CI integration, the action, example workflows | `docs/ci.md` |
+| The release pipeline, its one-time setup, or the cassette-refresh workflow | `docs/releasing.md` |
 | Anything needing a new page | the page plus `nav:` in `mkdocs.yml` |
 
 `README.md` is a landing page only. Reference prose lives in `docs/` — do not reintroduce
@@ -231,7 +273,7 @@ the `no-docs-needed` label to the PR to satisfy the `docs-freshness` gate.
   main** — it must be conventional too. `scripts/legacy-commits.txt` exempts two pre-convention
   commits and should only ever shrink.
 - `tests/conftest.py` chdirs every test into a fresh `tmp_path` so config upward-discovery
-  can't pick up an ambient `skill-eval.toml`. Tests needing real discovery pass an explicit
+  can't pick up an ambient `skill-lens.toml`. Tests needing real discovery pass an explicit
   `start=`.
 - `docs/superpowers/plans/` is a **historical record** — its code blocks were superseded by
   what shipped. Read `src/` as the source of truth; the design spec in `docs/superpowers/specs/`

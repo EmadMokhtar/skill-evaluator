@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from skill_eval.config import Config, ConfigError, find_config_file, load_config
+from skill_lens.config import Config, ConfigError, find_config_file, load_config
 
 TOML = """
 default_runner = "fake"
@@ -23,7 +23,7 @@ def test_defaults_when_no_config_file(tmp_path):
 
 
 def test_loads_values_from_an_explicit_path(tmp_path):
-    path = tmp_path / "skill-eval.toml"
+    path = tmp_path / "skill-lens.toml"
     path.write_text(TOML)
     config = load_config(path=path)
     assert config.min_pass_rate == 0.8
@@ -32,10 +32,10 @@ def test_loads_values_from_an_explicit_path(tmp_path):
 
 
 def test_discovers_config_by_searching_upward(tmp_path):
-    (tmp_path / "skill-eval.toml").write_text(TOML)
+    (tmp_path / "skill-lens.toml").write_text(TOML)
     nested = tmp_path / "a" / "b"
     nested.mkdir(parents=True)
-    assert find_config_file(nested) == tmp_path / "skill-eval.toml"
+    assert find_config_file(nested) == tmp_path / "skill-lens.toml"
     assert load_config(start=nested).min_pass_rate == 0.8
 
 
@@ -49,14 +49,14 @@ def test_explicit_missing_path_raises(tmp_path):
 
 
 def test_malformed_toml_raises_with_path(tmp_path):
-    path = tmp_path / "skill-eval.toml"
+    path = tmp_path / "skill-lens.toml"
     path.write_text("min_pass_rate = [unclosed\n")
-    with pytest.raises(ConfigError, match="skill-eval.toml"):
+    with pytest.raises(ConfigError, match="skill-lens.toml"):
         load_config(path=path)
 
 
 def test_unknown_keys_are_rejected(tmp_path):
-    path = tmp_path / "skill-eval.toml"
+    path = tmp_path / "skill-lens.toml"
     path.write_text('mistyped_key = "x"\n')
     with pytest.raises(ConfigError, match="mistyped_key"):
         load_config(path=path)
@@ -70,7 +70,7 @@ def test_reporters_field_was_removed_and_is_now_rejected(tmp_path):
     registry. A config file that still sets it must now be rejected as an
     unknown key, same as any other typo.
     """
-    path = tmp_path / "skill-eval.toml"
+    path = tmp_path / "skill-lens.toml"
     path.write_text('reporters = ["console", "json"]\n')
     with pytest.raises(ConfigError, match="reporters"):
         load_config(path=path)
@@ -94,7 +94,7 @@ def test_isolate_cwd_fixture_chdirs_into_a_fresh_tmp_path(tmp_path):
 
 def test_default_discovery_with_no_explicit_start_uses_isolated_cwd():
     """With the isolation fixture active, load_config() with no explicit
-    path/start must not see any real skill-eval.toml on the actual machine,
+    path/start must not see any real skill-lens.toml on the actual machine,
     since cwd has been chdir'd into an empty per-test directory.
     """
     assert load_config() == Config()
@@ -103,7 +103,7 @@ def test_default_discovery_with_no_explicit_start_uses_isolated_cwd():
 def test_non_ascii_config_loads_regardless_of_platform_encoding(tmp_path):
     # Regression test: config files are UTF-8; read_text() must pin the encoding
     # so a non-ASCII value doesn't fail under a non-UTF-8 platform default.
-    path = tmp_path / "skill-eval.toml"
+    path = tmp_path / "skill-lens.toml"
     path.write_text('default_runner = "fake"\n\n[per_skill_min]\n"café" = 1.0\n', encoding="utf-8")
     config = load_config(path=path)
     assert config.per_skill_min == {"café": 1.0}
@@ -113,14 +113,14 @@ def test_non_utf8_config_raises_config_error_not_raw_decode_error(tmp_path):
     # Regression test: read_text() sits outside the TOMLDecodeError guard, so an
     # unreadable or non-UTF-8 config surfaced a raw UnicodeDecodeError traceback
     # instead of the clean exit-2 authoring error the loaders already produce.
-    path = tmp_path / "skill-eval.toml"
+    path = tmp_path / "skill-lens.toml"
     path.write_bytes(b'default_runner = "\xff\xfe"\n')
     with pytest.raises(ConfigError, match="cannot read"):
         load_config(path=path)
 
 
 def test_config_reads_model_and_retry_settings(tmp_path):
-    config_file = tmp_path / "skill-eval.toml"
+    config_file = tmp_path / "skill-lens.toml"
     config_file.write_text(
         'default_runner = "pydantic-ai"\n'
         'model = "openai:gpt-4.1-mini"\n'
@@ -149,13 +149,13 @@ def test_config_temperature_accepts_unset_for_reasoning_models(tmp_path):
     # TOML has no null literal, and omitting the key must keep meaning "use the
     # default", so "unset" is the only way to say "send no temperature at all" --
     # which GPT-5-family and o-series models require.
-    config_file = tmp_path / "skill-eval.toml"
+    config_file = tmp_path / "skill-lens.toml"
     config_file.write_text('temperature = "unset"\n', encoding="utf-8")
     assert load_config(path=config_file).temperature == "unset"
 
 
 def test_config_rejects_a_nonsense_temperature(tmp_path):
-    config_file = tmp_path / "skill-eval.toml"
+    config_file = tmp_path / "skill-lens.toml"
     config_file.write_text('temperature = "hot"\n', encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(path=config_file)
@@ -168,18 +168,18 @@ def test_the_built_in_judge_default_never_spends_money():
 
 
 def test_a_project_can_opt_into_real_judging(tmp_path):
-    (tmp_path / "skill-eval.toml").write_text(
+    (tmp_path / "skill-lens.toml").write_text(
         'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o"\n', encoding="utf-8"
     )
-    settings = load_config(path=tmp_path / "skill-eval.toml")
+    settings = load_config(path=tmp_path / "skill-lens.toml")
     assert settings.judge == "pydantic-ai"
     assert settings.judge_model == "openai:gpt-4o"
 
 
 def test_an_unknown_config_key_is_still_rejected(tmp_path):
-    (tmp_path / "skill-eval.toml").write_text('judg = "pydantic-ai"\n', encoding="utf-8")
+    (tmp_path / "skill-lens.toml").write_text('judg = "pydantic-ai"\n', encoding="utf-8")
     with pytest.raises(ConfigError):
-        load_config(path=tmp_path / "skill-eval.toml")
+        load_config(path=tmp_path / "skill-lens.toml")
 
 
 def test_the_comparative_fields_have_safe_defaults():
@@ -190,7 +190,7 @@ def test_the_comparative_fields_have_safe_defaults():
 
 
 def test_an_unknown_baseline_kind_is_a_config_error(tmp_path):
-    path = tmp_path / "skill-eval.toml"
+    path = tmp_path / "skill-lens.toml"
     path.write_text('baseline = "yesterday"\n', encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(path=path)
@@ -200,6 +200,6 @@ def test_concurrency_defaults_to_one_and_can_be_set(tmp_path):
     """Default 1 for the same reason judge defaults to "fake": upgrading must
     never change spend or behavior on its own."""
     assert Config().concurrency == 1
-    path = tmp_path / "skill-eval.toml"
+    path = tmp_path / "skill-lens.toml"
     path.write_text("concurrency = 8\n", encoding="utf-8")
     assert load_config(path=path).concurrency == 8

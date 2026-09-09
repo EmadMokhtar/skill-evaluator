@@ -17,15 +17,16 @@ from pathlib import Path
 import pytest
 from typer.main import get_command
 
-from skill_eval.cli import app
-from skill_eval.config import Config
-from skill_eval.evaluators.assertion import ASSERTION_KINDS
-from skill_eval.models import EvalCase
-from skill_eval.yaml_loading import safe_load
+from skill_lens.cli import app
+from skill_lens.config import Config
+from skill_lens.evaluators.assertion import ASSERTION_KINDS
+from skill_lens.models import EvalCase
+from skill_lens.yaml_loading import safe_load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCS = REPO_ROOT / "docs"
 MKDOCS_YML = REPO_ROOT / "mkdocs.yml"
+RELEASING = REPO_ROOT / "docs" / "releasing.md"
 
 # docs/superpowers/ is a historical record of specs and plans, excluded from the
 # site (see mkdocs.yml) and from every check here.
@@ -116,6 +117,31 @@ def test_every_page_is_reachable_from_the_nav():
 def test_the_nav_has_no_missing_pages():
     missing = _nav_pages() - _site_pages()
     assert not missing, f"nav entries with no file on disk: {sorted(missing)}"
+
+
+def test_releasing_documents_every_piece_of_external_setup():
+    """The four settings live outside this repository, so nothing in CI can
+    check them. The docs are the only place they are recorded.
+
+    Each needle below is text that only occurs when the specific setup item
+    it names is actually documented. A loose word like "pypi" or "pending
+    publisher" also shows up in unrelated prose elsewhere on the page (PyPI
+    the package index, "pending publisher does not reserve the name"), so
+    checking for those alone would still pass with the setup item deleted.
+    """
+    text = RELEASING.read_text(encoding="utf-8")
+    for required in (
+        "Read and write",
+        "`pypi` GitHub Environment",
+        "pending publisher on PyPI",
+        "OPENAI_API_KEY",
+    ):
+        assert required in text, f"docs/releasing.md does not mention {required!r}"
+
+
+def test_releasing_is_in_the_nav():
+    nav = safe_load((REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8"))["nav"]
+    assert "releasing.md" in str(nav)
 
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from skill_eval.models import (
+from skill_lens.models import (
     BudgetSpec,
     CaseOutcome,
     CheckResult,
