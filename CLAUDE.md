@@ -36,7 +36,8 @@ uv sync                              # install (dev deps included)
 uv run pytest                        # test suite (integration marker deselected by default)
 uv run pytest tests/test_gating.py::test_name -v   # single test
 uv run pytest -m integration          # opt-in tier; needs OPENAI_API_KEY, costs real money
-uv run pytest tests/test_cassettes.py --record-mode=once   # re-record cassettes (needs a key)
+uv run pytest tests/test_cassettes.py --record-mode=once      # record a cassette that doesn't exist yet (needs a key)
+uv run pytest tests/test_cassettes.py --record-mode=rewrite   # refresh cassettes that already exist (needs a key)
 uv run ruff check .                  # lint
 uv run ruff format .                 # format (CI runs --check)
 uv run skill-lens list ./examples     # dogfood discovery; CI runs this as a self-check
