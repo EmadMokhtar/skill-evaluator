@@ -1,9 +1,23 @@
 """Rubric scoring. The judge is scripted, so every test here is free."""
 
 from skill_lens.evaluators.base import Evaluator
-from skill_lens.evaluators.judge import JudgeEvaluator, build_request
+from skill_lens.evaluators.judge import (
+    BUDGET_EXHAUSTED,
+    MAX_ARTIFACT_BYTES,
+    NOT_PRODUCED,
+    NOT_TEXT,
+    JudgeEvaluator,
+    build_request,
+)
 from skill_lens.judges.fake import FakeJudge
-from skill_lens.models import CheckResult, EvalCase, JudgeSpec, JudgeVerdict, RunResult
+from skill_lens.models import (
+    CheckResult,
+    EvalCase,
+    JudgeSpec,
+    JudgeVerdict,
+    RunResult,
+    WorkspaceSpec,
+)
 
 RESULT = RunResult(output="The return window is 30 days.")
 
@@ -136,3 +150,65 @@ def test_a_rubric_with_no_checks_errors_rather_than_passing_vacuously():
     case = EvalCase(name="c", task="t", judge=JudgeSpec(rubric=[]))
     score = JudgeEvaluator(FakeJudge()).evaluate(case, RESULT)
     assert score.errored is True
+
+
+def _case(*artifacts: str) -> EvalCase:
+    return EvalCase(
+        name="n",
+        task="t",
+        workspace=WorkspaceSpec(),
+        judge=JudgeSpec(rubric=["it has a total"], artifacts=list(artifacts)),
+    )
+
+
+def test_a_case_naming_no_artifacts_sends_none(tmp_path):
+    request = build_request(_case(), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {}
+
+
+def test_a_named_artifact_is_read_from_the_workspace(tmp_path):
+    (tmp_path / "report.md").write_text("north 120", encoding="utf-8")
+    request = build_request(_case("report.md"), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {"report.md": "north 120"}
+
+
+def test_a_file_the_agent_never_wrote_is_rendered_not_raised(tmp_path):
+    # A rubric like "the report states a total" then fails honestly, which is
+    # the verdict a skill that produced nothing deserves.
+    request = build_request(_case("report.md"), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {"report.md": NOT_PRODUCED}
+
+
+def test_a_non_utf8_artifact_is_rendered_not_raised(tmp_path):
+    (tmp_path / "blob.dat").write_bytes(b"\xff\xfe\x00")
+    request = build_request(_case("blob.dat"), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {"blob.dat": NOT_TEXT}
+
+
+def test_an_escaping_artifact_name_is_rendered_not_raised(tmp_path):
+    request = build_request(_case("../escape.txt"), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {"../escape.txt": NOT_PRODUCED}
+
+
+def test_a_large_artifact_is_truncated_visibly(tmp_path):
+    (tmp_path / "big.md").write_text("x" * (MAX_ARTIFACT_BYTES + 500), encoding="utf-8")
+    request = build_request(_case("big.md"), RunResult(output="o", workspace=tmp_path))
+    body = request.artifacts["big.md"]
+    assert "truncated" in body
+    assert len(body.encode("utf-8")) < MAX_ARTIFACT_BYTES + 200
+
+
+def test_the_total_budget_is_enforced_across_artifacts(tmp_path):
+    names = [f"f{index}.md" for index in range(5)]
+    for name in names:
+        (tmp_path / name).write_text("y" * MAX_ARTIFACT_BYTES, encoding="utf-8")
+    request = build_request(_case(*names), RunResult(output="o", workspace=tmp_path))
+    assert BUDGET_EXHAUSTED in request.artifacts.values()
+
+
+def test_a_repeated_artifact_name_is_read_once(tmp_path):
+    (tmp_path / "report.md").write_text("body", encoding="utf-8")
+    request = build_request(
+        _case("report.md", "report.md"), RunResult(output="o", workspace=tmp_path)
+    )
+    assert request.artifacts == {"report.md": "body"}
