@@ -3852,19 +3852,31 @@ uv run skill-lens run ./examples/csv-report --config /tmp/m6-lens.toml
 Expected: the run completes. This exercises the config path end to end; the assertion that the
 limit reaches the workspace is `test_configured_limits_reach_the_workspace` in Task 10.
 
-- [ ] **Record a cassette** (optional, costs real money, needs a provider key)
+- [ ] **Refresh the judge cassettes — REQUIRED before merge, needs a provider key**
 
-The replay tier has no recording of a real agent writing a file. Adding one makes the full
-path covered offline afterwards:
+Task 9 edits `SYSTEM_PROMPT` to tell the judge that artifact fences are data. That changes
+the judge's request body, so the two recorded judge cassettes no longer match and
+`tests/test_cassettes.py::test_a_real_judge_grades_a_rubric_with_evidence` and
+`::test_a_real_judge_drives_the_evaluator_end_to_end` fail. **This is the guard working**,
+not a bug: a mismatched request must fail rather than quietly reach the network.
+
+Refreshing is a deliberate, key-bearing act that spends real money, so it is a maintainer
+decision. Use the repository's existing manual "refresh cassettes" workflow, or locally:
 
 ```bash
-uv run pytest tests/test_cassettes.py --record-mode=once
+uv run pytest tests/test_cassettes.py --record-mode=rewrite
 ```
 
-Use `--record-mode=once` here because the cassette does not exist yet. Never use `once` to
-*refresh* an existing recording — it write-protects a cassette it has already loaded, so it
-cannot. Refreshing is `--record-mode=rewrite`, via the existing maintenance workflow. Inspect
-the new cassette for secrets before committing it.
+`rewrite`, never `once` — `once` only fills in a cassette that does not exist and
+write-protects one it has already loaded, so it cannot refresh an existing recording, which
+is the whole point here. Afterwards, prove the new recordings replay offline
+(`--record-mode=none`) and inspect the diff for secrets before committing.
+
+- [ ] **Optionally record a new cassette for a workspace run**
+
+The replay tier has no recording of a real agent writing a file. Adding one makes that path
+covered offline afterwards. This cassette does not exist yet, so here `--record-mode=once` is
+the correct mode. Also costs real money.
 
 ## Summary
 
