@@ -69,6 +69,7 @@ class JudgeRequest(BaseModel):
     output: str = ""
     expected: str = ""
     checks: list[RubricCheck] = Field(default_factory=list)
+    artifacts: dict[str, str] = Field(default_factory=dict)
 
 
 class JudgeOutput(BaseModel):
@@ -105,6 +106,11 @@ class RunResult(BaseModel):
 
     `skill_triggered` is None outside `mode: offered` -- "this was not a
     triggering run" is a different fact from "the skill was not triggered".
+
+    `workspace` is non-null **only while that directory still exists** -- the
+    orchestrator clears it after deleting and leaves it set under
+    `--keep-workspace`. A path pointing at a deleted directory would be a lie
+    in the JSON report; this way the field's presence is self-documenting.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -119,6 +125,7 @@ class RunResult(BaseModel):
     cost_note: str = ""
     model: str = ""
     skill_triggered: bool | None = None
+    workspace: Path | None = None
     error: str | None = None
 
     @property
@@ -158,12 +165,30 @@ class EvalScore(BaseModel):
 
 
 class AssertionSpec(BaseModel):
-    """A declarative assertion from an eval YAML file."""
+    """A declarative assertion from an eval YAML file.
+
+    `file` is a modifier, not a kind: with it, `contains` / `not_contains` /
+    `regex` / `equals` read a produced file instead of the run's output text.
+    That is one concept rather than a `file-`-prefixed twin of every kind.
+
+    `value` is optional because `file-produced` and `json-schema` carry their
+    subject elsewhere. It is `None`-by-default rather than `""`-by-default so
+    that "no value given" stays distinguishable from `equals` with an empty
+    value, which legitimately means "the output is empty". `cases/loader.py`
+    holds the per-kind table saying which of the three fields each kind
+    requires and which it forbids.
+
+    `json_schema`, not `schema`: Pydantic refuses a field name that shadows an
+    attribute on BaseModel, and an alias would be machinery bought for a
+    cosmetic gain.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     kind: str
-    value: str
+    value: str | None = None
+    file: str | None = None
+    json_schema: dict[str, Any] | None = None
 
 
 class ToolSpec(BaseModel):
@@ -216,12 +241,36 @@ class JudgeSpec(BaseModel):
 
     `rubric` entries are plain strings; ids are generated positionally by the
     evaluator so authors never have to invent them.
+
+    `artifacts` names files the judge may read, so a rubric can grade the
+    document a skill produced rather than the chat message about it. Named
+    `artifacts` and not `files` because `WorkspaceSpec.files` are inputs to
+    seed and these are outputs to grade; one word for both would guarantee
+    they get confused.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     expected: str = ""
     rubric: list[str] = Field(default_factory=list)
+    artifacts: list[str] = Field(default_factory=list)
+
+
+class WorkspaceSpec(BaseModel):
+    """A real, contained filesystem for one case, and the files it starts with.
+
+    Opt-in: a case without this block gets no temporary directory and no file
+    tools, so every suite written before M6 runs byte-identically. Declaring
+    the block with no `files` is meaningful -- a skill that generates a file
+    from nothing needs an empty workspace to generate it into.
+
+    Keys are relative paths, validated by `cases/loader.py` before they can
+    reach the filesystem; values are text, written as UTF-8.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    files: dict[str, str] = Field(default_factory=dict)
 
 
 class EvalCase(BaseModel):
@@ -237,6 +286,7 @@ class EvalCase(BaseModel):
     budget: BudgetSpec | None = None
     mode: CaseMode = "loaded"
     judge: JudgeSpec | None = None
+    workspace: WorkspaceSpec | None = None
     tags: list[str] = Field(default_factory=list)
 
 

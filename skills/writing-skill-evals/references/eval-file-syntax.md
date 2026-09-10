@@ -15,6 +15,7 @@ vacuously.
 | `trajectory` | no | Which tools must and must not have been called, and in what order |
 | `budget` | no | Ceilings on tokens, cost, and latency |
 | `judge` | no | A rubric for an LLM judge |
+| `workspace` | no | A temporary directory and the files it starts with |
 | `mode` | no | `loaded` (default) or `offered` |
 | `tags` | no | Labels for `--tag` filtering |
 

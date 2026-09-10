@@ -310,3 +310,83 @@ def test_pricing_degraded_is_false_when_no_result_carries_a_cost_note():
         ]
     )
     assert report.pricing_degraded is False
+
+
+def test_workspace_spec_defaults_to_no_files():
+    from skill_lens.models import WorkspaceSpec
+
+    assert WorkspaceSpec().files == {}
+
+
+def test_workspace_spec_forbids_unknown_keys():
+    # Without extra="forbid" a typo like `file:` would yield a workspace that
+    # silently seeds nothing.
+    from skill_lens.models import WorkspaceSpec
+
+    with pytest.raises(ValidationError):
+        WorkspaceSpec(file={"a.txt": "x"})
+
+
+def test_assertion_value_is_optional_but_distinguishes_empty_from_absent():
+    # `equals` with value "" is a real assertion meaning "the output is empty",
+    # so a "" default would make it indistinguishable from a missing field.
+    from skill_lens.models import AssertionSpec
+
+    assert AssertionSpec(kind="file-produced", file="report.md").value is None
+    assert AssertionSpec(kind="equals", value="").value == ""
+
+
+def test_assertion_carries_a_file_target_and_an_inline_schema():
+    from skill_lens.models import AssertionSpec
+
+    spec = AssertionSpec(
+        kind="json-schema",
+        file="totals.json",
+        json_schema={"type": "object", "required": ["units"]},
+    )
+    assert spec.file == "totals.json"
+    assert spec.json_schema == {"type": "object", "required": ["units"]}
+
+
+def test_assertion_forbids_unknown_keys():
+    from skill_lens.models import AssertionSpec
+
+    with pytest.raises(ValidationError):
+        AssertionSpec(kind="contains", value="x", schema={"type": "object"})
+
+
+def test_case_has_no_workspace_by_default():
+    # Every suite that exists today must run byte-identically.
+    assert EvalCase(name="n", task="t").workspace is None
+
+
+def test_case_accepts_a_workspace_block():
+    from skill_lens.models import WorkspaceSpec
+
+    case = EvalCase(name="n", task="t", workspace=WorkspaceSpec(files={"in.csv": "a,b\n1,2\n"}))
+    assert case.workspace is not None
+    assert case.workspace.files["in.csv"] == "a,b\n1,2\n"
+
+
+def test_judge_spec_names_no_artifacts_by_default():
+    assert JudgeSpec(rubric=["r"]).artifacts == []
+
+
+def test_run_result_has_no_workspace_by_default():
+    assert RunResult().workspace is None
+
+
+def test_run_result_carries_a_workspace_path():
+    result = RunResult(workspace=Path("/tmp/x"))
+    assert result.workspace == Path("/tmp/x")
+
+
+def test_run_result_still_forbids_extra_fields():
+    # `tokens` stays derived: writing it must remain a loud error.
+    with pytest.raises(ValidationError):
+        RunResult(tokens=5)
+
+
+def test_judge_request_carries_artifacts():
+    assert JudgeRequest(task="t").artifacts == {}
+    assert JudgeRequest(task="t", artifacts={"r.md": "body"}).artifacts == {"r.md": "body"}

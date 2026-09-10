@@ -14,6 +14,7 @@ Extra keys alongside `cases:` at the top level of the file are ignored.
 | `trajectory` | no | Which tools must/must not have been called, and in what order |
 | `budget` | no | Ceilings on tokens, cost, and latency |
 | `judge` | no | A rubric for an LLM judge — see [Judging output quality](#judging-output-quality) |
+| `workspace` | no | A temporary directory and the files it starts with |
 | `mode` | no | `loaded` (default) or `offered` — see [Did the agent reach for the skill?](#did-the-agent-reach-for-the-skill) |
 
 ## Judging output quality
