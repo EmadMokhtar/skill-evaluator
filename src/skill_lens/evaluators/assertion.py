@@ -113,6 +113,16 @@ def _check(spec: AssertionSpec, result: RunResult) -> tuple[bool, str]:
         return False, unreadable
 
     if spec.kind == "json-schema":
+        if spec.json_schema is None:
+            # Only reachable from an EvalCase built programmatically: the
+            # loader's requirements table makes json_schema mandatory for this
+            # kind. Guarded anyway, because Draft202012Validator(None) raises a
+            # bare AttributeError -- a crash outside the failed/errored/authoring
+            # taxonomy entirely, which is the one outcome this project has no
+            # place for.
+            raise InvalidAssertionValue(
+                "a json-schema assertion has no json_schema to validate against"
+            )
         try:
             document = json.loads(text)
         except ValueError as exc:

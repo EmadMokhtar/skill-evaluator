@@ -360,6 +360,33 @@ def test_a_file_assertion_with_no_workspace_is_an_authoring_error():
         AssertionEvaluator().evaluate(case, RunResult(output="x"))
 
 
+@pytest.mark.parametrize("escaping", ["../escape.md", "/etc/passwd"])
+@pytest.mark.parametrize("kind", ["contains", "file-produced"])
+def test_a_refused_path_is_an_authoring_error_not_a_failure(tmp_path, kind, escaping):
+    # The other half of the fail-vs-raise rule: a MISSING file fails (a fact
+    # about the skill), but a path that escapes the workspace is the author's
+    # mistake and must abort the run. Without this, someone could later
+    # "simplify" _subject_text into swallowing PathRefused as a plain failure
+    # and nothing would notice.
+    result = RunResult(output="", workspace=tmp_path.resolve())
+    spec = (
+        AssertionSpec(kind=kind, file=escaping)
+        if kind == "file-produced"
+        else AssertionSpec(kind=kind, value="x", file=escaping)
+    )
+    with pytest.raises(InvalidAssertionValue):
+        AssertionEvaluator().evaluate(_case(spec), result)
+
+
+def test_json_schema_without_a_schema_is_an_authoring_error(tmp_path):
+    # Reachable only by building an EvalCase directly; the loader requires the
+    # field. Draft202012Validator(None) would otherwise raise a bare
+    # AttributeError, which is neither a failure nor an errored case.
+    result = RunResult(output="{}", workspace=tmp_path.resolve())
+    with pytest.raises(InvalidAssertionValue):
+        AssertionEvaluator().evaluate(_case(AssertionSpec(kind="json-schema")), result)
+
+
 def test_check_ids_stay_positional_and_zero_based(tmp_path):
     # M4 pairs assertions across arms by id. A new scheme would silently break
     # that pairing and the low-signal-assertion report with it.
