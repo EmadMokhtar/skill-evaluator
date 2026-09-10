@@ -14,7 +14,13 @@ from typing import Any
 
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
 from skill_lens.runners.pricing import calculate_cost, provider_of
-from skill_lens.runners.tools import build_mock_tool, build_skill_tool, skill_tool_name
+from skill_lens.runners.tools import (
+    build_mock_tool,
+    build_skill_tool,
+    build_workspace_tools,
+    skill_tool_name,
+)
+from skill_lens.workspace import Workspace
 
 DEFAULT_MODEL = "openai:gpt-4o-mini"
 
@@ -39,6 +45,16 @@ OFFERED_PREAMBLE = (
 # which arm it is serving -- a runner that *could* branch on the arm could cheat.
 BASELINE_PREAMBLE = "You are a helpful assistant."
 
+# Appended to whatever preamble the arm already uses, byte-identically in both
+# arms, and naming no skill. The agent has to be told a working directory
+# exists or it cannot use it; added to the candidate arm only, this text would
+# become part of what --min-delta measures.
+WORKSPACE_PREAMBLE = (
+    "You have a working directory. Use `list_files` to see what is in it, "
+    "`read_file` to read a file, and `write_file` to create or replace one. "
+    "All paths are relative to that directory."
+)
+
 
 class RunnerDependencyError(Exception):
     """Raised when the optional extra providing this runner is not installed."""
@@ -62,6 +78,16 @@ def _system_prompt(skill: Skill) -> str:
     if skill.description:
         header = f"{header}\n\n{skill.description}"
     return f"{header}\n\n{skill.instructions}".strip()
+
+
+def _instructions(skill: Skill, case: EvalCase, has_workspace: bool) -> str:
+    """The full system prompt for one arm of one case.
+
+    Extracted from `_build_agent` so the arm-identical rule above can be
+    tested without a model, a provider or a network.
+    """
+    base = OFFERED_PREAMBLE if case.mode == "offered" else _system_prompt(skill)
+    return f"{base}\n\n{WORKSPACE_PREAMBLE}" if has_workspace else base
 
 
 def _arguments(args: Any) -> dict[str, Any]:
@@ -154,25 +180,28 @@ class PydanticAIRunner:
             return None
         return ModelSettings(temperature=float(self._temperature))
 
-    def _build_agent(self, skill: Skill, case: EvalCase) -> Any:
+    def _build_agent(self, skill: Skill, case: EvalCase, workspace: Workspace | None) -> Any:
         from pydantic_ai import Agent, Tool
 
-        mocks = [build_mock_tool(spec) for spec in case.tools]
+        built = [build_mock_tool(spec) for spec in case.tools]
         if case.mode == "offered":
-            mocks.append(build_skill_tool(skill))
-            instructions = OFFERED_PREAMBLE
-        else:
-            instructions = _system_prompt(skill)
+            built.append(build_skill_tool(skill))
+        if workspace is not None:
+            built.extend(build_workspace_tools(workspace))
         tools = [
             Tool.from_schema(
-                mock.call,
-                name=mock.name,
-                description=mock.description,
-                json_schema=mock.json_schema,
+                agent_tool.call,
+                name=agent_tool.name,
+                description=agent_tool.description,
+                json_schema=agent_tool.json_schema,
             )
-            for mock in mocks
+            for agent_tool in built
         ]
-        return Agent(self._model, instructions=instructions, tools=tools)
+        return Agent(
+            self._model,
+            instructions=_instructions(skill, case, workspace is not None),
+            tools=tools,
+        )
 
     def _run_with_retries(self, agent: Any, task: str) -> Any:
         settings = self._model_settings()
@@ -188,13 +217,13 @@ class PydanticAIRunner:
                 delay *= 2
                 attempt += 1
 
-    def run(self, skill: Skill, case: EvalCase) -> RunResult:
+    def run(self, skill: Skill, case: EvalCase, workspace: Workspace | None = None) -> RunResult:
         _require_pydantic_ai()
         configured = self._model if isinstance(self._model, str) else ""
         offered = skill_tool_name(skill.name) if case.mode == "offered" else None
         started = time.monotonic()
         try:
-            agent = self._build_agent(skill, case)
+            agent = self._build_agent(skill, case, workspace)
             result = self._run_with_retries(agent, case.task)
             messages = result.all_messages()
             usage = result.usage
