@@ -3324,6 +3324,17 @@ git commit -m "feat(orchestrator): own the workspace lifetime across arms, repea
 
 ## Task 11: Config, CLI and reporters
 
+> **Three gates fire the moment a flag or config key exists**, so their minimal
+> entries ship in THIS commit, not in Task 12:
+> - `tests/test_action.py::test_every_cli_flag_is_exposed_as_an_action_input` —
+>   every CLI flag must be an input in `action.yml`.
+> - `tests/test_docs.py::test_every_cli_option_is_documented` — `docs/cli.md`.
+> - `tests/test_docs.py::test_every_config_field_is_documented` — `docs/configuration.md`.
+>
+> Task 12 still owns all the prose around them. This is the same rule Tasks 1 and 6
+> follow for model fields and assertion kinds.
+
+
 **Files:**
 - Modify: `src/skill_lens/config.py`
 - Modify: `src/skill_lens/cli.py`
@@ -3585,6 +3596,46 @@ In `src/skill_lens/reporters/json_reporter.py`, add one entry to each outcome di
                     else None
                 ),
 ```
+
+- [ ] **Step 5b: Expose the flag in the composite action**
+
+`action.yml` must gain a `keep-workspace` input, its env var, and an argument line. The
+existing `add()` helper appends `--flag value`, which cannot express a three-state boolean, so
+add a second helper beside it:
+
+```bash
+        add_flag() {
+          case "${2:-}" in
+            true)  args+=("$1") ;;
+            false) args+=("$3") ;;
+          esac
+        }
+```
+
+Empty means the caller said nothing, so neither flag is passed and the config file decides —
+which is exactly the three-state semantics the CLI has. Then:
+
+```yaml
+  keep-workspace:
+    description: Keep each case's temporary directory instead of deleting it. true or false.
+```
+
+```yaml
+        SE_KEEP_WORKSPACE: ${{ inputs.keep-workspace }}
+```
+
+```bash
+        add_flag --keep-workspace "$SE_KEEP_WORKSPACE" --no-keep-workspace
+```
+
+- [ ] **Step 5c: Add the minimal documentation entries**
+
+`docs/cli.md`: a `--keep-workspace` / `--no-keep-workspace` entry, in the same shape as the
+surrounding flag entries, saying the flag overrides `keep_workspace` in either direction.
+
+`docs/configuration.md`: entries for `keep_workspace`, `max_file_bytes`, `max_files` and
+`max_total_bytes`, with their defaults, noting that the three caps have no CLI flag because
+they are per-repository policy.
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
