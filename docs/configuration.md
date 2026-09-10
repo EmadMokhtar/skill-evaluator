@@ -30,6 +30,10 @@ greeting = 0.9
 | `repeat` | `1` | `--repeat` |
 | `min_delta` | unset | `--min-delta` |
 | `concurrency` | `1` | `--concurrency` |
+| `keep_workspace` | `false` | `--keep-workspace` / `--no-keep-workspace` |
+| `max_file_bytes` | `1000000` | — |
+| `max_files` | `200` | — |
+| `max_total_bytes` | `5000000` | — |
 
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
@@ -47,6 +51,19 @@ network-bound — one provider round trip per case against sub-millisecond of lo
 raising it overlaps waiting, not computation; the practical ceiling is your provider's rate
 limit, not your CPU. Runners and evaluators are shared across threads, so a custom one must
 have no mutable state its `run`/`evaluate` touches.
+
+`keep_workspace` keeps each case's temporary directory instead of deleting it after the run,
+so you can inspect what a case actually wrote. `--keep-workspace` / `--no-keep-workspace`
+override it in either direction; leaving both unset keeps the config file's value. Every kept
+directory is printed under a `Kept workspaces` section, whichever of the flag or the config
+turned keeping on — a setting that silently filled a disk with no on-screen explanation would
+be a trap.
+
+`max_file_bytes`, `max_files`, and `max_total_bytes` are runaway guards on what one case's
+workspace may write, not something you tune per run — they get no CLI flag because they are
+policy set once per repository rather than a per-run decision. Roughly 100x a realistic
+artifact, so they only bind when a case is genuinely stuck (writing the same file repeatedly,
+or writing many small ones) rather than when it legitimately produces something large.
 
 `model`, `retries`, and `retry_backoff_seconds` only matter to components that reach a
 provider (`pydantic-ai`, as a runner or a judge); `FakeRunner` and `FakeJudge` ignore them.

@@ -61,6 +61,15 @@ UNKNOWN_KIND_CASES_YAML = """cases:
         value: pdf
 """
 
+WORKSPACE_CASES_YAML = """cases:
+  - name: mentions the skill
+    task: anything
+    workspace: {}
+    assertions:
+      - kind: contains
+        value: pdf
+"""
+
 
 def _make_skill(tmp_path, name="pdf", cases=CASES_YAML):
     skill_dir = tmp_path / name
@@ -624,3 +633,30 @@ def test_concurrency_above_one_runs_the_suite(tmp_path):
     _make_skill(tmp_path / "skills")
     result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--concurrency", "4"])
     assert result.exit_code == 0
+
+
+def test_keep_workspace_flag_wins_over_a_false_config(tmp_path):
+    skill_dir = _make_skill(tmp_path, cases=WORKSPACE_CASES_YAML)
+    result = runner.invoke(app, ["run", str(skill_dir), "--keep-workspace"])
+    assert result.exit_code in (0, 1)
+    assert "Kept workspaces" in result.stdout
+
+
+def test_no_keep_workspace_flag_wins_over_a_true_config(tmp_path):
+    skill_dir = _make_skill(tmp_path, cases=WORKSPACE_CASES_YAML)
+    config = tmp_path / "skill-lens.toml"
+    config.write_text("keep_workspace = true\n", encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(config), "--no-keep-workspace"]
+    )
+    assert "Kept workspaces" not in result.stdout
+
+
+def test_the_config_alone_turns_keeping_on(tmp_path):
+    # Printing only under the flag would let a committed keep_workspace = true
+    # fill a disk with nothing on screen connecting the two.
+    skill_dir = _make_skill(tmp_path, cases=WORKSPACE_CASES_YAML)
+    config = tmp_path / "skill-lens.toml"
+    config.write_text("keep_workspace = true\n", encoding="utf-8")
+    result = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
+    assert "Kept workspaces" in result.stdout

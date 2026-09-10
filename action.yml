@@ -30,6 +30,8 @@ inputs:
     description: Required improvement over the baseline. Needs baseline.
   concurrency:
     description: Run this many cases at once.
+  keep-workspace:
+    description: Keep each case's temporary directory instead of deleting it. true or false.
   json-output:
     description: Where to write the JSON report. Also read back for this action's outputs.
     default: skill-lens-report.json
@@ -116,6 +118,7 @@ runs:
         SE_MIN_PASS_RATE: ${{ inputs.min-pass-rate }}
         SE_MIN_DELTA: ${{ inputs.min-delta }}
         SE_CONCURRENCY: ${{ inputs.concurrency }}
+        SE_KEEP_WORKSPACE: ${{ inputs.keep-workspace }}
         SE_JSON: ${{ inputs.json-output }}
         SE_JUNIT: ${{ inputs.junit-output }}
         SE_MARKDOWN: ${{ inputs.markdown-output }}
@@ -124,6 +127,12 @@ runs:
         set -uo pipefail
         args=("$SE_PATH")
         add() { if [ -n "${2:-}" ]; then args+=("$1" "$2"); fi; }
+        add_flag() {
+          case "${2:-}" in
+            true)  args+=("$1") ;;
+            false) args+=("$3") ;;
+          esac
+        }
         add --evals "$SE_EVALS"
         add --runner "$SE_RUNNER"
         add --model "$SE_MODEL"
@@ -135,6 +144,7 @@ runs:
         add --min-pass-rate "$SE_MIN_PASS_RATE"
         add --min-delta "$SE_MIN_DELTA"
         add --concurrency "$SE_CONCURRENCY"
+        add_flag --keep-workspace "$SE_KEEP_WORKSPACE" --no-keep-workspace
         add --json-output "$SE_JSON"
         add --junit-output "$SE_JUNIT"
         add --markdown-output "$SE_MARKDOWN"

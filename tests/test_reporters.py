@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from skill_lens.comparison import build_delta
 from skill_lens.gating import evaluate_gate
@@ -468,3 +469,35 @@ def test_json_summary_carries_baseline_errored_count():
     )
     payload = json.loads(render_json(report, delta=build_delta(report)))
     assert payload["summary"]["baseline_errored"] == 1
+
+
+def _workspace_report(workspace: Path | None) -> RunReport:
+    return RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="s",
+                case_name="c",
+                runner="fake",
+                status="passed",
+                result=RunResult(output="o", workspace=workspace),
+            )
+        ]
+    )
+
+
+def test_no_kept_section_when_nothing_was_kept():
+    assert "Kept workspaces" not in render_console(_workspace_report(None))
+
+
+def test_the_kept_section_names_the_case_and_the_path():
+    rendered = render_console(_workspace_report(Path("/tmp/skill-lens-s-c-candidate-0-abc")))
+    assert "Kept workspaces" in rendered
+    assert "skill-lens-s-c-candidate-0-abc" in rendered
+    assert "s :: c" in rendered
+
+
+def test_json_carries_the_workspace_only_when_it_was_kept():
+    kept = json.loads(render_json(_workspace_report(Path("/tmp/kept"))))
+    gone = json.loads(render_json(_workspace_report(None)))
+    assert kept["outcomes"][0]["workspace"] == "/tmp/kept"
+    assert gone["outcomes"][0]["workspace"] is None

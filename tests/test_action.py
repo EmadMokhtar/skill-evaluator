@@ -71,6 +71,11 @@ def test_the_action_declares_its_report_outputs():
 def test_every_cli_backed_input_is_actually_forwarded_to_the_command():
     """Name-matching alone would pass an input that is declared, wired into the
     step's env, and then never handed to the CLI -- it would silently do nothing.
+
+    Most inputs pass through the `add` helper as `--flag value`. A three-state
+    boolean flag (present, absent, or its `--no-` twin) cannot be expressed that
+    way, so those go through `add_flag` instead -- either forwarding form counts
+    as "actually reaches the CLI".
     """
     step = next(s for s in _action()["runs"]["steps"] if s.get("id") == "run")
     script = step["run"]
@@ -79,6 +84,6 @@ def test_every_cli_backed_input_is_actually_forwarded_to_the_command():
         reference = "${{ inputs." + name + " }}"
         variable = next((k for k, v in env.items() if v.strip() == reference), None)
         assert variable is not None, f"input {name!r} is not exposed to the run step's env"
-        assert f'add --{name} "${variable}"' in script, (
-            f"input {name!r} reaches the step as ${variable} but is never passed to skill-lens"
-        )
+        assert (
+            f'add --{name} "${variable}"' in script or f'add_flag --{name} "${variable}"' in script
+        ), f"input {name!r} reaches the step as ${variable} but is never passed to skill-lens"
