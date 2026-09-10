@@ -54,7 +54,7 @@ test. §16 sketches it.
 | `jsonschema` is a **core dependency**, not an optional extra. | An optional extra would make `kind: json-schema` fail at *evaluate* time. This project draws a hard line between authoring errors (abort, exit 2) and infra errors (`errored`); a missing library for a declared assertion sits cleanly in neither. |
 | The judge reads **named, capped** artifacts. | A skill whose value is its output file cannot be graded on prose quality otherwise. Named rather than "the whole directory" because unbounded file content in a judge prompt is both a cost hazard and an accuracy one — a judge handed a large volume of irrelevant text grades worse, not better. |
 | Directories are **always deleted**; `--keep-workspace` opts out. | `--repeat 5 --baseline previous --concurrency 8` is 10 directories per case. Keeping them on failure would make residue conditional on a verdict and would fill a CI runner's temp filesystem silently. The failure detail carries a directory listing, which diagnoses the common mistake — a filename that differs by a character or by case — without needing the directory at all. |
-| `--keep-workspace` has **no config-file key**. | Most flags have one; the omission is deliberate. It is a debugging affordance, not a policy. Committed to `skill-lens.toml` it would quietly accumulate directories on every machine forever, and nobody would connect the disk usage to the setting. |
+| `keep_workspace` gets **both** a config key and a CLI flag, like `min_pass_rate`. | Consistency with every other run default wins. The objection considered and rejected: committed to `skill-lens.toml`, it could quietly accumulate directories on every machine forever. Two things answer that, and both are requirements, not hopes — the console prints every kept path on **every** run that kept one, however it was turned on (§11), so the setting cannot be silently forgotten; and `--no-keep-workspace` turns it off for a single run without editing the file (§10). |
 
 ## 3. The workspace — `src/skill_lens/workspace.py`
 
@@ -452,17 +452,33 @@ carries.
 
 ## 10. Config & CLI
 
-```
-skill-lens run ./skills --keep-workspace
+`Config` gains `keep_workspace: bool = False`, and the CLI flag overrides it — the same
+relationship `min_pass_rate` and `--min-pass-rate` already have.
+
+```toml
+# skill-lens.toml
+keep_workspace = false   # keep each run's temp directory instead of deleting it
 ```
 
-Boolean, off by default, **no config-file key** (see §2). Under the flag, nothing is
-deleted and the console reporter prints each path.
+```
+skill-lens run ./skills --keep-workspace       # keep, whatever the config says
+skill-lens run ./skills --no-keep-workspace    # delete, whatever the config says
+skill-lens run ./skills                        # whatever the config says
+```
+
+The flag is **three-state**: `Optional[bool] = typer.Option(None,
+"--keep-workspace/--no-keep-workspace")`. Absent it is `None` and the config value decides;
+present it wins. Two states would not be enough — with `keep_workspace = true` committed,
+there would be no way to get a clean run back without editing the file, which is exactly the
+trap the §2 objection describes. Resolution is `keep_workspace if keep_workspace is not None
+else settings.keep_workspace`, matching how `min_pass_rate` already resolves in `cli.py`.
 
 ## 11. Reporters
 
-- **Console** gains a section, printed only under `--keep-workspace`, listing each kept
-  directory against its skill, case, arm and repeat index.
+- **Console** gains a section listing each kept directory against its skill, case, arm and
+  repeat index. It prints on **every** run that kept a directory, whether that came from the
+  flag or from the config file. Printing only under the flag would let a committed
+  `keep_workspace = true` fill a disk with nothing on screen connecting the two.
 - **JSON** gains `outcomes[].workspace`: the path when kept, `null` otherwise.
 - **JUnit** and **Markdown** need no structural change. Both already render
   `EvalScore.detail`, which is where the directory listing appears on a `file-produced`
@@ -485,7 +501,9 @@ exercises the same path a real run does.
 | `test_orchestrator.py` | delete-after-scoring; distinct directories per arm and repetition; seeding failure is `errored`; the keep flag; an errored run's cleanup |
 | `test_judge_prompt.py` | artifact fencing; the truncation marker; `(not produced)`; an injection attempt inside artifact content |
 | `test_judge_evaluator.py` | artifacts built from the workspace; judge cost still on `EvalScore` |
-| `test_cli.py` | `--keep-workspace` |
+| `test_cli.py` | `--keep-workspace`, `--no-keep-workspace`, and the flag winning over the config value in both directions |
+| `test_config.py` | `keep_workspace` parses and defaults to `False` |
+| `test_reporters.py` | the kept-directory section prints when the config turned it on and no flag was passed |
 | `test_pydantic_ai_runner.py` | the workspace preamble is identical across arms and names no skill |
 
 Two existing tests fail until updated, and both failures are the mechanism working:
@@ -516,7 +534,8 @@ Documentation ships with the change; the `docs` and `docs-freshness` jobs enforc
 | Page | What lands |
 | --- | --- |
 | `docs/eval-files.md` | the `workspace:` block, `files:`, the two new kinds, the `file:` modifier, `judge.artifacts` |
-| `docs/cli.md` | `--keep-workspace` |
+| `docs/cli.md` | `--keep-workspace` / `--no-keep-workspace` and how they override the config |
+| `docs/configuration.md` | `keep_workspace` |
 | `docs/runners.md` | the built-in toolset, containment, the caps, the never-raise rule, the workspace preamble |
 | `docs/gating.md` | `outcomes[].workspace` in the JSON report |
 | `ARCHITECTURE.md` | `workspace.py` in the module map; the §15 invariants |
@@ -544,6 +563,9 @@ Documentation ships with the change; the `docs` and `docs-freshness` jobs enforc
 10. **Judge artifact bytes are capped and truncation is visible in the text.**
 11. **An unknown assertion kind is caught at load time**, before any case runs and before
     any money is spent; the evaluator's own check remains for library callers.
+12. **Every kept directory is printed, however keeping was turned on.** This is what makes
+    `keep_workspace` safe to put in a config file: a persistent setting that produced no
+    visible output would fill a disk with nothing on screen explaining why.
 
 ## 16. Part 2 — running a bundled skill script (sketch)
 
