@@ -1,4 +1,4 @@
-"""Build framework-neutral mock tools from a case's tool declarations.
+"""Build the framework-neutral tools an agent may call.
 
 Nothing here knows about any agent framework: an AgentTool is a name, a JSON
 schema and a callable, which every adapter can register in its own way.
@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from skill_lens.models import Skill, ToolSpec
+from skill_lens.workspace import PathRefused, Workspace
 
 
 @dataclass(frozen=True)
@@ -122,3 +123,87 @@ def build_skill_tool(skill: Skill) -> AgentTool:
         json_schema=_empty_schema(),
         call=call,
     )
+
+
+# The names the built-in tools are registered under. `cases/loader.py` reads
+# this to reject a case tool that would collide with one, and to accept these
+# names in a trajectory block -- both need the answer without asking a runner.
+BUILTIN_TOOL_NAMES: tuple[str, ...] = ("list_files", "read_file", "write_file")
+
+_PATH_SCHEMA = {
+    "type": "object",
+    "properties": {"path": {"type": "string"}},
+    "required": ["path"],
+    "additionalProperties": False,
+}
+
+_WRITE_SCHEMA = {
+    "type": "object",
+    "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+    "required": ["path", "content"],
+    "additionalProperties": False,
+}
+
+
+def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
+    """The three real tools, bound to one workspace.
+
+    Every callable below catches rather than raises. `PathRefused` already
+    carries a message written for the model; `OSError` and `UnicodeDecodeError`
+    are turned into one here. Arguments are accepted positionally-optional and
+    coerced, because a model may omit a required argument, send an extra one,
+    or send the wrong type -- none of which may raise.
+    """
+
+    def list_files(**_extra: Any) -> str:
+        try:
+            entries = workspace.listing()
+        except OSError as exc:  # pragma: no cover - a directory we just made
+            return f"refused: cannot list the working directory: {exc}"
+        return "\n".join(entries) if entries else "(empty)"
+
+    def read_file(path: Any = "", **_extra: Any) -> str:
+        target = str(path)
+        try:
+            return workspace.read(target)
+        except PathRefused as exc:
+            return str(exc)
+        except UnicodeDecodeError:
+            return f"refused: {target} is not valid UTF-8 text"
+        except OSError as exc:
+            return f"refused: cannot read {target}: {exc}"
+
+    def write_file(path: Any = "", content: Any = "", **_extra: Any) -> str:
+        target = str(path)
+        try:
+            written = workspace.write(target, str(content))
+        except PathRefused as exc:
+            return str(exc)
+        except OSError as exc:
+            return f"refused: cannot write {target}: {exc}"
+        return f"wrote {target} ({written:,} bytes)"
+
+    return [
+        AgentTool(
+            name="list_files",
+            description=("List every file in the working directory, one relative path per line."),
+            json_schema=_empty_schema(),
+            call=list_files,
+        ),
+        AgentTool(
+            name="read_file",
+            description=("Read a text file from the working directory. `path` is relative to it."),
+            # Built inline per call, like every other schema here, so no two
+            # toolsets ever share a mutable properties dict or required list.
+            json_schema=dict(_PATH_SCHEMA, properties=dict(_PATH_SCHEMA["properties"])),
+            call=read_file,
+        ),
+        AgentTool(
+            name="write_file",
+            description=(
+                "Create or replace a text file in the working directory. `path` is relative to it."
+            ),
+            json_schema=dict(_WRITE_SCHEMA, properties=dict(_WRITE_SCHEMA["properties"])),
+            call=write_file,
+        ),
+    ]
