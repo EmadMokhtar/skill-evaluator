@@ -595,6 +595,21 @@ def test_a_workspace_file_that_escapes_is_rejected(tmp_path, bad):
         parse_cases_file(path)
 
 
+def test_an_assertion_file_target_that_escapes_is_rejected_at_load_time(tmp_path):
+    # workspace.files and judge.artifacts are validated here already; an
+    # assertion's file: is the third path source and, before this fix, was
+    # only caught at evaluate time -- after the runner had already run (and,
+    # with a real provider, spent money). It must abort at load time (exit
+    # 2), same as the other two.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n    assertions:\n"
+        "      - kind: contains\n        value: x\n        file: ../escape.txt\n",
+    )
+    with pytest.raises(CaseParseError, match="escape.txt"):
+        parse_cases_file(path)
+
+
 def test_a_case_tool_colliding_with_a_builtin_is_rejected(tmp_path):
     path = _write(
         tmp_path,

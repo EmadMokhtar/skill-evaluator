@@ -54,6 +54,9 @@ is an authoring error. A `trajectory:` block may name the built-ins like any oth
       called: [read_file, write_file]
 ```
 
+Like the offered-skill tool below, a call to one of these three lands in the trajectory
+like any other tool call, so it counts toward `max_calls` and any `budget:` ceilings too.
+
 See [The workspace](runners.md#the-workspace) for containment and the size caps, and
 [Assertion kinds](#assertion-kinds) below for scoring a produced file rather than the chat
 output.
@@ -191,6 +194,11 @@ run's output text:
 `file:` (on any kind, `file-produced` and `json-schema` included) in a case with no
 `workspace:` block is an authoring error — there would be no file to look at, so the
 assertion could never hold.
+
+A `file:` naming a file that was never produced **fails** the assertion, `not_contains`
+included: an unreadable file fails regardless of kind, rather than being read as an implicit
+"the value isn't there" — an author checking `not_contains` against a file the skill never
+wrote should not expect that to pass.
 
 ## Per-check results
 

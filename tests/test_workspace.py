@@ -62,6 +62,17 @@ def test_check_relative_path_refuses_without_needing_a_root(candidate):
         check_relative_path(candidate)
 
 
+def test_check_relative_path_refuses_a_lone_utf16_surrogate():
+    # A surrogate is half of a UTF-16 pair; alone it cannot be encoded as
+    # UTF-8, so letting it reach the filesystem raises UnicodeEncodeError --
+    # a ValueError, not an OSError, that used to sail through this check and
+    # surface well past it (see tests/test_assertion_evaluator.py for the
+    # choke point this closes). YAML parses '\ud800' happily, so this is
+    # exactly the kind of value an author's own file can carry.
+    with pytest.raises(PathRefused, match="surrogate"):
+        check_relative_path("a\ud800b.txt")
+
+
 def test_check_relative_path_accepts_a_plain_relative_path():
     assert check_relative_path("nested/report.md") is None
 

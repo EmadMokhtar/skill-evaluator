@@ -378,6 +378,22 @@ def test_a_refused_path_is_an_authoring_error_not_a_failure(tmp_path, kind, esca
         AssertionEvaluator().evaluate(_case(spec), result)
 
 
+def test_a_surrogate_bearing_file_is_an_authoring_error_not_a_crash(tmp_path):
+    # A lone UTF-16 surrogate ('\ud800') is half of a UTF-16 pair and cannot
+    # be encoded as UTF-8. YAML carries it happily, and before this fix
+    # check_relative_path accepted it, so it reached os.path.realpath (inside
+    # Workspace.resolve) and raised UnicodeEncodeError -- a plain ValueError
+    # that matches none of _subject_text's except clauses (PathRefused,
+    # UnicodeDecodeError, OSError) and escaped as an unhandled traceback,
+    # exit 1 -- telling CI "the skill got worse" for what is actually a typo
+    # in the eval file. It must instead raise InvalidAssertionValue, the same
+    # authoring-error outcome as any other refused path.
+    result = RunResult(output="", workspace=tmp_path.resolve())
+    case = _case(AssertionSpec(kind="contains", value="x", file="a\ud800b.txt"))
+    with pytest.raises(InvalidAssertionValue):
+        AssertionEvaluator().evaluate(case, result)
+
+
 def test_json_schema_without_a_schema_is_an_authoring_error(tmp_path):
     # Reachable only by building an EvalCase directly; the loader requires the
     # field. Draft202012Validator(None) would otherwise raise a bare

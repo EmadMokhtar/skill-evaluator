@@ -88,6 +88,11 @@ def check_relative_path(candidate: str) -> None:
         raise PathRefused("refused: the path must not be empty")
     if "\x00" in text:
         raise PathRefused(f"refused: {candidate!r} contains a null byte")
+    if any("\ud800" <= char <= "\udfff" for char in text):
+        raise PathRefused(
+            f"refused: {candidate!r} contains an unpaired UTF-16 surrogate, "
+            "which cannot be encoded as UTF-8"
+        )
     path = Path(text)
     if not path.parts:
         raise PathRefused(

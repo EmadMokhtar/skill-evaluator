@@ -312,6 +312,33 @@ def test_the_content_budget_is_not_inflated_by_many_exhausted_names(tmp_path):
     assert _content_bytes(request.artifacts) == MAX_ARTIFACTS_TOTAL_BYTES
 
 
+def test_missing_names_never_decrement_the_content_budget(tmp_path):
+    # Guards the property that has no red-to-green test elsewhere in this
+    # file: NOT_PRODUCED (a name nobody wrote) must never decrement
+    # `remaining`, exactly like BUDGET_EXHAUSTED must not (see
+    # test_the_content_budget_is_not_inflated_by_many_exhausted_names above).
+    # Under an accounting that decremented `remaining` by even a sentinel's
+    # own rendered length, twenty NOT_PRODUCED names after three 19,999-byte
+    # real files would drive `remaining` to roughly -277 (20 sentinels of
+    # "(not produced)", 15 bytes each, against a remaining budget of 3),
+    # and the real 2-byte file that follows would be swallowed as
+    # BUDGET_EXHAUSTED without ever being read -- an eval signal (the
+    # rubric grading a file that was never shown to the judge) with nothing
+    # in the prompt saying so. It must instead render as its actual content.
+    sizes = [19_999, 19_999, 19_999]
+    real_names = [f"m{index}.md" for index in range(len(sizes))]
+    for name, size in zip(real_names, sizes, strict=True):
+        (tmp_path / name).write_text("x" * size, encoding="utf-8")
+    missing_names = [f"missing{index}.md" for index in range(20)]
+    (tmp_path / "tiny.md").write_text("hi", encoding="utf-8")
+    request = build_request(
+        _case(*real_names, *missing_names, "tiny.md"), RunResult(output="o", workspace=tmp_path)
+    )
+    for name in missing_names:
+        assert request.artifacts[name] == NOT_PRODUCED
+    assert request.artifacts["tiny.md"] == "hi"
+
+
 def test_a_surrogate_bearing_artifact_name_is_rendered_not_raised(tmp_path):
     # A lone UTF-16 surrogate in a path raises UnicodeEncodeError on the way
     # to the filesystem -- a ValueError, not an OSError -- which a

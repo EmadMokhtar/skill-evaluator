@@ -165,16 +165,22 @@ def _validate_assertions(path: Path, case: EvalCase) -> None:
 
 
 def _validate_workspace(path: Path, case: EvalCase) -> None:
-    """Reject a seeded path, or a named judge artifact, that could ever leave
-    the workspace root.
+    """Reject a seeded path, a named judge artifact, or an assertion's `file:`
+    target that could ever leave the workspace root.
 
     `judge.artifacts` gets no schema-level shape check on the string itself
     (it is "any list of names an eval author wants graded"), so a typo like
     `../escape.txt` would otherwise pass straight through to `_artifacts` at
     run time, render as `(not produced)`, and fail the rubric -- blaming the
     skill for a path no agent could ever have produced. `workspace.files`
-    keys get exactly this same check below; an authoring mistake in either
-    list must abort the run (exit 2), never score as a failure.
+    keys and assertion `file:` values get exactly this same check below; an
+    authoring mistake in any of the three must abort the run (exit 2), never
+    score as a failure. `AssertionEvaluator` keeps its own `PathRefused`
+    handling too -- reachable for an `EvalCase` built programmatically,
+    bypassing this loader -- so a case running that way still gets an
+    authoring-error verdict rather than a raw `UnicodeEncodeError`; it is
+    just no longer the only place a YAML-authored case's escape is caught,
+    and now catches it before the runner has spent anything on the case.
     """
     if case.workspace is not None:
         for name in case.workspace.files:
@@ -192,6 +198,16 @@ def _validate_workspace(path: Path, case: EvalCase) -> None:
                 raise CaseParseError(
                     f"{path}: case {case.name!r} names judge artifact {name!r}: {exc}"
                 ) from exc
+    for position, spec in enumerate(case.assertions, start=1):
+        if spec.file is None:
+            continue
+        try:
+            check_relative_path(spec.file)
+        except PathRefused as exc:
+            raise CaseParseError(
+                f"{path}: case {case.name!r} assertion #{position} targets file "
+                f"{spec.file!r}: {exc}"
+            ) from exc
 
 
 def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None = None) -> None:
