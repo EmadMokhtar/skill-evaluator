@@ -46,7 +46,9 @@ def _documented_names(text: str, heading: str) -> set[str]:
     names: set[str] = set()
     for line in table_lines[2:]:  # skip the header row and the --- separator
         first_cell = line.split("|")[1].strip()
-        cell_match = re.fullmatch(r"`(\w+)`", first_cell)
+        # [\w-]+, not \w+: an assertion kind like `file-produced` is a plain
+        # string, not a Python identifier, so it may contain a hyphen.
+        cell_match = re.fullmatch(r"`([\w-]+)`", first_cell)
         if cell_match:
             names.add(cell_match.group(1))
     return names

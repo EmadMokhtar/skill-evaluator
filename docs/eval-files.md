@@ -113,6 +113,8 @@ Comments are discarded before the check, so a file may discuss the token freely.
 | `not_contains` | `value` does not appear in the output |
 | `regex` | `value` matches anywhere in the output (`re.search`) |
 | `equals` | the stripped output equals `value` exactly |
+| `file-produced` | `file` exists in the workspace |
+| `json-schema` | the output (or `file`) parses as JSON and validates against `json_schema` |
 
 Every assertion in a case must hold for the case to pass. An unsupported `kind` or a malformed
 regex aborts the run as an authoring error rather than being reported as a skill failure.
