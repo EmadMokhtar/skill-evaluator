@@ -3187,11 +3187,15 @@ def _run_one(
 
     try:
         result = runner.run(skill, case, workspace=workspace)
-        if workspace is not None:
-            # Stamped here, not echoed by the runner: an adapter that ignores
-            # the parameter then fails loudly on the assertion instead of
-            # producing a workspace-less result that looks like a skill problem.
-            result = result.model_copy(update={"workspace": workspace.root})
+        # Stamped here, not echoed by the runner: an adapter that ignores the
+        # parameter then fails loudly on the assertion instead of producing a
+        # workspace-less result that looks like a skill problem. Written
+        # unconditionally -- including the None case -- so a non-conforming
+        # adapter cannot smuggle a path of its own into the report for a case
+        # that declared no workspace.
+        result = result.model_copy(
+            update={"workspace": workspace.root if workspace is not None else None}
+        )
         if result.errored:
             scores: list[EvalScore] = []
             status: CaseStatus = "errored"
