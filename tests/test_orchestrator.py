@@ -612,11 +612,19 @@ class _RecordingRunner:
 
     def __init__(self) -> None:
         self.seen: list[Workspace] = []
+        self.seeded: list[str] = []
 
     def run(self, skill, case, workspace=None):
         if workspace is not None:
             self.seen.append(workspace)
             workspace.write("report.md", f"{skill.variant}")
+            # Defensive: most callers of this stub seed nothing, so a missing
+            # file must not raise -- only pin what was actually there while
+            # the runner had control, for the cases that do seed one.
+            try:
+                self.seeded.append(workspace.read("in.csv"))
+            except OSError:
+                pass
         return RunResult(output="done")
 
 
@@ -668,8 +676,13 @@ def test_keep_workspace_leaves_the_directory_and_the_path(tmp_path):
         keep_workspace=True,
     )
     kept = report.outcomes[0].result.workspace
-    assert kept is not None and Path(kept).is_dir()
-    Workspace(root=Path(kept)).cleanup()
+    try:
+        assert kept is not None and Path(kept).is_dir()
+    finally:
+        # In a finally so a failing assertion above does not leak the
+        # directory -- cleanup must run either way.
+        if kept is not None:
+            Workspace(root=Path(kept)).cleanup()
 
 
 def test_each_arm_and_repetition_gets_its_own_directory(tmp_path):
@@ -690,20 +703,17 @@ def test_each_arm_and_repetition_gets_its_own_directory(tmp_path):
 
 
 def test_seeded_files_reach_the_runner(tmp_path):
-    # keep_workspace=True, not the default: cleanup deletes the directory
-    # before this function gets control back, and reading through the same
-    # Workspace object after that would just prove rmtree works. Keeping the
-    # directory around is the only way to check what the runner actually saw.
+    # _RecordingRunner captures the seeded content itself, inside run(),
+    # while it still has the directory -- not by reading it back afterward.
+    # That pins the file's presence at the moment the runner actually had
+    # control, so this no longer depends on keep_workspace working (a
+    # keep_workspace regression can no longer fail this test for an unrelated
+    # reason) and needs no cleanup at all: the default keep_workspace=False
+    # deletes the directory exactly as every other case does.
     runner = _RecordingRunner()
     case = _case(workspace=WorkspaceSpec(files={"in.csv": "a,b\n"}))
-    run_evals(
-        [_skill(tmp_path)],
-        [runner],
-        evals_path=_evals(tmp_path, case),
-        keep_workspace=True,
-    )
-    assert runner.seen[0].read("in.csv") == "a,b\n"
-    runner.seen[0].cleanup()
+    run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    assert runner.seeded == ["a,b\n"]
 
 
 def test_configured_limits_reach_the_workspace(tmp_path):
@@ -760,3 +770,43 @@ def test_concurrency_does_not_share_directories(tmp_path):
     run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, *cases), concurrency=4)
     roots = [workspace.root for workspace in runner.seen]
     assert len(set(roots)) == 6
+
+
+def test_an_authoring_error_still_deletes_the_directory(tmp_path):
+    # The cleanup lives in a `finally` for exactly this: an evaluator that
+    # raises an authoring error must abort the run AND leave no directory
+    # behind. Without this test, flattening the finally into straight-line
+    # code would pass the whole suite while leaking a directory per case.
+    from skill_lens.orchestrator import _run_one
+
+    class _Exploding:
+        def evaluate(self, case, result):
+            raise InvalidAssertionValue("boom")
+
+    runner = _RecordingRunner()
+    with pytest.raises(InvalidAssertionValue):
+        _run_one(
+            _skill(tmp_path),
+            _case(workspace=WorkspaceSpec()),
+            runner,
+            [_Exploding()],
+        )
+    assert not runner.seen[0].root.exists()
+
+
+def test_a_runner_supplied_workspace_is_ignored_for_a_workspace_less_case(tmp_path):
+    # The stamp is unconditional now: a runner that returns its own
+    # RunResult.workspace must not have that path reach the report for a case
+    # that declared no `workspace:` block. Otherwise a non-conforming adapter
+    # could smuggle a path of its own past the orchestrator, and the
+    # assertion evaluator would use it instead of raising the intended
+    # "this run had no workspace" authoring error.
+    class _Smuggler:
+        name = "smuggler"
+
+        def run(self, skill, case, workspace=None):
+            return RunResult(output="x", workspace=Path("/etc"))
+
+    report = run_evals([_skill(tmp_path)], [_Smuggler()], evals_path=_evals(tmp_path, _case()))
+    assert report.outcomes[0].result is not None
+    assert report.outcomes[0].result.workspace is None
