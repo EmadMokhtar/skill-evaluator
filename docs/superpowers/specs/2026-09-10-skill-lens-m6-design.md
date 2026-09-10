@@ -36,8 +36,10 @@ test. §16 sketches it.
   eval file plus a story about binary content, for no case we have yet.
 - **Binary input files.** `files:` values are text, written as UTF-8. A binary fixture needs
   base64 in YAML and a size story, and no example needs one.
-- **Per-case cap overrides.** The size and count caps are module constants. Making them
-  configurable before anyone has hit one is guessing at the right knob.
+- **Per-*case* cap overrides.** The caps are configurable per repository (§10), not per
+  case. A cap is a runaway guard, not part of what an eval asserts; putting one on a case
+  would imply it carries meaning about that case, and it does not. A repository with one
+  large-artifact skill raises the limit for the whole run, which is the right granularity.
 - **A `delete_file` tool.** The toolset is read, write, list. Deletion gives a run a way to
   destroy its own evidence and buys nothing an eval needs.
 - **A schema loaded from a separate file.** `json_schema:` is inline, like every other part
@@ -54,6 +56,7 @@ test. §16 sketches it.
 | `jsonschema` is a **core dependency**, not an optional extra. | An optional extra would make `kind: json-schema` fail at *evaluate* time. This project draws a hard line between authoring errors (abort, exit 2) and infra errors (`errored`); a missing library for a declared assertion sits cleanly in neither. |
 | The judge reads **named, capped** artifacts. | A skill whose value is its output file cannot be graded on prose quality otherwise. Named rather than "the whole directory" because unbounded file content in a judge prompt is both a cost hazard and an accuracy one — a judge handed a large volume of irrelevant text grades worse, not better. |
 | Directories are **always deleted**; `--keep-workspace` opts out. | `--repeat 5 --baseline previous --concurrency 8` is 10 directories per case. Keeping them on failure would make residue conditional on a verdict and would fill a CI runner's temp filesystem silently. The failure detail carries a directory listing, which diagnoses the common mistake — a filename that differs by a character or by case — without needing the directory at all. |
+| The three caps are **config keys**, not constants and not CLI flags. | A repository whose skill legitimately produces a large artifact must not have to edit installed source to run its evals. They get no CLI flag because they are policy set once per repository, not a per-run decision — the same reasoning that leaves `fail_on_error` and `retries` config-only. |
 | `keep_workspace` gets **both** a config key and a CLI flag, like `min_pass_rate`. | Consistency with every other run default wins. The objection considered and rejected: committed to `skill-lens.toml`, it could quietly accumulate directories on every machine forever. Two things answer that, and both are requirements, not hopes — the console prints every kept path on **every** run that kept one, however it was turned on (§11), so the setting cannot be silently forgotten; and `--no-keep-workspace` turns it off for a single run without editing the file (§10). |
 
 ## 3. The workspace — `src/skill_lens/workspace.py`
@@ -63,10 +66,6 @@ framework, so `tests/test_framework_isolation.py` keeps holding.
 
 ```python
 WORKSPACE_PREFIX = "skill-lens-"
-
-MAX_FILE_BYTES = 1_000_000
-MAX_FILES = 200
-MAX_TOTAL_BYTES = 5_000_000
 
 
 class PathRefused(Exception):
@@ -78,8 +77,19 @@ class WorkspaceError(Exception):
 
 
 @dataclass(frozen=True)
+class WorkspaceLimits:
+    max_file_bytes: int = 1_000_000
+    max_files: int = 200
+    max_total_bytes: int = 5_000_000
+
+
+DEFAULT_LIMITS = WorkspaceLimits()
+
+
+@dataclass(frozen=True)
 class Workspace:
-    root: Path                      # always already resolved
+    root: Path                                 # always already resolved
+    limits: WorkspaceLimits = DEFAULT_LIMITS
 
     def resolve(self, candidate: str) -> Path       # raises PathRefused
     def read(self, candidate: str) -> str           # raises PathRefused, OSError, UnicodeDecodeError
@@ -88,7 +98,9 @@ class Workspace:
     def cleanup(self) -> None
 
 
-def create_workspace(spec: WorkspaceSpec, *, label: str) -> Workspace
+def create_workspace(
+    spec: WorkspaceSpec, *, label: str, limits: WorkspaceLimits = DEFAULT_LIMITS
+) -> Workspace
 ```
 
 `Workspace` methods **raise**; the tools built on top of them **catch**. That split lets the
@@ -148,9 +160,27 @@ handles, because the root was resolved at creation.
 
 ### Caps
 
-`write` refuses when the encoded content exceeds `MAX_FILE_BYTES`, when creating a new file
-would exceed `MAX_FILES`, or when the resulting total would exceed `MAX_TOTAL_BYTES`. A
-model in a loop is a real failure mode and a full disk is a bad way to find out.
+`write` refuses when the encoded content exceeds `limits.max_file_bytes`, when creating a
+new file would exceed `limits.max_files`, or when the resulting total would exceed
+`limits.max_total_bytes`.
+
+These are runaway guards. A language model can get stuck repeating itself — write a file,
+read it back, append, write again, never stop — and without a limit one bad run fills the
+disk. Concurrency sharpens it: `--concurrency 8 --repeat 5 --baseline previous` keeps up to
+eight workspaces alive at once, and a full disk on a CI runner fails in ways that have
+nothing to do with the eval that caused it.
+
+**Every refusal names the limit it hit and that limit's value**, e.g. `refused: report.md
+would be 2,400,000 bytes; max_file_bytes is 1,000,000`. A generic "too large" would leave an
+author guessing which of three caps they hit and what to raise it to. Because the refusal is
+a tool result rather than an exception (§4), the model reads it and can adjust; the case
+then usually fails its assertions, which is correct — a skill that drives an agent into
+writing megabytes of repeated text is a skill behaving badly, and the eval should say so.
+
+The defaults are roughly 100 times a realistic artifact (a report or a JSON file is
+kilobytes), so they bind only on genuine runaways. They are configurable (§10) so that a
+repository whose skill legitimately produces something large is never forced to edit
+installed source.
 
 ### Cleanup
 
@@ -341,7 +371,8 @@ One new private function decides what text an assertion looks at: `result.output
 `result.workspace`, a `Path`, so it reconstructs `Workspace(root=result.workspace)` to read
 through the same containment code the tools use. That is the reason `Workspace` is a frozen
 dataclass over a root and holds no creation state: it has to be cheap to rebuild from a path
-by anything that was handed one. The four existing kinds are
+by anything that was handed one. `limits` defaults precisely so this reconstruction stays a
+one-argument call — limits constrain writes, and nothing but the tools writes. The four existing kinds are
 untouched — they keep taking `(value, text)` and returning a boolean, and gain file support
 for free. Two entries join `_CHECKS`, which is already the single source of truth that
 `tests/test_docs.py` enumerates.
@@ -445,8 +476,12 @@ mutable state touched by `run`/`evaluate`/`judge` is preserved, and this is the 
 reason the orchestrator owns creation: a runner that made its own workspace would be
 tempted to store it on `self`.
 
-Signature changes: `_run_one(..., keep_workspace: bool = False)`,
-`_execute(..., keep_workspace)`, `run_evals(..., keep_workspace: bool = False)`.
+Signature changes: `_run_one(..., keep_workspace: bool = False, limits: WorkspaceLimits =
+DEFAULT_LIMITS)`, the same two on `_execute`, and `run_evals(..., keep_workspace: bool =
+False, workspace_limits: WorkspaceLimits | None = None)`. Two separate parameters rather
+than one bundled options object: keeping a directory and bounding what goes in it are
+unrelated concerns, and Part 2 can introduce a bundle when it has a third thing to put in
+one.
 `_WorkItem` is unchanged — the label for the directory name is built from fields it already
 carries.
 
@@ -455,10 +490,24 @@ carries.
 `Config` gains `keep_workspace: bool = False`, and the CLI flag overrides it — the same
 relationship `min_pass_rate` and `--min-pass-rate` already have.
 
+`Config` also gains the three caps, with no CLI flag — they are policy set once per
+repository, not a per-run decision, which is why `fail_on_error` and `retries` are
+config-only too.
+
 ```toml
 # skill-lens.toml
-keep_workspace = false   # keep each run's temp directory instead of deleting it
+keep_workspace = false      # keep each run's temp directory instead of deleting it
+
+max_file_bytes = 1_000_000  # largest single write_file
+max_files = 200             # most files one workspace may hold
+max_total_bytes = 5_000_000 # most bytes one workspace may hold in total
 ```
+
+All three are `Field(gt=0)` on `Config`, so a zero or negative value fails as a
+`ConfigError` through the existing `ValidationError` path in `load_config`. Validation lives
+on the model here rather than in the CLI — the note on `concurrency` explains that its
+validation sits in the CLI so a flag and a config value are checked identically, and with no
+flag there is only one entry point to check.
 
 ```
 skill-lens run ./skills --keep-workspace       # keep, whatever the config says
@@ -494,15 +543,15 @@ exercises the same path a real run does.
 
 | File | Covers |
 | --- | --- |
-| `test_workspace.py` (new) | containment: absolute, `..`, drive-relative, root-relative, a symlinked root; each cap; seeding; cleanup suppressing errors |
+| `test_workspace.py` (new) | containment: absolute, `..`, drive-relative, root-relative, a symlinked root; each cap at a custom `WorkspaceLimits`, not just the default; every refusal message naming its limit and value; seeding; cleanup suppressing errors |
 | `test_builtin_tools.py` (new) | each tool, and that **every** refusal returns a string rather than raising |
 | `test_assertion_evaluator.py` | `file:` on all four existing kinds; `file-produced`; `json-schema`; the missing-file listing and its `+N more` elision; non-UTF-8; the no-workspace raise |
 | `test_case_loader.py` | every row of the requirements table, and each new authoring error in §6 |
-| `test_orchestrator.py` | delete-after-scoring; distinct directories per arm and repetition; seeding failure is `errored`; the keep flag; an errored run's cleanup |
+| `test_orchestrator.py` | delete-after-scoring; distinct directories per arm and repetition; seeding failure is `errored`; the keep flag; an errored run's cleanup; configured limits reaching the workspace rather than the defaults being used silently |
 | `test_judge_prompt.py` | artifact fencing; the truncation marker; `(not produced)`; an injection attempt inside artifact content |
 | `test_judge_evaluator.py` | artifacts built from the workspace; judge cost still on `EvalScore` |
 | `test_cli.py` | `--keep-workspace`, `--no-keep-workspace`, and the flag winning over the config value in both directions |
-| `test_config.py` | `keep_workspace` parses and defaults to `False` |
+| `test_config.py` | `keep_workspace` parses and defaults to `False`; the three caps parse, carry the documented defaults, and reject zero and negative values |
 | `test_reporters.py` | the kept-directory section prints when the config turned it on and no flag was passed |
 | `test_pydantic_ai_runner.py` | the workspace preamble is identical across arms and names no skill |
 
@@ -535,8 +584,8 @@ Documentation ships with the change; the `docs` and `docs-freshness` jobs enforc
 | --- | --- |
 | `docs/eval-files.md` | the `workspace:` block, `files:`, the two new kinds, the `file:` modifier, `judge.artifacts` |
 | `docs/cli.md` | `--keep-workspace` / `--no-keep-workspace` and how they override the config |
-| `docs/configuration.md` | `keep_workspace` |
-| `docs/runners.md` | the built-in toolset, containment, the caps, the never-raise rule, the workspace preamble |
+| `docs/configuration.md` | `keep_workspace`, `max_file_bytes`, `max_files`, `max_total_bytes` |
+| `docs/runners.md` | the built-in toolset, containment, the caps and what raising them costs, the never-raise rule, the workspace preamble |
 | `docs/gating.md` | `outcomes[].workspace` in the JSON report |
 | `ARCHITECTURE.md` | `workspace.py` in the module map; the §15 invariants |
 | `docs/roadmap.md` | M6 Part 1 shipped; Part 2 outstanding |
@@ -563,7 +612,10 @@ Documentation ships with the change; the `docs` and `docs-freshness` jobs enforc
 10. **Judge artifact bytes are capped and truncation is visible in the text.**
 11. **An unknown assertion kind is caught at load time**, before any case runs and before
     any money is spent; the evaluator's own check remains for library callers.
-12. **Every kept directory is printed, however keeping was turned on.** This is what makes
+12. **A configured cap reaches the workspace.** A limit read from config and then dropped
+    on the way through the orchestrator would leave the default silently in force, and the
+    only symptom would be a refusal message quoting a number the user never set.
+13. **Every kept directory is printed, however keeping was turned on.** This is what makes
     `keep_workspace` safe to put in a config file: a persistent setting that produced no
     visible output would fill a disk with nothing on screen explaining why.
 
