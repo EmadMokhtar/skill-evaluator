@@ -65,6 +65,7 @@ problem (errored) from a low score (failed).
 | `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
 | `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models. |
 | `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. |
+| `workspace.py` | The per-case temporary directory: creation, seeding, path containment, and cleanup. Framework-neutral, like every other top-level module. Its methods **raise** (`PathRefused`, `WorkspaceError`) for `cases/loader.py` and the evaluators to catch as authoring or infra errors; `runners/tools.py`'s built-in tools catch those same exceptions and turn them into ordinary tool-result strings instead. |
 | `runners/base.py` | The `Runner` protocol. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of only two modules that import an agent framework.** |
@@ -408,6 +409,110 @@ freshly recorded cassette is exactly that — without staging, the scan would re
 checking nothing on the one path that creates a file. It hands back a **branch**, never a pull
 request, because a pull request opened with `GITHUB_TOKEN` gets no CI checks, and on a cassette
 refresh those checks are the whole point of the review.
+
+### Real-execution tools (M6 part 1)
+
+**A built-in tool never raises; it returns a message the model can read.** `list_files`,
+`read_file` and `write_file` in `runners/tools.py` catch `PathRefused`, `OSError` and
+`UnicodeError` and turn every one into an ordinary tool-result string. `Workspace`'s own
+methods (`resolve`, `read`, `write`) *do* raise — that split is deliberate: an evaluator or
+the loader wants an exception, because a refused path there is a genuine authoring error,
+but a tool must never raise, because the model choosing a bad path is an eval signal and an
+exception would surface it as an infra failure instead.
+
+**No path outside the workspace root can be read or written.** Every candidate path is
+resolved and then checked against the root with `Path.is_relative_to`, never trusted from
+its spelling alone — `check_relative_path` rejects an absolute path, a drive, or a `..`
+segment before resolution even runs, so the refusal message can name what's wrong rather
+than a location the author never wrote. The root itself is resolved once, at creation
+(`Path(tempfile.mkdtemp(...)).resolve()`): macOS resolves `/tmp` to `/private/tmp`, and an
+unresolved root would make every later containment check compare two spellings of the same
+directory.
+
+**Every work item gets its own workspace, and two arms never share one.**
+`orchestrator._run_one` creates a workspace fresh for each (skill, case, runner, arm,
+repeat_index) combination via `tempfile.mkdtemp`, which is atomic — there is no window in
+which two work items racing for a directory name could collide. A shared directory would
+let the baseline arm read what the candidate wrote, or vice versa, corrupting the very
+comparison `--baseline` exists to make.
+
+**The workspace preamble is byte-identical in both arms and never names the skill.**
+`WORKSPACE_PREAMBLE` is appended in `_instructions` purely on whether the case has a
+workspace, never on which arm is running — the same discipline `BASELINE_PREAMBLE` already
+follows for the skill's own text. Added to the candidate arm only, that text would itself
+become part of what `--min-delta` measures, inflating (or deflating) a comparison that is
+supposed to isolate the skill's contribution.
+
+**`RunResult.workspace` is non-null only while the directory exists, and the orchestrator
+stamps it unconditionally.** `_run_one` overwrites whatever the runner returned with
+`workspace.root if workspace is not None else None` after every run, including the `None`
+case — so a non-conforming adapter that ignores the `workspace` parameter cannot smuggle a
+path of its own into the report, and a case with no `workspace:` block can never show one
+either. Once the directory is deleted, the field is cleared in the same step, so it can
+never point at something that is already gone.
+
+**Workspace cleanup never changes a verdict, and lives in a `finally`.** `Workspace.cleanup`
+suppresses its own errors (`shutil.rmtree(..., ignore_errors=True)`) — deleting a temp
+directory is harness housekeeping, and a cleanup failure turning a passing case red would be
+the tool reporting on itself instead of on the skill. It runs in `_run_one`'s `finally`
+block specifically so that an authoring error raised by an evaluator still deletes the
+directory on its way out, rather than leaking it.
+
+**A workspace creation or seeding failure is `errored`, never `failed`.** A full disk or a
+permissions problem says nothing about the skill under test, so `create_workspace` raises
+`WorkspaceError` and `_run_one` reports the case as `errored`, with the exception's message
+in `RunResult.error`. Seeding is subject to exactly the same rule: a seed file that cannot
+be written trips the same path, because a seed the harness itself could not write says
+nothing about the skill either — and a half-seeded directory would be worse than none, so
+`create_workspace` cleans up before re-raising.
+
+**Artifacts reach the judge as fenced, untrusted data.** Each is wrapped in its own
+`<artifact id="..." name="...">...</artifact id="...">` block, and its id is derived from
+both the trusted **name** and the untrusted **content** — salted with the name because
+`sha256("")` is a published constant (`e3b0c442...`) any model could reproduce from memory,
+so an empty artifact would otherwise get a guessable fence id a *later* artifact could echo
+as a forged closer. An artifact's boundary is its **first** matching closing tag — the
+opposite of the response fence's "last matching closer wins" rule — because each artifact
+block is closed immediately: unlike the response, which is always the last thing before the
+checks, an artifact may be followed by more attacker-controlled text (another artifact, or
+the checks list itself), so "last wins" would not be a safe rule there.
+
+**`file:` or `judge.artifacts` in a case with no `workspace:` block is an authoring error**
+(exit 2), and so is a `judge.artifacts` entry that could never be produced (one that fails
+`check_relative_path`, e.g. `../escape.txt`). Both are caught in `cases/loader.py` before any
+case runs — a case with no filesystem can never satisfy either, so scoring it as a failure
+would blame the skill for a check that could not have held under any output.
+
+**Judge artifact bytes are capped, and truncation is visible.** `MAX_ARTIFACT_BYTES` and
+`MAX_ARTIFACTS_TOTAL_BYTES` bound the untrusted, model-produced *content* a judge prompt can
+carry — a judge handed a large volume of irrelevant text grades worse, not better — and a
+cut file is marked with a visible `... [truncated, N bytes omitted]` note rather than being
+silently shortened. A sentinel (`(not produced)`, `(not valid UTF-8 text)`, `(omitted,
+artifact budget exhausted)`) never consumes that budget: the cap bounds untrusted model
+content, and a sentinel is fixed, harness-authored text with nothing for a content budget to
+police.
+
+**An unknown assertion kind is caught at load time**, before any case runs and before any
+money is spent. `cases/loader.py`'s `_validate_assertions` checks every `kind` against its
+own field-requirements table — deliberately a second table, not a reuse of
+`AssertionEvaluator`'s `_CHECKS` (one maps a kind to a predicate, the other to which fields
+it requires and allows), pinned together by a test rather than an import. Discovery is a
+separate sequential pass ahead of execution (an M5 invariant), so a bad kind anywhere in a
+suite aborts the whole run before the first case, real or fake, is charged for.
+
+**A configured cap reaches the workspace.** `max_file_bytes`, `max_files` and
+`max_total_bytes` flow from `Config` through `cli.py`'s `WorkspaceLimits` construction,
+through `orchestrator.run_evals`'s `workspace_limits` parameter, into every
+`create_workspace` call. A limit read from config and then dropped somewhere on that path
+would leave the built-in default silently in force, and the only symptom would be a refusal
+message quoting a number the user never set.
+
+**Every kept directory is printed, however keeping was turned on.** `_kept_workspaces` in
+`reporters/console.py` renders a `Kept workspaces` section whenever *any* outcome carries a
+non-null `workspace`, regardless of whether `--keep-workspace` or the config file's
+`keep_workspace` is what kept it. That is what makes `keep_workspace = true` safe to commit:
+a persistent setting that produced no visible output would fill a disk with nothing on
+screen to explain why.
 
 ## Extension points
 

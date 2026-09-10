@@ -227,6 +227,40 @@ form, that file is the explanation.
   see an untracked file and a freshly re-recorded cassette is exactly that; proves the new
   recordings replay under `--record-mode=none`; and checks the staged diff for secrets —
   all before pushing, and it never opens a pull request that CI has not run on.
+- **A built-in workspace tool never raises; it returns a message the model can read.**
+  `Workspace`'s own methods raise (`PathRefused`, `WorkspaceError`) for the loader and
+  evaluators to catch as authoring/infra errors; `runners/tools.py` catches those same
+  exceptions and turns them into ordinary tool results instead.
+- **No path outside the workspace root can be read or written.** Checked after resolution,
+  against a root that was itself resolved once at creation — an unresolved root (`/tmp` vs
+  `/private/tmp` on macOS) would make containment checks compare two spellings of one
+  directory.
+- **Every work item gets its own workspace, and two arms never share one.** `mkdtemp` is
+  atomic; a shared directory would let the baseline arm read the candidate's output.
+- **The workspace preamble is byte-identical in both arms and never names the skill** —
+  otherwise `--min-delta` measures the preamble instead of the skill.
+- **`RunResult.workspace` is non-null only while the directory exists**, and the orchestrator
+  stamps it unconditionally after every run so a non-conforming runner cannot smuggle a path
+  of its own into the report.
+- **Workspace cleanup never changes a verdict**, and lives in a `finally` so an authoring
+  error raised by an evaluator still deletes the directory on its way out.
+- **A workspace creation or seeding failure is `errored`, never `failed`.** A full disk or a
+  half-seeded directory says nothing about the skill.
+- **Artifacts reach the judge as fenced, untrusted data**, each under an id derived from the
+  trusted name AND the untrusted content — salted because `sha256("")` is a constant a model
+  could reproduce from memory. An artifact's boundary is its **first** matching closer, the
+  opposite of the response fence's rule, because each artifact block is closed immediately.
+- **`file:` or `judge.artifacts` in a case with no `workspace:` block is an authoring error**
+  (exit 2), and so is a `judge.artifacts` entry that could never be produced.
+- **Judge artifact bytes are capped and truncation is visible**; a sentinel never consumes
+  the content budget, because the cap bounds untrusted model content and a sentinel is fixed
+  harness text.
+- **An unknown assertion kind is caught at load time**, before any case runs and before any
+  money is spent.
+- **A configured cap reaches the workspace.** A limit read from config and then dropped on
+  the way through the orchestrator would leave the default silently in force.
+- **Every kept directory is printed, however keeping was turned on** — `--keep-workspace` or
+  the config key. A persistent setting with no visible output would fill a disk silently.
 
 ## Documentation
 

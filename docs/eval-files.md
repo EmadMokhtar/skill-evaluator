@@ -17,6 +17,47 @@ Extra keys alongside `cases:` at the top level of the file are ignored.
 | `workspace` | no | A temporary directory and the files it starts with |
 | `mode` | no | `loaded` (default) or `offered` — see [Did the agent reach for the skill?](#did-the-agent-reach-for-the-skill) |
 
+## Workspaces
+
+A `workspace:` block gives one case a real, contained temporary directory: created fresh
+for that work item, seeded with the files it declares, and deleted once the case is
+scored — unless [`--keep-workspace`](cli.md) says otherwise.
+
+```yaml
+    workspace:
+      files:
+        sales.csv: |
+          region,units
+          north,120
+          south,80
+```
+
+It is **opt-in**. A case with no `workspace:` block gets no temporary directory and no
+extra tools, so every suite written before this existed keeps running byte-identically.
+Declaring `workspace: {}` with no `files:` is still meaningful — it hands the agent an
+empty directory to generate something into, for a skill whose whole job is producing a
+file from nothing.
+
+With the block present, the agent also gets three built-in tools:
+
+| Tool | Does |
+| --- | --- |
+| `list_files` | List every file in the working directory, one relative path per line |
+| `read_file` | Read a text file. `path` is relative to the working directory |
+| `write_file` | Create or replace a text file |
+
+A case's own `tools:` may not declare a name that collides with one of these three — that
+is an authoring error. A `trajectory:` block may name the built-ins like any other tool:
+
+```yaml
+    trajectory:
+      called: [read_file, write_file]
+```
+
+See [The workspace](runners.md#the-workspace) for containment and the size caps, and
+[Assertion kinds](#assertion-kinds) below for scoring a produced file rather than the chat
+output.
+
 ## Judging output quality
 
 Some things an assertion cannot check: "explains it plainly" is not a substring. A `judge:`
@@ -34,6 +75,7 @@ block hands those to an LLM judge.
 | --- | --- | --- |
 | `expected` | no | Free text describing what a good answer looks like |
 | `rubric` | yes | One statement per line, each checked independently |
+| `artifacts` | no | Workspace files the judge may read, graded alongside the output — see [Workspaces](#workspaces) |
 
 The judge returns **one verdict per rubric entry, with the evidence for it**. skill-lens
 derives the verdict and the score from those per-check results; the judge is never asked for
@@ -48,6 +90,22 @@ Two rules follow from that, and both are mechanical rather than a prompt asking 
 
 An empty `rubric`, or a blank entry within one, is an authoring error: a check that verifies
 nothing would score as a pass nobody verified.
+
+`artifacts` names [workspace](#workspaces) files the judge may read, so a rubric can grade
+the document a skill produced rather than the chat message about it:
+
+```yaml
+    judge:
+      expected: A short Markdown report with one line per region and a total.
+      rubric:
+        - The report states a total of 200 units.
+      artifacts: [report.md]
+```
+
+Each artifact reaches the judge fenced against its own content — labelled with the name you
+gave it, but the content itself is read as data, never as instructions, even one that reads
+like it is trying to talk to the judge. `artifacts` on a case with no `workspace:` block, or
+naming a file no case could ever produce, is an authoring error.
 
 Judging costs money, so it is opted into explicitly with `judge = "pydantic-ai"` in
 [`skill-lens.toml`](configuration.md). The default `judge = "fake"` does not grade at all —
@@ -118,6 +176,21 @@ Comments are discarded before the check, so a file may discuss the token freely.
 
 Every assertion in a case must hold for the case to pass. An unsupported `kind` or a malformed
 regex aborts the run as an authoring error rather than being reported as a skill failure.
+
+`file` is a **modifier**, not a kind of its own. Set it on `contains`, `not_contains`, `regex`
+or `equals` and that assertion reads the named [workspace](#workspaces) file instead of the
+run's output text:
+
+```yaml
+    assertions:
+      - kind: contains
+        value: "north"
+        file: report.md
+```
+
+`file:` (on any kind, `file-produced` and `json-schema` included) in a case with no
+`workspace:` block is an authoring error — there would be no file to look at, so the
+assertion could never hold.
 
 ## Per-check results
 

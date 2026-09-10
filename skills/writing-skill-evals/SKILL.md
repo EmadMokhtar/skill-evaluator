@@ -50,6 +50,17 @@ the eval was wrong. Everything here exists to prevent one of those.
 | `trajectory` | The failure is invisible in the output — deciding without looking the order up, calling the tool that was forbidden. |
 | `budget` | Guarding against a regression into a tool-call loop or a runaway answer. |
 
+## Assert on the artifact, not the sentence about it
+
+When a skill's job is to produce a file, assert on the file. `contains` against
+the chat output only proves the agent *said* it wrote a total; `contains` with
+`file: report.md` proves the total is in the report.
+
+Reach for a judge `artifacts:` rubric when quality lives inside the document —
+structure, completeness, tone. Reach for `file-produced` and `json-schema` when
+the requirement is exact. A rubric that asks "is the JSON valid" is a schema
+assertion wearing a judge's costume: it costs tokens and it is less reliable.
+
 ## Triage: the eval, the skill, or the harness?
 
 A red case means one of three different things, and naming which comes before any edit.

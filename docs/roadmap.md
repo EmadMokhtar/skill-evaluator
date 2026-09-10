@@ -8,7 +8,7 @@
 | M3 | LLM-as-judge evaluator (per-check verdicts), triggering evals with negative controls | shipped |
 | M4 | Comparative evals: `--baseline`/`--repeat`, delta reporting, `--min-delta` gating | shipped |
 | M5 | CI/CD polish: JUnit XML + Markdown reporters, GitHub Action, bounded concurrency | shipped |
-| M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions | planned |
+| M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions | Part 1 shipped; Part 2 planned |
 | M7 | DX: `skill-lens init` scaffolder, more examples | `init` shipped; examples planned |
 | M8 | LangChain adapter (optional) | planned |
 
@@ -46,6 +46,25 @@ A merge to `main` now verifies the commit, bumps the version from the commit his
 it, and publishes to PyPI over Trusted Publishing — no stored credential anywhere. A manual
 workflow refreshes the recorded provider traffic and hands it back as a branch to review.
 See [Releasing](releasing.md).
+
+## What M6 part 1 shipped
+
+A case can declare a `workspace:` block: a real, contained temporary directory, created
+per work item and seeded with the files it names, plus three built-in tools —
+`list_files`, `read_file`, `write_file` — the agent can use inside it. Nothing can be read
+or written outside it, and no two arms or repetitions ever share one. Assertions can then
+target a produced file instead of the chat output — `file-produced` for existence,
+`json-schema` for shape, and `file:` as a modifier that points `contains`, `not_contains`,
+`regex` and `equals` at a file — and an LLM judge rubric can read named files through
+`judge: artifacts:`, so quality that lives inside a document is finally measurable.
+`--keep-workspace` keeps the directories for debugging, and every kept one is printed. Full
+detail is in [Workspaces](eval-files.md#workspaces) and [The workspace](runners.md#the-workspace).
+
+Deferred to part 2: running a script bundled with the skill under test. That is its own
+spec, because executing code that shipped with the artifact under evaluation is a
+different trust decision from writing files into a temporary directory — a `SKILL.md`
+under evaluation is, by construction, code nobody has vetted yet, and `skill-lens` is
+designed to run in CI against repository credentials.
 
 ## The rename to skill-lens
 
