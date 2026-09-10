@@ -68,7 +68,7 @@ problem (errored) from a low score (failed).
 | `runners/base.py` | The `Runner` protocol. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of only two modules that import an agent framework.** |
-| `runners/tools.py` | Builds framework-neutral `MockTool`s (name + JSON schema + callable) from a case's `tools:` block. |
+| `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block, and the built-in workspace tools. |
 | `runners/preflight.py` | Verifies the provider API key is present before any spend. |
 | `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
 | `evaluators/base.py` | The `Evaluator` protocol. |

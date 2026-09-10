@@ -113,7 +113,7 @@ form, that file is the explanation.
   reappears outside `docs/superpowers/`, which is a historical archive and is never rewritten.
 - **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
 - **No agent-framework type may appear outside `runners/pydantic_ai.py` and
-  `judges/pydantic_ai.py`.** `runners/tools.py` builds framework-neutral `MockTool`s (name +
+  `judges/pydantic_ai.py`.** `runners/tools.py` builds framework-neutral `AgentTool`s (name +
   JSON schema + callable); the adapters wrap them. `tests/test_framework_isolation.py` guards
   this: it asserts no other module under `src/skill_lens/` imports `pydantic_ai` at the top
   level.

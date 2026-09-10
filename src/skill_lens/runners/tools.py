@@ -1,6 +1,6 @@
 """Build framework-neutral mock tools from a case's tool declarations.
 
-Nothing here knows about any agent framework: a MockTool is a name, a JSON
+Nothing here knows about any agent framework: an AgentTool is a name, a JSON
 schema and a callable, which every adapter can register in its own way.
 """
 
@@ -14,8 +14,16 @@ from skill_lens.models import Skill, ToolSpec
 
 
 @dataclass(frozen=True)
-class MockTool:
-    """A tool the agent may call. Calling it has no side effects."""
+class AgentTool:
+    """A tool the agent may call: a name, a JSON schema and a callable.
+
+    Covers both the canned tools built from a case's `tools:` block, which
+    have no side effects, and the built-in workspace tools, which do. The
+    common contract is narrower than "no side effects" and is what every
+    adapter relies on: **calling one never raises.** A refusal comes back as
+    an ordinary string result, because a model that called a tool wrongly is
+    an eval signal and an exception would surface it as an infra failure.
+    """
 
     name: str
     description: str
@@ -23,7 +31,7 @@ class MockTool:
     call: Callable[..., str]
 
 
-def build_mock_tool(spec: ToolSpec) -> MockTool:
+def build_mock_tool(spec: ToolSpec) -> AgentTool:
     """Turn a declared ToolSpec into a callable plus its JSON schema.
 
     Parameter types are already constrained by `ToolSpec`, so an unsupported
@@ -37,7 +45,7 @@ def build_mock_tool(spec: ToolSpec) -> MockTool:
         """Return the canned value, whatever the model passed in."""
         return returns
 
-    return MockTool(
+    return AgentTool(
         name=spec.name,
         description=spec.description,
         json_schema={
@@ -95,7 +103,7 @@ def skill_tool_name(skill_name: str) -> str:
     return cleaned
 
 
-def build_skill_tool(skill: Skill) -> MockTool:
+def build_skill_tool(skill: Skill) -> AgentTool:
     """The skill itself, offered as a tool the agent may decline to use.
 
     Calling it returns the skill's instructions, so an offered run only has the
@@ -108,7 +116,7 @@ def build_skill_tool(skill: Skill) -> MockTool:
     def call(**_arguments: Any) -> str:
         return instructions
 
-    return MockTool(
+    return AgentTool(
         name=skill_tool_name(skill.name),
         description=skill.description,
         json_schema=_empty_schema(),
