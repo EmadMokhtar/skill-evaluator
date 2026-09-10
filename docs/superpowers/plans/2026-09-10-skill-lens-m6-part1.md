@@ -3015,10 +3015,22 @@ def test_each_arm_and_repetition_gets_its_own_directory(tmp_path):
 
 
 def test_seeded_files_reach_the_runner(tmp_path):
+    # keep_workspace=True because this test reads the directory AFTER the run,
+    # and the default path deletes it as soon as scoring finishes -- which is
+    # what test_the_workspace_is_deleted_after_scoring asserts. Reading a
+    # deleted directory here would contradict that test.
     runner = _RecordingRunner()
     case = _case(workspace=WorkspaceSpec(files={"in.csv": "a,b\n"}))
-    run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
-    assert runner.seen[0].read("in.csv") == "a,b\n"
+    run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        keep_workspace=True,
+    )
+    try:
+        assert runner.seen[0].read("in.csv") == "a,b\n"
+    finally:
+        runner.seen[0].cleanup()
 
 
 def test_configured_limits_reach_the_workspace(tmp_path):
