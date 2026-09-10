@@ -546,6 +546,22 @@ def test_judge_artifacts_without_a_workspace_are_rejected(tmp_path):
         parse_cases_file(path)
 
 
+def test_a_judge_artifact_naming_a_path_that_escapes_is_rejected(tmp_path):
+    # No agent could ever produce a file at "../escape.txt" -- it is a typo
+    # in the eval author's list, not a fact about the skill. Without this
+    # check it would sail through and render as "(not produced)" at run
+    # time, failing the rubric and blaming the skill for the author's
+    # mistake. workspace.files gets the identical check above; this pins the
+    # same rule for judge.artifacts.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n    judge:\n"
+        "      artifacts: ['../escape.txt']\n      rubric: ['it is good']\n",
+    )
+    with pytest.raises(CaseParseError, match="escape.txt"):
+        parse_cases_file(path)
+
+
 def test_a_malformed_json_schema_is_an_authoring_error(tmp_path):
     # Same class of mistake as a malformed regex.
     path = _write(

@@ -4,9 +4,11 @@ from skill_lens.evaluators.base import Evaluator
 from skill_lens.evaluators.judge import (
     BUDGET_EXHAUSTED,
     MAX_ARTIFACT_BYTES,
+    MAX_ARTIFACTS_TOTAL_BYTES,
     NOT_PRODUCED,
     NOT_TEXT,
     JudgeEvaluator,
+    _truncate,
     build_request,
 )
 from skill_lens.judges.fake import FakeJudge
@@ -212,3 +214,71 @@ def test_a_repeated_artifact_name_is_read_once(tmp_path):
         _case("report.md", "report.md"), RunResult(output="o", workspace=tmp_path)
     )
     assert request.artifacts == {"report.md": "body"}
+
+
+# BUDGET_EXHAUSTED is a fixed, harness-authored label, not attacker-supplied
+# content -- it cannot grow, so it is never the kind of unbounded cost/
+# accuracy hazard MAX_ARTIFACTS_TOTAL_BYTES exists to police (see the comment
+# on that constant). One artifact transitioning into exhaustion can therefore
+# push the true total this many bytes past the nominal cap; a run with
+# several such transitions could in principle add this once per transition.
+# `test_the_total_budget_is_enforced_across_artifacts` above pins the reason
+# it must render whole rather than sliced to fit: 5 files of exactly
+# MAX_ARTIFACT_BYTES leave `remaining` at precisely 0 for the rest, the most
+# common way exhaustion is ever reached, and a caller or a rubric matching on
+# the literal sentinel must always find it intact.
+_SENTINEL_OVERSHOOT_ALLOWANCE = len(BUDGET_EXHAUSTED.encode("utf-8"))
+
+
+def test_five_one_megabyte_artifacts_never_exceed_the_total_budget(tmp_path):
+    # A version of _truncate that appends its marker AFTER cutting to budget
+    # (rather than reserving room for it up front) lets a truncated artifact's
+    # real size land at budget + len(marker) -- proven against exactly this
+    # shape (5 x 1MB) to total well over the declared 60,000-byte cap (see
+    # the fix report for the exact before/after numbers). This is the
+    # regression guard: it would fail against that version. The allowance
+    # covers only the one fixed-size BUDGET_EXHAUSTED label this shape
+    # produces (see _SENTINEL_OVERSHOOT_ALLOWANCE); it does not cover any
+    # growth in real, truncatable content.
+    names = [f"f{index}.md" for index in range(5)]
+    for name in names:
+        (tmp_path / name).write_text("x" * 1_000_000, encoding="utf-8")
+    request = build_request(_case(*names), RunResult(output="o", workspace=tmp_path))
+    total = sum(len(value.encode("utf-8")) for value in request.artifacts.values())
+    assert total <= MAX_ARTIFACTS_TOTAL_BYTES + _SENTINEL_OVERSHOOT_ALLOWANCE
+
+
+def test_truncate_never_exceeds_a_budget_smaller_than_the_marker_reserve():
+    # Below _TRUNCATION_MARKER_RESERVE, the marker text itself cannot fit
+    # alongside any content; _truncate's hard cut is the actual guarantee
+    # that its return value never exceeds `budget`, for any budget >= 0.
+    text = "x" * 1000
+    truncated = _truncate(text, 10)
+    assert len(truncated.encode("utf-8")) <= 10
+
+
+def test_a_truncation_that_would_shred_the_marker_is_omitted_instead(tmp_path):
+    # This shape (taken from the review verbatim) drives `remaining` to
+    # exactly 3 bytes after the first three artifacts. Calling _truncate with
+    # a 3-byte budget renders the literal string "\n.." -- no "truncated", no
+    # byte count -- which lets a rubric fail on evidence that was cut with
+    # nothing saying so. The fix looks ahead: a block only starts when its
+    # truncation could still be announced, and once it hasn't, the fourth
+    # artifact is the exact, whole BUDGET_EXHAUSTED sentinel -- not the
+    # shredded fragment the old bug produced, and not silently absent either.
+    sizes = [19_999, 19_999, 19_999, 50_000]
+    names = [f"g{index}.md" for index in range(len(sizes))]
+    for name, size in zip(names, sizes, strict=True):
+        (tmp_path / name).write_text("x" * size, encoding="utf-8")
+    request = build_request(_case(*names), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts[names[3]] == BUDGET_EXHAUSTED
+    total = sum(len(value.encode("utf-8")) for value in request.artifacts.values())
+    assert total <= MAX_ARTIFACTS_TOTAL_BYTES + _SENTINEL_OVERSHOOT_ALLOWANCE
+
+
+def test_a_surrogate_bearing_artifact_name_is_rendered_not_raised(tmp_path):
+    # A lone UTF-16 surrogate in a path raises UnicodeEncodeError on the way
+    # to the filesystem -- a ValueError, not an OSError -- which a
+    # (PathRefused, OSError)-only catch would let escape.
+    request = build_request(_case("a\ud800b.txt"), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {"a\ud800b.txt": NOT_PRODUCED}
