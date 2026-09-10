@@ -221,14 +221,19 @@ def test_file_produced_passes_when_the_file_is_there(tmp_path):
 
 
 def test_file_produced_fails_and_lists_what_was_actually_there(tmp_path):
-    # The common authoring mistake is a filename differing by a character or
-    # by case, and this listing is the whole diagnostic story for it.
-    result = _result(tmp_path, report__MD="body", notes__txt="x")
+    # The common authoring mistake is a filename off by a character, and this
+    # listing is the whole diagnostic story for it.
+    #
+    # Deliberately NOT a case-only difference. macOS's default filesystem is
+    # case-insensitive, so `report.MD` and `report.md` are the same file
+    # there: a case-only test would pass in Linux CI while failing on every
+    # developer's Mac, which trains people to ignore a red suite.
+    result = _result(tmp_path, reports__md="body", notes__txt="x")
     score = AssertionEvaluator().evaluate(
         _case(AssertionSpec(kind="file-produced", file="report.md")), result
     )
     assert not score.passed
-    assert "report.MD" in score.detail
+    assert "reports.md" in score.detail
     assert "notes.txt" in score.detail
 
 
