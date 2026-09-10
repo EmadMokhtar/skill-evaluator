@@ -89,6 +89,16 @@ Task 11 needs Task 10. Task 12 needs everything.
 
 ## Task 1: Models and the `jsonschema` dependency
 
+> **Field-level doc gates fire immediately.** `tests/test_docs.py` iterates
+> `EvalCase.model_fields` and `ASSERTION_KINDS`, and `tests/test_shipped_skill.py`
+> runs a bidirectional check over both. So the *minimal table row* for a new
+> `EvalCase` field or assertion kind ships in the SAME commit that adds it —
+> in `docs/eval-files.md` and `skills/writing-skill-evals/references/eval-file-syntax.md`.
+> Task 12 still owns all the prose, the examples, and every other page. This is
+> the repository's own rule working as intended: documentation ships with the
+> change, never as a follow-up.
+
+
 Everything else imports these shapes, so this lands first. All changes are **additive** — no
 existing field changes type except `AssertionSpec.value`, which becomes optional.
 
@@ -340,7 +350,8 @@ Expected: a version at or above 4.21.
 ```bash
 uv run pytest -q
 uv run ruff format . && uv run ruff check .
-git add pyproject.toml uv.lock src/skill_lens/models.py tests/test_models.py
+git add pyproject.toml uv.lock src/skill_lens/models.py tests/test_models.py \
+  docs/eval-files.md skills/writing-skill-evals/references/eval-file-syntax.md
 git commit -m "feat(models): add workspace, file-targeted assertions and judge artifacts"
 ```
 
@@ -1602,6 +1613,16 @@ git commit -m "feat(cases): validate file-targeted assertions and workspace bloc
 ---
 
 ## Task 6: Assertion evaluator — the `file:` modifier and two new kinds
+
+> **Field-level doc gates fire immediately.** `tests/test_docs.py` iterates
+> `EvalCase.model_fields` and `ASSERTION_KINDS`, and `tests/test_shipped_skill.py`
+> runs a bidirectional check over both. So the *minimal table row* for a new
+> `EvalCase` field or assertion kind ships in the SAME commit that adds it —
+> in `docs/eval-files.md` and `skills/writing-skill-evals/references/eval-file-syntax.md`.
+> Task 12 still owns all the prose, the examples, and every other page. This is
+> the repository's own rule working as intended: documentation ships with the
+> change, never as a follow-up.
+
 
 **Files:**
 - Modify: `src/skill_lens/evaluators/assertion.py`
@@ -3654,7 +3675,7 @@ Expected: PASS.
 
 | Page | Add |
 | --- | --- |
-| `docs/eval-files.md` | A `## Workspaces` section: the `workspace:` block, `files:` seeding, that it is opt-in and why, the three built-in tools and that a trajectory may name them. A `file:` row and `file-produced` / `json-schema` rows in the assertion-kinds table. An `artifacts:` row in the judge-block section. |
+| `docs/eval-files.md` | The minimal `workspace:` and assertion-kind table rows already landed with Tasks 1 and 6 (see the note on those tasks); this task adds the prose around them. A `## Workspaces` section: the `workspace:` block, `files:` seeding, that it is opt-in and why, the three built-in tools and that a trajectory may name them. A `file:` row and `file-produced` / `json-schema` rows in the assertion-kinds table. An `artifacts:` row in the judge-block section. |
 | `docs/cli.md` | `--keep-workspace` / `--no-keep-workspace` in the `run` flag table, noting the flag overrides `keep_workspace` in either direction. |
 | `docs/configuration.md` | `keep_workspace`, `max_file_bytes`, `max_files`, `max_total_bytes` in the key table, with defaults, and a note that the caps have no CLI flag because they are per-repository policy. |
 | `docs/runners.md` | A `## The workspace` section: containment, the caps and that a refusal names the limit it hit, the rule that a built-in tool never raises, and that the workspace preamble is identical in both arms. |
