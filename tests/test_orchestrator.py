@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from skill_lens.cases.loader import CaseParseError
-from skill_lens.evaluators.assertion import UnknownAssertionKind
+from skill_lens.evaluators.assertion import InvalidAssertionValue
 from skill_lens.judges.fake import FakeJudge
 from skill_lens.models import (
     CheckResult,
@@ -131,10 +131,11 @@ def test_unknown_assertion_kind_aborts_the_run(tmp_path):
     """Characterization test: a malformed assertion aborts run_evals by design.
 
     An unknown `kind:` in an eval YAML is an authoring error in the user's
-    eval file, not a skill failure. The owner decided this should abort the
-    whole matrix (propagate out of run_evals) rather than be caught and
-    reported as a red eval outcome, so the orchestrator deliberately has no
-    try/except around evaluator.evaluate(...). This test locks in that
+    eval file, not a skill failure. Since M6 the case loader rejects it
+    during discovery -- before any provider call -- rather than the
+    evaluator catching it mid-run; either way the owner decided this should
+    abort the whole matrix (propagate out of run_evals) rather than be
+    caught and reported as a red eval outcome. This test locks in that
     behavior; the CLI is expected to turn this exception into a clean exit
     code in a later task.
     """
@@ -142,7 +143,7 @@ def test_unknown_assertion_kind_aborts_the_run(tmp_path):
         "cases:\n  - name: bad kind\n    task: good\n"
         "    assertions:\n      - kind: nonsense\n        value: whatever\n"
     )
-    with pytest.raises(UnknownAssertionKind):
+    with pytest.raises(CaseParseError):
         run_evals([_skill_with_cases(tmp_path, yaml_text=yaml_text)], [_runner()])
 
 
@@ -370,13 +371,15 @@ def test_an_authoring_error_still_aborts_the_run_under_concurrency(tmp_path):
         encoding="utf-8",
     )
     skills = load_skills(skill_dir)
-    with pytest.raises(UnknownAssertionKind):
+    with pytest.raises(CaseParseError):
         run_evals(skills, [FakeRunner()], concurrency=4)
 
 
 def test_the_surfaced_authoring_error_is_deterministic(tmp_path):
-    """Reading futures in submission order means the same error surfaces every
-    time, so the message a user sees does not depend on thread scheduling."""
+    """Discovery is a separate, sequential pass ahead of execution, so the
+    cases in a file are validated in order and the same one always surfaces
+    first -- the message a user sees does not depend on thread scheduling,
+    because no thread has started yet when this fires."""
     skill_dir = tmp_path / "mixed"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
@@ -395,7 +398,7 @@ def test_the_surfaced_authoring_error_is_deterministic(tmp_path):
     skills = load_skills(skill_dir)
     messages = set()
     for _ in range(5):
-        with pytest.raises(UnknownAssertionKind) as caught:
+        with pytest.raises(CaseParseError) as caught:
             run_evals(skills, [FakeRunner()], concurrency=4)
         messages.add(str(caught.value))
     assert len(messages) == 1
@@ -449,6 +452,13 @@ def test_a_failure_cancels_work_that_is_still_queued(tmp_path):
     about cancellation rather than about which thread won a race: a worker runs
     a future's done callbacks before it picks up its next item, so the cancel
     lands before any queued case can start.
+
+    The second case uses an invalid regex, not an unknown kind: since M6 an
+    unknown kind is caught by the case loader during discovery, which runs
+    entirely before execution starts, so it could never be the thing that
+    fires mid-run with a worker already blocked. A malformed regex is still
+    only caught by the evaluator, inside a submitted work item, which is
+    exactly the timing this test needs.
     """
     skill_dir = tmp_path / "big"
     (skill_dir / "evals").mkdir(parents=True)
@@ -460,7 +470,7 @@ def test_a_failure_cancels_work_that_is_still_queued(tmp_path):
         "  - name: aaa-blocker\n    task: block\n    assertions:\n"
         "      - kind: contains\n        value: x\n"
         "  - name: bbb-bad\n    task: bad\n    assertions:\n"
-        "      - kind: no-such-kind\n        value: x\n"
+        "      - kind: regex\n        value: '['\n"
     ) + "".join(
         f"  - name: rest-{i}\n    task: t{i}\n    assertions:\n"
         f"      - kind: contains\n        value: x\n"
@@ -488,7 +498,7 @@ def test_a_failure_cancels_work_that_is_still_queued(tmp_path):
     timer = threading.Timer(1.0, release.set)
     timer.start()
     try:
-        with pytest.raises(UnknownAssertionKind):
+        with pytest.raises(InvalidAssertionValue):
             run_evals(load_skills(skill_dir), [_GatedRunner()], concurrency=2)
     finally:
         timer.cancel()

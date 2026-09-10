@@ -5,10 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from pydantic import ValidationError
 
 from skill_lens.models import EvalCase, Skill
-from skill_lens.runners.tools import skill_tool_name
+from skill_lens.runners.tools import BUILTIN_TOOL_NAMES, skill_tool_name
+from skill_lens.workspace import PathRefused, check_relative_path
 from skill_lens.yaml_loading import safe_load
 
 EVALS_DIRNAME = "evals"
@@ -93,8 +96,85 @@ def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
             fields = ", ".join(str(e["loc"][0]) for e in exc.errors() if e["loc"])
             raise CaseParseError(f"{path}: case #{index + 1} invalid ({fields}): {exc}") from exc
         _validate_cross_references(path, case, skill)
+        _validate_workspace(path, case)
+        _validate_assertions(path, case)
         cases.append(case)
     return cases
+
+
+# Per kind: which of `value` / `file` / `json_schema` it requires, and which
+# it merely allows. Anything not listed is forbidden for that kind, so a
+# `value:` on a `file-produced` -- which would read as a content check but
+# assert nothing -- is caught rather than ignored.
+#
+# This is deliberately a second table, not a reuse of the evaluator's
+# `_CHECKS`: that one maps a kind to a predicate, this one maps a kind to its
+# field requirements. Two different facts about the same kinds. They are
+# pinned together by a test, not by an import.
+_ASSERTION_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
+    "contains": (frozenset({"value"}), frozenset({"file"})),
+    "not_contains": (frozenset({"value"}), frozenset({"file"})),
+    "regex": (frozenset({"value"}), frozenset({"file"})),
+    "equals": (frozenset({"value"}), frozenset({"file"})),
+    "file-produced": (frozenset({"file"}), frozenset()),
+    "json-schema": (frozenset({"json_schema"}), frozenset({"file"})),
+}
+
+_ASSERTION_FIELD_NAMES = ("value", "file", "json_schema")
+
+
+def _validate_assertions(path: Path, case: EvalCase) -> None:
+    """Check every assertion against the requirements table.
+
+    Runs at load time rather than at evaluate time so a mistake aborts before
+    any case runs. `AssertionEvaluator` keeps its own kind check for an
+    EvalCase built programmatically, bypassing this loader.
+    """
+    for position, spec in enumerate(case.assertions, start=1):
+        where = f"{path}: case {case.name!r} assertion #{position}"
+        try:
+            required, optional = _ASSERTION_FIELDS[spec.kind]
+        except KeyError:
+            known = ", ".join(sorted(_ASSERTION_FIELDS))
+            raise CaseParseError(
+                f"{where} has unknown kind {spec.kind!r}. Known kinds: {known}."
+            ) from None
+        present = {name for name in _ASSERTION_FIELD_NAMES if getattr(spec, name) is not None}
+        missing = sorted(required - present)
+        if missing:
+            raise CaseParseError(
+                f"{where} ({spec.kind}) requires {', '.join(missing)}, which is missing."
+            )
+        extra = sorted(present - required - optional)
+        if extra:
+            raise CaseParseError(
+                f"{where} ({spec.kind}) does not accept {', '.join(extra)}. "
+                f"It would assert nothing, so it is a mistake rather than a check."
+            )
+        if spec.file is not None and case.workspace is None:
+            raise CaseParseError(
+                f"{where} targets file {spec.file!r}, but the case declares no "
+                f"'workspace:' block. There would be no file to look at, so the "
+                f"assertion could never hold."
+            )
+        if spec.json_schema is not None:
+            try:
+                Draft202012Validator.check_schema(spec.json_schema)
+            except SchemaError as exc:
+                raise CaseParseError(f"{where} has an invalid json_schema: {exc.message}") from exc
+
+
+def _validate_workspace(path: Path, case: EvalCase) -> None:
+    """Reject a seeded path that could ever leave the workspace root."""
+    if case.workspace is None:
+        return
+    for name in case.workspace.files:
+        try:
+            check_relative_path(name)
+        except PathRefused as exc:
+            raise CaseParseError(
+                f"{path}: case {case.name!r} declares workspace file {name!r}: {exc}"
+            ) from exc
 
 
 def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None = None) -> None:
@@ -110,7 +190,20 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
             )
         seen.add(tool.name)
 
+    if case.workspace is not None:
+        for tool in case.tools:
+            if tool.name in BUILTIN_TOOL_NAMES:
+                raise CaseParseError(
+                    f"{path}: case {case.name!r} declares a tool named {tool.name!r}, "
+                    f"which collides with a built-in workspace tool. Rename the "
+                    f"case's tool, or drop the 'workspace:' block."
+                )
+
     declared = {tool.name for tool in case.tools}
+    if case.workspace is not None:
+        # The built-ins are real tools the agent can call, so a trajectory may
+        # name them -- but only in a case that actually has them.
+        declared |= set(BUILTIN_TOOL_NAMES)
 
     if case.judge is not None:
         if not case.judge.rubric:
@@ -127,6 +220,12 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
                     f"remove the entry -- a check that verifies nothing would score as "
                     f"a pass nobody verified."
                 )
+        if case.judge.artifacts and case.workspace is None:
+            raise CaseParseError(
+                f"{path}: case {case.name!r} names judge artifacts "
+                f"{case.judge.artifacts}, but declares no 'workspace:' block. "
+                f"There would be no files to read."
+            )
 
     if case.mode == "offered" and skill is not None:
         offered = skill_tool_name(skill.name)
@@ -154,9 +253,14 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
     ):
         for name in names:
             if name not in declared:
+                hint = (
+                    " Built-in file tools only exist in a case with a 'workspace:' block."
+                    if name in BUILTIN_TOOL_NAMES
+                    else ""
+                )
                 raise CaseParseError(
                     f"{path}: case {case.name!r} trajectory.{field_name} names "
-                    f"{name!r}, which is not declared in this case's tools"
+                    f"{name!r}, which is not declared in this case's tools.{hint}"
                 )
 
 
