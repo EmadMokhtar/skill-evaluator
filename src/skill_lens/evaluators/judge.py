@@ -22,11 +22,12 @@ NO_EVIDENCE = "recorded as failed: passed with no evidence"
 
 # Per file and across all files. Unbounded artifact content in a judge prompt
 # is both a cost hazard and an accuracy one: a grader handed a large volume of
-# irrelevant text grades worse, not better. The bound is on that content: the
-# small, fixed sentinel strings below (rendered in place of content that was
-# never read, or omitted once the budget runs out) are harness-authored
-# status labels, not model-supplied content, and their own tiny, constant
-# cost is not what this budget exists to police -- see `_artifacts`.
+# irrelevant text grades worse, not better. The bound is on that content --
+# untrusted, model-produced bytes -- not on the small, fixed sentinel strings
+# below (rendered in place of content that was never read, or in place of
+# content that didn't fit). Those are harness-authored, trusted status
+# labels, never model-supplied, so they are excluded by construction: see
+# `_artifacts`, where a sentinel never decrements `remaining`.
 MAX_ARTIFACT_BYTES = 20_000
 MAX_ARTIFACTS_TOTAL_BYTES = 60_000
 
@@ -75,7 +76,25 @@ def _truncate(text: str, budget: int) -> str:
 
 
 def _artifacts(spec: JudgeSpec, result: RunResult) -> dict[str, str]:
-    """The named files, in the author's order, deduplicated and capped."""
+    """The named files, in the author's order, deduplicated and capped.
+
+    `remaining` tracks only untrusted, model-produced *content* bytes --
+    never a sentinel's. The three properties that gives:
+
+    1. An artifact that fits is always rendered whole, however little budget
+       is left. A 2-byte file is never discarded just because `remaining`
+       is smaller than the truncation marker's reserve -- only a file that
+       genuinely does not fit, with too little budget left to say so
+       visibly, becomes BUDGET_EXHAUSTED.
+    2. A sentinel (NOT_PRODUCED, NOT_TEXT, BUDGET_EXHAUSTED) never
+       decrements `remaining`, because it is fixed, harness-authored text,
+       not model content -- there is nothing here for a total-byte budget
+       to police.
+    3. The invariant is exact: the sum of untrusted content bytes across
+       every rendered artifact never exceeds MAX_ARTIFACTS_TOTAL_BYTES.
+       Sentinels are trusted text and are excluded by construction, so
+       there is no overshoot to allow for.
+    """
     names = list(dict.fromkeys(spec.artifacts))
     if not names:
         return {}
@@ -85,36 +104,10 @@ def _artifacts(spec: JudgeSpec, result: RunResult) -> dict[str, str]:
     remaining = MAX_ARTIFACTS_TOTAL_BYTES
     artifacts: dict[str, str] = {}
     for name in names:
-        # A block is only started when its truncation could still be
-        # announced. At `remaining <= 0` alone, a run near total exhaustion
-        # (say remaining == 3) would still call `_truncate` with that tiny
-        # budget: the marker text itself cannot fit, and `_truncate`'s hard
-        # cut shreds it down to something like "\n.." -- no "truncated", no
-        # byte count, so a rubric fails on evidence that was cut with
-        # nothing saying so. Skipping straight to BUDGET_EXHAUSTED once
-        # `remaining` can no longer hold the marker keeps every truncation
-        # that *does* happen visibly marked.
-        if remaining < _TRUNCATION_MARKER_RESERVE:
-            # BUDGET_EXHAUSTED is rendered whole, not sliced to fit whatever
-            # sliver of `remaining` triggered this branch (which can be as
-            # small as 0, the common case once several full-budget files
-            # have landed exactly on the cap). A notice fragment nobody can
-            # read ("(om") would defeat the entire point of having a
-            # constant, recognisable sentinel here -- callers and tests alike
-            # match on the exact string. Its own fixed cost (well under
-            # `_TRUNCATION_MARKER_RESERVE`) is the one bounded, known
-            # exception to "never exceed the total": unlike attacker-supplied
-            # file content, it cannot grow, so it can never turn into the
-            # kind of unbounded-cost-and-accuracy hazard this budget exists
-            # to prevent (see the module docstring above).
-            artifacts[name] = BUDGET_EXHAUSTED
-            remaining -= len(BUDGET_EXHAUSTED.encode("utf-8"))
-            continue
         try:
             content = workspace.read(name)
         except UnicodeDecodeError:
             artifacts[name] = NOT_TEXT
-            remaining -= len(NOT_TEXT.encode("utf-8"))
             continue
         except (PathRefused, OSError, ValueError):
             # ValueError alongside PathRefused/OSError: a name carrying an
@@ -122,9 +115,19 @@ def _artifacts(spec: JudgeSpec, result: RunResult) -> dict[str, str]:
             # to the filesystem, which is a ValueError, not an OSError.
             # create_workspace catches it for the same reason.
             artifacts[name] = NOT_PRODUCED
-            remaining -= len(NOT_PRODUCED.encode("utf-8"))
             continue
-        rendered = _truncate(content, min(MAX_ARTIFACT_BYTES, remaining))
+        budget = min(MAX_ARTIFACT_BYTES, remaining)
+        if len(content.encode("utf-8")) <= budget:
+            # Fits whole: no truncation, nothing to announce.
+            rendered = content
+        elif budget < _TRUNCATION_MARKER_RESERVE:
+            # Does not fit, and the budget is too small to say so.
+            # Rendering a shredded marker would let the judge fail a check
+            # on evidence that was cut with nothing in the prompt saying so.
+            artifacts[name] = BUDGET_EXHAUSTED
+            continue
+        else:
+            rendered = _truncate(content, budget)
         artifacts[name] = rendered
         remaining -= len(rendered.encode("utf-8"))
     return artifacts

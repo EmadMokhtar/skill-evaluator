@@ -216,18 +216,19 @@ def test_a_repeated_artifact_name_is_read_once(tmp_path):
     assert request.artifacts == {"report.md": "body"}
 
 
-# BUDGET_EXHAUSTED is a fixed, harness-authored label, not attacker-supplied
-# content -- it cannot grow, so it is never the kind of unbounded cost/
-# accuracy hazard MAX_ARTIFACTS_TOTAL_BYTES exists to police (see the comment
-# on that constant). One artifact transitioning into exhaustion can therefore
-# push the true total this many bytes past the nominal cap; a run with
-# several such transitions could in principle add this once per transition.
-# `test_the_total_budget_is_enforced_across_artifacts` above pins the reason
-# it must render whole rather than sliced to fit: 5 files of exactly
-# MAX_ARTIFACT_BYTES leave `remaining` at precisely 0 for the rest, the most
-# common way exhaustion is ever reached, and a caller or a rubric matching on
-# the literal sentinel must always find it intact.
-_SENTINEL_OVERSHOOT_ALLOWANCE = len(BUDGET_EXHAUSTED.encode("utf-8"))
+def _content_bytes(artifacts: dict[str, str]) -> int:
+    """Sum only untrusted, model-produced content bytes.
+
+    Sentinels (NOT_PRODUCED, NOT_TEXT, BUDGET_EXHAUSTED) are fixed,
+    harness-authored text, not model content, so MAX_ARTIFACTS_TOTAL_BYTES
+    never bounds them -- they are excluded here by construction, matching
+    `_artifacts`, where a sentinel never decrements `remaining`.
+    """
+    return sum(
+        len(value.encode("utf-8"))
+        for value in artifacts.values()
+        if value not in {NOT_PRODUCED, NOT_TEXT, BUDGET_EXHAUSTED}
+    )
 
 
 def test_five_one_megabyte_artifacts_never_exceed_the_total_budget(tmp_path):
@@ -236,16 +237,12 @@ def test_five_one_megabyte_artifacts_never_exceed_the_total_budget(tmp_path):
     # real size land at budget + len(marker) -- proven against exactly this
     # shape (5 x 1MB) to total well over the declared 60,000-byte cap (see
     # the fix report for the exact before/after numbers). This is the
-    # regression guard: it would fail against that version. The allowance
-    # covers only the one fixed-size BUDGET_EXHAUSTED label this shape
-    # produces (see _SENTINEL_OVERSHOOT_ALLOWANCE); it does not cover any
-    # growth in real, truncatable content.
+    # regression guard: it would fail against that version.
     names = [f"f{index}.md" for index in range(5)]
     for name in names:
         (tmp_path / name).write_text("x" * 1_000_000, encoding="utf-8")
     request = build_request(_case(*names), RunResult(output="o", workspace=tmp_path))
-    total = sum(len(value.encode("utf-8")) for value in request.artifacts.values())
-    assert total <= MAX_ARTIFACTS_TOTAL_BYTES + _SENTINEL_OVERSHOOT_ALLOWANCE
+    assert _content_bytes(request.artifacts) <= MAX_ARTIFACTS_TOTAL_BYTES
 
 
 def test_truncate_never_exceeds_a_budget_smaller_than_the_marker_reserve():
@@ -272,8 +269,47 @@ def test_a_truncation_that_would_shred_the_marker_is_omitted_instead(tmp_path):
         (tmp_path / name).write_text("x" * size, encoding="utf-8")
     request = build_request(_case(*names), RunResult(output="o", workspace=tmp_path))
     assert request.artifacts[names[3]] == BUDGET_EXHAUSTED
-    total = sum(len(value.encode("utf-8")) for value in request.artifacts.values())
-    assert total <= MAX_ARTIFACTS_TOTAL_BYTES + _SENTINEL_OVERSHOOT_ALLOWANCE
+    assert _content_bytes(request.artifacts) <= MAX_ARTIFACTS_TOTAL_BYTES
+
+
+def test_a_tiny_artifact_that_fits_is_rendered_whole_near_exhaustion(tmp_path):
+    # Finding A: the short-circuit used to look only at `remaining`, never at
+    # the artifact's own size, so a genuinely tiny file that would fit was
+    # thrown away as BUDGET_EXHAUSTED anyway once `remaining` dropped below
+    # the truncation marker's reserve. Three 19,999-byte files leave
+    # `remaining` at exactly 3; a real 2-byte fourth file fits inside that,
+    # and must be rendered as its actual content, not discarded.
+    sizes = [19_999, 19_999, 19_999]
+    names = [f"h{index}.md" for index in range(len(sizes))]
+    for name, size in zip(names, sizes, strict=True):
+        (tmp_path / name).write_text("x" * size, encoding="utf-8")
+    (tmp_path / "tiny.md").write_text("hi", encoding="utf-8")
+    request = build_request(_case(*names, "tiny.md"), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts["tiny.md"] == "hi"
+
+
+def test_the_content_budget_is_not_inflated_by_many_exhausted_names(tmp_path):
+    # Finding B: MAX_ARTIFACTS_TOTAL_BYTES bounds untrusted content, not the
+    # fixed, harness-authored sentinel text, so a run with many names past
+    # exhaustion must not inflate the content total at all -- one sentinel
+    # per name, unbounded in count, would otherwise push the true total
+    # arbitrarily far past the declared cap (the reviewer demonstrated 720
+    # bytes over with 20 such names against the previous accounting). Three
+    # files of exactly MAX_ARTIFACT_BYTES exhaust the budget exactly; twenty
+    # more declared names each render BUDGET_EXHAUSTED, none of which count
+    # toward content.
+    names = [f"k{index}.md" for index in range(3)]
+    for name in names:
+        (tmp_path / name).write_text("x" * MAX_ARTIFACT_BYTES, encoding="utf-8")
+    exhausted_names = [f"past{index}.md" for index in range(20)]
+    for name in exhausted_names:
+        (tmp_path / name).write_text("still here", encoding="utf-8")
+    request = build_request(
+        _case(*names, *exhausted_names), RunResult(output="o", workspace=tmp_path)
+    )
+    for name in exhausted_names:
+        assert request.artifacts[name] == BUDGET_EXHAUSTED
+    assert _content_bytes(request.artifacts) == MAX_ARTIFACTS_TOTAL_BYTES
 
 
 def test_a_surrogate_bearing_artifact_name_is_rendered_not_raised(tmp_path):
