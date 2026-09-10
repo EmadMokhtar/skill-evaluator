@@ -3902,9 +3902,13 @@ uv run skill-lens list ./examples
 uv run skill-lens run ./examples/csv-report --keep-workspace
 ```
 
-Expected from `run`: it executes with the default `FakeRunner`, the case fails its file
-assertions (the fake writes nothing), and the output ends with a `Kept workspaces` section
-naming a real directory. Open that directory and confirm `sales.csv` is in it — that proves
+Expected from `run`: it executes with the default `FakeRunner` and the case comes back
+**errored**, not failed — three things at once, all of them correct. The assertion evaluator
+*fails* with `expected report.md; workspace held sales.csv`, which proves seeding, the
+diagnostic listing and file assertions all work end to end. The trajectory evaluator *fails*
+because the fake calls no tools. And the judge *errors*, because the default `FakeJudge` is
+unscripted and an unchecked rubric must never score as a pass — and an errored evaluator
+errors the case. The output ends with a `Kept workspaces` section naming a real directory. Open that directory and confirm `sales.csv` is in it — that proves
 seeding, the lifetime, and `--keep-workspace` all work together. Delete it afterwards.
 
 - [ ] **Confirm nothing changed for a suite without a workspace**
