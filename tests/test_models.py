@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from skill_lens.models import (
+    AssertionSpec,
     BudgetSpec,
     CaseOutcome,
     CheckResult,
@@ -19,6 +20,7 @@ from skill_lens.models import (
     ToolCall,
     ToolSpec,
     TrajectorySpec,
+    WorkspaceSpec,
 )
 
 
@@ -313,16 +315,12 @@ def test_pricing_degraded_is_false_when_no_result_carries_a_cost_note():
 
 
 def test_workspace_spec_defaults_to_no_files():
-    from skill_lens.models import WorkspaceSpec
-
     assert WorkspaceSpec().files == {}
 
 
 def test_workspace_spec_forbids_unknown_keys():
     # Without extra="forbid" a typo like `file:` would yield a workspace that
     # silently seeds nothing.
-    from skill_lens.models import WorkspaceSpec
-
     with pytest.raises(ValidationError):
         WorkspaceSpec(file={"a.txt": "x"})
 
@@ -330,15 +328,11 @@ def test_workspace_spec_forbids_unknown_keys():
 def test_assertion_value_is_optional_but_distinguishes_empty_from_absent():
     # `equals` with value "" is a real assertion meaning "the output is empty",
     # so a "" default would make it indistinguishable from a missing field.
-    from skill_lens.models import AssertionSpec
-
     assert AssertionSpec(kind="file-produced", file="report.md").value is None
     assert AssertionSpec(kind="equals", value="").value == ""
 
 
 def test_assertion_carries_a_file_target_and_an_inline_schema():
-    from skill_lens.models import AssertionSpec
-
     spec = AssertionSpec(
         kind="json-schema",
         file="totals.json",
@@ -349,8 +343,6 @@ def test_assertion_carries_a_file_target_and_an_inline_schema():
 
 
 def test_assertion_forbids_unknown_keys():
-    from skill_lens.models import AssertionSpec
-
     with pytest.raises(ValidationError):
         AssertionSpec(kind="contains", value="x", schema={"type": "object"})
 
@@ -361,8 +353,6 @@ def test_case_has_no_workspace_by_default():
 
 
 def test_case_accepts_a_workspace_block():
-    from skill_lens.models import WorkspaceSpec
-
     case = EvalCase(name="n", task="t", workspace=WorkspaceSpec(files={"in.csv": "a,b\n1,2\n"}))
     assert case.workspace is not None
     assert case.workspace.files["in.csv"] == "a,b\n1,2\n"
