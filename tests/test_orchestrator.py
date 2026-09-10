@@ -8,6 +8,7 @@ from skill_lens.cases.loader import CaseParseError
 from skill_lens.evaluators.assertion import InvalidAssertionValue
 from skill_lens.judges.fake import FakeJudge
 from skill_lens.models import (
+    AssertionSpec,
     CheckResult,
     EvalCase,
     EvalScore,
@@ -15,10 +16,12 @@ from skill_lens.models import (
     RunResult,
     Skill,
     ToolCall,
+    WorkspaceSpec,
 )
 from skill_lens.orchestrator import _execute, _WorkItem, run_evals
 from skill_lens.runners.fake import FakeRunner
 from skill_lens.skills.loader import load_skills
+from skill_lens.workspace import Workspace, WorkspaceLimits
 
 CASES_YAML = """cases:
   - name: passes
@@ -50,6 +53,20 @@ def _runner():
             "explodes": RunResult(error="provider 500"),
         }
     )
+
+
+def _evals(tmp_path: Path, *cases: EvalCase) -> Path:
+    """Write cases to a YAML file and return its path.
+
+    Goes through the real loader so these tests exercise the same validation
+    a user's file does.
+    """
+    import yaml
+
+    path = tmp_path / "generated.eval.yaml"
+    payload = {"cases": [case.model_dump(exclude_none=True) for case in cases]}
+    path.write_text(yaml.safe_dump(payload), encoding="utf-8")
+    return path
 
 
 def test_runs_all_cases_and_marks_pass_and_fail(tmp_path):
@@ -485,7 +502,7 @@ def test_a_failure_cancels_work_that_is_still_queued(tmp_path):
     class _GatedRunner:
         name = "gated"
 
-        def run(self, skill, case):
+        def run(self, skill, case, workspace=None):
             with lock:
                 seen.append(case.name)
             if case.name == "aaa-blocker":
@@ -586,3 +603,160 @@ def test_work_abandoned_without_a_failure_is_an_error_not_a_short_report():
     ]
     with pytest.raises(RuntimeError, match="work was abandoned"):
         _execute(items, [], concurrency=2, executor_factory=lambda _n: _AbandoningExecutor())
+
+
+class _RecordingRunner:
+    """Captures the workspace it was handed, and whether the directory existed."""
+
+    name = "recording"
+
+    def __init__(self) -> None:
+        self.seen: list[Workspace] = []
+
+    def run(self, skill, case, workspace=None):
+        if workspace is not None:
+            self.seen.append(workspace)
+            workspace.write("report.md", f"{skill.variant}")
+        return RunResult(output="done")
+
+
+def _skill(tmp_path) -> Skill:
+    return Skill(name="s", description="d", instructions="i", path=tmp_path)
+
+
+def _case(**kwargs) -> EvalCase:
+    kwargs.setdefault("name", "c")
+    kwargs.setdefault("task", "t")
+    return EvalCase(**kwargs)
+
+
+def test_a_case_with_no_workspace_gets_none(tmp_path):
+    runner = _RecordingRunner()
+    run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, _case()))
+    assert runner.seen == []
+
+
+def test_the_workspace_is_deleted_after_scoring(tmp_path):
+    runner = _RecordingRunner()
+    case = _case(
+        workspace=WorkspaceSpec(),
+        assertions=[AssertionSpec(kind="file-produced", file="report.md")],
+    )
+    report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    # The assertion passed, which proves the directory still existed while the
+    # evaluators ran; it is gone now, which proves cleanup happened after.
+    assert report.passed == 1
+    assert not runner.seen[0].root.exists()
+
+
+def test_the_workspace_path_is_cleared_once_the_directory_is_gone(tmp_path):
+    # A path pointing at a deleted directory would be a lie in the JSON report.
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    assert report.outcomes[0].result is not None
+    assert report.outcomes[0].result.workspace is None
+
+
+def test_keep_workspace_leaves_the_directory_and_the_path(tmp_path):
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    report = run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        keep_workspace=True,
+    )
+    kept = report.outcomes[0].result.workspace
+    assert kept is not None and Path(kept).is_dir()
+    Workspace(root=Path(kept)).cleanup()
+
+
+def test_each_arm_and_repetition_gets_its_own_directory(tmp_path):
+    # Two arms sharing one directory would let the baseline read files the
+    # candidate wrote -- a silently wrong delta.
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        baseline="none",
+        repeat=2,
+    )
+    roots = [workspace.root for workspace in runner.seen]
+    assert len(roots) == 4
+    assert len(set(roots)) == 4
+
+
+def test_seeded_files_reach_the_runner(tmp_path):
+    # keep_workspace=True, not the default: cleanup deletes the directory
+    # before this function gets control back, and reading through the same
+    # Workspace object after that would just prove rmtree works. Keeping the
+    # directory around is the only way to check what the runner actually saw.
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec(files={"in.csv": "a,b\n"}))
+    run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        keep_workspace=True,
+    )
+    assert runner.seen[0].read("in.csv") == "a,b\n"
+    runner.seen[0].cleanup()
+
+
+def test_configured_limits_reach_the_workspace(tmp_path):
+    # A limit read from config and then dropped on the way through would leave
+    # the default silently in force.
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        workspace_limits=WorkspaceLimits(max_files=7),
+    )
+    assert runner.seen[0].limits.max_files == 7
+
+
+def test_a_seeding_failure_errors_the_case_rather_than_failing_it(tmp_path):
+    # Disk and permission problems say nothing about the skill. The loader
+    # rejects an escaping path first, so this is unreachable through a YAML
+    # file -- it is called directly, which is also the only honest way to
+    # reach the branch.
+    from skill_lens.orchestrator import _run_one
+
+    outcome = _run_one(
+        _skill(tmp_path),
+        _case(workspace=WorkspaceSpec(files={"../escape.txt": "x"})),
+        _RecordingRunner(),
+        [],
+    )
+    assert outcome.status == "errored"
+    assert outcome.result is not None
+    assert "workspace" in outcome.result.error.lower()
+
+
+def test_an_errored_run_still_gets_its_directory_deleted(tmp_path):
+    class _Broken(_RecordingRunner):
+        def run(self, skill, case, workspace=None):
+            if workspace is not None:
+                self.seen.append(workspace)
+            return RunResult(error="provider exploded")
+
+    runner = _Broken()
+    case = _case(workspace=WorkspaceSpec())
+    report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    assert report.errored == 1
+    assert not runner.seen[0].root.exists()
+
+
+def test_concurrency_does_not_share_directories(tmp_path):
+    runner = _RecordingRunner()
+    cases = [
+        _case(name=f"c{index}", task=f"t{index}", workspace=WorkspaceSpec()) for index in range(6)
+    ]
+    run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, *cases), concurrency=4)
+    roots = [workspace.root for workspace in runner.seen]
+    assert len(set(roots)) == 6

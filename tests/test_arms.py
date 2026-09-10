@@ -73,9 +73,9 @@ def test_the_baseline_arm_gets_a_skill_with_nothing_to_say(tmp_path):
     seen: list[Skill] = []
 
     class Recorder(FakeRunner):
-        def run(self, skill, case):
+        def run(self, skill, case, workspace=None):
             seen.append(skill)
-            return super().run(skill, case)
+            return super().run(skill, case, workspace=workspace)
 
     run_evals([_skill(tmp_path)], [Recorder()], baseline="none")
     baseline = next(s for s in seen if s.variant == "baseline")
