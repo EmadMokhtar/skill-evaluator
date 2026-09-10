@@ -130,26 +130,40 @@ def build_skill_tool(skill: Skill) -> AgentTool:
 # names in a trajectory block -- both need the answer without asking a runner.
 BUILTIN_TOOL_NAMES: tuple[str, ...] = ("list_files", "read_file", "write_file")
 
-_PATH_SCHEMA = {
-    "type": "object",
-    "properties": {"path": {"type": "string"}},
-    "required": ["path"],
-    "additionalProperties": False,
-}
 
-_WRITE_SCHEMA = {
-    "type": "object",
-    "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
-    "required": ["path", "content"],
-    "additionalProperties": False,
-}
+def _path_schema() -> dict[str, Any]:
+    """A fresh one-argument schema. Built per call, like `_empty_schema()`.
+
+    Not a module constant copied with `dict(...)`: that copies only the top
+    level, so every toolset would go on sharing the same `required` list and
+    the same nested property dicts. Under `--concurrency N` one adapter
+    mutating a schema in place would then corrupt unrelated cases' tools.
+    """
+    return {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+        "additionalProperties": False,
+    }
+
+
+def _write_schema() -> dict[str, Any]:
+    """A fresh two-argument schema. See `_path_schema` for why it is a function."""
+    return {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+        "required": ["path", "content"],
+        "additionalProperties": False,
+    }
 
 
 def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
     """The three real tools, bound to one workspace.
 
     Every callable below catches rather than raises. `PathRefused` already
-    carries a message written for the model; `OSError` and `UnicodeDecodeError`
+    carries a message written for the model; `OSError` and `UnicodeError`
+    (a lone UTF-16 surrogate can raise `UnicodeEncodeError` on the way in,
+    before any decoding happens, not just `UnicodeDecodeError` on the way out)
     are turned into one here. Arguments are accepted positionally-optional and
     coerced, because a model may omit a required argument, send an extra one,
     or send the wrong type -- none of which may raise.
@@ -168,7 +182,11 @@ def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
             return workspace.read(target)
         except PathRefused as exc:
             return str(exc)
-        except UnicodeDecodeError:
+        except UnicodeError:
+            # UnicodeError, not UnicodeDecodeError: a lone UTF-16 surrogate in
+            # the path -- what a model emits when it produces a malformed
+            # \uXXXX escape -- makes os.path.realpath raise UnicodeEncodeError
+            # on the way in, before any decoding happens.
             return f"refused: {target} is not valid UTF-8 text"
         except OSError as exc:
             return f"refused: cannot read {target}: {exc}"
@@ -179,6 +197,10 @@ def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
             written = workspace.write(target, str(content))
         except PathRefused as exc:
             return str(exc)
+        except UnicodeError:
+            # A lone surrogate in either argument: the path trips
+            # os.path.realpath, the content trips content.encode("utf-8").
+            return f"refused: {target} is not valid UTF-8 text"
         except OSError as exc:
             return f"refused: cannot write {target}: {exc}"
         return f"wrote {target} ({written:,} bytes)"
@@ -193,9 +215,7 @@ def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
         AgentTool(
             name="read_file",
             description=("Read a text file from the working directory. `path` is relative to it."),
-            # Built inline per call, like every other schema here, so no two
-            # toolsets ever share a mutable properties dict or required list.
-            json_schema=dict(_PATH_SCHEMA, properties=dict(_PATH_SCHEMA["properties"])),
+            json_schema=_path_schema(),
             call=read_file,
         ),
         AgentTool(
@@ -203,7 +223,7 @@ def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
             description=(
                 "Create or replace a text file in the working directory. `path` is relative to it."
             ),
-            json_schema=dict(_WRITE_SCHEMA, properties=dict(_WRITE_SCHEMA["properties"])),
+            json_schema=_write_schema(),
             call=write_file,
         ),
     ]
