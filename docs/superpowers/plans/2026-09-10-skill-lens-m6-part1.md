@@ -1092,6 +1092,25 @@ def test_no_tool_ever_raises_whatever_the_model_sends(tmp_path, name, arguments)
     assert isinstance(tools[name].call(**arguments), str)
 
 
+@pytest.mark.parametrize("name", ["read_file", "write_file"])
+def test_a_lone_surrogate_is_refused_rather_than_raising(tmp_path, name):
+    # A model emitting a malformed \uXXXX escape produces an unpaired UTF-16
+    # surrogate. os.path.realpath raises UnicodeEncodeError on it -- an encode
+    # error, which a UnicodeDecodeError-only catch misses entirely.
+    _, tools = _tools(tmp_path)
+    assert isinstance(tools[name].call(path="a\ud800b.txt", content="x"), str)
+
+
+def test_a_lone_surrogate_in_content_is_refused_rather_than_raising(tmp_path):
+    _, tools = _tools(tmp_path)
+    assert isinstance(tools["write_file"].call(path="a.txt", content="\ud800"), str)
+
+
+def test_a_nul_byte_in_a_path_is_refused_rather_than_raising(tmp_path):
+    _, tools = _tools(tmp_path)
+    assert tools["read_file"].call(path="a\x00b.txt").startswith("refused:")
+
+
 def test_every_builtin_declares_a_closed_schema(tmp_path):
     _, tools = _tools(tmp_path)
     for name in BUILTIN_TOOL_NAMES:
@@ -1100,12 +1119,20 @@ def test_every_builtin_declares_a_closed_schema(tmp_path):
         assert schema["additionalProperties"] is False
 
 
-def test_two_toolsets_do_not_share_schema_objects(tmp_path):
-    # `_empty_schema()` is built per call for exactly this reason: mutating
-    # one tool's schema must never reach another's.
+@pytest.mark.parametrize("name", BUILTIN_TOOL_NAMES)
+def test_two_toolsets_do_not_share_schema_objects(tmp_path, name):
+    # Schemas are built per call for exactly this reason: under --concurrency N
+    # an adapter mutating one toolset's schema in place must never reach
+    # another's. A top-level `is not` alone would NOT catch this -- the nested
+    # `required` list and property dicts have to be checked by identity too.
     _, first = _tools(tmp_path)
     _, second = _tools(tmp_path)
-    assert first["list_files"].json_schema is not second["list_files"].json_schema
+    one, two = first[name].json_schema, second[name].json_schema
+    assert one is not two
+    assert one["required"] is not two["required"]
+    assert one["properties"] is not two["properties"]
+    for key, value in one["properties"].items():
+        assert value is not two["properties"][key]
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1132,19 +1159,30 @@ Then append:
 # names in a trajectory block -- both need the answer without asking a runner.
 BUILTIN_TOOL_NAMES: tuple[str, ...] = ("list_files", "read_file", "write_file")
 
-_PATH_SCHEMA = {
-    "type": "object",
-    "properties": {"path": {"type": "string"}},
-    "required": ["path"],
-    "additionalProperties": False,
-}
+def _path_schema() -> dict[str, Any]:
+    """A fresh one-argument schema. Built per call, like `_empty_schema()`.
 
-_WRITE_SCHEMA = {
-    "type": "object",
-    "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
-    "required": ["path", "content"],
-    "additionalProperties": False,
-}
+    Not a module constant copied with `dict(...)`: that copies only the top
+    level, so every toolset would go on sharing the same `required` list and
+    the same nested property dicts. Under `--concurrency N` one adapter
+    mutating a schema in place would then corrupt unrelated cases' tools.
+    """
+    return {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+        "additionalProperties": False,
+    }
+
+
+def _write_schema() -> dict[str, Any]:
+    """A fresh two-argument schema. See `_path_schema` for why it is a function."""
+    return {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+        "required": ["path", "content"],
+        "additionalProperties": False,
+    }
 
 
 def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
@@ -1170,7 +1208,11 @@ def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
             return workspace.read(target)
         except PathRefused as exc:
             return str(exc)
-        except UnicodeDecodeError:
+        except UnicodeError:
+            # UnicodeError, not UnicodeDecodeError: a lone UTF-16 surrogate in
+            # the path -- what a model emits when it produces a malformed
+            # \uXXXX escape -- makes os.path.realpath raise UnicodeEncodeError
+            # on the way in, before any decoding happens.
             return f"refused: {target} is not valid UTF-8 text"
         except OSError as exc:
             return f"refused: cannot read {target}: {exc}"
@@ -1181,6 +1223,10 @@ def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
             written = workspace.write(target, str(content))
         except PathRefused as exc:
             return str(exc)
+        except UnicodeError:
+            # A lone surrogate in either argument: the path trips
+            # os.path.realpath, the content trips content.encode("utf-8").
+            return f"refused: {target} is not valid UTF-8 text"
         except OSError as exc:
             return f"refused: cannot write {target}: {exc}"
         return f"wrote {target} ({written:,} bytes)"
@@ -1201,9 +1247,7 @@ def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
                 "Read a text file from the working directory. `path` is "
                 "relative to it."
             ),
-            # Built inline per call, like every other schema here, so no two
-            # toolsets ever share a mutable properties dict or required list.
-            json_schema=dict(_PATH_SCHEMA, properties=dict(_PATH_SCHEMA["properties"])),
+            json_schema=_path_schema(),
             call=read_file,
         ),
         AgentTool(
@@ -1212,7 +1256,7 @@ def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
                 "Create or replace a text file in the working directory. "
                 "`path` is relative to it."
             ),
-            json_schema=dict(_WRITE_SCHEMA, properties=dict(_WRITE_SCHEMA["properties"])),
+            json_schema=_write_schema(),
             call=write_file,
         ),
     ]
