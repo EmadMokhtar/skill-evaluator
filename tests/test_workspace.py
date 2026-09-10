@@ -51,7 +51,10 @@ def test_paths_that_leave_the_root_are_refused(tmp_path, candidate):
         ws.resolve(candidate)
 
 
-@pytest.mark.parametrize("candidate", ["", "   ", "/etc/passwd", "../escape.txt", "a/../../b.txt"])
+@pytest.mark.parametrize(
+    "candidate",
+    ["", "   ", "/etc/passwd", "../escape.txt", "a/../../b.txt", ".", "a\x00b.txt"],
+)
 def test_check_relative_path_refuses_without_needing_a_root(candidate):
     # Root-independent so cases/loader.py can run it at load time, long before
     # any directory exists.
@@ -82,6 +85,31 @@ def test_a_symlinked_root_still_contains(tmp_path):
     ws = Workspace(root=link.resolve())
     assert ws.write("a.txt", "x") == 1
     assert ws.read("a.txt") == "x"
+
+
+def test_a_symlink_inside_the_workspace_cannot_reach_outside(tmp_path):
+    # Guards against a plausible-looking refactor: replacing .resolve() with
+    # os.path.normpath to avoid touching the filesystem. normpath only
+    # rewrites ".." segments textually -- it does not follow symlinks -- so
+    # "root/link/victim.txt" would normalise to a path that IS relative to
+    # root even though the symlink actually points outside it. All six
+    # existing escape parametrizations are textual (".." or an absolute
+    # path); the only other symlink test covers a symlinked root, which is a
+    # positive case. Without this test, that refactor would pass all other
+    # tests and open a real escape.
+    root = (tmp_path / "ws").resolve()
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "victim.txt").write_text("original", encoding="utf-8")
+    (root / "link").symlink_to(outside)
+    (root / "victim.txt").symlink_to(outside / "victim.txt")
+    ws = Workspace(root=root)
+    with pytest.raises(PathRefused):
+        ws.read("link/victim.txt")
+    with pytest.raises(PathRefused):
+        ws.write("victim.txt", "pwned")
+    assert (outside / "victim.txt").read_text(encoding="utf-8") == "original"
 
 
 def test_write_then_read_round_trips_utf8(tmp_path):
@@ -179,6 +207,29 @@ def test_a_failed_seed_leaves_no_directory_behind(tmp_path, monkeypatch):
     monkeypatch.setattr(module.tempfile, "mkdtemp", recording_mkdtemp)
     with pytest.raises(WorkspaceError):
         create_workspace(WorkspaceSpec(files={"../escape.txt": "x"}), label="bad")
+    from pathlib import Path as _Path
+
+    assert made and not _Path(made[0]).exists()
+
+
+def test_a_nul_byte_seed_key_leaves_no_directory_behind(tmp_path, monkeypatch):
+    # check_relative_path now refuses a NUL byte before it ever reaches
+    # .resolve(), so this raises PathRefused rather than the ValueError the
+    # unpatched code let escape -- but the seed must still be cleaned up and
+    # still arrive as WorkspaceError, same as any other refused seed.
+    made: list = []
+    import skill_lens.workspace as module
+
+    real_mkdtemp = module.tempfile.mkdtemp
+
+    def recording_mkdtemp(*args, **kwargs):
+        path = real_mkdtemp(*args, **kwargs)
+        made.append(path)
+        return path
+
+    monkeypatch.setattr(module.tempfile, "mkdtemp", recording_mkdtemp)
+    with pytest.raises(WorkspaceError):
+        create_workspace(WorkspaceSpec(files={"a\x00b.txt": "x"}), label="nul")
     from pathlib import Path as _Path
 
     assert made and not _Path(made[0]).exists()

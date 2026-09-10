@@ -86,7 +86,13 @@ def check_relative_path(candidate: str) -> None:
     text = candidate.strip()
     if not text:
         raise PathRefused("refused: the path must not be empty")
+    if "\x00" in text:
+        raise PathRefused(f"refused: {candidate!r} contains a null byte")
     path = Path(text)
+    if not path.parts:
+        raise PathRefused(
+            f"refused: {candidate!r} names the working directory itself, not a file in it"
+        )
     # Three separate checks, not one: Path("C:foo") on Windows is
     # drive-relative but not absolute, and Path("\\foo") has a root and no
     # drive. Either would escape a test that only asked is_absolute().
@@ -133,7 +139,9 @@ class Workspace:
     def listing(self) -> list[str]:
         """Every file, relative to the root, sorted, recursive."""
         return sorted(
-            str(item.relative_to(self.root)) for item in self.root.rglob("*") if item.is_file()
+            item.relative_to(self.root).as_posix()
+            for item in self.root.rglob("*")
+            if item.is_file()
         )
 
     def _totals(self) -> tuple[int, int]:
@@ -216,7 +224,7 @@ def create_workspace(
     for name, content in spec.files.items():
         try:
             workspace.write(name, content)
-        except (PathRefused, OSError) as exc:
+        except (PathRefused, OSError, ValueError) as exc:
             # A half-seeded directory would be worse than none: the agent
             # would see an environment nobody declared.
             workspace.cleanup()
