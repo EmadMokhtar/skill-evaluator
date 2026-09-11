@@ -59,7 +59,11 @@ def test_reading_a_directory_returns_a_message(tmp_path):
 def test_reading_a_non_utf8_file_returns_a_message(tmp_path):
     workspace, tools = _tools(tmp_path)
     (workspace.root / "blob.dat").write_bytes(b"\xff\xfe\x00")
-    assert "UTF-8" in tools["read_file"].call(path="blob.dat")
+    message = tools["read_file"].call(path="blob.dat")
+    assert "UTF-8" in message
+    # The refusal must blame the CONTENT, not the path the model asked for --
+    # the path was fine, the bytes behind it were not.
+    assert "content" in message
 
 
 def test_escaping_the_root_returns_a_message_rather_than_raising(tmp_path):
@@ -106,7 +110,10 @@ def test_a_lone_surrogate_is_refused_rather_than_raising(tmp_path, name):
 
 def test_a_lone_surrogate_in_content_is_refused_rather_than_raising(tmp_path):
     _, tools = _tools(tmp_path)
-    assert isinstance(tools["write_file"].call(path="a.txt", content="\ud800"), str)
+    message = tools["write_file"].call(path="a.txt", content="\ud800")
+    assert isinstance(message, str)
+    # Names the content as the problem: the path was valid.
+    assert "content" in message and "encoded" in message
 
 
 def test_a_nul_byte_in_a_path_is_refused_rather_than_raising(tmp_path):

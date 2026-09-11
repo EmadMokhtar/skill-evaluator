@@ -182,12 +182,18 @@ def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
             return workspace.read(target)
         except PathRefused as exc:
             return str(exc)
+        except UnicodeDecodeError:
+            # The realistic case: the file exists but its bytes are not UTF-8.
+            # Say so about the CONTENT, so the model does not go looking for a
+            # problem with the path it asked for.
+            return f"refused: the content of {target} is not valid UTF-8 text"
         except UnicodeError:
-            # UnicodeError, not UnicodeDecodeError: a lone UTF-16 surrogate in
-            # the path -- what a model emits when it produces a malformed
-            # \uXXXX escape -- makes os.path.realpath raise UnicodeEncodeError
-            # on the way in, before any decoding happens.
-            return f"refused: {target} is not valid UTF-8 text"
+            # Backstop. A lone UTF-16 surrogate in the path used to reach here
+            # as UnicodeEncodeError from os.path.realpath; check_relative_path
+            # now refuses those first, as PathRefused. Kept so that any future
+            # surprise from the path layer still returns a message rather than
+            # breaking the never-raise rule.
+            return f"refused: {target} could not be handled as UTF-8 text"
         except OSError as exc:
             return f"refused: cannot read {target}: {exc}"
 
@@ -197,10 +203,18 @@ def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
             written = workspace.write(target, str(content))
         except PathRefused as exc:
             return str(exc)
+        except UnicodeEncodeError:
+            # Only the CONTENT can trip this now: a lone UTF-16 surrogate --
+            # what a model emits when it produces a malformed \uXXXX escape --
+            # cannot be encoded as UTF-8. A surrogate in the path is refused
+            # earlier, by check_relative_path, as PathRefused.
+            return (
+                f"refused: the content for {target} contains characters that "
+                "cannot be encoded as UTF-8"
+            )
         except UnicodeError:
-            # A lone surrogate in either argument: the path trips
-            # os.path.realpath, the content trips content.encode("utf-8").
-            return f"refused: {target} is not valid UTF-8 text"
+            # Backstop for any other Unicode failure, so the tool never raises.
+            return f"refused: {target} could not be handled as UTF-8 text"
         except OSError as exc:
             return f"refused: cannot write {target}: {exc}"
         return f"wrote {target} ({written:,} bytes)"
