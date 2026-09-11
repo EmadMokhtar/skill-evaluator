@@ -606,3 +606,39 @@ def test_the_comparative_branch_shows_the_candidates_output_but_not_the_baseline
     text = render_console(report, delta=build_delta(report))
     assert "output: CANDIDATE-SAID" in text
     assert "BASELINE-SAID" not in text
+
+
+def test_a_trailing_newline_does_not_add_a_blank_indented_line():
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="trails",
+                runner="fake",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output="hello\n"),
+            )
+        ]
+    )
+    text = render_console(report)
+    assert "        output: hello\n" in text
+    assert "        output: hello\n        \n" not in text
+
+
+def test_crlf_output_renders_without_carriage_returns():
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="crlf",
+                runner="fake",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output="line1\r\nline2"),
+            )
+        ]
+    )
+    text = render_console(report)
+    assert "        output: line1\n        line2" in text
+    assert "\r" not in text
