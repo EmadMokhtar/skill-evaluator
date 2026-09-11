@@ -247,6 +247,11 @@ def test_json_includes_tag_filtered_skills():
     assert data["tag_filtered_skills"] == ["xlsx"]
 
 
+def test_json_includes_case_filtered_skills():
+    report = RunReport(outcomes=[], case_filtered_skills=["pdf"])
+    assert json.loads(render_json(report))["case_filtered_skills"] == ["pdf"]
+
+
 def judged_report(**score_kwargs) -> RunReport:
     score = EvalScore(
         evaluator="judge",

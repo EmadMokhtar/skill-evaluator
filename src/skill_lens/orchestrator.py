@@ -202,6 +202,7 @@ class _Plan:
     items: list[_WorkItem] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     tag_filtered: list[str] = field(default_factory=list)
+    case_filtered: list[str] = field(default_factory=list)
     notes: list[BaselineNote] = field(default_factory=list)
 
 
@@ -210,6 +211,7 @@ def _plan_work(
     runners: list[Runner],
     evals_path: Path | None,
     tag: str | None,
+    case_filter: str | None,
     baseline: BaselineKind | None,
     repeat: int,
 ) -> _Plan:
@@ -229,6 +231,15 @@ def _plan_work(
             cases = [c for c in cases if tag in c.tags]
             if not cases:
                 plan.tag_filtered.append(skill.name)
+                continue
+        if case_filter is not None:
+            # Case-insensitive substring, like pytest -k: the CI log shows the
+            # name, the user copies any distinctive part of it. Applied after
+            # --tag so a skill emptied by --tag is recorded under --tag alone.
+            needle = case_filter.casefold()
+            cases = [c for c in cases if needle in c.name.casefold()]
+            if not cases:
+                plan.case_filtered.append(skill.name)
                 continue
         baseline_skill = None if baseline is None else _baseline_skill(skill, baseline, plan.notes)
         for case in cases:
@@ -362,6 +373,7 @@ def run_evals(
     evals_path: Path | None = None,
     evaluators: list[Evaluator] | None = None,
     tag: str | None = None,
+    case_filter: str | None = None,
     judge: Judge | None = None,
     baseline: BaselineKind | None = None,
     repeat: int = 1,
@@ -385,6 +397,10 @@ def run_evals(
     `evaluators` list already fully determines scoring. Passing both is
     rejected rather than silently ignoring `judge` -- a caller doing that has
     a contradictory request, not a preference we should guess at.
+
+    `case_filter` keeps only cases whose name contains it, case-insensitively;
+    a skill it empties is recorded in `case_filtered_skills`, never silently
+    dropped.
 
     `baseline` opts into the second arm; None means today's single-arm run.
     `repeat` samples each arm that many times, each repetition being its own
@@ -432,7 +448,7 @@ def run_evals(
             JudgeEvaluator(judge if judge is not None else FakeJudge()),
         ]
     )
-    plan = _plan_work(skills, runners, evals_path, tag, baseline, repeat)
+    plan = _plan_work(skills, runners, evals_path, tag, case_filter, baseline, repeat)
     outcomes = _execute(
         plan.items,
         evaluators,
@@ -445,6 +461,7 @@ def run_evals(
         outcomes=outcomes,
         skipped_skills=plan.skipped,
         tag_filtered_skills=plan.tag_filtered,
+        case_filtered_skills=plan.case_filtered,
         baseline_kind=baseline,
         repeat=repeat,
         baseline_notes=plan.notes,

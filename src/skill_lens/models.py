@@ -335,6 +335,7 @@ class RunReport(BaseModel):
     outcomes: list[CaseOutcome] = Field(default_factory=list)
     skipped_skills: list[str] = Field(default_factory=list)
     tag_filtered_skills: list[str] = Field(default_factory=list)
+    case_filtered_skills: list[str] = Field(default_factory=list)
     baseline_kind: BaselineKind | None = None
     repeat: int = 1
     baseline_notes: list[BaselineNote] = Field(default_factory=list)
