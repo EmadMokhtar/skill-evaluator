@@ -197,3 +197,16 @@ def test_contributing_installs_every_pre_commit_stage():
         assert f"--hook-type {stage}" in text, (
             f"docs/contributing.md does not install the {stage!r} pre-commit stage"
         )
+
+
+def test_contributing_documents_every_repository_setting():
+    """Settings that live in the GitHub UI cannot be checked by CI, so the
+    docs are the only record that they must be on."""
+    text = _page("contributing.md")
+    for required in ("Private vulnerability reporting", "Dependabot"):
+        assert required in text, f"docs/contributing.md does not mention {required!r}"
+
+
+def test_releasing_documents_the_sbom():
+    text = RELEASING.read_text(encoding="utf-8")
+    assert ".cdx.json" in text, "docs/releasing.md does not say where the SBOM is published"

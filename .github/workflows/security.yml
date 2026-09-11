@@ -25,12 +25,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Install uv
         # No cache: the audit installs nothing, it only reads uv.lock.
-        uses: astral-sh/setup-uv@v5
-
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5.4.2
       - name: Audit the lockfile for known vulnerabilities
         # `uv audit` reads uv.lock and asks OSV (osv.dev) about every package
         # in it; nothing is installed. `--locked` fails if pyproject.toml and

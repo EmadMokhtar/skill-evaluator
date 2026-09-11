@@ -560,6 +560,31 @@ inline `noqa` with that reason. `tests/**` and `scripts/**` have per-directory i
 values. A rule is never switched off for `src/`
 because one site trips it.
 
+**Every action is pinned to a commit SHA with a `# vX.Y.Z` comment, and nothing grants write
+access at the workflow level.** `actions/checkout@v4` runs whatever `v4` points at on the day,
+so a compromised or mistaken re-tag would run different code in CI with no change in this
+repository; a commit hash cannot be moved. The trailing version comment is what keeps a pin
+readable, and it is the comment Dependabot rewrites when it bumps the SHA, so the two never
+disagree. Dependabot watches both `uv.lock` and the actions weekly, because a pinned hash never
+moves on its own; its commit prefixes are Conventional Commit types, checked by running them
+through `cz check`, since the pull-request title becomes the commit that `cz bump` parses.
+Permissions are granted per job against a top-level block that is empty or read-only, so a job
+added later inherits nothing and the docs `build` job — third-party tooling on the checkout —
+never holds the token that publishes to Pages. `tests/test_supply_chain.py` holds all of it.
+
+**The SBOM never enters `dist/`, and the GitHub Release is created only after PyPI accepted the
+upload.** The CycloneDX export reads the lockfile `verify` just audited, `--frozen`, for the
+runtime dependencies and the `pydantic-ai` extra — what an installer gets, not the dev or docs
+groups that ship to nobody. It is written to `sbom/` and uploaded as its own artifact because
+`publish` sends every file in the `dist` artifact to PyPI, which would reject an SBOM and fail
+the upload after the tag is already pushed. `github-release` needs `publish`: a GitHub Release is
+the first outward-facing sign of a version, and one that exists before the upload could
+advertise a version `pip install` cannot find. The job is re-run safe — the documented recovery
+for any release step — because creation is skipped when `gh release view` finds the release,
+and assets are uploaded with `--clobber` so a partial run converges instead of refusing. Its
+notes are `cz changelog <version> --dry-run`: the same commits that chose the version number,
+and nothing else, are the source of truth for what a release contains.
+
 ## Extension points
 
 **Adding a runner.** Implement `Runner` in a new module under `runners/`, register it in

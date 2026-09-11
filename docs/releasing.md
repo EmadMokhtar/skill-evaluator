@@ -10,7 +10,8 @@ publishes to PyPI. Nobody types a release command.
 | --- | --- | --- |
 | `verify` | ruff (including the `S` security rules), format check, the full offline suite, `uv audit` on the lockfile | every push to `main` |
 | `release` | `cz bump`, push the commit and its tag, verify the tag reached `origin`, `uv build`, upload the artifact | `verify` passed |
-| `publish` | download the artifact, upload to PyPI | a version was actually cut |
+| `publish` | download the artifact, upload to PyPI with attestations | a version was actually cut |
+| `github-release` | create the GitHub Release for the tag with the changelog section as notes; attach the wheel, the sdist and the SBOM | `publish` succeeded |
 
 A merge whose commits do not warrant a release is a no-op: `cz bump` exits `21` or `3`, the
 job records "nothing to release" in its summary, and `publish` is skipped.
@@ -18,6 +19,16 @@ job records "nothing to release" in its summary, and `publish` is skipped.
 `verify` re-runs the dependency audit on the commit being released rather than trusting the
 pull request's green check: an advisory can be published between the merge and the tag, and
 nothing publishes that `verify` did not pass. See [Security](security.md).
+
+`release` also exports a CycloneDX SBOM from the lockfile `verify` audited —
+`skill-lens-X.Y.Z.cdx.json`, for the runtime dependencies and the `pydantic-ai` extra, not
+the dev or docs groups — and uploads it as its own `sbom` artifact, apart from `dist`:
+`publish` sends every file in `dist` to PyPI, which would reject an SBOM, and a rejected
+file fails the upload after the tag is already pushed. `github-release` then attaches it to
+the GitHub Release at
+`https://github.com/EmadMokhtar/skill-evaluator/releases/download/vX.Y.Z/skill-lens-X.Y.Z.cdx.json`.
+The release is created only after PyPI accepted the upload, so it can never advertise a
+version `pip install` cannot find.
 
 The version comes from the commit messages, so a Conventional Commit title is not a style
 rule here — it is the input to versioning. `fix:` gives a patch, `feat:` a minor, and a `!`
@@ -169,6 +180,13 @@ the run records "nothing to release": no build, no artifact, no `publish`. Eithe
 left with a real, permanent tag and no published package behind it, which is worse than doing
 nothing — the tag cannot simply be re-cut, since `vX.Y.Z` would then mean two different things
 depending on which push you ask about.
+
+### Recovering a failed GitHub Release
+
+`github-release` runs after `publish`, so a failure here means PyPI already has the version
+and only the GitHub Release or its assets are missing. Re-run the job: it skips creation
+when the release already exists and uploads the assets with `--clobber`, so a partial run
+converges rather than failing on "already exists". Nothing in it can affect PyPI.
 
 ### Recovering a failed publish
 
