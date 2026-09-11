@@ -64,7 +64,7 @@ problem (errored) from a low score (failed).
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
 | `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
 | `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models. |
-| `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. |
+| `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. `scaffold_target` decides where `init` writes. |
 | `workspace.py` | The per-case temporary directory: creation, seeding, path containment, and cleanup. Framework-neutral, like every other top-level module. Its methods **raise** (`PathRefused`, `WorkspaceError`) for `cases/loader.py` and the evaluators to catch as authoring or infra errors; `runners/tools.py`'s built-in tools catch those same exceptions and turn them into ordinary tool-result strings instead. |
 | `runners/base.py` | The `Runner` protocol. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
@@ -83,6 +83,7 @@ problem (errored) from a low score (failed).
 | `judges/fake.py` | A scripted, offline judge. The default — and unscripted it *errors* rather than passing, so an unjudged rubric is never a quiet green. |
 | `judges/pydantic_ai.py` | The PydanticAI judge adapter. **The other module that imports an agent framework.** |
 | `reporters/console.py` | Human-readable run summary. |
+| `reporters/failure_context.py` | The excerpt a non-passing case shows — output, cut count, tool-call lines. One helper for all three reporters; no markup. |
 | `reporters/json_reporter.py` | Machine-readable run report. |
 | `reporters/junit.py` | JUnit XML for CI test panes. `failed`/`errored` map onto `<failure>`/`<error>`, candidate arm only. |
 | `reporters/markdown.py` | GitHub-flavored Markdown for step summaries and PR comments, with optional `max_chars` truncation. |
@@ -521,6 +522,47 @@ non-null `workspace`, regardless of whether `--keep-workspace` or the config fil
 `keep_workspace` is what kept it. That is what makes `keep_workspace = true` safe to commit:
 a persistent setting that produced no visible output would fill a disk with nothing on
 screen to explain why.
+
+### Developer experience (M7)
+
+**Output is expanded only under non-passing candidate outcomes.** `failure_context` returns
+`None` for a passed outcome, a baseline outcome or an outcome with no result, and every
+reporter renders nothing on `None`. Fifty green cases stay fifty lines, and a baseline
+outcome — which is not the verdict — is never expanded.
+
+**A cut is never silent.** `FailureContext.cut` is the exact number of characters removed
+and `cut_note` states it, with the flag that lifts the cap. A truncated excerpt that looked
+complete would be worse than none.
+
+**The three reporters render one `FailureContext`.** Console, Markdown and JUnit call the
+same helper and may differ only in markup. Two excerpts computed separately would drift the
+first time one of them changed.
+
+**A `--case` matching nothing fails the gate.** The fourth zero-cases cause, beside no
+skills, no cases and `--tag`: `case_filtered_skills` on `RunReport` records the skills the
+filter emptied, and `evaluate_gate` names the flag. A typo in a filter is not a pass.
+
+**`--case` has no config key.** A filter chooses which cases one invocation runs. A config
+file that permanently narrowed the suite would let a green run measure less than the
+repository declares. `full_output` and `keep_workspace` are rendering knobs with no such
+failure mode, which is why they may live in the file.
+
+**`init` never creates an `evals/` directory beside existing `*.eval.yaml` files.**
+Discovery prefers `evals/` when it exists, so creating it would hide the files already
+there from every later run — silently, with nothing red. `scaffold_target` writes beside
+`SKILL.md` in that layout.
+
+**Batch `init` never overwrites.** A skill with any eval file is skipped and named;
+`--force` in batch mode is a user error. Rewriting every suite in a repository must never be
+one flag away.
+
+**The unfilled-scaffold scan covers mapping keys as well as values.** `workspace: files:` is
+keyed by filename; an unfilled filename would otherwise seed a file literally named after
+the placeholder.
+
+**`examples/greeting` stays at `1.1.0` or later, with `1.0.0` in history.** `--baseline
+previous` resolves an earlier *declared version* from git, so the shipped comparative
+example only works because the bump is real and the earlier version is on `main`.
 
 ## Extension points
 

@@ -87,6 +87,7 @@ uv run skill-lens list ./examples
 ```
 
 ```
+csv-report	1 case(s)	examples/csv-report
 greeting	1 case(s)	examples/greeting
 order-support	5 case(s)	examples/order-support
 ```

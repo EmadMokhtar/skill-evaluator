@@ -11,16 +11,17 @@ Skills and their eval cases are **inputs** to the tool. Nothing about a skill un
 test is vendored here, so any skill repository can adopt `skill-lens` without
 embedding it.
 
-!!! info "Status: M5"
+!!! info "Status: M7"
     The full pipeline — discovery, scoring, reporting, gating — runs offline against
     `FakeRunner` (the default, scripted, free) and against real agents through
-    `pydantic-ai`. It scores output text, tool-use trajectories, and efficiency
-    budgets, plus output quality via a rubric-based LLM judge with per-check evidence.
-    Each case can also run against a baseline for comparative, delta-gated evals, and
-    JUnit/Markdown reporters with a composite GitHub Action make a run CI-legible.
-    Merging to `main` versions the change from its commit history and publishes it to
-    PyPI (see [Releasing](releasing.md)). This is `0.x`: a minor release may still
-    change behaviour, so pin what you depend on. See the [roadmap](roadmap.md).
+    `pydantic-ai`. It scores output text, tool-use trajectories, efficiency budgets and
+    the files a case produces in a contained workspace, plus output quality via a
+    rubric-based LLM judge with per-check evidence. Each case can also run against a
+    baseline for comparative, delta-gated evals; JUnit/Markdown reporters and a composite
+    GitHub Action make a run CI-legible, and every failing case shows what the agent
+    actually did. Merging to `main` versions the change from its commit history and
+    publishes it to PyPI (see [Releasing](releasing.md)). This is `0.x`: a minor release
+    may still change behaviour, so pin what you depend on. See the [roadmap](roadmap.md).
 
 ## Install
 
