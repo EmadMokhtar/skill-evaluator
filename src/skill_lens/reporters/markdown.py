@@ -12,6 +12,12 @@ import re
 from skill_lens.comparison import Delta, format_baseline_notes
 from skill_lens.gating import GateResult
 from skill_lens.models import CaseOutcome, RunReport
+from skill_lens.reporters.failure_context import (
+    OUTPUT_LIMIT,
+    cut_note,
+    failure_context,
+    more_calls_note,
+)
 
 _TRUNCATION_NOTE = "_Truncated — see the JSON report artifact._"
 _ADVISORY = "These flags are advice about the eval suite; they never fail the gate."
@@ -228,7 +234,7 @@ def _details(summary: str, body_lines: list[str]) -> str:
     return "\n".join([f"<details><summary>{summary}</summary>", "", *body_lines, "", "</details>"])
 
 
-def _failure_lines(outcome: CaseOutcome, repeat: int) -> list[str]:
+def _failure_lines(outcome: CaseOutcome, repeat: int, output_limit: int | None) -> list[str]:
     label = outcome.case_name
     if repeat > 1:
         # Matches the JUnit reporter's suffix: without it, --repeat 5 renders
@@ -248,11 +254,24 @@ def _failure_lines(outcome: CaseOutcome, repeat: int) -> list[str]:
                 lines.append(f"    - {_code(check.id)}: {evidence}")
     if outcome.result is not None and outcome.result.error:
         lines.extend(["", _fenced(outcome.result.error)])
+    context = failure_context(outcome, limit=output_limit)
+    if context is not None:
+        # A fenced block is the one Markdown context where model output is
+        # inert: `</details>` and `#` inside it are literal text. `_fenced`
+        # already outgrows any run of backticks in the content.
+        lines.extend(["", "Output:", "", _fenced(context.output or "(empty)")])
+        if context.cut:
+            lines.extend(["", cut_note(context)])
+        if context.tool_calls:
+            calls = list(context.tool_calls)
+            if context.more_calls:
+                calls.append(more_calls_note(context))
+            lines.extend(["", "Tool calls:", "", _fenced("\n".join(calls))])
     lines.append("")
     return lines
 
 
-def _failures(report: RunReport) -> str:
+def _failures(report: RunReport, output_limit: int | None) -> str:
     failing = [o for o in report.candidate_outcomes if o.status != "passed"]
     if not failing:
         return ""
@@ -266,7 +285,7 @@ def _failures(report: RunReport) -> str:
         title = f"Failures ({failed})"
     body: list[str] = []
     for outcome in failing:
-        body.extend(_failure_lines(outcome, report.repeat))
+        body.extend(_failure_lines(outcome, report.repeat, output_limit))
     return _details(title, body)
 
 
@@ -314,6 +333,7 @@ def render_markdown(
     gate: GateResult | None = None,
     delta: Delta | None = None,
     max_chars: int | None = None,
+    output_limit: int | None = OUTPUT_LIMIT,
 ) -> str:
     """Render a report as Markdown, optionally trimmed to `max_chars`.
 
@@ -326,6 +346,9 @@ def render_markdown(
     small to hold the verdict itself falls back to a hard cut. The ceiling is
     absolute either way -- GitHub rejects an over-length comment outright, so
     overflowing would cost the reader the whole report rather than part of it.
+
+    `output_limit` caps the agent output shown under each failing case; None
+    prints all of it.
     """
     if max_chars is not None:
         # A negative budget must mean "nothing fits", not "slice from the end":
@@ -338,7 +361,7 @@ def render_markdown(
         _delta_block(delta)
         if delta is not None
         else (_no_baseline_block(report) if report.baseline_kind is not None else ""),
-        _failures(report),
+        _failures(report, output_limit),
         _low_signal(delta) if delta is not None else "",
         _high_variance(delta) if delta is not None else "",
         _skipped(report),

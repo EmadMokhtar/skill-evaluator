@@ -17,6 +17,7 @@ from skill_lens.models import (
     EvalScore,
     RunReport,
     RunResult,
+    ToolCall,
 )
 from skill_lens.reporters.markdown import render_markdown
 
@@ -427,3 +428,111 @@ def test_a_backtick_in_a_check_id_cannot_close_its_code_span():
     report = RunReport(outcomes=[_outcome()], baseline_kind="none")
     text = render_markdown(report, delta=delta)
     assert "``called:a`b``" in text
+
+
+def _without_fenced_blocks(text: str) -> str:
+    """The document with every fenced code block removed, for structural checks."""
+    return re.sub(r"`{3,}\n.*?\n`{3,}", "", text, flags=re.DOTALL)
+
+
+def test_the_failures_block_shows_the_output_in_a_fence():
+    report = RunReport(
+        outcomes=[
+            _outcome(
+                name="rejects",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output="I cannot refund order 1234."),
+            )
+        ]
+    )
+    text = render_markdown(report)
+    assert "Output:" in text
+    assert "```\nI cannot refund order 1234.\n```" in text
+
+
+def test_a_passing_case_shows_no_output():
+    assert "Output:" not in render_markdown(RunReport(outcomes=[_outcome()]))
+
+
+def test_output_containing_a_closing_details_tag_stays_inside_its_fence():
+    hostile = "fine.\n</details>\n\n# not a heading"
+    report = RunReport(
+        outcomes=[
+            _outcome(
+                name="rejects",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output=hostile),
+            )
+        ]
+    )
+    text = render_markdown(report)
+    structural = _without_fenced_blocks(text)
+    assert structural.count("<details>") == structural.count("</details>") == 1
+    assert "# not a heading" not in structural
+
+
+def test_output_containing_triple_backticks_gets_a_longer_fence():
+    report = RunReport(
+        outcomes=[
+            _outcome(
+                name="rejects",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output="see ```this``` block"),
+            )
+        ]
+    )
+    assert "````\nsee ```this``` block\n````" in render_markdown(report)
+
+
+def test_a_cut_output_carries_the_count_and_no_limit_prints_all():
+    report = RunReport(
+        outcomes=[
+            _outcome(
+                name="verbose",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output="x" * 2342),
+            )
+        ]
+    )
+    capped = render_markdown(report)
+    assert "… (1,842 more characters; --full-output prints them)" in capped
+    assert "x" * 501 not in capped
+    full = render_markdown(report, output_limit=None)
+    assert "x" * 2342 in full
+    assert "more characters" not in full
+
+
+def test_tool_calls_render_as_a_fenced_list():
+    report = RunReport(
+        outcomes=[
+            _outcome(
+                name="refuses",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(
+                    output="sorry",
+                    tool_calls=[ToolCall(name="lookup_order", arguments={"order_id": "1234"})],
+                ),
+            )
+        ]
+    )
+    text = render_markdown(report)
+    assert 'Tool calls:\n\n```\nlookup_order(order_id="1234")\n```' in text
+
+
+def test_an_empty_output_is_stated():
+    report = RunReport(
+        outcomes=[
+            _outcome(
+                name="silent",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output=""),
+            )
+        ]
+    )
+    assert "```\n(empty)\n```" in render_markdown(report)
