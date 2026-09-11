@@ -10,7 +10,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 
 from skill_lens.gating import evaluate_gate
-from skill_lens.models import CaseOutcome, CheckResult, EvalScore, RunReport, RunResult
+from skill_lens.models import CaseOutcome, CheckResult, EvalScore, RunReport, RunResult, ToolCall
 from skill_lens.reporters.junit import render_junit
 
 
@@ -181,7 +181,10 @@ def test_illegal_xml_characters_are_stripped_so_the_document_parses():
     )
     root = _parse(report)  # would raise ParseError before the strip
     assert root.find("testsuite/testcase").get("name") == "weirdname"
-    assert root.find("testsuite/testcase/error").text == "boom"
+    # The body now carries the output context after the head line (Task 4),
+    # so only the head -- what the control-character stripping is about -- is
+    # checked here.
+    assert root.find("testsuite/testcase/error").text.startswith("boom")
 
 
 def test_markup_in_names_survives_a_round_trip():
@@ -244,3 +247,57 @@ def test_two_runners_for_one_case_get_distinct_identities():
 def test_a_single_runner_keeps_clean_names():
     report = RunReport(outcomes=[_outcome(name="extracts")])
     assert _parse(report).find("testsuite/testcase").get("name") == "extracts"
+
+
+def _failed(output, tool_calls=()):
+    return _outcome(
+        name="rejects",
+        status="failed",
+        scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+        result=RunResult(output=output, tool_calls=list(tool_calls)),
+    )
+
+
+def test_a_failure_body_carries_the_output_after_the_detail():
+    root = _parse(RunReport(outcomes=[_failed("I cannot refund order 1234.")]))
+    failure = root.find("testsuite/testcase/failure")
+    assert failure.text.split("\n")[0] == "assertion: nope"
+    assert "output:\nI cannot refund order 1234." in failure.text
+    # The attribute stays the one-line summary.
+    assert failure.get("message") == "assertion: nope"
+
+
+def test_an_error_body_carries_the_output_too():
+    outcome = _outcome(
+        name="boom",
+        status="errored",
+        scores=[],
+        result=RunResult(output="partial answer", error="provider returned 500"),
+    )
+    root = _parse(RunReport(outcomes=[outcome]))
+    error = root.find("testsuite/testcase/error")
+    assert error.text.startswith("provider returned 500")
+    assert "output:\npartial answer" in error.text
+
+
+def test_tool_calls_and_the_cut_note_reach_the_body():
+    calls = [ToolCall(name="lookup_order", arguments={"order_id": "1234"})]
+    root = _parse(RunReport(outcomes=[_failed("x" * 2342, calls)]))
+    text = root.find("testsuite/testcase/failure").text
+    assert "… (1,842 more characters; --full-output prints them)" in text
+    assert 'tool calls:\nlookup_order(order_id="1234")' in text
+
+
+def test_no_output_limit_puts_the_whole_output_in_the_body():
+    root = _parse(RunReport(outcomes=[_failed("x" * 2342)]), output_limit=None)
+    assert "x" * 2342 in root.find("testsuite/testcase/failure").text
+
+
+def test_control_characters_in_the_output_are_stripped_so_the_document_parses():
+    root = _parse(RunReport(outcomes=[_failed("bad\x00byte\x01here")]))
+    assert "badbytehere" in root.find("testsuite/testcase/failure").text
+
+
+def test_an_empty_output_is_stated_in_the_body():
+    root = _parse(RunReport(outcomes=[_failed("")]))
+    assert "output:\n(empty)" in root.find("testsuite/testcase/failure").text

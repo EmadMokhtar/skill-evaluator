@@ -13,6 +13,12 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from skill_lens.comparison import Delta
 from skill_lens.gating import GateResult
 from skill_lens.models import CaseOutcome, RunReport
+from skill_lens.reporters.failure_context import (
+    OUTPUT_LIMIT,
+    cut_note,
+    failure_context,
+    more_calls_note,
+)
 
 # XML 1.0 forbids most control characters outright -- a document containing one
 # is not "badly escaped", it is not XML. ElementTree escapes &, < and > but
@@ -43,8 +49,25 @@ def _message(body: str) -> str:
     return _xml_safe(first[:_MESSAGE_LIMIT])
 
 
-def _failure_body(outcome: CaseOutcome) -> str:
-    """Why this case failed: each failing evaluator, then each failing check.
+def _context_lines(outcome: CaseOutcome, output_limit: int | None) -> list[str]:
+    """The output and tool calls, as plain lines appended to a body."""
+    context = failure_context(outcome, limit=output_limit)
+    if context is None:
+        return []
+    lines = ["output:", context.output or "(empty)"]
+    if context.cut:
+        lines.append(cut_note(context))
+    if context.tool_calls:
+        lines.append("tool calls:")
+        lines.extend(context.tool_calls)
+        if context.more_calls:
+            lines.append(more_calls_note(context))
+    return lines
+
+
+def _failure_body(outcome: CaseOutcome, output_limit: int | None) -> str:
+    """Why this case failed: each failing evaluator, then each failing check,
+    then the agent's output and tool calls.
 
     `no evidence given` matches the console reporter deliberately -- a check
     that passed on nothing is the judge's characteristic failure mode, and a
@@ -60,11 +83,13 @@ def _failure_body(outcome: CaseOutcome) -> str:
                 lines.append(
                     f"{score.evaluator}/{check.id}: {check.evidence or 'no evidence given'}"
                 )
-    return "\n".join(lines) or "no failing evaluator reported a detail"
+    head = "\n".join(lines) or "no failing evaluator reported a detail"
+    return "\n".join([head, *_context_lines(outcome, output_limit)])
 
 
-def _error_body(outcome: CaseOutcome) -> str:
-    """Why this case errored -- from the runner, or from an evaluator.
+def _error_body(outcome: CaseOutcome, output_limit: int | None) -> str:
+    """Why this case errored -- from the runner, or from an evaluator --
+    then the agent's output and tool calls.
 
     `errored` covers both: a runner that blew up, and an evaluator that did
     (a judge endpoint returning 500). Only the runner sets `RunResult.error`,
@@ -72,9 +97,13 @@ def _error_body(outcome: CaseOutcome) -> str:
     blame on the wrong component.
     """
     if outcome.result is not None and outcome.result.error:
-        return outcome.result.error
-    details = [f"{score.evaluator}: {score.detail}" for score in outcome.scores if score.errored]
-    return "\n".join(details) if details else "no detail was reported"
+        head = outcome.result.error
+    else:
+        details = [
+            f"{score.evaluator}: {score.detail}" for score in outcome.scores if score.errored
+        ]
+        head = "\n".join(details) if details else "no detail was reported"
+    return "\n".join([head, *_context_lines(outcome, output_limit)])
 
 
 def _case_name(outcome: CaseOutcome, repeat: int, name_the_runner: bool) -> str:
@@ -120,7 +149,10 @@ def _skipped_suite(root: Element, skill_name: str, case_name: str, reason: str) 
 
 
 def render_junit(
-    report: RunReport, gate: GateResult | None = None, delta: Delta | None = None
+    report: RunReport,
+    gate: GateResult | None = None,
+    delta: Delta | None = None,
+    output_limit: int | None = OUTPUT_LIMIT,
 ) -> str:
     """Render a report as JUnit XML.
 
@@ -129,6 +161,9 @@ def render_junit(
     red for the skill working. `delta` is accepted for signature symmetry with
     the other reporters and is unused -- JUnit has no vocabulary for "this case
     improved"; that lives in the JSON and Markdown reports.
+
+    `output_limit` caps the agent output appended to a failing or errored
+    case's body; None (the `--full-output` path) prints all of it.
     """
     root = Element("testsuites", name="skill-lens")
     tests = failures = errors = skipped = 0
@@ -153,11 +188,11 @@ def render_junit(
             )
             if outcome.status == "failed":
                 suite_failures += 1
-                body = _failure_body(outcome)
+                body = _failure_body(outcome, output_limit)
                 SubElement(case, "failure", message=_message(body)).text = _xml_safe(body)
             elif outcome.status == "errored":
                 suite_errors += 1
-                body = _error_body(outcome)
+                body = _error_body(outcome, output_limit)
                 SubElement(case, "error", message=_message(body)).text = _xml_safe(body)
         suite.set("tests", str(len(outcomes)))
         suite.set("failures", str(suite_failures))
