@@ -1,8 +1,25 @@
-# Install once per clone:  uv run pre-commit install --hook-type commit-msg
-# Rejects non-Conventional-Commit messages at write time, before they reach a branch.
+# Install once per clone:
+#   uv run pre-commit install --hook-type commit-msg --hook-type pre-push
 repos:
+  # Rejects non-Conventional-Commit messages at write time, before they reach a branch.
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.6.0
     hooks:
       - id: commitizen
         stages: [commit-msg]
+
+  # Audits uv.lock for known vulnerabilities before a push. It runs at push
+  # time, not commit time, because it needs the network: a commit hook would
+  # fail offline and teach people to skip it, while a push needs the network
+  # anyway. Exceptions live in [tool.uv.audit] in pyproject.toml, never here.
+  # The command must stay identical to the one in
+  # .github/workflows/security.yml and release.yml (tests/test_security_checks.py).
+  - repo: local
+    hooks:
+      - id: uv-audit
+        name: uv audit (known vulnerabilities in uv.lock)
+        entry: uv audit --preview-features audit --locked
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

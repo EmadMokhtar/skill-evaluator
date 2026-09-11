@@ -1,0 +1,35 @@
+# Keeps uv.lock and the SHA-pinned actions current. Every pin in this
+# repository is a commit hash (tests/test_supply_chain.py), and a hash never
+# moves on its own -- so without this, nothing would ever propose an update.
+#
+# Pull requests are squash-merged and the title becomes the commit on main
+# that `cz bump` parses, so each prefix below is a Conventional Commit type.
+# `build`/`ci` do not bump the version; retitle a security bump of a runtime
+# dependency `fix(deps): ...` before merging when users should get it.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "build(deps)"
+    # One pull request a week for every minor and patch bump; a major bump
+    # still gets its own, since it may need code changes.
+    groups:
+      python-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

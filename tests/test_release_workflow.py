@@ -10,6 +10,7 @@ Task 5 adds the `publish` job and its own tests for it; this file covers the
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -189,3 +190,109 @@ def test_the_bump_refuses_a_tree_whose_pins_did_not_move(workflow):
     assert "--check-consistency" in invocations[0], (
         "cz bump no longer checks version_files consistency: " + invocations[0]
     )
+
+
+def _release_step(workflow: dict, needle: str) -> dict:
+    steps = workflow["jobs"]["release"]["steps"]
+    return next(step for step in steps if needle in str(step.get("run", "")))
+
+
+def test_the_sbom_describes_what_an_installer_gets(workflow):
+    """The SBOM is exported from the lockfile that was just verified, in
+    CycloneDX, for the runtime dependency set including the optional
+    `pydantic-ai` extra -- and excluding the dev and docs tooling, which
+    nobody who installs the package receives."""
+    step = _release_step(workflow, "cyclonedx")
+    run = step["run"]
+    assert "--format cyclonedx1.5" in run
+    assert "--frozen" in run, "the export must read uv.lock as-is, not re-resolve"
+    assert "--all-extras" in run
+    assert "--no-default-groups" in run
+    assert step["if"] == "steps.bump.outputs.bumped == 'true'"
+
+
+def test_the_sbom_never_enters_the_pypi_upload(workflow):
+    """`publish` uploads every file in the `dist` artifact. An SBOM in
+    there would be sent to PyPI, which rejects it -- and a rejected file
+    fails the upload after the tag is already pushed."""
+    export = _release_step(workflow, "cyclonedx")["run"]
+    match = re.search(r"(?:-o|--output-file)\s+(\S+)", export)
+    assert match, f"the export does not write to a file: {export!r}"
+    # The path is shell-quoted in the workflow; the quote is not part of it.
+    target = match.group(1).strip("\"'")
+    assert not target.startswith("dist/"), "the SBOM must not be written under dist/"
+    uploads = [
+        step
+        for step in workflow["jobs"]["release"]["steps"]
+        if "upload-artifact" in str(step.get("uses"))
+    ]
+    names = {upload["with"]["name"]: upload["with"]["path"] for upload in uploads}
+    assert names["dist"].rstrip("/") == "dist"
+    assert "sbom" in names, "the SBOM is uploaded as its own artifact, apart from dist"
+
+
+def test_the_github_release_is_created_only_after_pypi_accepted_the_upload(workflow):
+    """A GitHub Release is the first outward-facing sign of a version. It
+    comes after `publish`, never before, so it cannot advertise a version
+    PyPI does not have."""
+    job = workflow["jobs"]["github-release"]
+    # A list, because the job also reads `release`'s outputs and GitHub only
+    # exposes the outputs of direct `needs`.
+    assert "publish" in job["needs"]
+    assert job["permissions"] == {"contents": "write"}
+
+
+def test_the_github_release_can_be_re_run(workflow):
+    """The documented recovery for a failed step is to re-run the job. That
+    only works if creating the release is skipped when it already exists
+    and uploading the assets overwrites rather than refuses."""
+    runs = " ".join(
+        str(step.get("run", "")) for step in workflow["jobs"]["github-release"]["steps"]
+    )
+    assert "gh release view" in runs, "creation is not guarded by an existence check"
+    assert "gh release upload" in runs and "--clobber" in runs
+
+
+def test_the_release_notes_are_the_changelog_section_for_that_version(workflow):
+    """The changelog is generated from the same commits that chose the
+    version; nothing else is a source of truth for what a release contains.
+    It is written in `release`, which already has the checkout, the
+    history and the tools, and handed on as an artifact."""
+    notes = _release_step(workflow, "cz changelog")
+    assert "--dry-run" in notes["run"]
+    assert notes["if"] == "steps.bump.outputs.bumped == 'true'"
+    uploads = {
+        step["with"]["name"]
+        for step in workflow["jobs"]["release"]["steps"]
+        if "upload-artifact" in str(step.get("uses"))
+    }
+    assert "release-notes" in uploads
+
+
+def test_the_privileged_release_job_installs_nothing(workflow):
+    """`github-release` holds `contents: write`. Everything it publishes was
+    built and verified by earlier jobs, so it downloads artifacts and runs
+    `gh` -- no checkout, no dependency install, no build hook that could run
+    third-party code under that token."""
+    steps = workflow["jobs"]["github-release"]["steps"]
+    uses = [str(step.get("uses", "")) for step in steps]
+    assert not any("checkout" in u or "setup-uv" in u for u in uses), uses
+    runs = " ".join(str(step.get("run", "")) for step in steps)
+    assert "uv " not in runs, "the privileged job must not run uv: " + runs
+
+
+def test_the_release_builds_with_the_audited_backend(workflow):
+    """`uv build` resolves the build backend fresh from `[build-system]`
+    unless told otherwise, so the artifact could be produced by a hatchling
+    the audit never saw. The constraint file is exported from the lockfile
+    (`--frozen`, the `build` group only) and handed to the build, so the
+    backend and its own dependencies are exactly the audited ones."""
+    build = next(
+        step for step in workflow["jobs"]["release"]["steps"] if "uv build" in str(step.get("run"))
+    )
+    run = build["run"]
+    export = re.search(r"uv export\s+(.*?)\s+-o\s+(\S+)", run)
+    assert export, f"the build step does not export a constraint file: {run!r}"
+    flags, constraints = export.group(1), export.group(2)
+    assert "--frozen" in flags and "--only-group build" in flags, flags
+    assert f"uv build --build-constraint {constraints}" in run, run

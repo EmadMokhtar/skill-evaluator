@@ -233,6 +233,7 @@ The full list, with the reasoning behind each, is in [ARCHITECTURE.md](https://g
 | Exit codes and reports | [Gating](https://emadmokhtar.github.io/skill-evaluator/gating/) |
 | The action and example workflows | [CI integration](https://emadmokhtar.github.io/skill-evaluator/ci/) |
 | How it is built | [ARCHITECTURE.md](https://github.com/EmadMokhtar/skill-evaluator/blob/main/ARCHITECTURE.md) |
+| What is checked for vulnerabilities, and where | [Security](https://emadmokhtar.github.io/skill-evaluator/security/) |
 | What's shipped, what's next | [Roadmap](https://emadmokhtar.github.io/skill-evaluator/roadmap/) |
 
 ## Contributing

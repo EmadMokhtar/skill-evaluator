@@ -561,6 +561,88 @@ the placeholder.
 previous` resolves an earlier *declared version* from git, so the shipped comparative
 example only works because the bump is real and the earlier version is on `main`.
 
+### Security checks
+
+**The dependency audit is one command, spelled identically in three places, and its exceptions
+live in one table.** `uv audit` reads `uv.lock` — the exact set anyone installs — and asks OSV
+about every package in every extra and group, dev tooling included, because that is what runs
+on maintainers' machines and in CI. It runs in `security.yml` on every pull request, every push
+to `main`, weekly on a schedule and on demand; in `release.yml`'s `verify` job; and in the
+`pre-push` hook. The schedule is what makes it a monitor rather than a check: an advisory can be
+published against a lockfile nobody has touched, and only a timer notices. `verify` re-runs it
+rather than trusting the pull request's green check because an advisory can land between the
+merge and the tag, and nothing publishes that `verify` did not pass.
+`tests/test_security_checks.py` requires the three commands to be byte-identical, so an
+exception can never apply to CI and not to the release, or to a laptop and not to CI.
+
+Exceptions go in `[tool.uv.audit]` in `pyproject.toml`, which every copy of the command reads,
+and only as `ignore-until-fixed`: it stops hiding an advisory the day a fixed version exists,
+so the list can only shrink on its own. Plain `ignore` hides a finding forever and is rejected.
+uv does not validate that table — a misspelled key is silently dropped and the finding silently
+kept — so the same test rejects any key but the allowed one. Any finding fails; a severity
+threshold is a decision someone has to defend for every advisory, while "fix it or record why
+not" is a decision made once. `--locked` makes uv fail when `pyproject.toml` and `uv.lock`
+disagree instead of quietly auditing a fresh resolution nobody installs, and
+`--preview-features audit` acknowledges that the command is still a uv preview feature — if
+its interface changes, the wiring tests fail on the pull request that bumps uv, not in a
+release.
+
+The build backend is audited and pinned too. `uv.lock` records what the project installs, not
+what builds it: `[build-system] requires` is resolved fresh at build time, so the artifact
+could be produced by a `hatchling` the audit never saw. A `build` dependency group mirrors
+those requirements — a test keeps the two lists equal, or the group would audit a backend the
+build does not use — which puts the backend and its own dependencies in the lockfile. The
+release then exports that group (`uv export --frozen --only-group build`) as a constraint file
+for `uv build --build-constraint`, so what builds the published wheel is exactly what `verify`
+audited.
+
+**The audit runs at push time locally, not commit time.** It needs the network. A commit hook
+would fail offline and teach people to skip it; a push needs the network anyway, so the check
+costs nothing extra there and cannot be blamed on a bad connection.
+
+**Ruff's `S` rules are on, and a false positive is suppressed at the site with its reason.**
+The `flake8-bandit` family rides on the existing `ruff check`, so it runs everywhere lint does
+with no extra step to forget. Two `src/` sites trip it and both are deliberate: `baseline.py`
+starts `git` by name because an absolute path is wrong on most machines and a missing git must
+come back as `BaselineUnavailable`, never a crash; `yaml_loading.py` passes `StrictBoolLoader`
+to `yaml.load`, and ruff cannot see that the loader subclasses `SafeLoader`. Each carries an
+inline `noqa` with that reason. `tests/**` and `scripts/**` have per-directory ignores for
+`assert`, subprocess-with-fixed-argv, XML parsing and literal `/tmp` strings used as fake path
+values. A rule is never switched off for `src/`
+because one site trips it.
+
+**Every action is pinned to a commit SHA with a `# vX.Y.Z` comment, and nothing grants write
+access at the workflow level.** `actions/checkout@v4` runs whatever `v4` points at on the day,
+so a compromised or mistaken re-tag would run different code in CI with no change in this
+repository; a commit hash cannot be moved. The trailing version comment is what keeps a pin
+readable, and it is the comment Dependabot rewrites when it bumps the SHA, so the two never
+disagree. Dependabot watches both `uv.lock` and the actions weekly, because a pinned hash never
+moves on its own; its commit prefixes are Conventional Commit types, checked by running them
+through `cz check`, since the pull-request title becomes the commit that `cz bump` parses.
+Permissions are granted per job against a top-level block that is empty or read-only, so a job
+added later inherits nothing and the docs `build` job — third-party tooling on the checkout —
+never holds the token that publishes to Pages. `tests/test_supply_chain.py` holds all of it.
+
+**The SBOM never enters `dist/`, and the GitHub Release is created only after PyPI accepted the
+upload.** The CycloneDX export reads the lockfile `verify` just audited, `--frozen`, for the
+runtime dependencies and the `pydantic-ai` extra — what an installer gets, not the dev or docs
+groups that ship to nobody. It is written to `sbom/` and uploaded as its own artifact because
+`publish` sends every file in the `dist` artifact to PyPI, which would reject an SBOM and fail
+the upload after the tag is already pushed. `github-release` needs `publish`: a GitHub Release is
+the first outward-facing sign of a version, and one that exists before the upload could
+advertise a version `pip install` cannot find. The job is re-run safe — the documented recovery
+for any release step — because creation is skipped when `gh release view` finds the release,
+and assets are uploaded with `--clobber` so a partial run converges instead of refusing. Its
+notes are `cz changelog <version> --dry-run`: the same commits that chose the version number,
+and nothing else, are the source of truth for what a release contains. The notes are written in
+`release`, which already has the checkout, the history and the tools, and handed on as an
+artifact — so `github-release`, the one job holding `contents: write`, has no checkout, runs no
+`uv`, and installs nothing. Everything it publishes was built and verified by an earlier job;
+a compromised dependency or build hook never executes under the token that can write releases.
+(The docs `build` job, by contrast, needs `pages: read` and not only `contents: read`:
+`actions/configure-pages` calls `GET /repos/{owner}/{repo}/pages` and fails the job when that
+call is refused — a tightening that would only have shown up on the next push to `main`.)
+
 ## Extension points
 
 **Adding a runner.** Implement `Runner` in a new module under `runners/`, register it in

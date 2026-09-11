@@ -21,10 +21,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5.4.2
         with:
           enable-cache: true
 
@@ -40,6 +39,12 @@ jobs:
       - name: Test
         run: uv run pytest
 
+      - name: Audit the lockfile for known vulnerabilities
+        # A lockfile with a known vulnerability must fail here, not ship and
+        # be found by a user. security.yml carries the full reasoning; this
+        # line must stay identical to the one there (tests/test_security_checks.py).
+        run: uv audit --preview-features audit --locked
+
   release:
     needs: verify
     runs-on: ubuntu-latest
@@ -49,14 +54,14 @@ jobs:
       bumped: ${{ steps.bump.outputs.bumped }}
       version: ${{ steps.bump.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           # cz bump reads every commit since the last tag to compute the
           # increment, so a shallow clone would under-report the change.
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5.4.2
         with:
           enable-cache: true
 
@@ -152,16 +157,65 @@ jobs:
           fi
           echo "Confirmed tag $tag reached origin." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Build the distributions
+      - name: Write the release notes
+        # The changelog section for exactly this version, generated from the
+        # same commits that chose the version number. `--dry-run` prints it
+        # instead of rewriting CHANGELOG.md, which the bump already did. It is
+        # written here, where the checkout, the history and the tools already
+        # are, so the job that publishes it later needs none of them.
         if: steps.bump.outputs.bumped == 'true'
-        run: uv build
+        run: uv run cz changelog "${{ steps.bump.outputs.version }}" --dry-run > notes.md
+
+      - name: Build the distributions
+        # The build backend is not part of the lockfile `verify` audited:
+        # `uv build` resolves `[build-system] requires` fresh, so the artifact
+        # could be produced by a hatchling nobody checked. The `build`
+        # dependency group mirrors those requirements, which puts the backend
+        # in uv.lock; exporting that group as a constraint file and handing it
+        # to the build pins the backend and its own dependencies to exactly
+        # the audited versions. `--frozen` reads the lockfile as-is.
+        if: steps.bump.outputs.bumped == 'true'
+        run: |
+          uv export --frozen --only-group build --no-hashes -o build-constraints.txt
+          uv build --build-constraint build-constraints.txt
+
+      - name: Export the SBOM
+        # A CycloneDX Software Bill of Materials for what an installer gets:
+        # the runtime dependencies plus the optional `pydantic-ai` extra, and
+        # not the dev or docs tooling, which ships to nobody. `--frozen` reads
+        # uv.lock exactly as `verify` audited it, with no re-resolution.
+        #
+        # It is written outside dist/ on purpose: `publish` uploads every file
+        # in the dist artifact, PyPI would reject an SBOM, and a rejected file
+        # fails the upload after the tag is already pushed.
+        if: steps.bump.outputs.bumped == 'true'
+        run: |
+          mkdir -p sbom
+          uv export --format cyclonedx1.5 --frozen --all-extras --no-default-groups \
+            -o "sbom/skill-lens-${{ steps.bump.outputs.version }}.cdx.json"
 
       - name: Upload the distributions
         if: steps.bump.outputs.bumped == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: dist
           path: dist/
+          if-no-files-found: error
+
+      - name: Upload the SBOM
+        if: steps.bump.outputs.bumped == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: sbom
+          path: sbom/
+          if-no-files-found: error
+
+      - name: Upload the release notes
+        if: steps.bump.outputs.bumped == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: release-notes
+          path: notes.md
           if-no-files-found: error
 
   publish:
@@ -180,16 +234,18 @@ jobs:
       - name: Download the distributions
         # The artifact the release job built and verified. Rebuilding here
         # would publish bytes that nothing tested.
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: dist
           path: dist/
 
       - name: Publish to PyPI
-        # Pinned to the release branch, not a numeric tag like every other
-        # third-party action here — this is PyPA's own recommendation for
-        # this action, not an oversight to be "fixed" into consistency.
-        uses: pypa/gh-action-pypi-publish@release/v1
+        # Pinned to a commit like every other action here (PyPA's README
+        # allows either its release branch or a SHA; Dependabot keeps the SHA
+        # current). With Trusted Publishing the action also generates and
+        # uploads a PEP 740 attestation for each file by default, so every
+        # file on PyPI carries a signed record of the workflow that built it.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
         with:
           # A partial upload is the case the documented "re-run publish"
           # recovery exists for: the wheel landed, the sdist did not. The
@@ -198,3 +254,54 @@ jobs:
           # This skips only files PyPI already has and still uploads the rest;
           # it cannot overwrite or silently replace a published file.
           skip-existing: true
+
+  github-release:
+    # The first outward-facing sign of a version, so it comes after PyPI has
+    # accepted the upload and never before: a GitHub Release must not
+    # advertise a version that `pip install` cannot find. It attaches the
+    # same wheel and sdist PyPI received, plus the SBOM, at a stable URL --
+    # https://github.com/EmadMokhtar/skill-evaluator/releases/download/vX.Y.Z/skill-lens-X.Y.Z.cdx.json
+    # -- which is what a procurement checklist asks for.
+    #
+    # This job holds `contents: write`, so it does as little as possible
+    # with it: no checkout, no dependency install, no build. Everything it
+    # publishes -- the distributions, the SBOM, the notes -- was produced
+    # and verified by `release`; here it is only downloaded and handed to gh.
+    needs: [release, publish]
+    if: needs.release.outputs.bumped == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # gh normally reads the repository from the checkout; there is none.
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - name: Download the distributions, the SBOM and the notes
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          # Each artifact into a directory named after it.
+          pattern: "{dist,sbom,release-notes}"
+          path: assets/
+
+      - name: Create the release if it does not exist
+        # Re-run safe: a re-run after a failed asset upload must not fail
+        # here on "already exists", and must not lose the notes. --verify-tag
+        # refuses to create a release for a tag that is not on origin.
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; keeping it." >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh release create "$tag" --title "$tag" --notes-file assets/release-notes/notes.md --verify-tag
+          fi
+
+      - name: Attach the distributions and the SBOM
+        # --clobber overwrites an asset that a previous, partial run already
+        # uploaded, so a re-run converges instead of refusing.
+        run: |
+          set -euo pipefail
+          gh release upload "v$VERSION" --clobber assets/dist/* assets/sbom/*
+          echo "Attached $(ls assets/dist assets/sbom | grep -c .) files to release v$VERSION." >> "$GITHUB_STEP_SUMMARY"
