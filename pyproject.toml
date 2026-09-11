@@ -69,6 +69,13 @@ docs = [
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.5,<10",
 ]
+# Mirrors [build-system] requires, and must stay equal to it
+# (tests/test_security_checks.py). uv.lock records what the project installs,
+# not what builds it: the backend is resolved fresh at build time and would
+# never be audited. Listing it here puts it in the lockfile, so `uv audit`
+# covers it, and lets the release build pin it (`uv export --only-group
+# build` -> `uv build --build-constraint`) to the exact audited version.
+build = ["hatchling>=1.27,<2"]
 
 [build-system]
 # Bounded rather than floating: the release runner builds with whatever it

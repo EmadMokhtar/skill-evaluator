@@ -274,7 +274,10 @@ form, that file is the explanation.
   `pyproject.toml`, never on a command line, and only as `ignore-until-fixed` — which stops
   hiding an advisory the day a fix ships — never `ignore`. uv does not validate that table, so
   the test rejects any other key rather than let a typo silently keep a finding. Any finding
-  fails; there is no severity threshold.
+  fails; there is no severity threshold. The build backend is audited too: a `build`
+  dependency group mirrors `[build-system] requires` (a test keeps them equal), which puts
+  `hatchling` in the lockfile, and the release exports that group as a `--build-constraint`
+  so `uv build` uses exactly the audited versions rather than a fresh resolution.
 - **The audit runs at push time locally, not commit time.** It needs the network; a commit
   hook would fail offline and teach people to skip it. A push needs the network anyway.
 - **Ruff's `S` rules are on, and a false positive is suppressed at the site with its reason.**

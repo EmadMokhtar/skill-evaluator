@@ -9,6 +9,7 @@ copy of the command is the same command.
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -157,3 +158,21 @@ def test_the_security_lint_rules_are_enabled(pyproject):
     `select` is the only way to switch it off -- and nothing else would
     notice."""
     assert "S" in pyproject["tool"]["ruff"]["lint"]["select"]
+
+
+def _locked_versions() -> dict[str, str]:
+    lock = tomllib.loads((REPO_ROOT / "uv.lock").read_text(encoding="utf-8"))
+    return {package["name"]: package["version"] for package in lock["package"]}
+
+
+def test_the_build_backend_is_in_the_audited_lockfile(pyproject):
+    """uv.lock records what the project installs, not what builds it:
+    `[build-system] requires` is resolved fresh at build time and never
+    audited. A `build` dependency group that mirrors it puts the backend in
+    the lockfile, where every copy of the audit sees it. The two lists must
+    stay equal, or the group audits a backend the build does not use."""
+    requires = sorted(pyproject["build-system"]["requires"])
+    assert sorted(pyproject["dependency-groups"]["build"]) == requires
+    for requirement in requires:
+        name = re.split(r"[<>=!~\[ ]", requirement, maxsplit=1)[0]
+        assert name in _locked_versions(), f"{name} is required to build but not in uv.lock"

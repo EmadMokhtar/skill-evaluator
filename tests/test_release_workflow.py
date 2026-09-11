@@ -202,7 +202,7 @@ def test_the_sbom_describes_what_an_installer_gets(workflow):
     CycloneDX, for the runtime dependency set including the optional
     `pydantic-ai` extra -- and excluding the dev and docs tooling, which
     nobody who installs the package receives."""
-    step = _release_step(workflow, "uv export")
+    step = _release_step(workflow, "cyclonedx")
     run = step["run"]
     assert "--format cyclonedx1.5" in run
     assert "--frozen" in run, "the export must read uv.lock as-is, not re-resolve"
@@ -215,7 +215,7 @@ def test_the_sbom_never_enters_the_pypi_upload(workflow):
     """`publish` uploads every file in the `dist` artifact. An SBOM in
     there would be sent to PyPI, which rejects it -- and a rejected file
     fails the upload after the tag is already pushed."""
-    export = _release_step(workflow, "uv export")["run"]
+    export = _release_step(workflow, "cyclonedx")["run"]
     match = re.search(r"(?:-o|--output-file)\s+(\S+)", export)
     assert match, f"the export does not write to a file: {export!r}"
     assert not match.group(1).startswith("dist/"), "the SBOM must not be written under dist/"
@@ -258,3 +258,20 @@ def test_the_release_notes_are_the_changelog_section_for_that_version(workflow):
         str(step.get("run", "")) for step in workflow["jobs"]["github-release"]["steps"]
     )
     assert "cz changelog" in runs and "--dry-run" in runs
+
+
+def test_the_release_builds_with_the_audited_backend(workflow):
+    """`uv build` resolves the build backend fresh from `[build-system]`
+    unless told otherwise, so the artifact could be produced by a hatchling
+    the audit never saw. The constraint file is exported from the lockfile
+    (`--frozen`, the `build` group only) and handed to the build, so the
+    backend and its own dependencies are exactly the audited ones."""
+    build = next(
+        step for step in workflow["jobs"]["release"]["steps"] if "uv build" in str(step.get("run"))
+    )
+    run = build["run"]
+    export = re.search(r"uv export\s+(.*?)\s+-o\s+(\S+)", run)
+    assert export, f"the build step does not export a constraint file: {run!r}"
+    flags, constraints = export.group(1), export.group(2)
+    assert "--frozen" in flags and "--only-group build" in flags, flags
+    assert f"uv build --build-constraint {constraints}" in run, run
