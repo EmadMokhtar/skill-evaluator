@@ -519,6 +519,56 @@ non-null `workspace`, regardless of whether `--keep-workspace` or the config fil
 a persistent setting that produced no visible output would fill a disk with nothing on
 screen to explain why.
 
+### Security checks
+
+**The dependency audit is one command, spelled identically in three places, and its exceptions
+live in one table.** `uv audit` reads `uv.lock` — the exact set anyone installs — and asks OSV
+about every package in every extra and group, dev tooling included, because that is what runs
+on maintainers' machines and in CI. It runs in `security.yml` on every pull request, every push
+to `main`, weekly on a schedule and on demand; in `release.yml`'s `verify` job; and in the
+`pre-push` hook. The schedule is what makes it a monitor rather than a check: an advisory can be
+published against a lockfile nobody has touched, and only a timer notices. `verify` re-runs it
+rather than trusting the pull request's green check because an advisory can land between the
+merge and the tag, and nothing publishes that `verify` did not pass.
+`tests/test_security_checks.py` requires the three commands to be byte-identical, so an
+exception can never apply to CI and not to the release, or to a laptop and not to CI.
+
+Exceptions go in `[tool.uv.audit]` in `pyproject.toml`, which every copy of the command reads,
+and only as `ignore-until-fixed`: it stops hiding an advisory the day a fixed version exists,
+so the list can only shrink on its own. Plain `ignore` hides a finding forever and is rejected.
+uv does not validate that table — a misspelled key is silently dropped and the finding silently
+kept — so the same test rejects any key but the allowed one. Any finding fails; a severity
+threshold is a decision someone has to defend for every advisory, while "fix it or record why
+not" is a decision made once. `--locked` makes uv fail when `pyproject.toml` and `uv.lock`
+disagree instead of quietly auditing a fresh resolution nobody installs, and
+`--preview-features audit` acknowledges that the command is still a uv preview feature — if
+its interface changes, the wiring tests fail on the pull request that bumps uv, not in a
+release.
+
+The build backend is audited and pinned too. `uv.lock` records what the project installs, not
+what builds it: `[build-system] requires` is resolved fresh at build time, so the artifact
+could be produced by a `hatchling` the audit never saw. A `build` dependency group mirrors
+those requirements — a test keeps the two lists equal, or the group would audit a backend the
+build does not use — which puts the backend and its own dependencies in the lockfile. The
+release then exports that group (`uv export --frozen --only-group build`) as a constraint file
+for `uv build --build-constraint`, so what builds the published wheel is exactly what `verify`
+audited.
+
+**The audit runs at push time locally, not commit time.** It needs the network. A commit hook
+would fail offline and teach people to skip it; a push needs the network anyway, so the check
+costs nothing extra there and cannot be blamed on a bad connection.
+
+**Ruff's `S` rules are on, and a false positive is suppressed at the site with its reason.**
+The `flake8-bandit` family rides on the existing `ruff check`, so it runs everywhere lint does
+with no extra step to forget. Two `src/` sites trip it and both are deliberate: `baseline.py`
+starts `git` by name because an absolute path is wrong on most machines and a missing git must
+come back as `BaselineUnavailable`, never a crash; `yaml_loading.py` passes `StrictBoolLoader`
+to `yaml.load`, and ruff cannot see that the loader subclasses `SafeLoader`. Each carries an
+inline `noqa` with that reason. `tests/**` and `scripts/**` have per-directory ignores for
+`assert`, subprocess-with-fixed-argv, XML parsing and literal `/tmp` strings used as fake path
+values. A rule is never switched off for `src/`
+because one site trips it.
+
 ## Extension points
 
 **Adding a runner.** Implement `Runner` in a new module under `runners/`, register it in

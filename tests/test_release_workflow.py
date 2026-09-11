@@ -10,6 +10,7 @@ Task 5 adds the `publish` job and its own tests for it; this file covers the
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -189,3 +190,20 @@ def test_the_bump_refuses_a_tree_whose_pins_did_not_move(workflow):
     assert "--check-consistency" in invocations[0], (
         "cz bump no longer checks version_files consistency: " + invocations[0]
     )
+
+
+def test_the_release_builds_with_the_audited_backend(workflow):
+    """`uv build` resolves the build backend fresh from `[build-system]`
+    unless told otherwise, so the artifact could be produced by a hatchling
+    the audit never saw. The constraint file is exported from the lockfile
+    (`--frozen`, the `build` group only) and handed to the build, so the
+    backend and its own dependencies are exactly the audited ones."""
+    build = next(
+        step for step in workflow["jobs"]["release"]["steps"] if "uv build" in str(step.get("run"))
+    )
+    run = build["run"]
+    export = re.search(r"uv export\s+(.*?)\s+-o\s+(\S+)", run)
+    assert export, f"the build step does not export a constraint file: {run!r}"
+    flags, constraints = export.group(1), export.group(2)
+    assert "--frozen" in flags and "--only-group build" in flags, flags
+    assert f"uv build --build-constraint {constraints}" in run, run

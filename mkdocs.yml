@@ -60,4 +60,5 @@ nav:
       - Releasing: releasing.md
   - Roadmap: roadmap.md
   - Architecture: architecture.md
+  - Security: security.md
   - Contributing: contributing.md

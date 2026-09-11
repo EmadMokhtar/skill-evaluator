@@ -1,0 +1,47 @@
+name: Security
+
+# The dependency audit. The same command also runs inside release.yml's
+# `verify` job, so a vulnerable lockfile can never be published, and in the
+# pre-push hook, so it is seen before a branch leaves a laptop. This workflow
+# is the copy that runs on a timer: an advisory can be published against a
+# uv.lock nobody has touched, and only a schedule notices that.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, Monday 06:00 UTC.
+    - cron: "0 6 * * 1"
+  # Re-check by hand after a fix lands, or when an advisory is in the news,
+  # without inventing a commit to trigger it.
+  workflow_dispatch:
+
+# Nothing by default; each job asks for exactly what it uses.
+permissions: {}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        # No cache: the audit installs nothing, it only reads uv.lock.
+        uses: astral-sh/setup-uv@v5
+
+      - name: Audit the lockfile for known vulnerabilities
+        # `uv audit` reads uv.lock and asks OSV (osv.dev) about every package
+        # in it; nothing is installed. `--locked` fails if pyproject.toml and
+        # uv.lock disagree, so the audit covers what people actually install
+        # rather than a fresh resolution nobody has seen. `--preview-features
+        # audit` acknowledges that the command is still a uv preview feature;
+        # without it every log opens with an "experimental" warning.
+        #
+        # Exceptions never go on this line. They live in `[tool.uv.audit]` in
+        # pyproject.toml, which every copy of this command reads, and only as
+        # `ignore-until-fixed` -- see the comment there for the policy.
+        # tests/test_security_checks.py requires this line to be identical to
+        # the one in release.yml and in .pre-commit-config.yaml.
+        run: uv audit --preview-features audit --locked
