@@ -10,8 +10,9 @@
 # Use it from the repository root with
 #   skill-lens run ./examples --config examples/skill-lens.toml
 # It is not picked up on its own from there: discovery searches upward from
-# the current directory, and this file sits below it on purpose, so the
-# repository's zero-cost self-check stays on the offline defaults.
+# the current directory, and this file sits below it on purpose, so a plain
+# `skill-lens run` from the repository root keeps the offline defaults and
+# never reaches for a real agent — or an API key — by accident.
 
 # "fake" is the offline, scripted runner; "pydantic-ai" runs a real agent.
 default_runner = "pydantic-ai"
@@ -44,7 +45,8 @@ min_pass_rate = 1.0
 
 # Comparative runs: "" (off), "none" (an empty skill) or "previous" (the
 # prior version from git). `repeat` samples each arm N times. `min_delta`
-# has no default — unset means the delta is reported but not gated.
+# has no default — unset means the delta is reported but not gated; 0.0
+# below is an example value meaning "must not regress".
 # baseline = ""
 # repeat = 1
 # min_delta = 0.0
