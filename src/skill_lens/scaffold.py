@@ -8,7 +8,10 @@ the file IO left to cli.py.
 
 from __future__ import annotations
 
-from skill_lens.cases.loader import UNFILLED_SENTINEL
+import re
+from pathlib import Path
+
+from skill_lens.cases.loader import EVAL_SUFFIX, EVALS_DIRNAME, UNFILLED_SENTINEL
 from skill_lens.models import Skill
 
 # A judge block is deliberately absent: the default judge does not grade, so a
@@ -119,3 +122,28 @@ def render_scaffold(skill: Skill) -> str:
         description=description,
         sentinel=UNFILLED_SENTINEL,
     )
+
+
+def eval_filename(name: str) -> str:
+    """A safe file name for a skill's eval suite.
+
+    The name comes from user-supplied frontmatter, so it is not automatically
+    a safe path component: `name: ../../x` would otherwise write outside the
+    directory init was pointed at.
+    """
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.") or "skill"
+    return f"{safe}{EVAL_SUFFIX}"
+
+
+def scaffold_target(skill: Skill) -> Path:
+    """Where `init` writes: wherever this skill already keeps its evals.
+
+    Discovery prefers an `evals/` directory when one exists and only falls
+    back to `*.eval.yaml` beside SKILL.md when it does not. An `init` that
+    always created `evals/` would therefore hide any suite already sitting
+    beside SKILL.md from every later run -- silently, with nothing red.
+    """
+    beside = list(skill.path.glob(f"*{EVAL_SUFFIX}"))
+    if beside and not (skill.path / EVALS_DIRNAME).is_dir():
+        return skill.path / eval_filename(skill.name)
+    return skill.path / EVALS_DIRNAME / eval_filename(skill.name)

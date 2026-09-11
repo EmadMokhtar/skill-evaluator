@@ -120,3 +120,18 @@ def test_a_skill_md_with_unparseable_yaml_frontmatter_is_a_user_error(tmp_path):
     result = runner.invoke(app, ["init", str(path)])
     assert result.exit_code == 2
     assert "frontmatter" in result.output
+
+
+def test_init_writes_beside_skill_md_when_evals_already_live_there(tmp_path):
+    path = _skill_dir(tmp_path)
+    (path / "other.eval.yaml").write_text("cases: []\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["init", str(path)])
+    assert result.exit_code == 0, result.output
+    assert (path / "order-support.eval.yaml").is_file()
+    assert not (path / "evals").exists()
+    # Discovery still sees the file that was already there.
+    assert sorted(p.name for p in path.glob("*.eval.yaml")) == [
+        "order-support.eval.yaml",
+        "other.eval.yaml",
+    ]

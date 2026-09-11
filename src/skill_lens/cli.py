@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 from typing import Annotated
 
@@ -11,8 +10,6 @@ import typer
 
 from skill_lens import __version__
 from skill_lens.cases.loader import (
-    EVAL_SUFFIX,
-    EVALS_DIRNAME,
     UNFILLED_SENTINEL,
     CaseParseError,
     load_cases_for_skill,
@@ -32,7 +29,7 @@ from skill_lens.reporters.markdown import render_markdown
 from skill_lens.runners.fake import FakeRunner
 from skill_lens.runners.preflight import MissingAPIKey, check_api_key
 from skill_lens.runners.pydantic_ai import PydanticAIRunner, RunnerDependencyError
-from skill_lens.scaffold import render_scaffold
+from skill_lens.scaffold import render_scaffold, scaffold_target
 from skill_lens.skills.loader import SKILL_FILENAME, SkillParseError, load_skills, parse_skill_file
 from skill_lens.workspace import WorkspaceLimits
 
@@ -329,17 +326,6 @@ def list_skills(
         raise typer.Exit(code=2) from exc
 
 
-def _eval_filename(name: str) -> str:
-    """A safe file name for a skill's eval suite.
-
-    The name comes from user-supplied frontmatter, so it is not automatically
-    a safe path component: `name: ../../x` would otherwise write outside the
-    directory init was pointed at.
-    """
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.") or "skill"
-    return f"{safe}{EVAL_SUFFIX}"
-
-
 @app.command()
 def init(
     path: Annotated[Path, typer.Argument(help="A skill directory containing SKILL.md.")],
@@ -358,7 +344,7 @@ def init(
         typer.echo(str(exc))
         raise typer.Exit(code=2) from exc
 
-    target = path / EVALS_DIRNAME / _eval_filename(skill.name)
+    target = scaffold_target(skill)
     if target.exists() and not force:
         typer.echo(f"{target} already exists; pass --force to overwrite it")
         raise typer.Exit(code=2)

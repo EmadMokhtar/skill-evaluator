@@ -8,7 +8,7 @@ import pytest
 
 from skill_lens.cases.loader import UNFILLED_SENTINEL, CaseParseError, parse_cases_file
 from skill_lens.models import Skill
-from skill_lens.scaffold import render_scaffold
+from skill_lens.scaffold import eval_filename, render_scaffold, scaffold_target
 from skill_lens.yaml_loading import safe_load
 
 SKILL = Skill(
@@ -120,3 +120,34 @@ def test_no_placeholder_sits_in_a_mapping_key():
                 yield from keys(item)
 
     assert not any(UNFILLED_SENTINEL in str(k) for k in keys(data))
+
+
+def _skill_at(path: Path) -> Skill:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "SKILL.md").write_text("---\nname: pdf\n---\nbody\n", encoding="utf-8")
+    return Skill(name="pdf", path=path)
+
+
+def test_the_target_is_the_evals_directory_by_default(tmp_path):
+    skill = _skill_at(tmp_path / "pdf")
+    assert scaffold_target(skill) == tmp_path / "pdf" / "evals" / "pdf.eval.yaml"
+
+
+def test_the_target_sits_beside_skill_md_when_the_evals_already_do(tmp_path):
+    # Discovery prefers evals/ when it exists. Creating it here would make the
+    # existing other.eval.yaml invisible to every later run.
+    skill = _skill_at(tmp_path / "pdf")
+    (skill.path / "other.eval.yaml").write_text("cases: []\n", encoding="utf-8")
+    assert scaffold_target(skill) == tmp_path / "pdf" / "pdf.eval.yaml"
+
+
+def test_an_existing_evals_directory_wins_over_files_beside(tmp_path):
+    skill = _skill_at(tmp_path / "pdf")
+    (skill.path / "stray.eval.yaml").write_text("cases: []\n", encoding="utf-8")
+    (skill.path / "evals").mkdir()
+    assert scaffold_target(skill) == tmp_path / "pdf" / "evals" / "pdf.eval.yaml"
+
+
+def test_eval_filename_neutralises_path_separators():
+    assert eval_filename("../../etc/passwd") == "etc-passwd.eval.yaml"
+    assert eval_filename("") == "skill.eval.yaml"
