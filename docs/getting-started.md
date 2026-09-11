@@ -1,81 +1,199 @@
 # Getting started
 
-A skill is a directory containing `SKILL.md`. Its eval cases live beside it:
+This page takes one skill from nothing to a CI gate. Every command is shown with what it
+prints. The first four steps cost nothing and need no API key.
 
-```
-examples/
-  greeting/
-    SKILL.md
-    greeting.eval.yaml
-```
-
-The `SKILL.md` frontmatter declares the skill's name, description, and optional version:
-
-```yaml
----
-name: greeting
-description: Greet a user warmly and by name
-version: 1.0.0
----
-```
-
-`version:` is optional. When present, `--baseline previous` uses it to find the
-previous version of the skill in git history — see
-[Comparative evals](comparative-evals.md).
-
-Versions must parse as text. The three-part semver above, `1.0.0`, is already text to
-YAML and needs no quotes. A two-part decimal is the trap: `version: 1.20` reads as the
-*number* `1.2`, indistinguishable from `1.2` itself, so two genuinely different versions
-would silently compare equal — that case is rejected at parse time with a quoting hint
-rather than accepted and later mistaken for a version that never changed.
-
-```yaml
-# greeting.eval.yaml
-cases:
-  - name: greets the named person in one sentence
-    task: greet Ada
-    tags: [smoke]
-    budget:
-      max_tokens: 500
-    assertions:
-      - kind: contains
-        value: Ada
-      - kind: not_contains
-        value: Traceback
-      # SKILL.md asks for "one short sentence"; this regex only checks "one line,
-      # under 120 chars, ending in . ! or ?" -- it doesn't (and can't, with a
-      # regex) verify single-sentence-ness. It's deliberately looser than that
-      # prose because real model output legitimately varies (e.g. two short
-      # clauses joined by a comma), so don't tighten it without re-recording
-      # against a real provider.
-      - kind: regex
-        value: "^[^\\n]{1,120}[.!?]\"?\\s*$"
-```
-
-Point the CLI at a single skill directory or at a parent directory of many — discovery is
-recursive:
+## 1. Install
 
 ```bash
-uv run skill-lens list ./examples
+uv tool install "skill-lens[pydantic-ai]"
+```
+
+`pip install "skill-lens[pydantic-ai]"` works the same way. The extra supplies the
+real-agent runner; drop it if you only want the offline default. From a checkout of this
+repository, `uv sync --extra pydantic-ai` and prefix every command below with `uv run`.
+
+## 2. Scaffold a suite
+
+A skill is a directory containing `SKILL.md`. Its eval cases live beside it. Say you have:
+
+```
+skills/
+  refund/
+    SKILL.md
+```
+
+```bash
+skill-lens init ./skills/refund
 ```
 
 ```
-greeting	1 case(s)	examples/greeting
-order-support	5 case(s)	examples/order-support
+Wrote skills/refund/evals/refund.eval.yaml
+Fill in every TODO(skill-lens), then run: skill-lens list skills/refund
 ```
 
-`list` discovers skills and validates every eval file without calling a runner — free, and no
-API key required. The shipped examples assert real model behavior, so actually running them
-(`skill-lens run`) needs the `pydantic-ai` runner — see [running against a real agent](runners.md). The
-zero-cost `fake` runner (the default) is what the test suite itself runs on.
+The file holds five cases — the common case, the policy edge with mock tools and a
+trajectory check, both halves of a triggering pair, and a workspace case for a skill that
+writes a file. Every value you must supply reads `TODO(skill-lens)`. A case still holding
+one **refuses to run** (exit `2`, naming the field), so the scaffold can never pass by
+checking nothing. Delete the cases that do not apply; keep the ones that do.
 
-Two of the example cases go further than a runner: one is graded by an
-[LLM judge](eval-files.md#judging-output-quality) and needs `judge = "pydantic-ai"` in
-`skill-lens.toml` as well, because the judge is configured independently of the runner; two
-more use [`mode: offered`](eval-files.md#did-the-agent-reach-for-the-skill) to measure
-whether the agent reaches for the skill at all, which only a real runner can answer. Under
-the defaults both report **errored** rather than passing — nothing was verified, so nothing
-is reported as verified.
+Pointed at a directory of skills, `init` scaffolds every skill that has no suite and skips
+the rest — see [CLI](cli.md#init).
 
-Next: the full [eval file reference](eval-files.md), or
-[running against a real agent](runners.md).
+## 3. Fill it in
+
+For a first run, two cases are enough. Replace the generated file with:
+
+```yaml
+# skills/refund/evals/refund.eval.yaml
+cases:
+  - name: refuses a refund outside the return window
+    task: I want a refund for order 1234
+    tags: [smoke]
+    tools:
+      - name: lookup_order
+        description: Look up an order by its id
+        parameters:
+          order_id: string
+        returns: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
+      - name: issue_refund
+        description: Issue a refund for an order
+        parameters:
+          order_id: string
+        returns: '{"ok": true}'
+    trajectory:
+      called: [lookup_order]      # it must look the order up
+      forbidden: [issue_refund]   # and must not refund this one
+    assertions:
+      - kind: contains
+        value: "1234"             # name the order you are talking about
+
+  - name: never leaks a stack trace
+    task: I want a refund for order 1234
+    assertions:
+      - kind: not_contains
+        value: Traceback
+```
+
+Mock tools execute nothing: calling one records the call and returns `returns` verbatim,
+so the trajectory is genuinely the model's choice. The full field reference is
+[Eval files](eval-files.md); deciding *which* cases a skill needs is
+[Writing evals](writing-evals.md).
+
+## 4. Validate for free
+
+```bash
+skill-lens list ./skills
+```
+
+```
+refund	2 case(s)	skills/refund
+```
+
+`list` discovers skills and validates every eval file without calling a runner — no key,
+no spend. A malformed file, an unknown assertion kind or a leftover `TODO(skill-lens)`
+stops here with exit `2`.
+
+## 5. Run offline and read a failure
+
+```bash
+skill-lens run ./skills
+```
+
+The default runner is `fake`: scripted, offline, free. It answers every task with
+`[fake] <skill> handled: <task>` and never calls a tool, so it exercises the whole pipeline
+and fails the first case — which is what we want to look at:
+
+```
+[FAIL] refund :: refuses a refund outside the return window (fake)
+        trajectory: lookup_order was never called
+            called:lookup_order: lookup_order was never called
+        output: [fake] refund handled: I want a refund for order 1234
+[PASS] refund :: never leaks a stack trace (fake)
+
+1 passed, 1 failed, 0 errored — pass rate 50%
+
+Gate FAILED:
+  - pass rate 50% is below the required 100%
+```
+
+Read it top down. The `contains('1234')` assertion held — the fake echo names the order —
+but the trajectory check did not: `lookup_order` was never called. Below the checks is
+what the agent actually did: its `output:`, and a `tool calls:` list when there were any
+(here there were none, which is exactly the problem). A real agent that answered the same
+way would fail for the same reason, and you would see the words it chose. Output is cut at
+500 characters; a cut is never silent, and `--full-output` prints all of it. Exit code `0`
+means the gate passed, `1` failed, `2` something in your own files is wrong — that is the
+whole contract with your pipeline. See [Gating](gating.md).
+
+## 6. Run against a real agent
+
+```bash
+export OPENAI_API_KEY=...
+skill-lens run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
+```
+
+Before spending anything the CLI prints its ceiling:
+
+```
+Plan: up to 1 arm(s) x 1 repeat(s) x 2 case(s) = 2 runs
+```
+
+Rerun one case by any distinctive part of its name:
+
+```bash
+skill-lens run ./skills --runner pydantic-ai --case "return window"
+```
+
+A `--case` that matches nothing fails the gate rather than reporting an empty success.
+Runners, tools and budgets are covered in [Runners](runners.md).
+
+## 7. Commit a configuration
+
+Rather than repeat the flags, commit `skill-lens.toml` at your repository root:
+
+```toml
+default_runner = "pydantic-ai"
+model = "openai:gpt-4o-mini"
+judge = "pydantic-ai"        # turns on the LLM judge for cases with a rubric
+min_pass_rate = 1.0
+concurrency = 4
+```
+
+Flags still win over the file. Every key, annotated, is in
+[`examples/skill-lens.toml`](https://github.com/EmadMokhtar/skill-evaluator/blob/main/examples/skill-lens.toml);
+the reference is [Configuration](configuration.md). Secrets never go in the file — API keys
+come from the environment only.
+
+## 8. Gate pull requests
+
+```yaml
+- uses: EmadMokhtar/skill-evaluator@v0.3.0
+  with:
+    path: ./skills
+    runner: pydantic-ai
+    model: openai:gpt-4o-mini
+  env:
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+The action installs `skill-lens`, runs it, publishes a JUnit report for the test pane and a
+Markdown summary for the job summary or a pull-request comment, and exits with the gate's
+code. Complete workflows are in [CI integration](ci.md).
+
+## Next: did the edit help?
+
+Once the gate is green, the interesting question is whether an edit to `SKILL.md` made the
+skill *better*. Add `version:` to the frontmatter (three-part, like `1.0.0` — see
+[why it must be text](comparative-evals.md#version-and-why-it-must-be-quoted)), bump it
+with each meaningful edit, and run:
+
+```bash
+skill-lens run ./skills --runner pydantic-ai --baseline previous
+```
+
+Every case runs twice — the working copy and the previous version resolved from git — and
+the report carries the delta. `--min-delta` turns that into a gate. This repository's own
+`examples/greeting` is versioned for exactly this walkthrough:
+[Comparative evals](comparative-evals.md#try-it-on-the-shipped-examples).

@@ -128,6 +128,7 @@ version_files = [
     "action.yml:skill-lens\\[pydantic-ai\\]==",
     "docs/ci.md:skill-evaluator@v",
     "docs/ci.md:skill-lens\\[pydantic-ai\\]==",
+    "docs/getting-started.md:skill-evaluator@v",
     "README.md:skill-evaluator@v",
     "examples/ci/skill-lens.yml:skill-evaluator@v",
 ]

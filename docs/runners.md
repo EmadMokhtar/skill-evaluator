@@ -98,6 +98,15 @@ become part of what `--min-delta` measures.
 after scoring, for inspecting exactly what a run wrote. Every kept directory is printed,
 however keeping was turned on.
 
+**Files beside `SKILL.md` are not loaded.** A skill directory often carries `references/`
+or `scripts/` alongside `SKILL.md`. Today skill-lens reads only `SKILL.md`: those files
+are not added to the prompt, and the workspace tools cannot reach them — the workspace is
+the case's temporary directory, not the skill's. A `SKILL.md` that says "see
+`references/policy.md`" therefore points the agent at a file it cannot read. Running a
+script bundled with the skill is planned as M6 part 2 (see the [roadmap](roadmap.md)),
+because executing code that shipped with the artifact under evaluation is a different
+trust decision from writing files into a temporary directory.
+
 ## Budget limits and pricing
 
 The `budget` block sets ceilings on tokens, cost, and latency. Pricing comes from
