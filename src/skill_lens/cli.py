@@ -25,6 +25,7 @@ from skill_lens.judges.fake import FakeJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.orchestrator import run_evals
 from skill_lens.reporters.console import render_console
+from skill_lens.reporters.failure_context import OUTPUT_LIMIT
 from skill_lens.reporters.json_reporter import render_json
 from skill_lens.reporters.junit import render_junit
 from skill_lens.reporters.markdown import render_markdown
@@ -137,6 +138,13 @@ def run(
             help="Keep each case's temporary directory instead of deleting it.",
         ),
     ] = None,
+    full_output: Annotated[
+        bool | None,
+        typer.Option(
+            "--full-output/--no-full-output",
+            help="Print a failing case's whole output instead of the first 500 characters.",
+        ),
+    ] = None,
 ) -> None:
     """Discover skills, run their eval cases, and gate on the results."""
     try:
@@ -154,6 +162,9 @@ def run(
         resolved_keep_workspace = (
             keep_workspace if keep_workspace is not None else settings.keep_workspace
         )
+        resolved_full_output = full_output if full_output is not None else settings.full_output
+        # None means "no cap" to every reporter.
+        output_limit = None if resolved_full_output else OUTPUT_LIMIT
         workspace_limits = WorkspaceLimits(
             max_file_bytes=settings.max_file_bytes,
             max_files=settings.max_files,
@@ -253,18 +264,28 @@ def run(
         delta=delta,
     )
 
-    typer.echo(render_console(report, gate=gate, delta=delta))
+    typer.echo(render_console(report, gate=gate, delta=delta, output_limit=output_limit))
     # One loop over every requested report. A write failure escalates to exit 2
     # only when the gate itself passed -- exit codes are the CI contract, and an
     # already-red gate must stay visible rather than being masked by an
     # unrelated write problem.
     writes = (
         (json_output, "JSON", lambda: render_json(report, gate=gate, delta=delta)),
-        (junit_output, "JUnit", lambda: render_junit(report, gate=gate, delta=delta)),
+        (
+            junit_output,
+            "JUnit",
+            lambda: render_junit(report, gate=gate, delta=delta, output_limit=output_limit),
+        ),
         (
             markdown_output,
             "Markdown",
-            lambda: render_markdown(report, gate=gate, delta=delta, max_chars=markdown_max_chars),
+            lambda: render_markdown(
+                report,
+                gate=gate,
+                delta=delta,
+                max_chars=markdown_max_chars,
+                output_limit=output_limit,
+            ),
         ),
     )
     write_failed = False

@@ -73,6 +73,35 @@ comparative run's output to point at weak spots in the eval suite, but they neve
 exit code — see
 [Low-signal checks and high-variance cases](comparative-evals.md#low-signal-checks-and-high-variance-cases).
 
+## What a failing case shows
+
+A case that did not pass shows *why* in every reporter: each failing evaluator's detail and
+each failing judge check's evidence, and then what the agent actually did — its output and
+every tool call, in order.
+
+```
+[FAIL] order-support :: refuses a refund outside the return window (pydantic-ai)
+        assertion: failed: contains('1234')
+            contains[0]: contains('1234') did not hold
+        output: I'm sorry, but that order was delivered 45 days ago, so it is
+        outside our 30-day return window and I can't refund it.
+        tool calls:
+            lookup_order(order_id="1234")
+```
+
+The output is cut at 500 characters. A cut is never silent — the line `… (1,842 more
+characters; --full-output prints them)` states exactly how much was removed — and an empty
+output prints `output: (empty)`, because "the agent said nothing" is the single most useful
+fact about a failed assertion. Tool-call argument values are cut at 80 characters and the
+list at 20 calls, with a `… +N more calls` count. `--full-output` (or `full_output = true` in
+[`skill-lens.toml`](configuration.md)) lifts the output cap.
+
+Only **non-passing candidate** outcomes are expanded. Passing cases stay one line, and
+baseline outcomes are never expanded — they are not the verdict; the delta block is. The
+Markdown report renders the same excerpt in fenced blocks inside its failures section, and
+the JUnit report appends it to the `<failure>` or `<error>` body. All three read one shared
+excerpt, so they can never disagree on what was shown.
+
 ## JSON report
 
 `--json-output report.json` writes a machine-readable report alongside the console output:

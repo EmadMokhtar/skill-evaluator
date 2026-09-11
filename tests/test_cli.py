@@ -675,3 +675,55 @@ def test_the_config_alone_turns_keeping_on(tmp_path, monkeypatch):
     config.write_text("keep_workspace = true\n", encoding="utf-8")
     result = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
     assert "Kept workspaces" in result.stdout
+
+
+# A task long enough that the fake runner's echo of it exceeds OUTPUT_LIMIT.
+LONG_TASK = "word " * 200
+
+VERBOSE_FAILING_CASES_YAML = f"""cases:
+  - name: cannot pass
+    task: {LONG_TASK.strip()}
+    assertions:
+      - kind: contains
+        value: definitely-not-in-output
+"""
+
+
+def test_a_failing_case_prints_its_output_cut_by_default(tmp_path):
+    skill_dir = _make_skill(tmp_path, cases=VERBOSE_FAILING_CASES_YAML)
+    result = runner.invoke(app, ["run", str(skill_dir)])
+    assert result.exit_code == 1
+    assert "output: [fake] pdf handled: word word" in result.stdout
+    assert "more characters; --full-output prints them" in result.stdout
+
+
+def test_full_output_prints_everything(tmp_path):
+    skill_dir = _make_skill(tmp_path, cases=VERBOSE_FAILING_CASES_YAML)
+    result = runner.invoke(app, ["run", str(skill_dir), "--full-output"])
+    assert "more characters" not in result.stdout
+    assert LONG_TASK.strip() in result.stdout
+
+
+def test_no_full_output_flag_wins_over_a_true_config(tmp_path):
+    skill_dir = _make_skill(tmp_path, cases=VERBOSE_FAILING_CASES_YAML)
+    config = tmp_path / "skill-lens.toml"
+    config.write_text("full_output = true\n", encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(config), "--no-full-output"]
+    )
+    assert "more characters" in result.stdout
+
+
+def test_the_config_alone_lifts_the_cap(tmp_path):
+    skill_dir = _make_skill(tmp_path, cases=VERBOSE_FAILING_CASES_YAML)
+    config = tmp_path / "skill-lens.toml"
+    config.write_text("full_output = true\n", encoding="utf-8")
+    result = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
+    assert "more characters" not in result.stdout
+
+
+def test_a_passing_run_prints_no_output_lines(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(skill_dir)])
+    assert result.exit_code == 0
+    assert "output:" not in result.stdout

@@ -32,6 +32,8 @@ inputs:
     description: Run this many cases at once.
   keep-workspace:
     description: Keep each case's temporary directory instead of deleting it. true or false.
+  full-output:
+    description: Print a failing case's whole output instead of the first 500 characters. true or false.
   json-output:
     description: Where to write the JSON report. Also read back for this action's outputs.
     default: skill-lens-report.json
@@ -119,6 +121,7 @@ runs:
         SE_MIN_DELTA: ${{ inputs.min-delta }}
         SE_CONCURRENCY: ${{ inputs.concurrency }}
         SE_KEEP_WORKSPACE: ${{ inputs.keep-workspace }}
+        SE_FULL_OUTPUT: ${{ inputs.full-output }}
         SE_JSON: ${{ inputs.json-output }}
         SE_JUNIT: ${{ inputs.junit-output }}
         SE_MARKDOWN: ${{ inputs.markdown-output }}
@@ -145,6 +148,7 @@ runs:
         add --min-delta "$SE_MIN_DELTA"
         add --concurrency "$SE_CONCURRENCY"
         add_flag --keep-workspace "$SE_KEEP_WORKSPACE" --no-keep-workspace
+        add_flag --full-output "$SE_FULL_OUTPUT" --no-full-output
         add --json-output "$SE_JSON"
         add --junit-output "$SE_JUNIT"
         add --markdown-output "$SE_MARKDOWN"

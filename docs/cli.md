@@ -7,7 +7,7 @@ skill-lens run <path> [--evals <path>] [--runner <name>] [--model <name>]
                       [--markdown-output <path>] [--markdown-max-chars <int>]
                       [--concurrency <int>] [--config <file>] [--baseline <kind>]
                       [--repeat <int>] [--min-delta <float>]
-                      [--keep-workspace | --no-keep-workspace]
+                      [--keep-workspace | --no-keep-workspace] [--full-output | --no-full-output]
 skill-lens list <path> [--evals <path>]
 skill-lens init <path> [--force]
 skill-lens --version
@@ -39,10 +39,17 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--markdown-max-chars <int>` | unset | Truncate the Markdown summary to fit a comment. Detail blocks are dropped first, then gate reasons are elided behind a `+N more` count; a budget too small to hold even the verdict is cut outright. Requires `--markdown-output` |
 | `--concurrency <int>` | `1` | Run this many cases at once. The work is network-bound, so the practical ceiling is your provider's rate limit |
 | `--keep-workspace` / `--no-keep-workspace` | unset | Keep each case's temporary directory instead of deleting it. Overrides the `keep_workspace` config key in either direction; omitting both flags leaves the config file's value in effect. Every kept directory is printed, under a `Kept workspaces` section, whichever of the flag or the config turned keeping on |
+| `--full-output` / `--no-full-output` | unset | Print a failing case's whole output instead of the first 500 characters. Overrides the `full_output` config key in either direction; omitting both flags leaves the config file's value in effect |
 
 Each flag overrides the corresponding key in [configuration](configuration.md).
 Exit codes are documented in [Gating](gating.md). `--baseline`, `--repeat` and `--min-delta`
 are covered in full in [Comparative evals](comparative-evals.md).
+
+A non-passing case prints what the agent actually did — its output, and every tool it
+called — under the evaluator detail, in the console and in the JUnit and Markdown reports
+alike. The output is cut at 500 characters by default; a cut is never silent (`… (1,842 more
+characters; --full-output prints them)`). Passing cases stay one line. See
+[what a failing case shows](gating.md#what-a-failing-case-shows).
 
 `--repeat` and `--baseline` multiply spend: `--repeat 5 --baseline previous` runs 10x as many
 cases as a plain run (5 repetitions x 2 arms). Before a run on a runner that needs an API key,

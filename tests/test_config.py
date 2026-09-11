@@ -232,3 +232,10 @@ def test_a_non_positive_cap_is_a_config_error(tmp_path, key, value):
     path.write_text(f"{key} = {value}\n", encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(path=path)
+
+
+def test_full_output_defaults_off_and_loads_from_the_file(tmp_path):
+    assert Config().full_output is False
+    path = tmp_path / "skill-lens.toml"
+    path.write_text("full_output = true\n", encoding="utf-8")
+    assert load_config(path=path).full_output is True
