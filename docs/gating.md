@@ -32,7 +32,8 @@ Gate FAILED:
 
 **A run that executed zero cases also fails.** "Nothing ran" is a broken run, not a pass —
 otherwise a mistyped path reports success forever. The reason names the cause: no skills found,
-all skills skipped for having no eval cases, or every case filtered out by `--tag`.
+all skills skipped for having no eval cases, every case filtered out by `--tag`, or no case name
+matching `--case`.
 
 ```
 Skipped (no eval cases): badskill
@@ -106,8 +107,8 @@ excerpt, so they can never disagree on what was shown.
 
 `--json-output report.json` writes a machine-readable report alongside the console output:
 a `summary` block (counts, overall and per-skill pass rates, token/cost/latency totals),
-`skipped_skills`, `tag_filtered_skills`, a per-case `outcomes` list, a top-level `delta` block,
-`baseline_notes`, and the `gate` decision with its reasons.
+`skipped_skills`, `tag_filtered_skills`, `case_filtered_skills`, a per-case `outcomes` list,
+a top-level `delta` block, `baseline_notes`, and the `gate` decision with its reasons.
 
 Comparative evals changed this document additively, not by rewriting what was already there:
 every M3 field means what it always meant, and M4 only adds fields alongside them — `arm` and

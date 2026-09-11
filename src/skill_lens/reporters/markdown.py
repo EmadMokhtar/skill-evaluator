@@ -325,6 +325,9 @@ def _skipped(report: RunReport) -> str:
     if report.tag_filtered_skills:
         names = ", ".join(_escape(name) for name in report.tag_filtered_skills)
         bits.append(f"Skipped (no cases matched --tag): {names}")
+    if report.case_filtered_skills:
+        names = ", ".join(_escape(name) for name in report.case_filtered_skills)
+        bits.append(f"Skipped (no cases matched --case): {names}")
     return "<sub>" + "<br>".join(bits) + "</sub>" if bits else ""
 
 

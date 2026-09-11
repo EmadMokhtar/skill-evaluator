@@ -108,6 +108,13 @@ def run(
         typer.Option(help='Model id for the judge; judge = "..." in skill-lens.toml picks it.'),
     ] = None,
     tag: Annotated[str | None, typer.Option(help="Only run cases with this tag.")] = None,
+    case: Annotated[
+        str | None,
+        typer.Option(
+            "--case",
+            help="Only run cases whose name contains this text (case-insensitive).",
+        ),
+    ] = None,
     min_pass_rate: Annotated[float | None, typer.Option(help="Required pass rate.")] = None,
     json_output: Annotated[Path | None, typer.Option(help="Write a JSON report here.")] = None,
     config: Annotated[Path | None, typer.Option(help="Path to skill-lens.toml.")] = None,
@@ -233,6 +240,9 @@ def run(
                 cases = load_cases_for_skill(candidate_skill, evals_path=evals)
                 if tag is not None:
                     cases = [c for c in cases if tag in c.tags]
+                if case is not None:
+                    needle = case.casefold()
+                    cases = [c for c in cases if needle in c.name.casefold()]
                 case_count += len(cases)
             typer.echo(
                 f"Plan: up to {arms} arm(s) x {resolved_repeat} repeat(s) x "
@@ -243,6 +253,7 @@ def run(
             [active_runner],
             evals_path=evals,
             tag=tag,
+            case_filter=case,
             judge=active_judge,
             baseline=baseline_kind or None,
             repeat=resolved_repeat,

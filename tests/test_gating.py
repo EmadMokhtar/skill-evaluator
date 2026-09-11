@@ -199,3 +199,18 @@ def test_a_deliberately_skipped_baseline_is_not_a_gate_reason():
 def test_without_min_delta_the_delta_is_reported_but_not_gated():
     gate = evaluate_gate(_report(("pdf", "passed")), delta=_delta(-0.9))
     assert gate.passed is True
+
+
+def test_empty_report_because_the_case_filter_matched_nothing_names_the_cause():
+    report = RunReport(outcomes=[], case_filtered_skills=["pdf"])
+    gate = evaluate_gate(report)
+    assert not gate.passed
+    assert any("--case" in r and "pdf" in r for r in gate.reasons)
+    assert not any("--tag" in r for r in gate.reasons)
+
+
+def test_both_filters_emptying_different_skills_give_one_reason_each():
+    report = RunReport(outcomes=[], tag_filtered_skills=["a"], case_filtered_skills=["b"])
+    reasons = evaluate_gate(report).reasons
+    assert any("--tag" in r and "a" in r for r in reasons)
+    assert any("--case" in r and "b" in r for r in reasons)

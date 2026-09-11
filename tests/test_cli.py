@@ -727,3 +727,40 @@ def test_a_passing_run_prints_no_output_lines(tmp_path):
     result = runner.invoke(app, ["run", str(skill_dir)])
     assert result.exit_code == 0
     assert "output:" not in result.stdout
+
+
+TWO_CASES_YAML = """cases:
+  - name: mentions the skill
+    task: anything
+    assertions:
+      - kind: contains
+        value: pdf
+  - name: also fine
+    task: anything else
+    assertions:
+      - kind: contains
+        value: pdf
+"""
+
+
+def test_case_flag_runs_only_matching_cases(tmp_path):
+    skill_dir = _make_skill(tmp_path, cases=TWO_CASES_YAML)
+    result = runner.invoke(app, ["run", str(skill_dir), "--case", "MENTIONS"])
+    assert result.exit_code == 0, result.stdout
+    assert "mentions the skill" in result.stdout
+    assert "also fine" not in result.stdout
+
+
+def test_a_case_flag_matching_nothing_fails_the_gate_naming_the_flag(tmp_path):
+    skill_dir = _make_skill(tmp_path, cases=TWO_CASES_YAML)
+    result = runner.invoke(app, ["run", str(skill_dir), "--case", "no-such-case"])
+    assert result.exit_code == 1
+    assert "no cases matched --case filter" in result.stdout
+    assert "the --case filter matched no case for skill(s): pdf" in result.stdout
+
+
+def test_the_run_plan_counts_only_cases_the_case_filter_keeps(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-parsing")
+    _make_skill(tmp_path, cases=TWO_CASES_YAML)
+    result = runner.invoke(app, ["run", str(tmp_path), "--runner", "pydantic-ai", "--case", "also"])
+    assert "1 case(s) = 1 runs" in plain(result.stdout)

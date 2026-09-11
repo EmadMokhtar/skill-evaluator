@@ -647,3 +647,8 @@ def test_crlf_output_renders_without_carriage_returns():
     text = render_console(report)
     assert "        output: line1\n        line2" in text
     assert "\r" not in text
+
+
+def test_console_lists_case_filtered_skills():
+    report = RunReport(outcomes=[], case_filtered_skills=["pdf"])
+    assert "Skipped (no cases matched --case filter): pdf" in render_console(report)

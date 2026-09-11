@@ -18,6 +18,8 @@ inputs:
     description: Model id for the LLM judge. Falls back to model.
   tag:
     description: Only run cases carrying this tag.
+  case:
+    description: Only run cases whose name contains this text (case-insensitive).
   config:
     description: Path to skill-lens.toml.
   baseline:
@@ -114,6 +116,7 @@ runs:
         SE_MODEL: ${{ inputs.model }}
         SE_JUDGE_MODEL: ${{ inputs.judge-model }}
         SE_TAG: ${{ inputs.tag }}
+        SE_CASE: ${{ inputs.case }}
         SE_CONFIG: ${{ inputs.config }}
         SE_BASELINE: ${{ inputs.baseline }}
         SE_REPEAT: ${{ inputs.repeat }}
@@ -141,6 +144,7 @@ runs:
         add --model "$SE_MODEL"
         add --judge-model "$SE_JUDGE_MODEL"
         add --tag "$SE_TAG"
+        add --case "$SE_CASE"
         add --config "$SE_CONFIG"
         add --baseline "$SE_BASELINE"
         add --repeat "$SE_REPEAT"

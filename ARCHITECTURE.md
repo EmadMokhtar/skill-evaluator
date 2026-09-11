@@ -148,8 +148,8 @@ actually happen.
 
 **A run executing zero cases fails the gate.** "Nothing ran" is a broken run, not a pass —
 otherwise a mistyped path reports success forever. `gating.evaluate_gate` distinguishes the
-causes: no skills found, all skills skipped for having no cases, or every case filtered out
-by `--tag`.
+causes: no skills found, all skills skipped for having no cases, every case filtered out
+by `--tag`, or no case name matched `--case`.
 
 **Authoring errors abort the run; they never score as failures.** An unknown assertion
 `kind`, a malformed regex, an undeclared tool name in a `trajectory` block, or an unknown
@@ -290,6 +290,9 @@ trajectory, `max_tokens` / `max_cost_usd` / `max_latency_ms` for budget. This is
 `comparison.py` name a specific low-signal check rather than only flag a whole case.
 
 ### CI surfaces (M5)
+
+**`--case` is flag-only, like `--tag`:** a config file that permanently narrowed the suite
+would let a green run measure less than the repository declares.
 
 **JUnit reports the candidate arm only.** Under `--baseline`, a failing baseline is the
 evidence that the skill helped. Rendering it as `<failure>` would paint CI red for the skill

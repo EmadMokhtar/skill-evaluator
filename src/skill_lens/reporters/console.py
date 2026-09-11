@@ -205,6 +205,12 @@ def render_console(
             f"Skipped (no cases matched --tag filter): {', '.join(report.tag_filtered_skills)}"
         )
 
+    if report.case_filtered_skills:
+        lines.append("")
+        lines.append(
+            f"Skipped (no cases matched --case filter): {', '.join(report.case_filtered_skills)}"
+        )
+
     lines.append("")
     lines.append(
         f"{report.passed} passed, {report.failed} failed, "

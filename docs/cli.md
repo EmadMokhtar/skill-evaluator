@@ -2,12 +2,14 @@
 
 ```
 skill-lens run <path> [--evals <path>] [--runner <name>] [--model <name>]
-                      [--judge-model <name>] [--tag <tag>] [--min-pass-rate <float>]
+                      [--judge-model <name>] [--tag <tag>] [--case <text>]
+                      [--min-pass-rate <float>]
                       [--json-output <path>] [--junit-output <path>]
                       [--markdown-output <path>] [--markdown-max-chars <int>]
                       [--concurrency <int>] [--config <file>] [--baseline <kind>]
                       [--repeat <int>] [--min-delta <float>]
-                      [--keep-workspace | --no-keep-workspace] [--full-output | --no-full-output]
+                      [--keep-workspace | --no-keep-workspace]
+                      [--full-output | --no-full-output]
 skill-lens list <path> [--evals <path>]
 skill-lens init <path> [--force]
 skill-lens --version
@@ -28,6 +30,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--model <name>` | `openai:gpt-4o-mini` | Model id, passed to runners that use one |
 | `--judge-model <name>` | falls back to `--model` | Model id for the LLM judge |
 | `--tag <tag>` | none | Only run cases carrying this tag |
+| `--case <text>` | none | Only run cases whose name contains `<text>`, case-insensitively — copy any distinctive part of a case name out of a CI log to rerun just that case. Combined with `--tag`, both must hold. No config key: a filter is a property of one invocation |
 | `--min-pass-rate <float>` | `1.0` | Required overall pass rate, `0.0`–`1.0` |
 | `--json-output <path>` | none | Write a machine-readable report here |
 | `--config <file>` | upward discovery | Path to `skill-lens.toml` |

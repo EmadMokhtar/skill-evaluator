@@ -217,6 +217,13 @@ def render_junit(
         tests += 1
         skipped += 1
 
+    for skill_name in report.case_filtered_skills:
+        _skipped_suite(
+            root, skill_name, "(no cases matched --case)", "no cases matched the --case filter"
+        )
+        tests += 1
+        skipped += 1
+
     if report.total == 0:
         # tests="0" renders green in most CI UIs, which would directly
         # contradict exit code 1. "Nothing ran is a broken run" has to hold on

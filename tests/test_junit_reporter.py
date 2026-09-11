@@ -307,3 +307,12 @@ def test_a_trailing_newline_does_not_leave_a_blank_line_in_the_body():
     root = _parse(RunReport(outcomes=[_failed("done.\n")]))
     assert "output:\ndone." in root.find("testsuite/testcase/failure").text
     assert "done.\n\n" not in root.find("testsuite/testcase/failure").text
+
+
+def test_case_filtered_skills_become_skipped_suites():
+    root = _parse(RunReport(outcomes=[_outcome()], case_filtered_skills=["xlsx"]))
+    names = [s.get("name") for s in root.findall("testsuite")]
+    assert "xlsx" in names
+    skipped = root.find("testsuite[@name='xlsx']/testcase/skipped")
+    assert skipped is not None
+    assert "--case" in skipped.get("message")
