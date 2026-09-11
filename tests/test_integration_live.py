@@ -41,7 +41,7 @@ pytestmark = [
 
 def test_the_examples_pass_against_a_real_provider():
     report = run_evals(load_skills(EXAMPLES), [PydanticAIRunner(model="openai:gpt-4o-mini")])
-    assert report.total == 3
+    assert report.total == 7  # greeting (1) + order-support (5) + csv-report (1)
     assert report.errored == 0, [o.result.error for o in report.outcomes if o.result.errored]
     assert report.pass_rate == 1.0, [
         (o.case_name, [s.detail for s in o.scores if not s.passed])

@@ -25,3 +25,13 @@ def test_every_example_skill_has_at_least_one_case():
     # test erroring rather than needing its own dedicated example-only check.
     for skill in load_skills(EXAMPLES):
         assert load_cases_for_skill(skill), f"{skill.name} has no eval cases"
+
+
+def test_greeting_stays_at_the_version_that_makes_the_comparative_example_work():
+    # `--baseline previous` resolves the skill's *earlier* version from git
+    # history, so the shipped example only demonstrates a comparison because
+    # 1.0.0 is on main and the working copy declares something later. Do not
+    # revert this bump, and do not reuse 1.1.0 for an unrelated edit -- bump
+    # again instead, so every version in history stays distinct.
+    greeting = next(s for s in load_skills(EXAMPLES) if s.name == "greeting")
+    assert greeting.version == "1.1.0"
