@@ -83,6 +83,28 @@ cases:
     tags: [triggering]
     trajectory:
       skill_triggered: false
+
+  # 5. Does it produce the right artifact? `workspace:` gives the case a real,
+  #    contained temporary directory seeded with the files named under
+  #    `files:`, plus three built-in tools: list_files, read_file, write_file.
+  #    Assertions can then target a produced file instead of the chat output.
+  #    Delete this case if the skill produces no files.
+  - name: produces the expected file
+    task: >-
+      {sentinel} a prompt that asks for a file to be written
+    workspace:
+      files:
+        input.txt: |-
+          {sentinel} the input the skill reads; delete `files:` for an empty workspace
+    assertions:
+      - kind: file-produced
+        file: >-
+          {sentinel} the filename the skill must write
+      - kind: contains
+        file: >-
+          {sentinel} the same filename
+        value: >-
+          {sentinel} a string that file must contain
 """
 
 

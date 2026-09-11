@@ -25,9 +25,9 @@ def test_the_scaffold_names_the_skill_and_quotes_its_description():
     assert "Handle customer refund requests against the 30-day return policy" in text
 
 
-def test_the_scaffold_is_valid_yaml_with_four_cases():
+def test_the_scaffold_is_valid_yaml_with_five_cases():
     data = safe_load(render_scaffold(SKILL))
-    assert len(data["cases"]) == 4
+    assert len(data["cases"]) == 5
 
 
 def test_the_scaffold_ships_both_halves_of_the_triggering_pair():
@@ -73,8 +73,8 @@ def test_a_filled_scaffold_loads_clean(tmp_path, replacement):
     filled = render_scaffold(SKILL).replace(UNFILLED_SENTINEL, replacement)
     path.write_text(filled, encoding="utf-8")
     cases = parse_cases_file(path, SKILL)
-    assert len(cases) == 4
-    assert [case.mode for case in cases] == ["loaded", "loaded", "offered", "offered"]
+    assert len(cases) == 5
+    assert [case.mode for case in cases] == ["loaded", "loaded", "offered", "offered", "loaded"]
 
 
 def test_no_scaffold_case_is_assertion_free_unless_it_checks_triggering():
@@ -91,3 +91,32 @@ def test_scaffold_header_mentions_indentation():
     text = render_scaffold(SKILL)
     assert "indentation" in text.lower()
     assert "continuation" in text.lower() or ">-" in text
+
+
+def test_the_fifth_case_exercises_the_workspace_and_the_file_assertions():
+    data = safe_load(render_scaffold(SKILL))
+    case = data["cases"][4]
+    assert "input.txt" in case["workspace"]["files"]
+    assert [a["kind"] for a in case["assertions"]] == ["file-produced", "contains"]
+    assert all("file" in a for a in case["assertions"])
+
+
+def test_the_fifth_case_says_when_to_delete_it():
+    assert "Delete this case if the skill produces no files" in render_scaffold(SKILL)
+
+
+def test_no_placeholder_sits_in_a_mapping_key():
+    # Task 8 made the loader refuse keys too; the template must still be
+    # refused for its *values* and never rely on a key to carry the marker.
+    data = safe_load(render_scaffold(SKILL))
+
+    def keys(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                yield k
+                yield from keys(v)
+        elif isinstance(node, list):
+            for item in node:
+                yield from keys(item)
+
+    assert not any(UNFILLED_SENTINEL in str(k) for k in keys(data))
