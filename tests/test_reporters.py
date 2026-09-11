@@ -10,6 +10,7 @@ from skill_lens.models import (
     EvalScore,
     RunReport,
     RunResult,
+    ToolCall,
 )
 from skill_lens.reporters.console import render_console
 from skill_lens.reporters.json_reporter import render_json
@@ -244,6 +245,11 @@ def test_json_includes_tag_filtered_skills():
     data = json.loads(render_json(report))
     assert data["skipped_skills"] == ["pdf"]
     assert data["tag_filtered_skills"] == ["xlsx"]
+
+
+def test_json_includes_case_filtered_skills():
+    report = RunReport(outcomes=[], case_filtered_skills=["pdf"])
+    assert json.loads(render_json(report))["case_filtered_skills"] == ["pdf"]
 
 
 def judged_report(**score_kwargs) -> RunReport:
@@ -501,3 +507,148 @@ def test_json_carries_the_workspace_only_when_it_was_kept():
     gone = json.loads(render_json(_workspace_report(None)))
     assert kept["outcomes"][0]["workspace"] == "/tmp/kept"
     assert gone["outcomes"][0]["workspace"] is None
+
+
+def test_a_failing_case_shows_the_agents_output_and_a_passing_one_does_not():
+    text = render_console(_report())
+    assert "        output: no" in text
+    assert "output: yes" not in text
+
+
+def test_an_empty_output_is_stated_not_omitted():
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="silent",
+                runner="fake",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output=""),
+            )
+        ]
+    )
+    assert "        output: (empty)" in render_console(report)
+
+
+def _long_output_report(length=2342):
+    return RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="verbose",
+                runner="fake",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output="x" * length),
+            )
+        ]
+    )
+
+
+def test_a_cut_output_says_exactly_how_much_was_cut():
+    text = render_console(_long_output_report())
+    assert "        … (1,842 more characters; --full-output prints them)" in text
+    assert "x" * 500 in text
+    assert "x" * 501 not in text
+
+
+def test_no_output_limit_prints_everything():
+    text = render_console(_long_output_report(), output_limit=None)
+    assert "x" * 2342 in text
+    assert "more characters" not in text
+
+
+def test_multi_line_output_keeps_every_line_indented():
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="wraps",
+                runner="fake",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output="first line\nsecond line"),
+            )
+        ]
+    )
+    text = render_console(report)
+    assert "        output: first line\n        second line" in text
+
+
+def test_tool_calls_are_listed_under_the_output_and_omitted_when_none():
+    with_calls = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="refund",
+                case_name="refuses",
+                runner="fake",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(
+                    output="sorry",
+                    tool_calls=[ToolCall(name="lookup_order", arguments={"order_id": "1234"})],
+                ),
+            )
+        ]
+    )
+    text = render_console(with_calls)
+    assert '        tool calls:\n            lookup_order(order_id="1234")' in text
+    assert "tool calls:" not in render_console(_report())
+
+
+def test_the_comparative_branch_shows_the_candidates_output_but_not_the_baselines():
+    report = _two_arm_report()
+    # Make the candidate fail with a distinctive output and the baseline fail
+    # with another; only the candidate's may appear.
+    report.outcomes[0].status = "failed"
+    report.outcomes[0].scores = [EvalScore(evaluator="assertion", passed=False, detail="nope")]
+    report.outcomes[0].result = RunResult(output="CANDIDATE-SAID")
+    for outcome in report.outcomes:
+        if outcome.arm == "baseline":
+            outcome.status = "failed"
+            outcome.result = RunResult(output="BASELINE-SAID")
+    text = render_console(report, delta=build_delta(report))
+    assert "output: CANDIDATE-SAID" in text
+    assert "BASELINE-SAID" not in text
+
+
+def test_a_trailing_newline_does_not_add_a_blank_indented_line():
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="trails",
+                runner="fake",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output="hello\n"),
+            )
+        ]
+    )
+    text = render_console(report)
+    assert "        output: hello\n" in text
+    assert "        output: hello\n        \n" not in text
+
+
+def test_crlf_output_renders_without_carriage_returns():
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf",
+                case_name="crlf",
+                runner="fake",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output="line1\r\nline2"),
+            )
+        ]
+    )
+    text = render_console(report)
+    assert "        output: line1\n        line2" in text
+    assert "\r" not in text
+
+
+def test_console_lists_case_filtered_skills():
+    report = RunReport(outcomes=[], case_filtered_skills=["pdf"])
+    assert "Skipped (no cases matched --case filter): pdf" in render_console(report)

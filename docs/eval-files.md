@@ -164,7 +164,9 @@ hand-written stub is refused the same way. An unfinished eval that ran would eit
 while checking nothing or fail while saying nothing about the skill, and both are worse
 than a run that stops and tells you which field to fill in.
 
-Comments are discarded before the check, so a file may discuss the token freely.
+Comments are discarded before the check, so a file may discuss the token freely. Mapping
+keys are checked as well as values — `workspace: files:` is keyed by filename, and an
+unfilled filename would otherwise seed a file literally named after the placeholder.
 
 ## Assertion kinds
 

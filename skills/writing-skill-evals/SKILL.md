@@ -16,11 +16,14 @@ the eval was wrong. Everything here exists to prevent one of those.
    discovers.
 2. **Scaffold, or extend.** If step 1 found no suite, run `skill-lens init <skill-dir>` —
    do not hand-roll the file structure, the generated file already carries the triggering
-   pair and the placeholders that stop an unfinished suite from running. If a suite
-   already exists, do not run `init`: it exits 2 rather than touch an existing file. Read
-   `references/auditing.md` and extend the suite you found instead. (`--force` overwrites
-   the file outright, which is not what you want when a suite is already there to build
-   on.)
+   pair, a `workspace:` case for a skill that produces a file (delete it if this one does
+   not), and the placeholders that stop an unfinished suite from running. Pointed at a
+   directory of skills, `init` scaffolds every skill that has no suite and skips the rest.
+   If a suite already exists, do not run `init` on that skill: it never overwrites a file,
+   but it may add a second scaffold beside the one you have, which is not what you want.
+   Read `references/auditing.md` and extend the suite you found instead.
+   (`--force` overwrites the file outright, which is not what you want when a suite is
+   already there to build on.)
 3. **Mine the skill for claims.** Every "always", "never" and "must" in the instructions
    is a candidate case. The frontmatter `description` is a claim too, and it is precisely
    what the `mode: offered` cases test.

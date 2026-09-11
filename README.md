@@ -63,10 +63,13 @@ development environment, and prefix the commands below with `uv run` — you can
 `uv tool install` above.
 
 A skill is any directory containing `SKILL.md`. Its eval cases live beside it — this
-repository ships two:
+repository ships three:
 
 ```
 examples/
+  csv-report/
+    SKILL.md
+    csv-report.eval.yaml
   greeting/
     SKILL.md
     greeting.eval.yaml
@@ -82,13 +85,15 @@ skill-lens list ./examples
 ```
 
 ```
+csv-report	1 case(s)	examples/csv-report
 greeting	1 case(s)	examples/greeting
 order-support	5 case(s)	examples/order-support
 ```
 
 `list` discovers skills and validates every eval file without calling a runner: no API key,
 no spend. Starting on your own skill? `skill-lens init ./skills/my-skill` writes a starter
-suite with the placeholders marked, so you fill in the blanks instead of starting from one.
+suite with the placeholders marked, so you fill in the blanks instead of starting from one;
+point it at a directory of skills and it scaffolds every one that has no suite.
 
 ## A case is a few lines of YAML
 
@@ -137,8 +142,9 @@ skill-lens run ./skills
 ```
 [PASS] order-support :: names the order it is talking about (fake)
 [FAIL] order-support :: refuses a refund outside the return window (fake)
-        assertion: failed: contains('return window')
+        assertion: failed: contains('return window'): did not hold
             contains[0]: contains('return window') did not hold
+        output: [fake] order-support handled: I want a refund for order 1234
 [PASS] order-support :: never leaks a stack trace to the customer (fake)
 
 2 passed, 1 failed, 0 errored — pass rate 67%
@@ -146,6 +152,9 @@ skill-lens run ./skills
 Gate FAILED:
   - pass rate 67% is below the required 100%
 ```
+
+Every failing case shows what the agent actually said and which tools it called —
+`--case` reruns just that one.
 
 Exit code `0` means the gate passed, `1` means it failed, and `2` means something in your
 own files is wrong. That is the whole contract with your pipeline.
@@ -258,10 +267,10 @@ contribution.
 
 ## Status
 
-Milestone 5. Discovery, scoring, judging, comparison, reporting, gating and the automated
-release pipeline all ship and are tested. Versions are derived from the commit history and
-published to PyPI on merge. This is `0.x`: a minor release may still change behaviour, so pin
-what you depend on. See the
+Milestone 7. Discovery, scoring, judging, comparison, real-file workspaces, reporting, gating
+and the automated release pipeline all ship and are tested. Versions are derived from the
+commit history and published to PyPI on merge. This is `0.x`: a minor release may still
+change behaviour, so pin what you depend on. See the
 [roadmap](https://emadmokhtar.github.io/skill-evaluator/roadmap/) for what is shipped and
 what is planned.
 

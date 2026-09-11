@@ -40,6 +40,7 @@ def render_json(
         },
         "skipped_skills": report.skipped_skills,
         "tag_filtered_skills": report.tag_filtered_skills,
+        "case_filtered_skills": report.case_filtered_skills,
         "outcomes": [
             {
                 "skill_name": o.skill_name,

@@ -37,19 +37,27 @@ def evaluate_gate(
     reasons: list[str] = []
 
     if report.total == 0:
+        # A filter that matched nothing is named first: it is the likeliest
+        # cause of an empty run and the one a typo produces.
         if report.tag_filtered_skills:
             names = ", ".join(report.tag_filtered_skills)
             reasons.append(
                 f"no eval cases ran: the --tag filter excluded every case for skill(s): {names}"
             )
-        elif report.skipped_skills:
-            names = ", ".join(report.skipped_skills)
+        if report.case_filtered_skills:
+            names = ", ".join(report.case_filtered_skills)
             reasons.append(
-                "no eval cases ran: all discovered skill(s) were skipped for "
-                f"having no eval cases: {names}"
+                f"no eval cases ran: the --case filter matched no case for skill(s): {names}"
             )
-        else:
-            reasons.append("no eval cases ran: no skills were found")
+        if not report.tag_filtered_skills and not report.case_filtered_skills:
+            if report.skipped_skills:
+                names = ", ".join(report.skipped_skills)
+                reasons.append(
+                    "no eval cases ran: all discovered skill(s) were skipped for "
+                    f"having no eval cases: {names}"
+                )
+            else:
+                reasons.append("no eval cases ran: no skills were found")
     elif report.pass_rate < min_pass_rate:
         reasons.append(
             f"pass rate {report.pass_rate:.0%} is below the required {min_pass_rate:.0%}"

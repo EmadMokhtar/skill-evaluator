@@ -34,6 +34,9 @@ def _reject_unfilled(
 
     Runs before schema validation so the message names the field to fill in
     rather than complaining about the type of a value nobody meant to keep.
+    Mapping keys are checked as well as values: `workspace.files` is keyed by
+    filename.
+
     An unfilled scaffold says something about the author's progress, not about
     the skill, so it aborts the run as an authoring error instead of scoring
     as a failure.
@@ -57,6 +60,8 @@ def _reject_unfilled(
             return
         seen = seen | {id(raw)}
         for key, value in raw.items():
+            # Keys are user text too: `workspace.files` is keyed by filename.
+            _reject_unfilled(path, index, key, trail, seen)
             _reject_unfilled(path, index, value, f"{trail}.{key}" if trail else str(key), seen)
     elif isinstance(raw, list):
         if id(raw) in seen:
@@ -297,7 +302,7 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
                 )
 
 
-def _discover_paths(skill: Skill) -> list[Path]:
+def discover_eval_paths(skill: Skill) -> list[Path]:
     """Find eval files beside a skill: an evals/ dir, then *.eval.yaml."""
     evals_dir = skill.path / EVALS_DIRNAME
     if evals_dir.is_dir():
@@ -317,7 +322,7 @@ def load_cases_for_skill(skill: Skill, evals_path: Path | None = None) -> list[E
             else [evals_path]
         )
     else:
-        paths = _discover_paths(skill)
+        paths = discover_eval_paths(skill)
     cases: list[EvalCase] = []
     for path in paths:
         cases.extend(parse_cases_file(path, skill))

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 from typing import Annotated
 
@@ -11,10 +10,9 @@ import typer
 
 from skill_lens import __version__
 from skill_lens.cases.loader import (
-    EVAL_SUFFIX,
-    EVALS_DIRNAME,
     UNFILLED_SENTINEL,
     CaseParseError,
+    discover_eval_paths,
     load_cases_for_skill,
 )
 from skill_lens.comparison import build_delta
@@ -23,15 +21,17 @@ from skill_lens.evaluators.assertion import InvalidAssertionValue, UnknownAssert
 from skill_lens.gating import EXIT_OK, evaluate_gate
 from skill_lens.judges.fake import FakeJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
+from skill_lens.models import Skill
 from skill_lens.orchestrator import run_evals
 from skill_lens.reporters.console import render_console
+from skill_lens.reporters.failure_context import OUTPUT_LIMIT
 from skill_lens.reporters.json_reporter import render_json
 from skill_lens.reporters.junit import render_junit
 from skill_lens.reporters.markdown import render_markdown
 from skill_lens.runners.fake import FakeRunner
 from skill_lens.runners.preflight import MissingAPIKey, check_api_key
 from skill_lens.runners.pydantic_ai import PydanticAIRunner, RunnerDependencyError
-from skill_lens.scaffold import render_scaffold
+from skill_lens.scaffold import render_scaffold, scaffold_target
 from skill_lens.skills.loader import SKILL_FILENAME, SkillParseError, load_skills, parse_skill_file
 from skill_lens.workspace import WorkspaceLimits
 
@@ -107,6 +107,13 @@ def run(
         typer.Option(help='Model id for the judge; judge = "..." in skill-lens.toml picks it.'),
     ] = None,
     tag: Annotated[str | None, typer.Option(help="Only run cases with this tag.")] = None,
+    case: Annotated[
+        str | None,
+        typer.Option(
+            "--case",
+            help="Only run cases whose name contains this text (case-insensitive).",
+        ),
+    ] = None,
     min_pass_rate: Annotated[float | None, typer.Option(help="Required pass rate.")] = None,
     json_output: Annotated[Path | None, typer.Option(help="Write a JSON report here.")] = None,
     config: Annotated[Path | None, typer.Option(help="Path to skill-lens.toml.")] = None,
@@ -137,6 +144,13 @@ def run(
             help="Keep each case's temporary directory instead of deleting it.",
         ),
     ] = None,
+    full_output: Annotated[
+        bool | None,
+        typer.Option(
+            "--full-output/--no-full-output",
+            help="Print a failing case's whole output instead of the first 500 characters.",
+        ),
+    ] = None,
 ) -> None:
     """Discover skills, run their eval cases, and gate on the results."""
     try:
@@ -154,6 +168,9 @@ def run(
         resolved_keep_workspace = (
             keep_workspace if keep_workspace is not None else settings.keep_workspace
         )
+        resolved_full_output = full_output if full_output is not None else settings.full_output
+        # None means "no cap" to every reporter.
+        output_limit = None if resolved_full_output else OUTPUT_LIMIT
         workspace_limits = WorkspaceLimits(
             max_file_bytes=settings.max_file_bytes,
             max_files=settings.max_files,
@@ -209,19 +226,23 @@ def run(
         else:
             active_judge = judge_class()
         if getattr(runner_class, "needs_api_key", False):
-            # A ceiling, not a forecast. The tag filter is applied here because
-            # `run_evals` applies it too and ignoring it can overstate the total
-            # wildly -- but the baseline arm is also dropped per-case for
-            # `mode: offered` under --baseline none, and per-skill when a
-            # previous version cannot be resolved. Both only ever *reduce* the
-            # count, and reproducing them here would mean duplicating the
-            # orchestrator's discovery (and its git calls) just to print a line.
+            # A ceiling, not a forecast. The tag and case filters are applied
+            # here because `run_evals` applies them too and ignoring them can
+            # overstate the total wildly -- but the baseline arm is also
+            # dropped per-case for `mode: offered` under --baseline none, and
+            # per-skill when a previous version cannot be resolved. Both only
+            # ever *reduce* the count, and reproducing them here would mean
+            # duplicating the orchestrator's discovery (and its git calls)
+            # just to print a line.
             arms = 2 if baseline_kind else 1
             case_count = 0
             for candidate_skill in skills:
                 cases = load_cases_for_skill(candidate_skill, evals_path=evals)
                 if tag is not None:
                     cases = [c for c in cases if tag in c.tags]
+                if case is not None:
+                    needle = case.casefold()
+                    cases = [c for c in cases if needle in c.name.casefold()]
                 case_count += len(cases)
             typer.echo(
                 f"Plan: up to {arms} arm(s) x {resolved_repeat} repeat(s) x "
@@ -232,6 +253,7 @@ def run(
             [active_runner],
             evals_path=evals,
             tag=tag,
+            case_filter=case,
             judge=active_judge,
             baseline=baseline_kind or None,
             repeat=resolved_repeat,
@@ -253,18 +275,28 @@ def run(
         delta=delta,
     )
 
-    typer.echo(render_console(report, gate=gate, delta=delta))
+    typer.echo(render_console(report, gate=gate, delta=delta, output_limit=output_limit))
     # One loop over every requested report. A write failure escalates to exit 2
     # only when the gate itself passed -- exit codes are the CI contract, and an
     # already-red gate must stay visible rather than being masked by an
     # unrelated write problem.
     writes = (
         (json_output, "JSON", lambda: render_json(report, gate=gate, delta=delta)),
-        (junit_output, "JUnit", lambda: render_junit(report, gate=gate, delta=delta)),
+        (
+            junit_output,
+            "JUnit",
+            lambda: render_junit(report, gate=gate, delta=delta, output_limit=output_limit),
+        ),
         (
             markdown_output,
             "Markdown",
-            lambda: render_markdown(report, gate=gate, delta=delta, max_chars=markdown_max_chars),
+            lambda: render_markdown(
+                report,
+                gate=gate,
+                delta=delta,
+                max_chars=markdown_max_chars,
+                output_limit=output_limit,
+            ),
         ),
     )
     write_failed = False
@@ -297,39 +329,8 @@ def list_skills(
         raise typer.Exit(code=2) from exc
 
 
-def _eval_filename(name: str) -> str:
-    """A safe file name for a skill's eval suite.
-
-    The name comes from user-supplied frontmatter, so it is not automatically
-    a safe path component: `name: ../../x` would otherwise write outside the
-    directory init was pointed at.
-    """
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.") or "skill"
-    return f"{safe}{EVAL_SUFFIX}"
-
-
-@app.command()
-def init(
-    path: Annotated[Path, typer.Argument(help="A skill directory containing SKILL.md.")],
-    force: Annotated[
-        bool, typer.Option("--force", help="Overwrite an existing eval file.")
-    ] = False,
-) -> None:
-    """Write a starter eval suite beside a skill."""
-    skill_md = path / SKILL_FILENAME
-    if not skill_md.is_file():
-        typer.echo(f"no {SKILL_FILENAME} in {path}; point init at a skill directory")
-        raise typer.Exit(code=2)
-    try:
-        skill = parse_skill_file(skill_md)
-    except SkillParseError as exc:
-        typer.echo(str(exc))
-        raise typer.Exit(code=2) from exc
-
-    target = path / EVALS_DIRNAME / _eval_filename(skill.name)
-    if target.exists() and not force:
-        typer.echo(f"{target} already exists; pass --force to overwrite it")
-        raise typer.Exit(code=2)
+def _write_scaffold(target: Path, skill: Skill) -> None:
+    """Write one scaffold, or exit 2 naming the file."""
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(render_scaffold(skill), encoding="utf-8")
@@ -337,5 +338,73 @@ def init(
         typer.echo(f"cannot write {target}: {exc}")
         raise typer.Exit(code=2) from exc
 
+
+def _init_one(path: Path, force: bool) -> None:
+    """The original `init`: exactly one skill directory, `--force` allowed."""
+    try:
+        skill = parse_skill_file(path / SKILL_FILENAME)
+    except SkillParseError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=2) from exc
+
+    target = scaffold_target(skill)
+    if target.exists() and not force:
+        typer.echo(f"{target} already exists; pass --force to overwrite it")
+        raise typer.Exit(code=2)
+    _write_scaffold(target, skill)
     typer.echo(f"Wrote {target}")
     typer.echo(f"Fill in every {UNFILLED_SENTINEL}, then run: skill-lens list {path}")
+
+
+def _init_many(path: Path) -> None:
+    """Batch mode: scaffold every skill under `path` that has no suite.
+
+    Skips any skill with an eval file already -- batch init exists to fill in
+    the *missing* suites and must never rewrite one that is there to build on.
+    """
+    try:
+        skills = load_skills(path) if path.is_dir() else []
+    except SkillParseError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=2) from exc
+    if not skills:
+        typer.echo(
+            f"no {SKILL_FILENAME} under {path}; point init at a skill directory "
+            "or a directory of skill directories"
+        )
+        raise typer.Exit(code=2)
+
+    wrote = 0
+    for skill in skills:
+        existing = discover_eval_paths(skill)
+        if existing:
+            typer.echo(f"Skipped {skill.name}: already has {len(existing)} eval file(s)")
+            continue
+        target = scaffold_target(skill)
+        _write_scaffold(target, skill)
+        typer.echo(f"Wrote {target}")
+        wrote += 1
+    if wrote:
+        typer.echo(f"Fill in every {UNFILLED_SENTINEL}, then run: skill-lens list {path}")
+    else:
+        typer.echo(f"Nothing to do: every skill under {path} already has an eval suite")
+
+
+@app.command()
+def init(
+    path: Annotated[
+        Path, typer.Argument(help="A skill directory, or a directory of skill directories.")
+    ],
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite an existing eval file (one skill only).")
+    ] = False,
+) -> None:
+    """Write a starter eval suite beside a skill, or beside every skill that has none."""
+    if (path / SKILL_FILENAME).is_file():
+        _init_one(path, force)
+        return
+    if force:
+        # Rewriting every suite in a repository must never be one flag away.
+        typer.echo("--force applies to one skill; point init at that skill's directory")
+        raise typer.Exit(code=2)
+    _init_many(path)

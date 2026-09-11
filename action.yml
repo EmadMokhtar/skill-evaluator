@@ -18,6 +18,8 @@ inputs:
     description: Model id for the LLM judge. Falls back to model.
   tag:
     description: Only run cases carrying this tag.
+  case:
+    description: Only run cases whose name contains this text (case-insensitive).
   config:
     description: Path to skill-lens.toml.
   baseline:
@@ -32,6 +34,8 @@ inputs:
     description: Run this many cases at once.
   keep-workspace:
     description: Keep each case's temporary directory instead of deleting it. true or false.
+  full-output:
+    description: Print a failing case's whole output instead of the first 500 characters. true or false.
   json-output:
     description: Where to write the JSON report. Also read back for this action's outputs.
     default: skill-lens-report.json
@@ -112,6 +116,7 @@ runs:
         SE_MODEL: ${{ inputs.model }}
         SE_JUDGE_MODEL: ${{ inputs.judge-model }}
         SE_TAG: ${{ inputs.tag }}
+        SE_CASE: ${{ inputs.case }}
         SE_CONFIG: ${{ inputs.config }}
         SE_BASELINE: ${{ inputs.baseline }}
         SE_REPEAT: ${{ inputs.repeat }}
@@ -119,6 +124,7 @@ runs:
         SE_MIN_DELTA: ${{ inputs.min-delta }}
         SE_CONCURRENCY: ${{ inputs.concurrency }}
         SE_KEEP_WORKSPACE: ${{ inputs.keep-workspace }}
+        SE_FULL_OUTPUT: ${{ inputs.full-output }}
         SE_JSON: ${{ inputs.json-output }}
         SE_JUNIT: ${{ inputs.junit-output }}
         SE_MARKDOWN: ${{ inputs.markdown-output }}
@@ -138,6 +144,7 @@ runs:
         add --model "$SE_MODEL"
         add --judge-model "$SE_JUDGE_MODEL"
         add --tag "$SE_TAG"
+        add --case "$SE_CASE"
         add --config "$SE_CONFIG"
         add --baseline "$SE_BASELINE"
         add --repeat "$SE_REPEAT"
@@ -145,6 +152,7 @@ runs:
         add --min-delta "$SE_MIN_DELTA"
         add --concurrency "$SE_CONCURRENCY"
         add_flag --keep-workspace "$SE_KEEP_WORKSPACE" --no-keep-workspace
+        add_flag --full-output "$SE_FULL_OUTPUT" --no-full-output
         add --json-output "$SE_JSON"
         add --junit-output "$SE_JUNIT"
         add --markdown-output "$SE_MARKDOWN"

@@ -63,6 +63,12 @@ class Config(BaseModel):
     was turned on -- a persistent setting that produced no visible output
     would fill a disk with nothing on screen explaining why.
 
+    `full_output` lifts the 500-character cap on the agent output printed
+    under a non-passing case, in every reporter. `--full-output` /
+    `--no-full-output` override it in either direction, like
+    `keep_workspace`. The cap itself is never silent: a cut output always
+    states exactly how many characters were removed.
+
     The three caps are runaway guards on what one case may write. They get no
     CLI flag because they are policy set once per repository rather than a
     per-run decision, the same reasoning that leaves `fail_on_error` and
@@ -90,6 +96,7 @@ class Config(BaseModel):
     min_delta: float | None = None
     concurrency: int = 1
     keep_workspace: bool = False
+    full_output: bool = False
     max_file_bytes: int = Field(default=DEFAULT_LIMITS.max_file_bytes, gt=0)
     max_files: int = Field(default=DEFAULT_LIMITS.max_files, gt=0)
     max_total_bytes: int = Field(default=DEFAULT_LIMITS.max_total_bytes, gt=0)

@@ -9,7 +9,7 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M5 (complete)**: the pipeline runs real agents through `PydanticAIRunner`
+Currently at **M7 (complete)**: the pipeline runs real agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
 remains the default and the backbone of the zero-cost test tier. M3 adds a
@@ -25,13 +25,20 @@ composite GitHub Action with example workflows. M5 part 2 automates releasing
 itself: a merge to `main` verifies, bumps the version from the commit history
 with `cz bump`, tags it, and publishes to PyPI over Trusted Publishing, with a
 manual workflow to refresh the recorded provider traffic. See
-[Releasing](docs/releasing.md). Milestones are defined in
+[Releasing](docs/releasing.md). M6 part 1 gives a case a contained workspace
+with `list_files`/`read_file`/`write_file`, `file-produced` and `json-schema`
+assertions, a `file:` modifier and `judge: artifacts:`. M7 makes a failing
+case explain itself (output and tool calls in every reporter, `--full-output`),
+adds `--case`, brings `init` up to M6 with a workspace case and a batch mode,
+and ships a versioned comparative example, an annotated config and an
+end-to-end quickstart. Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
 is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
-design is in `docs/superpowers/specs/2026-08-03-skill-eval-m4-design.md`, and
-the M5 design is in
-`docs/superpowers/specs/2026-08-05-skill-eval-m5-design.md`.
+design is in `docs/superpowers/specs/2026-08-03-skill-eval-m4-design.md`, the
+M5 design is in `docs/superpowers/specs/2026-08-05-skill-eval-m5-design.md`,
+the M6 design is in `docs/superpowers/specs/2026-09-10-skill-lens-m6-design.md`,
+and the M7 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m7-design.md`.
 
 ## Commands
 
@@ -266,6 +273,18 @@ form, that file is the explanation.
   the way through the orchestrator would leave the default silently in force.
 - **Every kept directory is printed, however keeping was turned on** — `--keep-workspace` or
   the config key. A persistent setting with no visible output would fill a disk silently.
+- **Output is expanded only under non-passing candidate outcomes, and a cut is never silent.**
+  `reporters/failure_context.py` computes one excerpt for all three reporters; passing and
+  baseline outcomes are never expanded, and a truncated output states the exact count removed.
+- **A `--case` matching nothing fails the gate** — the fourth zero-cases cause. `--case` has
+  no config key: a filter that lived in the file would let a green run measure less than the
+  repository declares.
+- **`init` never creates an `evals/` directory beside existing `*.eval.yaml` files**
+  (`scaffold_target`), and **batch `init` never overwrites** — a skill with any eval file is
+  skipped and `--force` in batch mode is a user error.
+- **The unfilled-scaffold scan covers mapping keys as well as values.**
+- **`examples/greeting` stays at `1.1.0` or later.** The bump is what makes `--baseline
+  previous` resolvable from a checkout; `tests/test_examples.py` pins it.
 - **The dependency audit is one command, spelled identically in three places, and its
   exceptions live in one table.** `uv audit --preview-features audit --locked` runs in
   `security.yml` (every PR, every push to `main`, weekly on a schedule, and on demand), in

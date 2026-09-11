@@ -26,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.orchestrator import run_evals
 from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.skills.loader import load_skills
@@ -40,8 +41,14 @@ pytestmark = [
 
 
 def test_the_examples_pass_against_a_real_provider():
-    report = run_evals(load_skills(EXAMPLES), [PydanticAIRunner(model="openai:gpt-4o-mini")])
-    assert report.total == 3
+    # Two example cases carry a `judge:` block; the default FakeJudge errors on an
+    # unscripted rubric by design, so the live tier must bring a real judge too.
+    report = run_evals(
+        load_skills(EXAMPLES),
+        [PydanticAIRunner(model="openai:gpt-4o-mini")],
+        judge=PydanticAIJudge(model="openai:gpt-4o-mini"),
+    )
+    assert report.total == 7  # greeting (1) + order-support (5) + csv-report (1)
     assert report.errored == 0, [o.result.error for o in report.outcomes if o.result.errored]
     assert report.pass_rate == 1.0, [
         (o.case_name, [s.detail for s in o.scores if not s.passed])

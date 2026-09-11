@@ -2,7 +2,9 @@
 
 `skill-lens.toml` is optional. It is located via `--config`, or otherwise discovered by
 searching upward from the current directory — the repo root is the conventional home, not a
-requirement.
+requirement. [`examples/skill-lens.toml`](https://github.com/EmadMokhtar/skill-evaluator/blob/main/examples/skill-lens.toml)
+is a complete, annotated example: every key listed, the realistic ones live, the rest
+commented out at their defaults.
 
 ```toml
 default_runner = "fake"
@@ -31,6 +33,7 @@ greeting = 0.9
 | `min_delta` | unset | `--min-delta` |
 | `concurrency` | `1` | `--concurrency` |
 | `keep_workspace` | `false` | `--keep-workspace` / `--no-keep-workspace` |
+| `full_output` | `false` | `--full-output` / `--no-full-output` |
 | `max_file_bytes` | `1000000` | — |
 | `max_files` | `200` | — |
 | `max_total_bytes` | `5000000` | — |
@@ -58,6 +61,13 @@ override it in either direction; leaving both unset keeps the config file's valu
 directory is printed under a `Kept workspaces` section, whichever of the flag or the config
 turned keeping on — a setting that silently filled a disk with no on-screen explanation would
 be a trap.
+
+`full_output` lifts the 500-character cap on the agent output printed under a non-passing
+case, in every reporter. `--full-output` / `--no-full-output` override it in either
+direction; leaving both unset keeps the config file's value. The cap is never silent — a cut
+output always states exactly how many characters were removed — so the default is safe to
+leave in CI, where a long red log helps nobody, and `true` is the right committed value for
+a repository that reads its failures locally.
 
 `max_file_bytes`, `max_files`, and `max_total_bytes` are runaway guards on what one case's
 workspace may write, not something you tune per run — they get no CLI flag because they are

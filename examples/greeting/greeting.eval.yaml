@@ -12,6 +12,13 @@ cases:
         value: Ada
       - kind: not_contains
         value: Traceback
+      # Version 1.1.0 added "do not use exclamation marks". This is the
+      # assertion `--baseline previous` measures: version 1.0.0 typically
+      # answers "Hello, Ada!", so the baseline arm fails it and the delta
+      # block shows the improvement. Try it from a checkout:
+      #   skill-lens run examples/greeting --runner pydantic-ai --baseline previous
+      - kind: not_contains
+        value: "!"
       # SKILL.md asks for "one short sentence"; this regex only checks "one
       # line, under 120 chars, ending in . ! or ?" -- it doesn't (and can't,
       # with a regex) verify single-sentence-ness. It was deliberately

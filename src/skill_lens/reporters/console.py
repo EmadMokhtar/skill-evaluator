@@ -4,9 +4,17 @@ from __future__ import annotations
 
 from skill_lens.comparison import ArmStats, CaseStats, Delta, format_baseline_notes
 from skill_lens.gating import GateResult
-from skill_lens.models import RunReport
+from skill_lens.models import CaseOutcome, RunReport
+from skill_lens.reporters.failure_context import (
+    OUTPUT_LIMIT,
+    cut_note,
+    failure_context,
+    more_calls_note,
+)
 
 _MARKS = {"passed": "PASS", "failed": "FAIL", "errored": "ERROR"}
+_INDENT = "        "  # 8 spaces: the evaluator-detail column
+_DEEPER = "            "  # 12 spaces: the check-evidence column
 
 
 def _fraction(stats: ArmStats) -> str:
@@ -102,33 +110,73 @@ def _kept_workspaces(report: RunReport) -> list[str]:
     return lines
 
 
+def _failure_lines(outcome: CaseOutcome, output_limit: int | None) -> list[str]:
+    """Why a non-passing outcome did not pass, then what the agent actually did.
+
+    The first part is the M3 renderer: each failing evaluator's detail and each
+    failing check's evidence -- the evidence is the point of a judge verdict,
+    since a summary line cannot tell an author whether the judge read the
+    response or invented a reason. The second part is what M7 added: the
+    output and the tool calls, so `did not hold` comes with the text it was
+    checked against.
+    """
+    lines: list[str] = []
+    for score in outcome.scores:
+        if not score.passed:
+            lines.append(f"{_INDENT}{score.evaluator}: {score.detail}")
+            for check in score.checks:
+                if not check.passed:
+                    lines.append(f"{_DEEPER}{check.id}: {check.evidence or 'no evidence given'}")
+    if outcome.result is not None and outcome.result.error:
+        lines.append(f"{_INDENT}error: {outcome.result.error}")
+    lines.extend(_context_lines(outcome, output_limit))
+    return lines
+
+
+def _context_lines(outcome: CaseOutcome, output_limit: int | None) -> list[str]:
+    context = failure_context(outcome, limit=output_limit)
+    if context is None:
+        return []
+    lines: list[str] = []
+    if context.output:
+        first, *rest = context.output.split("\n")
+        lines.append(f"{_INDENT}output: {first}")
+        lines.extend(f"{_INDENT}{line}" for line in rest)
+    else:
+        # "The agent said nothing" is the most useful fact about a failed
+        # assertion; an absent line would look like the feature is missing.
+        lines.append(f"{_INDENT}output: (empty)")
+    if context.cut:
+        lines.append(f"{_INDENT}{cut_note(context)}")
+    if context.tool_calls:
+        lines.append(f"{_INDENT}tool calls:")
+        lines.extend(f"{_DEEPER}{call}" for call in context.tool_calls)
+        if context.more_calls:
+            lines.append(f"{_DEEPER}{more_calls_note(context)}")
+    return lines
+
+
 def render_console(
-    report: RunReport, gate: GateResult | None = None, delta: Delta | None = None
+    report: RunReport,
+    gate: GateResult | None = None,
+    delta: Delta | None = None,
+    output_limit: int | None = OUTPUT_LIMIT,
 ) -> str:
     """Render a report as plain text suitable for a terminal or CI log.
 
     With no `delta` this is exactly the M3 renderer: one line per outcome. A
     comparative run collapses to one line per (case, arm) instead, because
     `--repeat 5 --baseline previous` would otherwise print ten lines per case.
+
+    `output_limit` caps the agent output shown under a non-passing case; None
+    prints all of it (`--full-output`).
     """
     lines: list[str] = []
     if delta is None:
         for outcome in report.outcomes:
             mark = _MARKS[outcome.status]
             lines.append(f"[{mark}] {outcome.skill_name} :: {outcome.case_name} ({outcome.runner})")
-            for score in outcome.scores:
-                if not score.passed:
-                    lines.append(f"        {score.evaluator}: {score.detail}")
-                    # The evidence is the point of a judge verdict: a summary line
-                    # cannot tell an author whether the judge read the response or
-                    # invented a reason.
-                    for check in score.checks:
-                        if not check.passed:
-                            lines.append(
-                                f"            {check.id}: {check.evidence or 'no evidence given'}"
-                            )
-            if outcome.result is not None and outcome.result.error:
-                lines.append(f"        error: {outcome.result.error}")
+            lines.extend(_failure_lines(outcome, output_limit))
     else:
         for case in delta.cases:
             lines.append(_case_line(case))
@@ -143,20 +191,7 @@ def render_console(
                 None,
             )
             if failing is not None:
-                for score in failing.scores:
-                    if not score.passed:
-                        lines.append(f"        {score.evaluator}: {score.detail}")
-                        # The evidence is the point of a judge verdict: a summary line
-                        # cannot tell an author whether the judge read the response or
-                        # invented a reason.
-                        for check in score.checks:
-                            if not check.passed:
-                                lines.append(
-                                    f"            {check.id}: "
-                                    f"{check.evidence or 'no evidence given'}"
-                                )
-                if failing.result is not None and failing.result.error:
-                    lines.append(f"        error: {failing.result.error}")
+                lines.extend(_failure_lines(failing, output_limit))
             if case.low_signal:
                 lines.append(f"        low-signal: {', '.join(case.low_signal)}")
 
@@ -168,6 +203,12 @@ def render_console(
         lines.append("")
         lines.append(
             f"Skipped (no cases matched --tag filter): {', '.join(report.tag_filtered_skills)}"
+        )
+
+    if report.case_filtered_skills:
+        lines.append("")
+        lines.append(
+            f"Skipped (no cases matched --case filter): {', '.join(report.case_filtered_skills)}"
         )
 
     lines.append("")

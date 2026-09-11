@@ -661,3 +661,26 @@ def test_a_case_with_no_workspace_still_loads_unchanged(tmp_path):
     (case,) = parse_cases_file(path)
     assert case.workspace is None
     assert case.assertions[0].file is None
+
+
+def test_a_placeholder_in_a_mapping_key_is_refused_too(tmp_path):
+    # `workspace.files` is keyed by filename. A scaffold that left the
+    # filename unfilled would otherwise load, seed a file literally named
+    # "TODO(skill-lens) ..." and let the case run.
+    path = tmp_path / "x.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: writes a file\n"
+        "    task: go\n"
+        "    workspace:\n"
+        "      files:\n"
+        '        "TODO(skill-lens) the input file": hello\n'
+        "    assertions:\n"
+        "      - kind: file-produced\n"
+        "        file: out.txt\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "TODO(skill-lens)" in str(exc.value)
+    assert "workspace.files" in str(exc.value)

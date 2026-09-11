@@ -254,6 +254,22 @@ strings in YAML and need no quoting, but quoting is always safe and recommended.
 A skill with no `version:` at all is not an error — resolution falls back to comparing file
 content instead (see [above](#how-previous-is-resolved)).
 
+## Try it on the shipped examples
+
+`examples/greeting` is versioned for exactly this. Version `1.1.0` added one instruction —
+"do not use exclamation marks" — and one assertion only that version satisfies
+(`not_contains: "!"`). Because `1.0.0` is in this repository's history, a checkout can run
+the comparison as-is:
+
+```bash
+skill-lens run examples/greeting --runner pydantic-ai --baseline previous
+```
+
+The candidate arm runs the working copy; the baseline arm runs `1.0.0` resolved from git.
+Version `1.0.0` typically answers `Hello, Ada!`, so the baseline fails the new assertion, the
+candidate passes it, and the delta block reports the improvement — a small, real example of
+what `--min-delta` gates on.
+
 ## Worked CI example
 
 ```bash

@@ -9,7 +9,7 @@
 | M4 | Comparative evals: `--baseline`/`--repeat`, delta reporting, `--min-delta` gating | shipped |
 | M5 | CI/CD polish: JUnit XML + Markdown reporters, GitHub Action, bounded concurrency | shipped |
 | M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions | Part 1 shipped; Part 2 planned |
-| M7 | DX: `skill-lens init` scaffolder, more examples | `init` shipped; examples planned |
+| M7 | DX: failing cases explain themselves, `--case`, `init` batch mode and workspace case, versioned example, quickstart | shipped |
 | M8 | LangChain adapter (optional) | planned |
 
 ## What M4 shipped
@@ -65,6 +65,25 @@ spec, because executing code that shipped with the artifact under evaluation is 
 different trust decision from writing files into a temporary directory — a `SKILL.md`
 under evaluation is, by construction, code nobody has vetted yet, and `skill-lens` is
 designed to run in CI against repository credentials.
+
+## What M7 shipped
+
+The original M7 list — `init`, docs, more examples, a quickstart — had mostly shipped
+early, so M7 was re-scoped around the developer-experience gaps that using the tool
+exposed. A non-passing case now shows the agent's output and its tool calls in the
+console, the Markdown summary and the JUnit body alike, from one shared excerpt; the
+output is cut at 500 characters and a cut is never silent (`full_output` /
+`--full-output` lifts it). `--case <text>` reruns the cases whose name contains the text,
+and a filter matching nothing fails the gate. `init` gained a fifth scaffold case for
+skills that produce a file, writes beside `SKILL.md` when that is where a skill's evals
+already live (so it can never hide them behind a new `evals/` directory), and scaffolds
+every skill under a directory that has no suite. `examples/greeting` is versioned so
+`--baseline previous` works from a checkout, `examples/skill-lens.toml` annotates every
+config key, and [Getting started](getting-started.md) is an end-to-end quickstart.
+
+Deferred: a `references/` layout example (bundled files are not loaded until M6 part 2),
+a repeatable `--case`, and the gating features carried over from M4 and M5 (per-skill
+`min_delta`, `--baseline-ref`, both-arms-fail flagging).
 
 ## The rename to skill-lens
 

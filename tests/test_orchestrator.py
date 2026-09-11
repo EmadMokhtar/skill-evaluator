@@ -810,3 +810,68 @@ def test_a_runner_supplied_workspace_is_ignored_for_a_workspace_less_case(tmp_pa
     report = run_evals([_skill(tmp_path)], [_Smuggler()], evals_path=_evals(tmp_path, _case()))
     assert report.outcomes[0].result is not None
     assert report.outcomes[0].result.workspace is None
+
+
+def test_case_filter_selects_by_case_insensitive_substring(tmp_path):
+    yaml_text = (
+        "cases:\n"
+        "  - name: Refuses a refund outside the window\n    task: a\n"
+        "  - name: refunds inside the window\n    task: b\n"
+        "  - name: greets\n    task: c\n"
+    )
+    report = run_evals(
+        [_skill_with_cases(tmp_path, yaml_text=yaml_text)], [_runner()], case_filter="REFUND"
+    )
+    assert [o.case_name for o in report.outcomes] == [
+        "Refuses a refund outside the window",
+        "refunds inside the window",
+    ]
+
+
+def test_case_filter_and_tag_filter_both_apply(tmp_path):
+    yaml_text = (
+        "cases:\n"
+        "  - name: refund smoke\n    task: a\n    tags: [smoke]\n"
+        "  - name: refund deep\n    task: b\n"
+    )
+    report = run_evals(
+        [_skill_with_cases(tmp_path, yaml_text=yaml_text)],
+        [_runner()],
+        tag="smoke",
+        case_filter="refund",
+    )
+    assert [o.case_name for o in report.outcomes] == ["refund smoke"]
+
+
+def test_a_case_filter_matching_nothing_is_case_filtered_not_skipped(tmp_path):
+    yaml_text = "cases:\n  - name: greets\n    task: good\n"
+    report = run_evals(
+        [_skill_with_cases(tmp_path, yaml_text=yaml_text)], [_runner()], case_filter="refund"
+    )
+    assert report.total == 0
+    assert report.skipped_skills == []
+    assert report.tag_filtered_skills == []
+    assert report.case_filtered_skills == ["pdf"]
+
+
+def test_a_skill_emptied_by_the_tag_filter_is_not_also_case_filtered(tmp_path):
+    yaml_text = "cases:\n  - name: refund\n    task: good\n"
+    report = run_evals(
+        [_skill_with_cases(tmp_path, yaml_text=yaml_text)],
+        [_runner()],
+        tag="no-such-tag",
+        case_filter="refund",
+    )
+    assert report.tag_filtered_skills == ["pdf"]
+    assert report.case_filtered_skills == []
+
+
+def test_case_filter_is_appended_after_every_pre_existing_parameter():
+    # `run_evals` is library API. A caller that passed `judge` positionally
+    # before `case_filter` existed must still be binding `judge`, so the new
+    # parameter has to sit after every parameter that predates it.
+    import inspect
+
+    params = list(inspect.signature(run_evals).parameters)
+    assert params[-1] == "case_filter"
+    assert params.index("judge") == params.index("tag") + 1

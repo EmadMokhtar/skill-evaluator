@@ -1,0 +1,73 @@
+# skill-lens.toml — an annotated example of a committed configuration.
+#
+# This is the file a repository commits once it evaluates against a real
+# agent in CI. Every key skill-lens knows is listed; the ones this example
+# sets are live, the rest are commented out at their defaults.
+#
+# Resolution order: CLI flag > this file > built-in default. Secrets never
+# live here: API keys come from environment variables only.
+#
+# Use it from the repository root with
+#   skill-lens run ./examples --config examples/skill-lens.toml
+# It is not picked up on its own from there: discovery searches upward from
+# the current directory, and this file sits below it on purpose, so a plain
+# `skill-lens run` from the repository root keeps the offline defaults and
+# never reaches for a real agent — or an API key — by accident.
+
+# "fake" is the offline, scripted runner; "pydantic-ai" runs a real agent.
+default_runner = "pydantic-ai"
+
+# Model id for the runner. Needs the provider's key in the environment
+# (OPENAI_API_KEY here).
+model = "openai:gpt-4o-mini"
+
+# Sampling temperature, or the string "unset" for reasoning models that
+# reject an explicit one.
+# temperature = 0.0
+
+# Retries on a provider failure, and the wait between them in seconds.
+# retries = 2
+# retry_backoff_seconds = 1.0
+
+# "fake" never grades — a rubric case errors rather than passing unchecked.
+# "pydantic-ai" grades every `judge:` block with a real model.
+judge = "pydantic-ai"
+
+# Model for the judge; empty means "the same model as `model`".
+# judge_model = ""
+# judge_temperature = 0.0
+
+# The gate. 1.0 means every case must pass.
+min_pass_rate = 1.0
+
+# Whether an errored case (the runner or an evaluator broke) fails the gate.
+# fail_on_error = true
+
+# Comparative runs: "" (off), "none" (an empty skill) or "previous" (the
+# prior version from git). `repeat` samples each arm N times. `min_delta`
+# has no default — unset means the delta is reported but not gated; 0.0
+# below is an example value meaning "must not regress".
+# baseline = ""
+# repeat = 1
+# min_delta = 0.0
+
+# Cases run at once. The work is network-bound, so the ceiling is your
+# provider's rate limit, not your CPU.
+concurrency = 4
+
+# Keep each case's temporary directory for inspection. Every kept directory
+# is printed, so this is safe to commit.
+# keep_workspace = false
+
+# Print a failing case's whole output instead of the first 500 characters.
+# full_output = false
+
+# Runaway guards on what one case's workspace may write.
+# max_file_bytes = 1000000
+# max_files = 200
+# max_total_bytes = 5000000
+
+# A stricter floor for one skill, by name. Must stay the last section: in
+# TOML every key after a [table] header belongs to that table.
+[per_skill_min]
+order-support = 1.0
