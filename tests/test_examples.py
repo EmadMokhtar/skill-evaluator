@@ -15,7 +15,7 @@ EXAMPLES = Path(__file__).parent.parent / "examples"
 
 def test_every_example_skill_is_discovered():
     names = [skill.name for skill in load_skills(EXAMPLES)]
-    assert names == ["greeting", "order-support"]
+    assert names == ["csv-report", "greeting", "order-support"]
 
 
 def test_every_example_skill_has_at_least_one_case():

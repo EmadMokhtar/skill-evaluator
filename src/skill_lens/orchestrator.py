@@ -21,12 +21,21 @@ from skill_lens.models import (
     BaselineKind,
     BaselineNote,
     CaseOutcome,
+    CaseStatus,
     EvalCase,
+    EvalScore,
     RunReport,
+    RunResult,
     Skill,
 )
 from skill_lens.runners.base import Runner
 from skill_lens.skills.baseline import BaselineUnavailable, resolve_previous
+from skill_lens.workspace import (
+    DEFAULT_LIMITS,
+    WorkspaceError,
+    WorkspaceLimits,
+    create_workspace,
+)
 
 
 def _run_one(
@@ -38,6 +47,8 @@ def _run_one(
     arm: Arm = "candidate",
     repeat_index: int = 0,
     report_skill_name: str | None = None,
+    keep_workspace: bool = False,
+    limits: WorkspaceLimits = DEFAULT_LIMITS,
 ) -> CaseOutcome:
     """Run a single combination and score it, keeping errored distinct from failed.
 
@@ -45,38 +56,75 @@ def _run_one(
     keeps its own name and description -- that is what makes an `offered` run
     against the previous version honest -- but both arms must group under one
     heading in the report, and the candidate's name is that heading.
+
+    This function owns the workspace's lifetime. Creation happens here rather
+    than inside the runner because deletion must happen *after* scoring, and
+    the runner has returned by then. It is also what guarantees every arm and
+    every repetition gets a directory of its own.
     """
     name = report_skill_name if report_skill_name is not None else skill.name
-    result = runner.run(skill, case)
-    if result.errored:
-        return CaseOutcome(
-            skill_name=name,
-            case_name=case.name,
-            runner=runner.name,
-            status="errored",
-            scores=[],
-            result=result,
-            arm=arm,
-            repeat_index=repeat_index,
-        )
-    scores = [evaluator.evaluate(case, result) for evaluator in evaluators]
-    if any(score.errored for score in scores):
-        # An evaluator that blew up (a judge endpoint returning 500, structured
-        # output that did not match the rubric) is an infra signal, exactly like
-        # a runner that blew up. It must not read as a skill that got worse.
-        status = "errored"
-    else:
-        status = "passed" if all(score.passed for score in scores) else "failed"
-    return CaseOutcome(
+    outcome = partial(
+        CaseOutcome,
         skill_name=name,
         case_name=case.name,
         runner=runner.name,
-        status=status,
-        scores=scores,
-        result=result,
         arm=arm,
         repeat_index=repeat_index,
     )
+
+    workspace = None
+    if case.workspace is not None:
+        try:
+            workspace = create_workspace(
+                case.workspace,
+                label=f"{name}-{case.name}-{arm}-{repeat_index}",
+                limits=limits,
+            )
+        except WorkspaceError as exc:
+            # Infra, not signal: a disk or permissions problem says nothing
+            # about the skill, so this errors the case rather than failing it.
+            return outcome(
+                status="errored",
+                scores=[],
+                result=RunResult(error=f"WorkspaceError: {exc}"),
+            )
+
+    try:
+        result = runner.run(skill, case, workspace=workspace)
+        # Stamped here, not echoed by the runner: an adapter that ignores the
+        # parameter then fails loudly on the assertion instead of producing a
+        # workspace-less result that looks like a skill problem. Written
+        # unconditionally -- including the None case -- so a non-conforming
+        # adapter cannot smuggle a path of its own into the report for a case
+        # that declared no workspace.
+        result = result.model_copy(
+            update={"workspace": workspace.root if workspace is not None else None}
+        )
+        if result.errored:
+            scores: list[EvalScore] = []
+            status: CaseStatus = "errored"
+        else:
+            scores = [evaluator.evaluate(case, result) for evaluator in evaluators]
+            # An evaluator that blew up (a judge endpoint returning 500,
+            # structured output that did not match the rubric) is an infra
+            # signal, exactly like a runner that blew up. It must not read as
+            # a skill that got worse.
+            if any(score.errored for score in scores):
+                status = "errored"
+            else:
+                status = "passed" if all(score.passed for score in scores) else "failed"
+    finally:
+        # In a finally so an authoring error raised by an evaluator still
+        # cleans up before it propagates.
+        if workspace is not None and not keep_workspace:
+            workspace.cleanup()
+
+    if workspace is not None and not keep_workspace:
+        # The directory is gone, so the path must go too: a field pointing at
+        # a deleted directory would be a lie in the JSON report.
+        result = result.model_copy(update={"workspace": None})
+
+    return outcome(status=status, scores=scores, result=result)
 
 
 def _baseline_skill(skill: Skill, kind: BaselineKind, notes: list[BaselineNote]) -> Skill | None:
@@ -200,7 +248,12 @@ def _plan_work(
     return plan
 
 
-def _run_item(item: _WorkItem, evaluators: list[Evaluator]) -> CaseOutcome:
+def _run_item(
+    item: _WorkItem,
+    evaluators: list[Evaluator],
+    keep_workspace: bool,
+    limits: WorkspaceLimits,
+) -> CaseOutcome:
     return _run_one(
         item.skill,
         item.case,
@@ -209,6 +262,8 @@ def _run_item(item: _WorkItem, evaluators: list[Evaluator]) -> CaseOutcome:
         arm=item.arm,
         repeat_index=item.repeat_index,
         report_skill_name=item.report_skill_name,
+        keep_workspace=keep_workspace,
+        limits=limits,
     )
 
 
@@ -221,6 +276,8 @@ def _execute(
     evaluators: list[Evaluator],
     concurrency: int,
     executor_factory: Callable[[int], Executor] | None,
+    keep_workspace: bool = False,
+    limits: WorkspaceLimits = DEFAULT_LIMITS,
 ) -> list[CaseOutcome]:
     """Run every work item, reporting them in submission order.
 
@@ -243,7 +300,7 @@ def _execute(
     network-bound and threads release the GIL while waiting on a socket.
     """
     if concurrency == 1:
-        return [_run_item(item, evaluators) for item in items]
+        return [_run_item(item, evaluators, keep_workspace, limits) for item in items]
 
     executor = (executor_factory or _default_executor)(concurrency)
     try:
@@ -251,7 +308,9 @@ def _execute(
         # another OS thread, a broken pool, a custom factory -- and an executor
         # left un-shut-down keeps its workers alive, so the interpreter's exit
         # handler would finish the work this abort exists to abandon.
-        futures = [executor.submit(_run_item, item, evaluators) for item in items]
+        futures = [
+            executor.submit(_run_item, item, evaluators, keep_workspace, limits) for item in items
+        ]
 
         def _cancel_queued_after(index: int, finished: Future) -> None:
             # Runs on the worker thread, before it picks up its next item.
@@ -308,6 +367,8 @@ def run_evals(
     repeat: int = 1,
     concurrency: int = 1,
     executor_factory: Callable[[int], Executor] | None = None,
+    keep_workspace: bool = False,
+    workspace_limits: WorkspaceLimits | None = None,
 ) -> RunReport:
     """Run every (skill, case, runner, arm, repetition) and aggregate the results.
 
@@ -342,6 +403,12 @@ def run_evals(
     touching call sites. Runners, judges and evaluators must therefore be
     safe to share across threads: no mutable instance state touched by
     run/evaluate/judge.
+
+    `keep_workspace` skips deleting each case's temporary directory and leaves
+    its path on the `RunResult`, for debugging. `workspace_limits` bounds what
+    a case may write; None means the module defaults. Both are per-run
+    settings rather than per-case ones -- a cap is a runaway guard, not part
+    of what an eval asserts.
     """
     if evaluators is not None and judge is not None:
         raise ValueError(
@@ -366,7 +433,14 @@ def run_evals(
         ]
     )
     plan = _plan_work(skills, runners, evals_path, tag, baseline, repeat)
-    outcomes = _execute(plan.items, evaluators, concurrency, executor_factory)
+    outcomes = _execute(
+        plan.items,
+        evaluators,
+        concurrency,
+        executor_factory,
+        keep_workspace,
+        workspace_limits or DEFAULT_LIMITS,
+    )
     return RunReport(
         outcomes=outcomes,
         skipped_skills=plan.skipped,

@@ -1,6 +1,6 @@
-"""Build framework-neutral mock tools from a case's tool declarations.
+"""Build the framework-neutral tools an agent may call.
 
-Nothing here knows about any agent framework: a MockTool is a name, a JSON
+Nothing here knows about any agent framework: an AgentTool is a name, a JSON
 schema and a callable, which every adapter can register in its own way.
 """
 
@@ -11,11 +11,20 @@ from dataclasses import dataclass
 from typing import Any
 
 from skill_lens.models import Skill, ToolSpec
+from skill_lens.workspace import PathRefused, Workspace
 
 
 @dataclass(frozen=True)
-class MockTool:
-    """A tool the agent may call. Calling it has no side effects."""
+class AgentTool:
+    """A tool the agent may call: a name, a JSON schema and a callable.
+
+    Covers both the canned tools built from a case's `tools:` block, which
+    have no side effects, and the built-in workspace tools, which do. The
+    common contract is narrower than "no side effects" and is what every
+    adapter relies on: **calling one never raises.** A refusal comes back as
+    an ordinary string result, because a model that called a tool wrongly is
+    an eval signal and an exception would surface it as an infra failure.
+    """
 
     name: str
     description: str
@@ -23,7 +32,7 @@ class MockTool:
     call: Callable[..., str]
 
 
-def build_mock_tool(spec: ToolSpec) -> MockTool:
+def build_mock_tool(spec: ToolSpec) -> AgentTool:
     """Turn a declared ToolSpec into a callable plus its JSON schema.
 
     Parameter types are already constrained by `ToolSpec`, so an unsupported
@@ -37,7 +46,7 @@ def build_mock_tool(spec: ToolSpec) -> MockTool:
         """Return the canned value, whatever the model passed in."""
         return returns
 
-    return MockTool(
+    return AgentTool(
         name=spec.name,
         description=spec.description,
         json_schema={
@@ -95,7 +104,7 @@ def skill_tool_name(skill_name: str) -> str:
     return cleaned
 
 
-def build_skill_tool(skill: Skill) -> MockTool:
+def build_skill_tool(skill: Skill) -> AgentTool:
     """The skill itself, offered as a tool the agent may decline to use.
 
     Calling it returns the skill's instructions, so an offered run only has the
@@ -108,9 +117,127 @@ def build_skill_tool(skill: Skill) -> MockTool:
     def call(**_arguments: Any) -> str:
         return instructions
 
-    return MockTool(
+    return AgentTool(
         name=skill_tool_name(skill.name),
         description=skill.description,
         json_schema=_empty_schema(),
         call=call,
     )
+
+
+# The names the built-in tools are registered under. `cases/loader.py` reads
+# this to reject a case tool that would collide with one, and to accept these
+# names in a trajectory block -- both need the answer without asking a runner.
+BUILTIN_TOOL_NAMES: tuple[str, ...] = ("list_files", "read_file", "write_file")
+
+
+def _path_schema() -> dict[str, Any]:
+    """A fresh one-argument schema. Built per call, like `_empty_schema()`.
+
+    Not a module constant copied with `dict(...)`: that copies only the top
+    level, so every toolset would go on sharing the same `required` list and
+    the same nested property dicts. Under `--concurrency N` one adapter
+    mutating a schema in place would then corrupt unrelated cases' tools.
+    """
+    return {
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+        "required": ["path"],
+        "additionalProperties": False,
+    }
+
+
+def _write_schema() -> dict[str, Any]:
+    """A fresh two-argument schema. See `_path_schema` for why it is a function."""
+    return {
+        "type": "object",
+        "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+        "required": ["path", "content"],
+        "additionalProperties": False,
+    }
+
+
+def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
+    """The three real tools, bound to one workspace.
+
+    Every callable below catches rather than raises. `PathRefused` already
+    carries a message written for the model; `OSError` and `UnicodeError`
+    (a lone UTF-16 surrogate can raise `UnicodeEncodeError` on the way in,
+    before any decoding happens, not just `UnicodeDecodeError` on the way out)
+    are turned into one here. Arguments are accepted positionally-optional and
+    coerced, because a model may omit a required argument, send an extra one,
+    or send the wrong type -- none of which may raise.
+    """
+
+    def list_files(**_extra: Any) -> str:
+        try:
+            entries = workspace.listing()
+        except OSError as exc:  # pragma: no cover - a directory we just made
+            return f"refused: cannot list the working directory: {exc}"
+        return "\n".join(entries) if entries else "(empty)"
+
+    def read_file(path: Any = "", **_extra: Any) -> str:
+        target = str(path)
+        try:
+            return workspace.read(target)
+        except PathRefused as exc:
+            return str(exc)
+        except UnicodeDecodeError:
+            # The realistic case: the file exists but its bytes are not UTF-8.
+            # Say so about the CONTENT, so the model does not go looking for a
+            # problem with the path it asked for.
+            return f"refused: the content of {target} is not valid UTF-8 text"
+        except UnicodeError:
+            # Backstop. A lone UTF-16 surrogate in the path used to reach here
+            # as UnicodeEncodeError from os.path.realpath; check_relative_path
+            # now refuses those first, as PathRefused. Kept so that any future
+            # surprise from the path layer still returns a message rather than
+            # breaking the never-raise rule.
+            return f"refused: {target} could not be handled as UTF-8 text"
+        except OSError as exc:
+            return f"refused: cannot read {target}: {exc}"
+
+    def write_file(path: Any = "", content: Any = "", **_extra: Any) -> str:
+        target = str(path)
+        try:
+            written = workspace.write(target, str(content))
+        except PathRefused as exc:
+            return str(exc)
+        except UnicodeEncodeError:
+            # Only the CONTENT can trip this now: a lone UTF-16 surrogate --
+            # what a model emits when it produces a malformed \uXXXX escape --
+            # cannot be encoded as UTF-8. A surrogate in the path is refused
+            # earlier, by check_relative_path, as PathRefused.
+            return (
+                f"refused: the content for {target} contains characters that "
+                "cannot be encoded as UTF-8"
+            )
+        except UnicodeError:
+            # Backstop for any other Unicode failure, so the tool never raises.
+            return f"refused: {target} could not be handled as UTF-8 text"
+        except OSError as exc:
+            return f"refused: cannot write {target}: {exc}"
+        return f"wrote {target} ({written:,} bytes)"
+
+    return [
+        AgentTool(
+            name="list_files",
+            description=("List every file in the working directory, one relative path per line."),
+            json_schema=_empty_schema(),
+            call=list_files,
+        ),
+        AgentTool(
+            name="read_file",
+            description=("Read a text file from the working directory. `path` is relative to it."),
+            json_schema=_path_schema(),
+            call=read_file,
+        ),
+        AgentTool(
+            name="write_file",
+            description=(
+                "Create or replace a text file in the working directory. `path` is relative to it."
+            ),
+            json_schema=_write_schema(),
+            call=write_file,
+        ),
+    ]

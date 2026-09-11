@@ -33,6 +33,7 @@ from skill_lens.runners.preflight import MissingAPIKey, check_api_key
 from skill_lens.runners.pydantic_ai import PydanticAIRunner, RunnerDependencyError
 from skill_lens.scaffold import render_scaffold
 from skill_lens.skills.loader import SKILL_FILENAME, SkillParseError, load_skills, parse_skill_file
+from skill_lens.workspace import WorkspaceLimits
 
 app = typer.Typer(help="Run evaluations on Agent Skills (SKILL.md).", no_args_is_help=True)
 
@@ -129,6 +130,13 @@ def run(
         typer.Option(help="Truncate the Markdown summary to this many characters."),
     ] = None,
     concurrency: Annotated[int | None, typer.Option(help="Run this many cases at once.")] = None,
+    keep_workspace: Annotated[
+        bool | None,
+        typer.Option(
+            "--keep-workspace/--no-keep-workspace",
+            help="Keep each case's temporary directory instead of deleting it.",
+        ),
+    ] = None,
 ) -> None:
     """Discover skills, run their eval cases, and gate on the results."""
     try:
@@ -143,6 +151,14 @@ def run(
         resolved_concurrency = concurrency if concurrency is not None else settings.concurrency
         if resolved_concurrency < 1:
             raise typer.BadParameter("--concurrency must be at least 1")
+        resolved_keep_workspace = (
+            keep_workspace if keep_workspace is not None else settings.keep_workspace
+        )
+        workspace_limits = WorkspaceLimits(
+            max_file_bytes=settings.max_file_bytes,
+            max_files=settings.max_files,
+            max_total_bytes=settings.max_total_bytes,
+        )
         if markdown_max_chars is not None:
             if markdown_max_chars < 1:
                 raise typer.BadParameter("--markdown-max-chars must be at least 1")
@@ -220,6 +236,8 @@ def run(
             baseline=baseline_kind or None,
             repeat=resolved_repeat,
             concurrency=resolved_concurrency,
+            keep_workspace=resolved_keep_workspace,
+            workspace_limits=workspace_limits,
         )
     except _AUTHORING_ERRORS as exc:
         typer.echo(str(exc))

@@ -9,8 +9,15 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from skill_lens.models import EvalCase, Skill, ToolSpec
 from skill_lens.runners.base import Runner
-from skill_lens.runners.pydantic_ai import BASELINE_PREAMBLE, OFFERED_PREAMBLE, PydanticAIRunner
-from skill_lens.runners.tools import skill_tool_name
+from skill_lens.runners.pydantic_ai import (
+    BASELINE_PREAMBLE,
+    OFFERED_PREAMBLE,
+    WORKSPACE_PREAMBLE,
+    PydanticAIRunner,
+    _instructions,
+)
+from skill_lens.runners.tools import BUILTIN_TOOL_NAMES, skill_tool_name
+from skill_lens.workspace import Workspace
 
 SKILL = Skill(
     name="order-support",
@@ -497,3 +504,82 @@ def test_a_baseline_resolved_from_git_still_gets_its_own_prompt():
 
     PydanticAIRunner(model=FunctionModel(reply)).run(previous, case())
     assert "Old instructions." in seen["instructions"]
+
+
+def test_no_workspace_leaves_the_instructions_untouched():
+    plain = _instructions(SKILL, case(), has_workspace=False)
+    assert WORKSPACE_PREAMBLE not in plain
+
+
+def test_the_workspace_preamble_is_byte_identical_in_both_arms():
+    # If it were added to the candidate arm only, --min-delta would be
+    # measuring the preamble rather than the skill.
+    candidate = _instructions(SKILL, case(), has_workspace=True)
+    baseline = _instructions(EMPTY_SKILL, case(), has_workspace=True)
+    assert candidate.endswith(WORKSPACE_PREAMBLE)
+    assert baseline.endswith(WORKSPACE_PREAMBLE)
+    assert baseline == f"{BASELINE_PREAMBLE}\n\n{WORKSPACE_PREAMBLE}"
+
+
+def test_the_workspace_preamble_never_names_the_skill():
+    assert "order-support" not in WORKSPACE_PREAMBLE
+    assert EMPTY_SKILL.name not in _instructions(EMPTY_SKILL, case(), has_workspace=True)
+
+
+def test_an_offered_case_keeps_its_own_preamble_and_gains_the_workspace_one():
+    offered = _instructions(SKILL, case(mode="offered"), has_workspace=True)
+    assert offered == f"{OFFERED_PREAMBLE}\n\n{WORKSPACE_PREAMBLE}"
+
+
+def test_the_builtin_tools_are_registered_when_a_workspace_is_given(tmp_path):
+    seen: dict[str, list[str]] = {}
+
+    def reply(messages, info: AgentInfo):
+        seen["tools"] = [tool.name for tool in info.function_tools]
+        return text("done")
+
+    runner = PydanticAIRunner(model=FunctionModel(reply))
+    workspace = Workspace(root=tmp_path.resolve())
+    runner.run(SKILL, case(), workspace=workspace)
+    assert set(BUILTIN_TOOL_NAMES) <= set(seen["tools"])
+
+
+def test_no_builtin_tools_without_a_workspace():
+    seen: dict[str, list[str]] = {}
+
+    def reply(messages, info: AgentInfo):
+        seen["tools"] = [tool.name for tool in info.function_tools]
+        return text("done")
+
+    runner = PydanticAIRunner(model=FunctionModel(reply))
+    runner.run(SKILL, case())
+    assert not set(BUILTIN_TOOL_NAMES) & set(seen["tools"])
+
+
+def test_a_model_writing_a_file_lands_it_in_the_workspace(tmp_path):
+    runner = PydanticAIRunner(
+        model=scripted(
+            tool_call("write_file", {"path": "report.md", "content": "north 120"}),
+            text("done"),
+        )
+    )
+    workspace = Workspace(root=tmp_path.resolve())
+    result = runner.run(SKILL, case(), workspace=workspace)
+    assert result.error is None
+    assert workspace.read("report.md") == "north 120"
+    assert [call.name for call in result.tool_calls] == ["write_file"]
+
+
+def test_a_model_writing_outside_the_root_is_refused_not_errored(tmp_path):
+    # The refusal is an eval signal. A raised exception would mark the case
+    # errored and hide it.
+    runner = PydanticAIRunner(
+        model=scripted(
+            tool_call("write_file", {"path": "../escape.txt", "content": "x"}),
+            text("done"),
+        )
+    )
+    workspace = Workspace(root=tmp_path.resolve())
+    result = runner.run(SKILL, case(), workspace=workspace)
+    assert result.error is None
+    assert workspace.listing() == []

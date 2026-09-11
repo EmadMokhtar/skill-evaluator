@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from skill_lens.models import EvalCase, RunResult, Skill
+from skill_lens.workspace import Workspace
 
 
 @runtime_checkable
@@ -13,11 +14,21 @@ class Runner(Protocol):
 
     name: str
 
-    def run(self, skill: Skill, case: EvalCase) -> RunResult:
+    def run(self, skill: Skill, case: EvalCase, workspace: Workspace | None = None) -> RunResult:
         """Execute `case` with `skill` loaded, returning a RunResult.
 
         Takes the whole case, not just its task string, because a runner also
         builds the environment the case declares (its mock tools).
+
+        `workspace` is the contained directory the case asked for, already
+        created and seeded by the orchestrator, or None when the case declared
+        no `workspace:` block. It arrives as a `Workspace` rather than a
+        `Path` so the repository's configured limits travel with it -- an
+        adapter rebuilding one from a bare path would silently reinstate the
+        defaults.
+
+        The orchestrator, not the runner, owns the directory's lifetime: it is
+        deleted only after every evaluator has read it.
 
         Implementations must not raise for provider failures; they set
         RunResult.error instead so the orchestrator can mark the case errored.

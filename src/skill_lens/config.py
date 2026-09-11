@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from skill_lens.workspace import DEFAULT_LIMITS
+
 CONFIG_FILENAME = "skill-lens.toml"
 DEFAULT_MODEL = "openai:gpt-4o-mini"
 
@@ -52,6 +54,22 @@ class Config(BaseModel):
     overlaps waits rather than using more cores; the practical ceiling is the
     provider's rate limit. Validation lives in the CLI, not here, so a config
     value and a flag are checked the same way `repeat` already is.
+
+    `keep_workspace` keeps each case's temporary directory instead of deleting
+    it, and `--keep-workspace` / `--no-keep-workspace` override it in either
+    direction. Two states would not be enough: with `keep_workspace = true`
+    committed there would be no way to get a clean run back without editing
+    the file. Every kept directory is printed on every run, however keeping
+    was turned on -- a persistent setting that produced no visible output
+    would fill a disk with nothing on screen explaining why.
+
+    The three caps are runaway guards on what one case may write. They get no
+    CLI flag because they are policy set once per repository rather than a
+    per-run decision, the same reasoning that leaves `fail_on_error` and
+    `retries` config-only. `gt=0` lives on the model rather than in the CLI
+    because, with no flag, there is only one entry point to validate --
+    unlike `repeat` and `concurrency`, whose checks sit in the CLI so a flag
+    and a config value are checked identically.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -71,6 +89,10 @@ class Config(BaseModel):
     repeat: int = 1
     min_delta: float | None = None
     concurrency: int = 1
+    keep_workspace: bool = False
+    max_file_bytes: int = Field(default=DEFAULT_LIMITS.max_file_bytes, gt=0)
+    max_files: int = Field(default=DEFAULT_LIMITS.max_files, gt=0)
+    max_total_bytes: int = Field(default=DEFAULT_LIMITS.max_total_bytes, gt=0)
 
 
 def find_config_file(start: Path) -> Path | None:

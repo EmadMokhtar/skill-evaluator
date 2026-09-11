@@ -5,9 +5,10 @@ from pathlib import Path
 import pytest
 
 from skill_lens.cases.loader import CaseParseError
-from skill_lens.evaluators.assertion import UnknownAssertionKind
+from skill_lens.evaluators.assertion import InvalidAssertionValue
 from skill_lens.judges.fake import FakeJudge
 from skill_lens.models import (
+    AssertionSpec,
     CheckResult,
     EvalCase,
     EvalScore,
@@ -15,10 +16,12 @@ from skill_lens.models import (
     RunResult,
     Skill,
     ToolCall,
+    WorkspaceSpec,
 )
 from skill_lens.orchestrator import _execute, _WorkItem, run_evals
 from skill_lens.runners.fake import FakeRunner
 from skill_lens.skills.loader import load_skills
+from skill_lens.workspace import Workspace, WorkspaceLimits
 
 CASES_YAML = """cases:
   - name: passes
@@ -50,6 +53,20 @@ def _runner():
             "explodes": RunResult(error="provider 500"),
         }
     )
+
+
+def _evals(tmp_path: Path, *cases: EvalCase) -> Path:
+    """Write cases to a YAML file and return its path.
+
+    Goes through the real loader so these tests exercise the same validation
+    a user's file does.
+    """
+    import yaml
+
+    path = tmp_path / "generated.eval.yaml"
+    payload = {"cases": [case.model_dump(exclude_none=True) for case in cases]}
+    path.write_text(yaml.safe_dump(payload), encoding="utf-8")
+    return path
 
 
 def test_runs_all_cases_and_marks_pass_and_fail(tmp_path):
@@ -131,10 +148,11 @@ def test_unknown_assertion_kind_aborts_the_run(tmp_path):
     """Characterization test: a malformed assertion aborts run_evals by design.
 
     An unknown `kind:` in an eval YAML is an authoring error in the user's
-    eval file, not a skill failure. The owner decided this should abort the
-    whole matrix (propagate out of run_evals) rather than be caught and
-    reported as a red eval outcome, so the orchestrator deliberately has no
-    try/except around evaluator.evaluate(...). This test locks in that
+    eval file, not a skill failure. Since M6 the case loader rejects it
+    during discovery -- before any provider call -- rather than the
+    evaluator catching it mid-run; either way the owner decided this should
+    abort the whole matrix (propagate out of run_evals) rather than be
+    caught and reported as a red eval outcome. This test locks in that
     behavior; the CLI is expected to turn this exception into a clean exit
     code in a later task.
     """
@@ -142,7 +160,7 @@ def test_unknown_assertion_kind_aborts_the_run(tmp_path):
         "cases:\n  - name: bad kind\n    task: good\n"
         "    assertions:\n      - kind: nonsense\n        value: whatever\n"
     )
-    with pytest.raises(UnknownAssertionKind):
+    with pytest.raises(CaseParseError):
         run_evals([_skill_with_cases(tmp_path, yaml_text=yaml_text)], [_runner()])
 
 
@@ -370,13 +388,15 @@ def test_an_authoring_error_still_aborts_the_run_under_concurrency(tmp_path):
         encoding="utf-8",
     )
     skills = load_skills(skill_dir)
-    with pytest.raises(UnknownAssertionKind):
+    with pytest.raises(CaseParseError):
         run_evals(skills, [FakeRunner()], concurrency=4)
 
 
 def test_the_surfaced_authoring_error_is_deterministic(tmp_path):
-    """Reading futures in submission order means the same error surfaces every
-    time, so the message a user sees does not depend on thread scheduling."""
+    """Discovery is a separate, sequential pass ahead of execution, so the
+    cases in a file are validated in order and the same one always surfaces
+    first -- the message a user sees does not depend on thread scheduling,
+    because no thread has started yet when this fires."""
     skill_dir = tmp_path / "mixed"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
@@ -395,7 +415,7 @@ def test_the_surfaced_authoring_error_is_deterministic(tmp_path):
     skills = load_skills(skill_dir)
     messages = set()
     for _ in range(5):
-        with pytest.raises(UnknownAssertionKind) as caught:
+        with pytest.raises(CaseParseError) as caught:
             run_evals(skills, [FakeRunner()], concurrency=4)
         messages.add(str(caught.value))
     assert len(messages) == 1
@@ -449,6 +469,13 @@ def test_a_failure_cancels_work_that_is_still_queued(tmp_path):
     about cancellation rather than about which thread won a race: a worker runs
     a future's done callbacks before it picks up its next item, so the cancel
     lands before any queued case can start.
+
+    The second case uses an invalid regex, not an unknown kind: since M6 an
+    unknown kind is caught by the case loader during discovery, which runs
+    entirely before execution starts, so it could never be the thing that
+    fires mid-run with a worker already blocked. A malformed regex is still
+    only caught by the evaluator, inside a submitted work item, which is
+    exactly the timing this test needs.
     """
     skill_dir = tmp_path / "big"
     (skill_dir / "evals").mkdir(parents=True)
@@ -460,7 +487,7 @@ def test_a_failure_cancels_work_that_is_still_queued(tmp_path):
         "  - name: aaa-blocker\n    task: block\n    assertions:\n"
         "      - kind: contains\n        value: x\n"
         "  - name: bbb-bad\n    task: bad\n    assertions:\n"
-        "      - kind: no-such-kind\n        value: x\n"
+        "      - kind: regex\n        value: '['\n"
     ) + "".join(
         f"  - name: rest-{i}\n    task: t{i}\n    assertions:\n"
         f"      - kind: contains\n        value: x\n"
@@ -475,7 +502,7 @@ def test_a_failure_cancels_work_that_is_still_queued(tmp_path):
     class _GatedRunner:
         name = "gated"
 
-        def run(self, skill, case):
+        def run(self, skill, case, workspace=None):
             with lock:
                 seen.append(case.name)
             if case.name == "aaa-blocker":
@@ -488,7 +515,7 @@ def test_a_failure_cancels_work_that_is_still_queued(tmp_path):
     timer = threading.Timer(1.0, release.set)
     timer.start()
     try:
-        with pytest.raises(UnknownAssertionKind):
+        with pytest.raises(InvalidAssertionValue):
             run_evals(load_skills(skill_dir), [_GatedRunner()], concurrency=2)
     finally:
         timer.cancel()
@@ -576,3 +603,210 @@ def test_work_abandoned_without_a_failure_is_an_error_not_a_short_report():
     ]
     with pytest.raises(RuntimeError, match="work was abandoned"):
         _execute(items, [], concurrency=2, executor_factory=lambda _n: _AbandoningExecutor())
+
+
+class _RecordingRunner:
+    """Captures the workspace it was handed, and whether the directory existed."""
+
+    name = "recording"
+
+    def __init__(self) -> None:
+        self.seen: list[Workspace] = []
+        self.seeded: list[str] = []
+
+    def run(self, skill, case, workspace=None):
+        if workspace is not None:
+            self.seen.append(workspace)
+            workspace.write("report.md", f"{skill.variant}")
+            # Defensive: most callers of this stub seed nothing, so a missing
+            # file must not raise -- only pin what was actually there while
+            # the runner had control, for the cases that do seed one.
+            try:
+                self.seeded.append(workspace.read("in.csv"))
+            except OSError:
+                pass
+        return RunResult(output="done")
+
+
+def _skill(tmp_path) -> Skill:
+    return Skill(name="s", description="d", instructions="i", path=tmp_path)
+
+
+def _case(**kwargs) -> EvalCase:
+    kwargs.setdefault("name", "c")
+    kwargs.setdefault("task", "t")
+    return EvalCase(**kwargs)
+
+
+def test_a_case_with_no_workspace_gets_none(tmp_path):
+    runner = _RecordingRunner()
+    run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, _case()))
+    assert runner.seen == []
+
+
+def test_the_workspace_is_deleted_after_scoring(tmp_path):
+    runner = _RecordingRunner()
+    case = _case(
+        workspace=WorkspaceSpec(),
+        assertions=[AssertionSpec(kind="file-produced", file="report.md")],
+    )
+    report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    # The assertion passed, which proves the directory still existed while the
+    # evaluators ran; it is gone now, which proves cleanup happened after.
+    assert report.passed == 1
+    assert not runner.seen[0].root.exists()
+
+
+def test_the_workspace_path_is_cleared_once_the_directory_is_gone(tmp_path):
+    # A path pointing at a deleted directory would be a lie in the JSON report.
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    assert report.outcomes[0].result is not None
+    assert report.outcomes[0].result.workspace is None
+
+
+def test_keep_workspace_leaves_the_directory_and_the_path(tmp_path):
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    report = run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        keep_workspace=True,
+    )
+    kept = report.outcomes[0].result.workspace
+    try:
+        assert kept is not None and Path(kept).is_dir()
+    finally:
+        # In a finally so a failing assertion above does not leak the
+        # directory -- cleanup must run either way.
+        if kept is not None:
+            Workspace(root=Path(kept)).cleanup()
+
+
+def test_each_arm_and_repetition_gets_its_own_directory(tmp_path):
+    # Two arms sharing one directory would let the baseline read files the
+    # candidate wrote -- a silently wrong delta.
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        baseline="none",
+        repeat=2,
+    )
+    roots = [workspace.root for workspace in runner.seen]
+    assert len(roots) == 4
+    assert len(set(roots)) == 4
+
+
+def test_seeded_files_reach_the_runner(tmp_path):
+    # _RecordingRunner captures the seeded content itself, inside run(),
+    # while it still has the directory -- not by reading it back afterward.
+    # That pins the file's presence at the moment the runner actually had
+    # control, so this no longer depends on keep_workspace working (a
+    # keep_workspace regression can no longer fail this test for an unrelated
+    # reason) and needs no cleanup at all: the default keep_workspace=False
+    # deletes the directory exactly as every other case does.
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec(files={"in.csv": "a,b\n"}))
+    run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    assert runner.seeded == ["a,b\n"]
+
+
+def test_configured_limits_reach_the_workspace(tmp_path):
+    # A limit read from config and then dropped on the way through would leave
+    # the default silently in force.
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        workspace_limits=WorkspaceLimits(max_files=7),
+    )
+    assert runner.seen[0].limits.max_files == 7
+
+
+def test_a_seeding_failure_errors_the_case_rather_than_failing_it(tmp_path):
+    # Disk and permission problems say nothing about the skill. The loader
+    # rejects an escaping path first, so this is unreachable through a YAML
+    # file -- it is called directly, which is also the only honest way to
+    # reach the branch.
+    from skill_lens.orchestrator import _run_one
+
+    outcome = _run_one(
+        _skill(tmp_path),
+        _case(workspace=WorkspaceSpec(files={"../escape.txt": "x"})),
+        _RecordingRunner(),
+        [],
+    )
+    assert outcome.status == "errored"
+    assert outcome.result is not None
+    assert "workspace" in outcome.result.error.lower()
+
+
+def test_an_errored_run_still_gets_its_directory_deleted(tmp_path):
+    class _Broken(_RecordingRunner):
+        def run(self, skill, case, workspace=None):
+            if workspace is not None:
+                self.seen.append(workspace)
+            return RunResult(error="provider exploded")
+
+    runner = _Broken()
+    case = _case(workspace=WorkspaceSpec())
+    report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    assert report.errored == 1
+    assert not runner.seen[0].root.exists()
+
+
+def test_concurrency_does_not_share_directories(tmp_path):
+    runner = _RecordingRunner()
+    cases = [
+        _case(name=f"c{index}", task=f"t{index}", workspace=WorkspaceSpec()) for index in range(6)
+    ]
+    run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, *cases), concurrency=4)
+    roots = [workspace.root for workspace in runner.seen]
+    assert len(set(roots)) == 6
+
+
+def test_an_authoring_error_still_deletes_the_directory(tmp_path):
+    # The cleanup lives in a `finally` for exactly this: an evaluator that
+    # raises an authoring error must abort the run AND leave no directory
+    # behind. Without this test, flattening the finally into straight-line
+    # code would pass the whole suite while leaking a directory per case.
+    from skill_lens.orchestrator import _run_one
+
+    class _Exploding:
+        def evaluate(self, case, result):
+            raise InvalidAssertionValue("boom")
+
+    runner = _RecordingRunner()
+    with pytest.raises(InvalidAssertionValue):
+        _run_one(
+            _skill(tmp_path),
+            _case(workspace=WorkspaceSpec()),
+            runner,
+            [_Exploding()],
+        )
+    assert not runner.seen[0].root.exists()
+
+
+def test_a_runner_supplied_workspace_is_ignored_for_a_workspace_less_case(tmp_path):
+    # The stamp is unconditional now: a runner that returns its own
+    # RunResult.workspace must not have that path reach the report for a case
+    # that declared no `workspace:` block. Otherwise a non-conforming adapter
+    # could smuggle a path of its own past the orchestrator, and the
+    # assertion evaluator would use it instead of raising the intended
+    # "this run had no workspace" authoring error.
+    class _Smuggler:
+        name = "smuggler"
+
+        def run(self, skill, case, workspace=None):
+            return RunResult(output="x", workspace=Path("/etc"))
+
+    report = run_evals([_skill(tmp_path)], [_Smuggler()], evals_path=_evals(tmp_path, _case()))
+    assert report.outcomes[0].result is not None
+    assert report.outcomes[0].result.workspace is None

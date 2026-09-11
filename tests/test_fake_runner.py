@@ -2,11 +2,15 @@
 
 from pathlib import Path
 
+import pytest
+
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
 from skill_lens.runners.base import Runner
 from skill_lens.runners.fake import FakeRunner
+from skill_lens.workspace import PathRefused, Workspace
 
 SKILL = Skill(name="pdf", description="", instructions="", path=Path("."))
+BASELINE = Skill(name="pdf", description="", instructions="", path=Path("."), variant="baseline")
 
 
 def case(task: str) -> EvalCase:
@@ -91,3 +95,70 @@ def test_an_unscripted_baseline_arm_falls_back_to_the_shared_script():
     runner = FakeRunner(responses={"t": RunResult(output="shared")})
     baseline = Skill(name="s", path=Path("."), variant="baseline")
     assert runner.run(baseline, EvalCase(name="c", task="t")).output == "shared"
+
+
+def test_fake_runner_still_satisfies_the_protocol():
+    assert isinstance(FakeRunner(), Runner)
+
+
+def test_running_without_a_workspace_is_unchanged():
+    runner = FakeRunner(responses={"t": RunResult(output="scripted")})
+    assert runner.run(SKILL, EvalCase(name="n", task="t")).output == "scripted"
+
+
+def test_scripted_writes_land_in_the_workspace(tmp_path):
+    runner = FakeRunner(writes={"t": {"report.md": "body"}})
+    workspace = Workspace(root=tmp_path.resolve())
+    runner.run(SKILL, EvalCase(name="n", task="t"), workspace=workspace)
+    assert workspace.read("report.md") == "body"
+
+
+def test_the_baseline_arm_can_be_scripted_to_write_differently(tmp_path):
+    # The only way a zero-cost test can express "this skill helps" for an
+    # artifact, mirroring how responses / baseline_responses already work.
+    runner = FakeRunner(
+        writes={"t": {"report.md": "thorough"}},
+        baseline_writes={"t": {"report.md": "thin"}},
+    )
+    candidate = Workspace(root=(tmp_path / "c").resolve())
+    baseline = Workspace(root=(tmp_path / "b").resolve())
+    candidate.root.mkdir()
+    baseline.root.mkdir()
+    runner.run(SKILL, EvalCase(name="n", task="t"), workspace=candidate)
+    runner.run(BASELINE, EvalCase(name="n", task="t"), workspace=baseline)
+    assert candidate.read("report.md") == "thorough"
+    assert baseline.read("report.md") == "thin"
+
+
+def test_the_baseline_falls_back_to_the_candidate_script(tmp_path):
+    runner = FakeRunner(writes={"t": {"report.md": "shared"}})
+    workspace = Workspace(root=tmp_path.resolve())
+    runner.run(BASELINE, EvalCase(name="n", task="t"), workspace=workspace)
+    assert workspace.read("report.md") == "shared"
+
+
+def test_an_unscripted_task_writes_nothing(tmp_path):
+    runner = FakeRunner(writes={"other": {"report.md": "body"}})
+    workspace = Workspace(root=tmp_path.resolve())
+    runner.run(SKILL, EvalCase(name="n", task="t"), workspace=workspace)
+    assert workspace.listing() == []
+
+
+def test_a_scripted_write_that_escapes_raises(tmp_path):
+    # A test helper, not a provider: an escaping path here is a bug in the
+    # test that scripted it, and must be loud rather than silently skipped.
+    runner = FakeRunner(writes={"t": {"../escape.txt": "x"}})
+    workspace = Workspace(root=tmp_path.resolve())
+    with pytest.raises(PathRefused):
+        runner.run(SKILL, EvalCase(name="n", task="t"), workspace=workspace)
+
+
+def test_scripted_state_cannot_be_corrupted_by_a_caller(tmp_path):
+    # The existing deep-copy invariant, re-checked now that a second scripted
+    # mapping exists.
+    scripted = {"t": {"report.md": "body"}}
+    runner = FakeRunner(writes=scripted, responses={"t": RunResult(output="o")})
+    workspace = Workspace(root=tmp_path.resolve())
+    result = runner.run(SKILL, EvalCase(name="n", task="t"), workspace=workspace)
+    result.output = "mutated"
+    assert runner.run(SKILL, EvalCase(name="n", task="t"), workspace=workspace).output == "o"

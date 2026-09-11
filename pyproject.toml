@@ -30,6 +30,12 @@ dependencies = [
     "pydantic>=2.7",
     "typer>=0.12",
     "pyyaml>=6.0",
+    # Core, not an optional extra. An optional extra would make
+    # `kind: json-schema` fail at *evaluate* time, and this project draws a
+    # hard line between authoring errors (abort, exit 2) and infra errors
+    # (errored); a missing library for a declared assertion is cleanly
+    # neither. It is small and pure Python.
+    "jsonschema>=4.21",
 ]
 
 # The distribution is `skill-lens` but the repository is `skill-evaluator`, so a

@@ -80,6 +80,28 @@ def _no_baseline_block(report: RunReport) -> list[str]:
     return lines
 
 
+def _kept_workspaces(report: RunReport) -> list[str]:
+    """Every directory still on disk, and which run left it there.
+
+    Printed on every run that kept one, whether the flag or the config file
+    turned keeping on. That is what makes `keep_workspace` safe to commit.
+    """
+    kept = [
+        (outcome, outcome.result.workspace)
+        for outcome in report.outcomes
+        if outcome.result is not None and outcome.result.workspace is not None
+    ]
+    if not kept:
+        return []
+    lines = ["", "Kept workspaces"]
+    for outcome, path in kept:
+        lines.append(
+            f"  {outcome.skill_name} :: {outcome.case_name} "
+            f"({outcome.arm}, repeat {outcome.repeat_index})  {path}"
+        )
+    return lines
+
+
 def render_console(
     report: RunReport, gate: GateResult | None = None, delta: Delta | None = None
 ) -> str:
@@ -187,6 +209,8 @@ def render_console(
         lines.extend(_delta_block(delta))
     elif report.baseline_kind is not None:
         lines.extend(_no_baseline_block(report))
+
+    lines.extend(_kept_workspaces(report))
 
     if gate is not None and not gate.passed:
         lines.append("")

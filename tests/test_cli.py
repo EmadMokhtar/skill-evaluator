@@ -1,5 +1,6 @@
 import json
 import re
+import tempfile
 import xml.etree.ElementTree as ET
 
 from typer.testing import CliRunner
@@ -58,6 +59,15 @@ UNKNOWN_KIND_CASES_YAML = """cases:
     task: anything
     assertions:
       - kind: nonsense
+        value: pdf
+"""
+
+WORKSPACE_CASES_YAML = """cases:
+  - name: mentions the skill
+    task: anything
+    workspace: {}
+    assertions:
+      - kind: contains
         value: pdf
 """
 
@@ -624,3 +634,44 @@ def test_concurrency_above_one_runs_the_suite(tmp_path):
     _make_skill(tmp_path / "skills")
     result = runner.invoke(app, ["run", str(tmp_path / "skills"), "--concurrency", "4"])
     assert result.exit_code == 0
+
+
+def test_keep_workspace_flag_wins_over_a_false_config(tmp_path, monkeypatch):
+    # This test deliberately keeps a workspace (--keep-workspace) and never
+    # deletes it. tempfile.mkdtemp writes to the system temp directory by
+    # default, which tests/conftest.py's chdir-into-tmp_path fixture does not
+    # touch -- left alone, every run of this test strands another
+    # skill-lens-* directory outside pytest's own cleanup. Redirecting
+    # tempfile.tempdir into tmp_path puts the kept workspace where pytest
+    # will garbage-collect it.
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    skill_dir = _make_skill(tmp_path, cases=WORKSPACE_CASES_YAML)
+    result = runner.invoke(app, ["run", str(skill_dir), "--keep-workspace"])
+    assert result.exit_code in (0, 1)
+    assert "Kept workspaces" in result.stdout
+
+
+def test_no_keep_workspace_flag_wins_over_a_true_config(tmp_path):
+    skill_dir = _make_skill(tmp_path, cases=WORKSPACE_CASES_YAML)
+    config = tmp_path / "skill-lens.toml"
+    config.write_text("keep_workspace = true\n", encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(config), "--no-keep-workspace"]
+    )
+    assert "Kept workspaces" not in result.stdout
+
+
+def test_the_config_alone_turns_keeping_on(tmp_path, monkeypatch):
+    # Printing only under the flag would let a committed keep_workspace = true
+    # fill a disk with nothing on screen connecting the two. This test also
+    # keeps its workspace and never deletes it, so redirect tempfile.tempdir
+    # into tmp_path for the same reason as
+    # test_keep_workspace_flag_wins_over_a_false_config above -- otherwise
+    # mkdtemp strands it in the system temp directory, which pytest never
+    # cleans up.
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    skill_dir = _make_skill(tmp_path, cases=WORKSPACE_CASES_YAML)
+    config = tmp_path / "skill-lens.toml"
+    config.write_text("keep_workspace = true\n", encoding="utf-8")
+    result = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
+    assert "Kept workspaces" in result.stdout

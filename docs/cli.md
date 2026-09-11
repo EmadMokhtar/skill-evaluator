@@ -7,6 +7,7 @@ skill-lens run <path> [--evals <path>] [--runner <name>] [--model <name>]
                       [--markdown-output <path>] [--markdown-max-chars <int>]
                       [--concurrency <int>] [--config <file>] [--baseline <kind>]
                       [--repeat <int>] [--min-delta <float>]
+                      [--keep-workspace | --no-keep-workspace]
 skill-lens list <path> [--evals <path>]
 skill-lens init <path> [--force]
 skill-lens --version
@@ -37,6 +38,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--markdown-output <path>` | none | Write a Markdown summary here, for a job summary or PR comment |
 | `--markdown-max-chars <int>` | unset | Truncate the Markdown summary to fit a comment. Detail blocks are dropped first, then gate reasons are elided behind a `+N more` count; a budget too small to hold even the verdict is cut outright. Requires `--markdown-output` |
 | `--concurrency <int>` | `1` | Run this many cases at once. The work is network-bound, so the practical ceiling is your provider's rate limit |
+| `--keep-workspace` / `--no-keep-workspace` | unset | Keep each case's temporary directory instead of deleting it. Overrides the `keep_workspace` config key in either direction; omitting both flags leaves the config file's value in effect. Every kept directory is printed, under a `Kept workspaces` section, whichever of the flag or the config turned keeping on |
 
 Each flag overrides the corresponding key in [configuration](configuration.md).
 Exit codes are documented in [Gating](gating.md). `--baseline`, `--repeat` and `--min-delta`

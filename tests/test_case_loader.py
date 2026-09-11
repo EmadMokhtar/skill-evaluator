@@ -475,3 +475,189 @@ def test_a_sentinel_in_a_comment_is_not_a_sentinel(tmp_path):
     )
     cases = parse_cases_file(path)
     assert [case.name for case in cases] == ["handles the common case"]
+
+
+def _write(tmp_path, body: str):
+    path = tmp_path / "cases.eval.yaml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_an_unknown_kind_is_rejected_at_load_time(tmp_path):
+    # Before M6 this surfaced only when the case ran, after money was spent.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    assertions:\n"
+        "      - kind: containz\n        value: x\n",
+    )
+    with pytest.raises(CaseParseError, match="containz"):
+        parse_cases_file(path)
+
+
+def test_contains_without_a_value_is_rejected(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    assertions:\n      - kind: contains\n",
+    )
+    with pytest.raises(CaseParseError, match="value"):
+        parse_cases_file(path)
+
+
+def test_file_produced_without_a_file_is_rejected(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n    assertions:\n"
+        "      - kind: file-produced\n",
+    )
+    with pytest.raises(CaseParseError, match="file"):
+        parse_cases_file(path)
+
+
+def test_a_forbidden_field_for_the_kind_is_rejected(tmp_path):
+    # `value` means nothing to file-produced; accepting it silently would let
+    # an author think they had asserted on content.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n    assertions:\n"
+        "      - kind: file-produced\n        file: r.md\n        value: hello\n",
+    )
+    with pytest.raises(CaseParseError, match="value"):
+        parse_cases_file(path)
+
+
+def test_a_file_target_without_a_workspace_is_rejected(tmp_path):
+    # The assertion could never hold, so it is a mistake, not a failing skill.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    assertions:\n"
+        "      - kind: contains\n        value: x\n        file: r.md\n",
+    )
+    with pytest.raises(CaseParseError, match="workspace"):
+        parse_cases_file(path)
+
+
+def test_judge_artifacts_without_a_workspace_are_rejected(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    judge:\n"
+        "      artifacts: [r.md]\n      rubric: ['it is good']\n",
+    )
+    with pytest.raises(CaseParseError, match="workspace"):
+        parse_cases_file(path)
+
+
+def test_a_judge_artifact_naming_a_path_that_escapes_is_rejected(tmp_path):
+    # No agent could ever produce a file at "../escape.txt" -- it is a typo
+    # in the eval author's list, not a fact about the skill. Without this
+    # check it would sail through and render as "(not produced)" at run
+    # time, failing the rubric and blaming the skill for the author's
+    # mistake. workspace.files gets the identical check above; this pins the
+    # same rule for judge.artifacts.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n    judge:\n"
+        "      artifacts: ['../escape.txt']\n      rubric: ['it is good']\n",
+    )
+    with pytest.raises(CaseParseError, match="escape.txt"):
+        parse_cases_file(path)
+
+
+def test_a_malformed_json_schema_is_an_authoring_error(tmp_path):
+    # Same class of mistake as a malformed regex.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n    assertions:\n"
+        "      - kind: json-schema\n        file: d.json\n"
+        "        json_schema:\n          type: not-a-real-type\n",
+    )
+    with pytest.raises(CaseParseError, match="json_schema"):
+        parse_cases_file(path)
+
+
+def test_a_valid_json_schema_case_loads(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n    assertions:\n"
+        "      - kind: json-schema\n        file: d.json\n"
+        "        json_schema:\n          type: object\n",
+    )
+    (case,) = parse_cases_file(path)
+    assert case.assertions[0].json_schema == {"type": "object"}
+
+
+@pytest.mark.parametrize("bad", ["/abs.txt", "../escape.txt", "nested/../../x.txt", ""])
+def test_a_workspace_file_that_escapes_is_rejected(tmp_path, bad):
+    path = _write(
+        tmp_path,
+        f"cases:\n  - name: n\n    task: t\n    workspace:\n      files:\n        {bad!r}: 'x'\n",
+    )
+    with pytest.raises(CaseParseError):
+        parse_cases_file(path)
+
+
+def test_an_assertion_file_target_that_escapes_is_rejected_at_load_time(tmp_path):
+    # workspace.files and judge.artifacts are validated here already; an
+    # assertion's file: is the third path source and, before this fix, was
+    # only caught at evaluate time -- after the runner had already run (and,
+    # with a real provider, spent money). It must abort at load time (exit
+    # 2), same as the other two.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n    assertions:\n"
+        "      - kind: contains\n        value: x\n        file: ../escape.txt\n",
+    )
+    with pytest.raises(CaseParseError, match="escape.txt"):
+        parse_cases_file(path)
+
+
+def test_a_case_tool_colliding_with_a_builtin_is_rejected(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n    tools:\n"
+        "      - name: write_file\n        description: mine\n",
+    )
+    with pytest.raises(CaseParseError, match="write_file"):
+        parse_cases_file(path)
+
+
+def test_the_same_tool_name_is_fine_without_a_workspace(tmp_path):
+    # No workspace means no built-in tools, so there is nothing to collide with.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    tools:\n"
+        "      - name: write_file\n        description: mine\n",
+    )
+    (case,) = parse_cases_file(path)
+    assert case.tools[0].name == "write_file"
+
+
+def test_a_trajectory_may_name_a_builtin_when_a_workspace_exists(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n"
+        "    trajectory:\n      called: [write_file]\n",
+    )
+    (case,) = parse_cases_file(path)
+    assert case.trajectory is not None
+    assert case.trajectory.called == ["write_file"]
+
+
+def test_a_trajectory_naming_a_builtin_without_a_workspace_is_rejected(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    trajectory:\n      called: [write_file]\n",
+    )
+    with pytest.raises(CaseParseError, match="workspace"):
+        parse_cases_file(path)
+
+
+def test_a_case_with_no_workspace_still_loads_unchanged(tmp_path):
+    # The whole opt-in promise: suites written before M6 must be untouched.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    assertions:\n"
+        "      - kind: contains\n        value: hello\n",
+    )
+    (case,) = parse_cases_file(path)
+    assert case.workspace is None
+    assert case.assertions[0].file is None

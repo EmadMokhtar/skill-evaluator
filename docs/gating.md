@@ -90,6 +90,12 @@ Each entry in `outcomes` carries `arm` (`"candidate"` or `"baseline"`) and `repe
 (0-based), so a comparative run's raw per-repetition results can be reconstructed from the
 JSON even though the console collapses them to one line per case.
 
+`outcomes[].workspace` is that case's temporary directory path when
+[`--keep-workspace`](cli.md) kept it, `null` otherwise — including for every case that
+declared no `workspace:` block at all. It is never a path to a directory that has already
+been deleted: the field is cleared at the same moment the directory is, so it can never be
+a stale pointer in the report.
+
 `delta` is the full comparison object — pass-rate, token, cost and latency deltas, per-case
 stats, low-signal checks, high-variance cases and notes — and is `null` when no baseline arm
 ran. `baseline_notes` lists why a skill's or case's baseline was skipped or unavailable.

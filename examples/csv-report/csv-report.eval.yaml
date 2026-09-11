@@ -1,0 +1,42 @@
+# The reference eval suite for M6: seeded input, produced artifacts, and a
+# rubric that grades the report rather than the chat message about it.
+cases:
+  - name: summarises a two-region export
+    task: Summarise sales.csv into report.md, and write totals.json alongside it.
+    workspace:
+      files:
+        sales.csv: |
+          region,units
+          north,120
+          south,80
+    trajectory:
+      called: [read_file, write_file]
+    assertions:
+      - kind: file-produced
+        file: report.md
+      - kind: file-produced
+        file: totals.json
+      - kind: contains
+        value: "north"
+        file: report.md
+      - kind: contains
+        value: "200"
+        file: report.md
+      - kind: json-schema
+        file: totals.json
+        json_schema:
+          type: object
+          required: [total, regions]
+          properties:
+            total: { type: integer }
+            regions: { type: object }
+      - kind: not_contains
+        value: "east"
+        file: report.md
+    judge:
+      artifacts: [report.md]
+      expected: A short Markdown report with one line per region and a total.
+      rubric:
+        - The report has a line for the north region and a line for the south region.
+        - The report states a total of 200 units.
+        - The report names no region that is absent from the input.

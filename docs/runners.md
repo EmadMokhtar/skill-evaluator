@@ -60,6 +60,44 @@ the first place is a check that can never fire. A name that isn't declared is an
 authoring error (the run aborts, exit `2`), not a failing case, because a check that can
 never pass tells you nothing about the skill.
 
+## The workspace
+
+A case that declares a [`workspace:`](eval-files.md#workspaces) block gets a real,
+contained temporary directory in addition to the canned tools above. `list_files`,
+`read_file` and `write_file` are the only way in or out of it.
+
+**Containment.** Every path a tool is given is resolved relative to the workspace root and
+then checked against it: an absolute path, one containing `..`, or one that resolves outside
+the root through a symlink is refused before it touches the filesystem. The root itself is
+resolved once, at creation — on macOS `/tmp` is a symlink to `/private/tmp`, and comparing an
+unresolved root against a resolved candidate path would make every containment check compare
+two spellings of the same directory.
+
+**The caps.** Three [configured](configuration.md) limits — `max_file_bytes`, `max_files`,
+`max_total_bytes` — bound what one case may write. They default to roughly 100x a realistic
+artifact (a report or a JSON file is kilobytes), so they only bind when a run is genuinely
+stuck — writing the same file repeatedly, or many small ones — never on a skill that
+legitimately produces something large. A refusal always names the limit it hit and that
+limit's value, e.g. `refused: report.md would be 1,200,000 bytes; max_file_bytes is
+1,000,000` — a generic "too large" would leave you guessing which of the three caps stopped
+you and what to raise it to.
+
+**A built-in tool never raises.** A refused path, a file that does not exist, content that
+is not valid UTF-8 — every one of those comes back to the model as an ordinary tool-result
+string, never an exception. The model choosing a bad path is a fact about the run worth
+scoring; an exception would turn it into an infra error and hide that signal.
+
+**The workspace preamble is identical in both arms.** Telling the agent a working directory
+exists — and how to use `list_files`, `read_file` and `write_file` — is text appended to
+whatever system prompt the arm already has, byte-for-byte the same whether the skill is
+loaded, replaced by the neutral baseline preamble, or offered as a tool under `mode:
+offered`, and it names no skill. Added to the candidate arm only, that text would itself
+become part of what `--min-delta` measures.
+
+`--keep-workspace` (see [CLI](cli.md)) keeps every case's directory instead of deleting it
+after scoring, for inspecting exactly what a run wrote. Every kept directory is printed,
+however keeping was turned on.
+
 ## Budget limits and pricing
 
 The `budget` block sets ceilings on tokens, cost, and latency. Pricing comes from

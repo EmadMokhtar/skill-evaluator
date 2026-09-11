@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from skill_lens.config import Config, ConfigError, find_config_file, load_config
+from skill_lens.workspace import DEFAULT_LIMITS
 
 TOML = """
 default_runner = "fake"
@@ -203,3 +204,31 @@ def test_concurrency_defaults_to_one_and_can_be_set(tmp_path):
     path = tmp_path / "skill-lens.toml"
     path.write_text("concurrency = 8\n", encoding="utf-8")
     assert load_config(path=path).concurrency == 8
+
+
+def test_workspace_settings_have_the_documented_defaults():
+    settings = Config()
+    assert settings.keep_workspace is False
+    assert settings.max_file_bytes == DEFAULT_LIMITS.max_file_bytes
+    assert settings.max_files == DEFAULT_LIMITS.max_files
+    assert settings.max_total_bytes == DEFAULT_LIMITS.max_total_bytes
+
+
+def test_workspace_settings_parse(tmp_path):
+    path = tmp_path / "skill-lens.toml"
+    path.write_text(
+        "keep_workspace = true\nmax_file_bytes = 42\nmax_files = 3\nmax_total_bytes = 99\n",
+        encoding="utf-8",
+    )
+    settings = load_config(path=path)
+    assert settings.keep_workspace is True
+    assert (settings.max_file_bytes, settings.max_files, settings.max_total_bytes) == (42, 3, 99)
+
+
+@pytest.mark.parametrize("key", ["max_file_bytes", "max_files", "max_total_bytes"])
+@pytest.mark.parametrize("value", [0, -1])
+def test_a_non_positive_cap_is_a_config_error(tmp_path, key, value):
+    path = tmp_path / "skill-lens.toml"
+    path.write_text(f"{key} = {value}\n", encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(path=path)

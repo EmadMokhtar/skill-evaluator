@@ -43,18 +43,18 @@ interactions:
     uri: https://api.openai.com/v1/responses
   response:
     body:
-      string: "{\n  \"id\": \"resp_0c0bbc3dfbfbc178006a6e55beb70c819f94df594b8468cabb\",\n
-        \ \"object\": \"response\",\n  \"created_at\": 1785615806,\n  \"status\":
+      string: "{\n  \"id\": \"resp_07e34c60b9dbdf5a006aa396f932c487d2bec8008031f66720\",\n
+        \ \"object\": \"response\",\n  \"created_at\": 1789105913,\n  \"status\":
         \"completed\",\n  \"background\": false,\n  \"billing\": {\n    \"payer\":
-        \"openai\"\n  },\n  \"completed_at\": 1785615807,\n  \"error\": null,\n  \"frequency_penalty\":
+        \"openai\"\n  },\n  \"completed_at\": 1789105915,\n  \"error\": null,\n  \"frequency_penalty\":
         0.0,\n  \"incomplete_details\": null,\n  \"instructions\": \"# order-support\\n\\nHandle
         customer refund requests\\n\\nAlways call lookup_order before saying anything
         about an order. Never issue a refund for an order delivered more than 30 days
         ago.\",\n  \"max_output_tokens\": null,\n  \"max_tool_calls\": null,\n  \"model\":
         \"gpt-4o-mini-2024-07-18\",\n  \"moderation\": null,\n  \"output\": [\n    {\n
-        \     \"id\": \"fc_0c0bbc3dfbfbc178006a6e55bf7434819fa92f6b4b49802a5b\",\n
+        \     \"id\": \"fc_07e34c60b9dbdf5a006aa396fb5a8887d2a80adb3c54e3165e\",\n
         \     \"type\": \"function_call\",\n      \"status\": \"completed\",\n      \"arguments\":
-        \"{\\\"order_id\\\":\\\"1234\\\"}\",\n      \"call_id\": \"call_E6dFKEVsTiblGWDqPaReHYy6\",\n
+        \"{\\\"order_id\\\":\\\"1234\\\"}\",\n      \"call_id\": \"call_hX1xRAZi9bB8IS7N1alot7GI\",\n
         \     \"name\": \"lookup_order\"\n    }\n  ],\n  \"parallel_tool_calls\":
         true,\n  \"presence_penalty\": 0.0,\n  \"previous_response_id\": null,\n  \"prompt_cache_key\":
         null,\n  \"prompt_cache_retention\": \"in_memory\",\n  \"reasoning\": {\n
@@ -97,9 +97,9 @@ interactions:
       content-type:
       - application/json
       date:
-      - Sat, 01 Aug 2026 20:23:27 GMT
+      - Fri, 11 Sep 2026 05:51:55 GMT
       openai-processing-ms:
-      - '928'
+      - '2469'
       openai-version:
       - '2020-10-01'
       server:
@@ -126,7 +126,7 @@ interactions:
       code: 200
       message: OK
 - request:
-    body: '{"input":[{"role":"user","content":"I want a refund for order 1234"},{"name":"lookup_order","arguments":"{\"order_id\":\"1234\"}","call_id":"call_E6dFKEVsTiblGWDqPaReHYy6","type":"function_call"},{"type":"function_call_output","call_id":"call_E6dFKEVsTiblGWDqPaReHYy6","output":"{\"id\":
+    body: '{"input":[{"role":"user","content":"I want a refund for order 1234"},{"name":"lookup_order","arguments":"{\"order_id\":\"1234\"}","call_id":"call_hX1xRAZi9bB8IS7N1alot7GI","type":"function_call"},{"type":"function_call_output","call_id":"call_hX1xRAZi9bB8IS7N1alot7GI","output":"{\"id\":
       \"1234\", \"status\": \"delivered\", \"days_since_delivery\": 45}"}],"instructions":"#
       order-support\n\nHandle customer refund requests\n\nAlways call lookup_order
       before saying anything about an order. Never issue a refund for an order delivered
@@ -170,19 +170,19 @@ interactions:
     uri: https://api.openai.com/v1/responses
   response:
     body:
-      string: "{\n  \"id\": \"resp_0f8f3925c7a258e5006a6e55c058c481a184fbdda099cb8d5f\",\n
-        \ \"object\": \"response\",\n  \"created_at\": 1785615808,\n  \"status\":
+      string: "{\n  \"id\": \"resp_09fa495abdf5f4fe006aa396fbf8dc87d28c27a5d78e5d8ff9\",\n
+        \ \"object\": \"response\",\n  \"created_at\": 1789105916,\n  \"status\":
         \"completed\",\n  \"background\": false,\n  \"billing\": {\n    \"payer\":
-        \"openai\"\n  },\n  \"completed_at\": 1785615809,\n  \"error\": null,\n  \"frequency_penalty\":
+        \"openai\"\n  },\n  \"completed_at\": 1789105917,\n  \"error\": null,\n  \"frequency_penalty\":
         0.0,\n  \"incomplete_details\": null,\n  \"instructions\": \"# order-support\\n\\nHandle
         customer refund requests\\n\\nAlways call lookup_order before saying anything
         about an order. Never issue a refund for an order delivered more than 30 days
         ago.\",\n  \"max_output_tokens\": null,\n  \"max_tool_calls\": null,\n  \"model\":
         \"gpt-4o-mini-2024-07-18\",\n  \"moderation\": null,\n  \"output\": [\n    {\n
-        \     \"id\": \"msg_0f8f3925c7a258e5006a6e55c170c481a1b119c2daa01559a1\",\n
+        \     \"id\": \"msg_09fa495abdf5f4fe006aa396fd940c87d2b2ff22b87436ba78\",\n
         \     \"type\": \"message\",\n      \"status\": \"completed\",\n      \"content\":
         [\n        {\n          \"type\": \"output_text\",\n          \"annotations\":
-        [],\n          \"logprobs\": [],\n          \"text\": \"Unfortunately, I can't
+        [],\n          \"logprobs\": [],\n          \"text\": \"I'm sorry, but I can't
         issue a refund for order 1234 because it was delivered more than 30 days ago.
         If you have any other questions or need further assistance, feel free to ask!\"\n
         \       }\n      ],\n      \"role\": \"assistant\"\n    }\n  ],\n  \"parallel_tool_calls\":
@@ -212,8 +212,8 @@ interactions:
         \   }\n  ],\n  \"top_logprobs\": 0,\n  \"top_p\": 1.0,\n  \"truncation\":
         \"disabled\",\n  \"usage\": {\n    \"input_tokens\": 155,\n    \"input_tokens_details\":
         {\n      \"cache_write_tokens\": 0,\n      \"cached_tokens\": 0\n    },\n
-        \   \"output_tokens\": 41,\n    \"output_tokens_details\": {\n      \"reasoning_tokens\":
-        0\n    },\n    \"total_tokens\": 196\n  },\n  \"user\": null,\n  \"metadata\":
+        \   \"output_tokens\": 43,\n    \"output_tokens_details\": {\n      \"reasoning_tokens\":
+        0\n    },\n    \"total_tokens\": 198\n  },\n  \"user\": null,\n  \"metadata\":
         {}\n}"
     headers:
       alt-svc:
@@ -227,9 +227,9 @@ interactions:
       content-type:
       - application/json
       date:
-      - Sat, 01 Aug 2026 20:23:30 GMT
+      - Fri, 11 Sep 2026 05:51:58 GMT
       openai-processing-ms:
-      - '1642'
+      - '2141'
       openai-version:
       - '2020-10-01'
       server:
@@ -249,7 +249,7 @@ interactions:
       x-ratelimit-remaining-tokens:
       - '199628'
       x-ratelimit-reset-requests:
-      - 15.288s
+      - 14.706s
       x-ratelimit-reset-tokens:
       - 111ms
     status:

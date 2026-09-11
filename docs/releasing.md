@@ -118,6 +118,29 @@ Open the pull request yourself from the link in the job summary. A pull request 
 workflow's own token would carry no CI checks, and on a cassette refresh those checks are the
 review.
 
+### Refreshing locally
+
+The same three steps run on a maintainer's machine through the `justfile`:
+
+```bash
+just refresh-cassettes                                        # all six recordings
+just refresh-cassettes test_a_real_judge_grades_a_rubric_with_evidence   # one of them
+```
+
+Naming one test refreshes one cassette, which matters because every re-recording is a paid
+provider call and `rewrite` re-records everything it touches.
+
+The provider key never touches the shell. The recipe runs `pytest` through `op run`, the
+1Password command-line tool, which resolves the reference in `.env.tpl` and hands the value to
+the child process only — it is not in the environment before the command starts and it is
+gone when the command exits. Typing `export OPENAI_API_KEY=...` instead puts the key into the
+shell's history file in plain text, where it stays until someone deletes it.
+
+`.env.tpl` holds a 1Password *address*, not a secret, so it is committed. The vault and item
+names in it belong to one maintainer; another creates an "API Credential" item in their own
+1Password and points the reference at it. `just replay-cassettes` and `just scan-cassettes`
+run the two verification steps on their own, and `just` alone lists every recipe.
+
 ## There is no manual path to PyPI
 
 Do not run `cz bump` locally to release. It will tag a version without publishing it, and the

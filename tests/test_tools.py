@@ -110,7 +110,7 @@ def test_built_skill_tools_do_not_share_mutable_schema_state():
     # Regression: build_skill_tool used to do `json_schema=dict(_EMPTY_SCHEMA)`,
     # a shallow copy. Every built tool's `properties` dict and `required` list
     # were the *same* objects, shared with the module-level template and with
-    # each other. MockTool being frozen only blocks reassigning the attribute,
+    # each other. AgentTool being frozen only blocks reassigning the attribute,
     # not mutating its contents, so mutating one tool's schema would leak into
     # every other tool built from the template.
     first = build_skill_tool(Skill(name="a", description="d", instructions="i", path=Path(".")))
