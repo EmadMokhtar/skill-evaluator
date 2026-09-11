@@ -38,7 +38,10 @@ def _git(args: list[str], cwd: Path) -> str | None:
     """Run git in `cwd`; return stdout, or None if the command failed."""
     try:
         completed = subprocess.run(  # noqa: S603 - fixed argv, no shell
-            ["git", *args],
+            # S607: `git` is found on PATH on purpose. An absolute path would
+            # be wrong on most machines, and a missing git must come back as
+            # BaselineUnavailable (the OSError below), never as a crash.
+            ["git", *args],  # noqa: S607
             cwd=cwd,
             capture_output=True,
             timeout=GIT_TIMEOUT_SECONDS,

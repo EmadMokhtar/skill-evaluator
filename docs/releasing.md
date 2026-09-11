@@ -8,12 +8,16 @@ publishes to PyPI. Nobody types a release command.
 
 | Job | Does | Runs when |
 | --- | --- | --- |
-| `verify` | ruff, format check, the full offline suite | every push to `main` |
+| `verify` | ruff (including the `S` security rules), format check, the full offline suite, `uv audit` on the lockfile | every push to `main` |
 | `release` | `cz bump`, push the commit and its tag, verify the tag reached `origin`, `uv build`, upload the artifact | `verify` passed |
 | `publish` | download the artifact, upload to PyPI | a version was actually cut |
 
 A merge whose commits do not warrant a release is a no-op: `cz bump` exits `21` or `3`, the
 job records "nothing to release" in its summary, and `publish` is skipped.
+
+`verify` re-runs the dependency audit on the commit being released rather than trusting the
+pull request's green check: an advisory can be published between the merge and the tag, and
+nothing publishes that `verify` did not pass. See [Security](security.md).
 
 The version comes from the commit messages, so a Conventional Commit title is not a style
 rule here — it is the input to versioning. `fix:` gives a patch, `feat:` a minor, and a `!`

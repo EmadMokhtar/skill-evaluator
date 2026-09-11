@@ -46,4 +46,7 @@ StrictBoolLoader.add_implicit_resolver(
 
 def safe_load(text: str) -> Any:
     """Load YAML text using `StrictBoolLoader`."""
-    return yaml.load(text, Loader=StrictBoolLoader)
+    # S506 cannot see that StrictBoolLoader subclasses SafeLoader: it only
+    # recognises the name `SafeLoader` itself. The loader is safe by
+    # construction (see the class above), so the finding is a false positive.
+    return yaml.load(text, Loader=StrictBoolLoader)  # noqa: S506

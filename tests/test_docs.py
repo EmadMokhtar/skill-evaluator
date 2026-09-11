@@ -167,3 +167,33 @@ def test_relative_links_resolve(path: Path):
             continue
         resolved = (path.parent / relative).resolve()
         assert resolved.exists(), f"{path.name}: dead link to {target!r}"
+
+
+SECURITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "security.yml"
+PRE_COMMIT = REPO_ROOT / ".pre-commit-config.yaml"
+
+
+def test_security_documents_the_audit_as_ci_runs_it():
+    """The page tells a reader how to run the check locally. If it spells the
+    command differently from security.yml, the local result can disagree
+    with the pipeline -- a flag dropped here, an exception applied there."""
+    workflow = safe_load(SECURITY_WORKFLOW.read_text(encoding="utf-8"))
+    runs = [str(step.get("run", "")) for step in workflow["jobs"]["audit"]["steps"]]
+    command = next(line.strip() for run in runs for line in run.splitlines() if "uv audit" in line)
+    assert command in _page("security.md"), f"docs/security.md does not show {command!r}"
+
+
+def test_contributing_installs_every_pre_commit_stage():
+    """A hook that is configured but never installed runs for nobody. The
+    install command is derived from .pre-commit-config.yaml, so adding a
+    stage there without documenting it here is a failing test, not a hook
+    that silently only runs in CI."""
+    config = safe_load(PRE_COMMIT.read_text(encoding="utf-8"))
+    stages = {
+        stage for repo in config["repos"] for hook in repo["hooks"] for stage in hook["stages"]
+    }
+    text = _page("contributing.md")
+    for stage in sorted(stages):
+        assert f"--hook-type {stage}" in text, (
+            f"docs/contributing.md does not install the {stage!r} pre-commit stage"
+        )

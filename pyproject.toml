@@ -80,6 +80,22 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/skill_lens"]
 
+# Exceptions to `uv audit` live here and only here. Every invocation -- the
+# Security workflow, the release gate, the pre-push hook -- reads this table,
+# so an exception can never be in one place and not another. Only
+# `ignore-until-fixed` is allowed: it stops hiding an advisory the day a fixed
+# version exists, so the check turns red again and forces the upgrade. Plain
+# `ignore` hides a finding forever and is rejected by tests/test_security_checks.py.
+# Each entry carries a comment saying why the finding does not apply.
+#
+# uv does not validate this table, so a misspelled key would be silently
+# ignored and the finding silently kept; the same test rejects any other key.
+#
+# [tool.uv.audit]
+# ignore-until-fixed = [
+#     "GHSA-xxxx-xxxx-xxxx",  # <package>: <why this does not affect skill-lens>
+# ]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
@@ -97,7 +113,19 @@ src = ["src", "tests"]
 extend-exclude = ["docs"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+# S is flake8-bandit: the static security check on our own code (shell=True,
+# unsafe YAML loaders, hard-coded credentials, ...). It rides on the existing
+# `ruff check`, so it runs everywhere lint does with no extra step.
+select = ["E", "F", "I", "UP", "B", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert (S101), run git in subprocesses the way the code under test
+# does (S603, S607), parse the JUnit XML they just wrote (S314), and use
+# literal "/tmp/..." strings as fake path values in model fixtures (S108) --
+# real temporary directories come from pytest's tmp_path.
+"tests/**" = ["S101", "S603", "S607", "S314", "S108"]
+# The CI helper scripts run git with a fixed argv and no shell (S603, S607).
+"scripts/**" = ["S603", "S607"]
 
 [tool.commitizen]
 name = "cz_conventional_commits"

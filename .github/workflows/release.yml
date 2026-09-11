@@ -40,6 +40,12 @@ jobs:
       - name: Test
         run: uv run pytest
 
+      - name: Audit the lockfile for known vulnerabilities
+        # A lockfile with a known vulnerability must fail here, not ship and
+        # be found by a user. security.yml carries the full reasoning; this
+        # line must stay identical to the one there (tests/test_security_checks.py).
+        run: uv audit --preview-features audit --locked
+
   release:
     needs: verify
     runs-on: ubuntu-latest

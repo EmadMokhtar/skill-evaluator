@@ -7,6 +7,7 @@ uv sync
 uv run pytest                  # test suite
 uv run ruff check .            # lint
 uv run ruff format --check .   # formatting (as CI runs it)
+uv audit --preview-features audit --locked   # known vulnerabilities in uv.lock
 uv run skill-lens list ./examples
 ```
 
@@ -69,11 +70,15 @@ commit history, so a non-conforming message silently breaks the release. Because
 PRs are **squash-merged**, the PR title becomes the commit on `main` — so the
 title is what release automation actually reads.
 
-Install the hook once per clone so bad messages are rejected before they land:
+Install the hooks once per clone so bad messages are rejected before they land, and the
+dependency audit runs before every push:
 
 ```bash
-uv run pre-commit install --hook-type commit-msg
+uv run pre-commit install --hook-type commit-msg --hook-type pre-push
 ```
+
+The audit hook runs at push time rather than commit time because it needs the network; see
+[Security](security.md) for what it checks and what to do when it finds something.
 
 CI enforces the same rules on every PR: the title is checked with `cz check`, and
 every commit on the branch with `scripts/check_commits.py`. Two docs-only commits
