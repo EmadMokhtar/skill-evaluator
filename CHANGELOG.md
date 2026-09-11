@@ -1,3 +1,9 @@
+## v0.3.0 (2026-09-11)
+
+### Feat
+
+- give eval cases a contained filesystem and score the files they produce (#12)
+
 ## v0.2.0 (2026-09-09)
 
 ### BREAKING CHANGE
