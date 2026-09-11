@@ -9,9 +9,9 @@ publishes to PyPI. Nobody types a release command.
 | Job | Does | Runs when |
 | --- | --- | --- |
 | `verify` | ruff (including the `S` security rules), format check, the full offline suite, `uv audit` on the lockfile | every push to `main` |
-| `release` | `cz bump`, push the commit and its tag, verify the tag reached `origin`, `uv build`, upload the artifact | `verify` passed |
+| `release` | `cz bump`, push the commit and its tag, verify the tag reached `origin`, write the release notes, `uv build`, export the SBOM, upload the artifacts | `verify` passed |
 | `publish` | download the artifact, upload to PyPI with attestations | a version was actually cut |
-| `github-release` | create the GitHub Release for the tag with the changelog section as notes; attach the wheel, the sdist and the SBOM | `publish` succeeded |
+| `github-release` | download the three artifacts and hand them to `gh`: create the GitHub Release for the tag with the notes; attach the wheel, the sdist and the SBOM. No checkout, no install | `publish` succeeded |
 
 A merge whose commits do not warrant a release is a no-op: `cz bump` exits `21` or `3`, the
 job records "nothing to release" in its summary, and `publish` is skipped.
@@ -196,6 +196,11 @@ and only the GitHub Release or its assets are missing. Re-run the job: it skips 
 when the release already exists and uploads the assets with `--clobber`, so a partial run
 converges rather than failing on "already exists". Nothing in it can affect PyPI.
 
+The job holds `contents: write`, so it is kept to downloading artifacts and running `gh`:
+no checkout, no `uv sync`, no build. The notes, the SBOM and the distributions are all
+produced in `release` and handed on as artifacts, so no third-party code runs under the
+token that can write releases.
+
 ### Recovering a failed publish
 
 The one recoverable failure is a run whose `release` job fully succeeded — tests passed, the tag
@@ -211,8 +216,9 @@ reports nothing to release.
 
 ### Recovering a failure *after* the tag but *before* the artifact
 
-There is one state with no re-run at all. If `uv build` or the artifact upload fails once the
-tag has already reached origin, `main` carries a permanent tag `vX.Y.Z`, `publish` was never
+There is one state with no re-run at all. If anything between the tag and the artifacts
+fails once the tag has already reached origin — writing the release notes, `uv build`, the
+SBOM export, or any of the three artifact uploads — `main` carries a permanent tag `vX.Y.Z`, `publish` was never
 eligible (`needs.release.outputs.bumped` never reached it), so there is no `publish` job to
 re-run, and a fresh run's `cz bump` exits `3` — nothing to release — for the same
 already-tagged-`HEAD` reason as above. Version `X.Y.Z` is spent: it exists as a tag and will

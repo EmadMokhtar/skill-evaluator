@@ -157,6 +157,15 @@ jobs:
           fi
           echo "Confirmed tag $tag reached origin." >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Write the release notes
+        # The changelog section for exactly this version, generated from the
+        # same commits that chose the version number. `--dry-run` prints it
+        # instead of rewriting CHANGELOG.md, which the bump already did. It is
+        # written here, where the checkout, the history and the tools already
+        # are, so the job that publishes it later needs none of them.
+        if: steps.bump.outputs.bumped == 'true'
+        run: uv run cz changelog "${{ steps.bump.outputs.version }}" --dry-run > notes.md
+
       - name: Build the distributions
         # The build backend is not part of the lockfile `verify` audited:
         # `uv build` resolves `[build-system] requires` fresh, so the artifact
@@ -199,6 +208,14 @@ jobs:
         with:
           name: sbom
           path: sbom/
+          if-no-files-found: error
+
+      - name: Upload the release notes
+        if: steps.bump.outputs.bumped == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: release-notes
+          path: notes.md
           if-no-files-found: error
 
   publish:
@@ -245,6 +262,11 @@ jobs:
     # same wheel and sdist PyPI received, plus the SBOM, at a stable URL --
     # https://github.com/EmadMokhtar/skill-evaluator/releases/download/vX.Y.Z/skill-lens-X.Y.Z.cdx.json
     # -- which is what a procurement checklist asks for.
+    #
+    # This job holds `contents: write`, so it does as little as possible
+    # with it: no checkout, no dependency install, no build. Everything it
+    # publishes -- the distributions, the SBOM, the notes -- was produced
+    # and verified by `release`; here it is only downloaded and handed to gh.
     needs: [release, publish]
     if: needs.release.outputs.bumped == 'true'
     runs-on: ubuntu-latest
@@ -252,48 +274,28 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+      # gh normally reads the repository from the checkout; there is none.
+      GH_REPO: ${{ github.repository }}
       VERSION: ${{ needs.release.outputs.version }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
-        with:
-          # The bump commit and its tag were pushed by the release job; the
-          # checkout defaults to the commit that triggered the workflow,
-          # which is their parent. The tag is what the notes describe, and
-          # `cz changelog` needs the history behind it.
-          ref: v${{ needs.release.outputs.version }}
-          fetch-depth: 0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5.4.2
-        with:
-          enable-cache: true
-
-      - name: Install dependencies
-        run: uv sync --all-extras --dev
-
-      - name: Download the distributions and the SBOM
+      - name: Download the distributions, the SBOM and the notes
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
-          # Both artifacts, each into a directory named after it.
-          pattern: "{dist,sbom}"
+          # Each artifact into a directory named after it.
+          pattern: "{dist,sbom,release-notes}"
           path: assets/
-
-      - name: Write the release notes
-        # The changelog section for exactly this version, generated from the
-        # same commits that chose the version number. `--dry-run` prints it
-        # instead of rewriting CHANGELOG.md, which the bump commit already did.
-        run: uv run cz changelog "$VERSION" --dry-run > notes.md
 
       - name: Create the release if it does not exist
         # Re-run safe: a re-run after a failed asset upload must not fail
-        # here on "already exists", and must not lose the notes.
+        # here on "already exists", and must not lose the notes. --verify-tag
+        # refuses to create a release for a tag that is not on origin.
         run: |
           set -euo pipefail
           tag="v$VERSION"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "Release $tag already exists; keeping it." >> "$GITHUB_STEP_SUMMARY"
           else
-            gh release create "$tag" --title "$tag" --notes-file notes.md --verify-tag
+            gh release create "$tag" --title "$tag" --notes-file assets/release-notes/notes.md --verify-tag
           fi
 
       - name: Attach the distributions and the SBOM

@@ -299,7 +299,11 @@ form, that file is the explanation.
   ships as its own artifact. `github-release` needs `publish`; a release that exists before the
   upload could advertise a version `pip install` cannot find. It is re-run safe: creation is
   guarded by `gh release view`, assets go up with `--clobber`, and its notes are
-  `cz changelog <version> --dry-run` — the same commits that chose the version.
+  `cz changelog <version> --dry-run` — the same commits that chose the version. **The job
+  that can write releases installs nothing**: notes, SBOM and distributions are all produced
+  in `release` and passed as artifacts, so `github-release` has no checkout and runs no `uv`,
+  and no third-party code executes under `contents: write`. The docs `build` job needs
+  `pages: read` — `actions/configure-pages` fails the job when its `GET …/pages` is refused.
 
 ## Documentation
 

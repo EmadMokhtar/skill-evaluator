@@ -164,8 +164,10 @@ order of jobs and how a failed step is recovered.
   Conventional Commits, because the title becomes the commit on `main` that versioning reads.
 - **Least-privilege tokens.** No workflow grants write access at the top level; each job asks
   for exactly what it uses, so the docs `build` job, which runs third-party tooling on the
-  checkout, never holds the token that can publish to Pages, and `publish` holds `id-token`
-  and nothing that can write to the repository.
+  checkout, holds only the read access it needs, and `publish` holds `id-token` and nothing
+  that can write to the repository. The one job that can write releases, `github-release`,
+  installs nothing and checks nothing out: it downloads artifacts that earlier jobs built and
+  verified, and runs `gh`.
 
 ## Why these rules
 

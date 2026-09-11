@@ -592,7 +592,14 @@ advertise a version `pip install` cannot find. The job is re-run safe — the do
 for any release step — because creation is skipped when `gh release view` finds the release,
 and assets are uploaded with `--clobber` so a partial run converges instead of refusing. Its
 notes are `cz changelog <version> --dry-run`: the same commits that chose the version number,
-and nothing else, are the source of truth for what a release contains.
+and nothing else, are the source of truth for what a release contains. The notes are written in
+`release`, which already has the checkout, the history and the tools, and handed on as an
+artifact — so `github-release`, the one job holding `contents: write`, has no checkout, runs no
+`uv`, and installs nothing. Everything it publishes was built and verified by an earlier job;
+a compromised dependency or build hook never executes under the token that can write releases.
+(The docs `build` job, by contrast, needs `pages: read` and not only `contents: read`:
+`actions/configure-pages` calls `GET /repos/{owner}/{repo}/pages` and fails the job when that
+call is refused — a tightening that would only have shown up on the next push to `main`.)
 
 ## Extension points
 

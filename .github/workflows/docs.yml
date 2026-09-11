@@ -26,6 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # `actions/configure-pages` calls GET /repos/{owner}/{repo}/pages and
+      # fails the job when the call is refused; read is all it needs.
+      pages: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Install uv

@@ -18,7 +18,12 @@ import pytest
 from skill_lens.yaml_loading import safe_load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-WORKFLOWS = sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+# GitHub runs both spellings, so a guard over one alone has a hole in it.
+WORKFLOWS = sorted(
+    path
+    for ext in ("yml", "yaml")
+    for path in (REPO_ROOT / ".github" / "workflows").glob(f"*.{ext}")
+)
 ACTION = REPO_ROOT / "action.yml"
 DEPENDABOT = REPO_ROOT / ".github" / "dependabot.yml"
 SECURITY_POLICY = REPO_ROOT / "SECURITY.md"
@@ -30,16 +35,17 @@ PINNED = re.compile(r"^[\w.-]+/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}$")
 PIN_LINE = re.compile(r"uses:\s*\S+@[0-9a-f]{40}\s+#\s*v\d+\.\d+\.\d+\s*$")
 
 
-def _steps(document: dict) -> list[dict]:
-    """Every step in a workflow's jobs, or in a composite action's `runs`."""
-    if "jobs" in document:
-        return [step for job in document["jobs"].values() for step in job.get("steps", [])]
-    return document["runs"]["steps"]
-
-
 def _uses(path: Path) -> list[str]:
+    """Every `uses:` in a file: each step's, and -- for a workflow -- each
+    job's own, which is how a reusable workflow is called. A job-level
+    reference runs third-party code just as a step does."""
     document = safe_load(path.read_text(encoding="utf-8"))
-    return [str(step["uses"]) for step in _steps(document) if "uses" in step]
+    if "jobs" in document:
+        jobs = document["jobs"].values()
+        holders = [job for job in jobs] + [step for job in jobs for step in job.get("steps", [])]
+    else:
+        holders = document["runs"]["steps"]
+    return [str(holder["uses"]) for holder in holders if "uses" in holder]
 
 
 @pytest.mark.parametrize("path", [*WORKFLOWS, ACTION], ids=lambda p: p.name)
@@ -81,9 +87,11 @@ def test_no_workflow_grants_write_at_the_top_level(path: Path):
 def test_the_docs_build_job_cannot_deploy():
     """Only `deploy` publishes to Pages, so only `deploy` holds the token
     that can. `build` runs third-party tooling on the checkout and needs
-    nothing but read access."""
+    read access only -- including `pages: read`, because
+    `actions/configure-pages` calls `GET /repos/{owner}/{repo}/pages` and
+    fails the job when that call is refused."""
     docs = safe_load((REPO_ROOT / ".github" / "workflows" / "docs.yml").read_text("utf-8"))
-    assert docs["jobs"]["build"]["permissions"] == {"contents": "read"}
+    assert docs["jobs"]["build"]["permissions"] == {"contents": "read", "pages": "read"}
     assert docs["jobs"]["deploy"]["permissions"] == {"pages": "write", "id-token": "write"}
 
 
@@ -98,6 +106,17 @@ def test_dependabot_watches_the_lockfile_and_the_actions(dependabot):
     uv.lock, `github-actions` finds .github/workflows/ and action.yml."""
     watched = {(u["package-ecosystem"], u["directory"]) for u in dependabot["updates"]}
     assert {("uv", "/"), ("github-actions", "/")} <= watched, watched
+
+
+def test_dependabot_never_groups_a_major_bump(dependabot):
+    """A major bump may need code changes and deserves its own pull request;
+    grouped with a dozen patch bumps it is invisible until something
+    breaks. Every group is limited to minor and patch updates."""
+    for update in dependabot["updates"]:
+        for name, group in update.get("groups", {}).items():
+            assert set(group.get("update-types", [])) == {"minor", "patch"}, (
+                f"group {name!r} in {update['package-ecosystem']} would batch major bumps"
+            )
 
 
 def test_dependabot_titles_are_conventional_commits(dependabot):

@@ -218,7 +218,9 @@ def test_the_sbom_never_enters_the_pypi_upload(workflow):
     export = _release_step(workflow, "cyclonedx")["run"]
     match = re.search(r"(?:-o|--output-file)\s+(\S+)", export)
     assert match, f"the export does not write to a file: {export!r}"
-    assert not match.group(1).startswith("dist/"), "the SBOM must not be written under dist/"
+    # The path is shell-quoted in the workflow; the quote is not part of it.
+    target = match.group(1).strip("\"'")
+    assert not target.startswith("dist/"), "the SBOM must not be written under dist/"
     uploads = [
         step
         for step in workflow["jobs"]["release"]["steps"]
@@ -253,11 +255,30 @@ def test_the_github_release_can_be_re_run(workflow):
 
 def test_the_release_notes_are_the_changelog_section_for_that_version(workflow):
     """The changelog is generated from the same commits that chose the
-    version; nothing else is a source of truth for what a release contains."""
-    runs = " ".join(
-        str(step.get("run", "")) for step in workflow["jobs"]["github-release"]["steps"]
-    )
-    assert "cz changelog" in runs and "--dry-run" in runs
+    version; nothing else is a source of truth for what a release contains.
+    It is written in `release`, which already has the checkout, the
+    history and the tools, and handed on as an artifact."""
+    notes = _release_step(workflow, "cz changelog")
+    assert "--dry-run" in notes["run"]
+    assert notes["if"] == "steps.bump.outputs.bumped == 'true'"
+    uploads = {
+        step["with"]["name"]
+        for step in workflow["jobs"]["release"]["steps"]
+        if "upload-artifact" in str(step.get("uses"))
+    }
+    assert "release-notes" in uploads
+
+
+def test_the_privileged_release_job_installs_nothing(workflow):
+    """`github-release` holds `contents: write`. Everything it publishes was
+    built and verified by earlier jobs, so it downloads artifacts and runs
+    `gh` -- no checkout, no dependency install, no build hook that could run
+    third-party code under that token."""
+    steps = workflow["jobs"]["github-release"]["steps"]
+    uses = [str(step.get("uses", "")) for step in steps]
+    assert not any("checkout" in u or "setup-uv" in u for u in uses), uses
+    runs = " ".join(str(step.get("run", "")) for step in steps)
+    assert "uv " not in runs, "the privileged job must not run uv: " + runs
 
 
 def test_the_release_builds_with_the_audited_backend(workflow):
