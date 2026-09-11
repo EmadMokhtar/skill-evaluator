@@ -286,6 +286,24 @@ form, that file is the explanation.
   as fake path values; the two `src/` sites
   (`git` found on `PATH` in `baseline.py`; `StrictBoolLoader` in `yaml_loading.py`, which
   *is* a `SafeLoader` subclass ruff cannot see) each carry an inline `noqa` with the reason.
+- **Every action is pinned to a commit SHA with a `# vX.Y.Z` comment, and nothing grants
+  write access at the workflow level.** A tag can be moved; a commit cannot.
+  `tests/test_supply_chain.py` fails any `uses:` that is not `./` or a 40-hex SHA with the
+  version comment Dependabot maintains, any workflow whose top-level `permissions` is not empty
+  or read-only, and a docs `build` job holding anything but `contents: read`. Dependabot
+  (`uv` and `github-actions`, weekly) is what keeps the pins moving; its commit prefixes must
+  pass `cz check`, because the PR title becomes the commit `cz bump` parses.
+- **The SBOM never enters `dist/`, and the GitHub Release is created only after PyPI accepted
+  the upload.** `publish` sends every file in the `dist` artifact to PyPI, which would reject
+  an SBOM and fail the upload after the tag is pushed — so the export writes to `sbom/` and
+  ships as its own artifact. `github-release` needs `publish`; a release that exists before the
+  upload could advertise a version `pip install` cannot find. It is re-run safe: creation is
+  guarded by `gh release view`, assets go up with `--clobber`, and its notes are
+  `cz changelog <version> --dry-run` — the same commits that chose the version. **The job
+  that can write releases installs nothing**: notes, SBOM and distributions are all produced
+  in `release` and passed as artifacts, so `github-release` has no checkout and runs no `uv`,
+  and no third-party code executes under `contents: write`. The docs `build` job needs
+  `pages: read` — `actions/configure-pages` fails the job when its `GET …/pages` is refused.
 
 ## Documentation
 
@@ -302,7 +320,7 @@ Documentation ships **with** the change, never as a follow-up. Two CI jobs enfor
 | A protocol, an invariant, or the module map | `ARCHITECTURE.md` |
 | CI integration, the action, example workflows | `docs/ci.md` |
 | The release pipeline, its one-time setup, or the cassette-refresh workflow | `docs/releasing.md` |
-| The dependency audit, the `S` lint rules, or the exception policy | `docs/security.md` |
+| The dependency audit, the `S` lint rules, the exception policy, action pinning, Dependabot, the SBOM, or attestations | `docs/security.md` (and `SECURITY.md` for how to report) |
 | Anything needing a new page | the page plus `nav:` in `mkdocs.yml` |
 
 `README.md` is a landing page only. Reference prose lives in `docs/` — do not reintroduce

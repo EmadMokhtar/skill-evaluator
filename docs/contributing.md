@@ -87,8 +87,16 @@ should only ever shrink.
 
 ## One-time repository settings
 
-Two settings live in the GitHub UI, not in this repo, so they are easy to miss when
+These settings live in the GitHub UI, not in this repo, so they are easy to miss when
 standing up a fork or a new instance of this project:
+
+- **Settings -> Code security -> Private vulnerability reporting = enabled.** `SECURITY.md`
+  and the [Security](security.md) page send reporters to the private advisory form; with the
+  setting off, that form does not exist and the only remaining path is a public issue.
+- **Settings -> Code security -> Dependabot alerts and Dependabot security updates = enabled.**
+  `.github/dependabot.yml` turns on *version* updates by itself; alert-driven *security*
+  updates — a pull request the day an advisory is published, rather than on the weekly
+  schedule — are a separate switch.
 
 - **Settings -> Pages -> Source = "GitHub Actions".** Without it, `docs.yml`'s `build`
   job succeeds but `deploy` fails with an opaque error, and every published docs link

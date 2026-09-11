@@ -9,8 +9,9 @@ publishes to PyPI. Nobody types a release command.
 | Job | Does | Runs when |
 | --- | --- | --- |
 | `verify` | ruff (including the `S` security rules), format check, the full offline suite, `uv audit` on the lockfile | every push to `main` |
-| `release` | `cz bump`, push the commit and its tag, verify the tag reached `origin`, `uv build`, upload the artifact | `verify` passed |
-| `publish` | download the artifact, upload to PyPI | a version was actually cut |
+| `release` | `cz bump`, push the commit and its tag, verify the tag reached `origin`, write the release notes, `uv build`, export the SBOM, upload the artifacts | `verify` passed |
+| `publish` | download the artifact, upload to PyPI with attestations | a version was actually cut |
+| `github-release` | download the three artifacts and hand them to `gh`: create the GitHub Release for the tag with the notes; attach the wheel, the sdist and the SBOM. No checkout, no install | `publish` succeeded |
 
 A merge whose commits do not warrant a release is a no-op: `cz bump` exits `21` or `3`, the
 job records "nothing to release" in its summary, and `publish` is skipped.
@@ -18,6 +19,16 @@ job records "nothing to release" in its summary, and `publish` is skipped.
 `verify` re-runs the dependency audit on the commit being released rather than trusting the
 pull request's green check: an advisory can be published between the merge and the tag, and
 nothing publishes that `verify` did not pass. See [Security](security.md).
+
+`release` also exports a CycloneDX SBOM from the lockfile `verify` audited —
+`skill-lens-X.Y.Z.cdx.json`, for the runtime dependencies and the `pydantic-ai` extra, not
+the dev or docs groups — and uploads it as its own `sbom` artifact, apart from `dist`:
+`publish` sends every file in `dist` to PyPI, which would reject an SBOM, and a rejected
+file fails the upload after the tag is already pushed. `github-release` then attaches it to
+the GitHub Release at
+`https://github.com/EmadMokhtar/skill-evaluator/releases/download/vX.Y.Z/skill-lens-X.Y.Z.cdx.json`.
+The release is created only after PyPI accepted the upload, so it can never advertise a
+version `pip install` cannot find.
 
 `release` builds with the audited backend, not a fresh one. `uv build` resolves
 `[build-system] requires` at build time, outside the lockfile, so the artifact could otherwise
@@ -178,6 +189,18 @@ left with a real, permanent tag and no published package behind it, which is wor
 nothing — the tag cannot simply be re-cut, since `vX.Y.Z` would then mean two different things
 depending on which push you ask about.
 
+### Recovering a failed GitHub Release
+
+`github-release` runs after `publish`, so a failure here means PyPI already has the version
+and only the GitHub Release or its assets are missing. Re-run the job: it skips creation
+when the release already exists and uploads the assets with `--clobber`, so a partial run
+converges rather than failing on "already exists". Nothing in it can affect PyPI.
+
+The job holds `contents: write`, so it is kept to downloading artifacts and running `gh`:
+no checkout, no `uv sync`, no build. The notes, the SBOM and the distributions are all
+produced in `release` and handed on as artifacts, so no third-party code runs under the
+token that can write releases.
+
 ### Recovering a failed publish
 
 The one recoverable failure is a run whose `release` job fully succeeded — tests passed, the tag
@@ -193,8 +216,9 @@ reports nothing to release.
 
 ### Recovering a failure *after* the tag but *before* the artifact
 
-There is one state with no re-run at all. If `uv build` or the artifact upload fails once the
-tag has already reached origin, `main` carries a permanent tag `vX.Y.Z`, `publish` was never
+There is one state with no re-run at all. If anything between the tag and the artifacts
+fails once the tag has already reached origin — writing the release notes, `uv build`, the
+SBOM export, or any of the three artifact uploads — `main` carries a permanent tag `vX.Y.Z`, `publish` was never
 eligible (`needs.release.outputs.bumped` never reached it), so there is no `publish` job to
 re-run, and a fresh run's `cz bump` exits `3` — nothing to release — for the same
 already-tagged-`HEAD` reason as above. Version `X.Y.Z` is spent: it exists as a tag and will

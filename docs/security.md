@@ -8,6 +8,13 @@ The checks cover skill-lens's own code and its dependencies. They say nothing ab
 skills you evaluate *with* it — a skill under test is an input, and it gets no more
 trust than any other input.
 
+## Reporting a vulnerability
+
+Please do not open a public issue. Use GitHub's private reporting form —
+<https://github.com/EmadMokhtar/skill-evaluator/security/advisories/new> — and see
+[`SECURITY.md`](https://github.com/EmadMokhtar/skill-evaluator/blob/main/SECURITY.md) for
+what to include and what to expect.
+
 ## What is checked
 
 ### Known vulnerabilities in dependencies
@@ -123,6 +130,44 @@ Exceptions live in that table and nowhere else. Every copy of the audit command 
 Security workflow, the release gate, the pre-push hook — reads it, and a test requires the
 three commands to be spelled identically, so an exception can never apply to CI and not to
 the release, or to your machine and not to CI.
+
+## What a release carries
+
+Each version published to PyPI is accompanied by:
+
+- **A Software Bill of Materials (SBOM)** in CycloneDX 1.5, attached to the GitHub Release
+  for the tag at a stable URL:
+  `https://github.com/EmadMokhtar/skill-evaluator/releases/download/vX.Y.Z/skill-lens-X.Y.Z.cdx.json`.
+  It is exported from the lockfile the release gate just audited, with `--frozen` so nothing
+  is re-resolved, and it describes what an installer gets — the runtime dependencies plus the
+  optional `pydantic-ai` extra — not the dev or docs tooling, which ships to nobody. The wheel
+  and sdist PyPI received are attached beside it.
+- **Signed attestations on PyPI.** The upload uses Trusted Publishing (PyPI trusts a specific
+  GitHub workflow through short-lived tokens; no stored password or API token exists), and
+  the publishing action generates a [PEP 740](https://peps.python.org/pep-0740/) attestation
+  for every file by default — a signed record of which repository, workflow and commit built
+  it. PyPI shows it on each file's page.
+
+The GitHub Release is created **after** PyPI accepted the upload, never before, so it cannot
+advertise a version that `pip install` cannot find. See [Releasing](releasing.md) for the
+order of jobs and how a failed step is recovered.
+
+## The repository's own automation
+
+- **Every GitHub Action is pinned to a commit SHA**, with the version it corresponds to in a
+  trailing comment (`actions/checkout@11d5960…  # v4.4.0`). A tag can be moved, so
+  `@v4` runs whatever `v4` points at on the day; a commit cannot. `tests/test_supply_chain.py`
+  fails on any `uses:` that is not a 40-character SHA with a version comment.
+- **Dependabot** (`.github/dependabot.yml`) proposes weekly updates for both `uv.lock` and the
+  pinned actions, since a pinned hash never moves on its own. Minor and patch bumps arrive as
+  one grouped pull request; a major bump gets its own. Its pull-request titles are
+  Conventional Commits, because the title becomes the commit on `main` that versioning reads.
+- **Least-privilege tokens.** No workflow grants write access at the top level; each job asks
+  for exactly what it uses, so the docs `build` job, which runs third-party tooling on the
+  checkout, holds only the read access it needs, and `publish` holds `id-token` and nothing
+  that can write to the repository. The one job that can write releases, `github-release`,
+  installs nothing and checks nothing out: it downloads artifacts that earlier jobs built and
+  verified, and runs `gh`.
 
 ## Why these rules
 
