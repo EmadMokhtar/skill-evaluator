@@ -34,6 +34,9 @@ def _reject_unfilled(
 
     Runs before schema validation so the message names the field to fill in
     rather than complaining about the type of a value nobody meant to keep.
+    Mapping keys are checked as well as values: `workspace.files` is keyed by
+    filename.
+
     An unfilled scaffold says something about the author's progress, not about
     the skill, so it aborts the run as an authoring error instead of scoring
     as a failure.
@@ -57,6 +60,8 @@ def _reject_unfilled(
             return
         seen = seen | {id(raw)}
         for key, value in raw.items():
+            # Keys are user text too: `workspace.files` is keyed by filename.
+            _reject_unfilled(path, index, key, trail, seen)
             _reject_unfilled(path, index, value, f"{trail}.{key}" if trail else str(key), seen)
     elif isinstance(raw, list):
         if id(raw) in seen:
