@@ -19,6 +19,12 @@ second. It covers every extra and every dependency group, so a vulnerable test o
 dependency is reported too: those run on maintainers' machines and in CI, which is where
 a supply-chain attack would want to be.
 
+The build backend is covered too. `uv.lock` records what the project *installs*, not what
+*builds* it — `[build-system] requires` is resolved fresh at build time — so a `build`
+dependency group mirrors those requirements (a test keeps the two equal). That puts
+`hatchling` and its own dependencies in the lockfile, where the audit sees them, and lets
+the release pin the build to exactly those versions (see [Releasing](releasing.md)).
+
 Besides vulnerabilities it reports **adverse project statuses** — packages PyPI has
 marked deprecated, archived or quarantined — so a dependency being abandoned upstream is
 visible before it becomes a vulnerability.

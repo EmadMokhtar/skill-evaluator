@@ -159,8 +159,17 @@ jobs:
           echo "Confirmed tag $tag reached origin." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build the distributions
+        # The build backend is not part of the lockfile `verify` audited:
+        # `uv build` resolves `[build-system] requires` fresh, so the artifact
+        # could be produced by a hatchling nobody checked. The `build`
+        # dependency group mirrors those requirements, which puts the backend
+        # in uv.lock; exporting that group as a constraint file and handing it
+        # to the build pins the backend and its own dependencies to exactly
+        # the audited versions. `--frozen` reads the lockfile as-is.
         if: steps.bump.outputs.bumped == 'true'
-        run: uv build
+        run: |
+          uv export --frozen --only-group build --no-hashes -o build-constraints.txt
+          uv build --build-constraint build-constraints.txt
 
       - name: Upload the distributions
         if: steps.bump.outputs.bumped == 'true'

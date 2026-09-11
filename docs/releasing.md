@@ -19,6 +19,14 @@ job records "nothing to release" in its summary, and `publish` is skipped.
 pull request's green check: an advisory can be published between the merge and the tag, and
 nothing publishes that `verify` did not pass. See [Security](security.md).
 
+`release` builds with the audited backend, not a fresh one. `uv build` resolves
+`[build-system] requires` at build time, outside the lockfile, so the artifact could otherwise
+be produced by a `hatchling` nobody checked. The `build` dependency group mirrors those
+requirements, which puts the backend in `uv.lock`; the job exports that group
+(`uv export --frozen --only-group build`) as a constraint file and passes it to
+`uv build --build-constraint`, so the backend and its own dependencies are exactly the versions
+`verify` audited.
+
 The version comes from the commit messages, so a Conventional Commit title is not a style
 rule here — it is the input to versioning. `fix:` gives a patch, `feat:` a minor, and a `!`
 or a `BREAKING CHANGE:` footer a breaking change. Because `major_version_zero = true`, a

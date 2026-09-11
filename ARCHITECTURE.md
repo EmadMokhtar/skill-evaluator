@@ -545,6 +545,15 @@ disagree instead of quietly auditing a fresh resolution nobody installs, and
 its interface changes, the wiring tests fail on the pull request that bumps uv, not in a
 release.
 
+The build backend is audited and pinned too. `uv.lock` records what the project installs, not
+what builds it: `[build-system] requires` is resolved fresh at build time, so the artifact
+could be produced by a `hatchling` the audit never saw. A `build` dependency group mirrors
+those requirements — a test keeps the two lists equal, or the group would audit a backend the
+build does not use — which puts the backend and its own dependencies in the lockfile. The
+release then exports that group (`uv export --frozen --only-group build`) as a constraint file
+for `uv build --build-constraint`, so what builds the published wheel is exactly what `verify`
+audited.
+
 **The audit runs at push time locally, not commit time.** It needs the network. A commit hook
 would fail offline and teach people to skip it; a push needs the network anyway, so the check
 costs nothing extra there and cannot be blamed on a bad connection.
