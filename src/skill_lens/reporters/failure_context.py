@@ -33,7 +33,6 @@ TOOL_CALL_LIMIT = 20
 @dataclass(frozen=True)
 class FailureContext:
     """The excerpt. `output` is already cut, has normalised line endings
-
     (CRLF/CR folded to LF), and carries no trailing newline; `cut` says how
     much was cut, counted on the raw output before that normalisation.
     """

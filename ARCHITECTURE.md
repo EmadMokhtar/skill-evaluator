@@ -292,9 +292,6 @@ trajectory, `max_tokens` / `max_cost_usd` / `max_latency_ms` for budget. This is
 
 ### CI surfaces (M5)
 
-**`--case` is flag-only, like `--tag`:** a config file that permanently narrowed the suite
-would let a green run measure less than the repository declares.
-
 **JUnit reports the candidate arm only.** Under `--baseline`, a failing baseline is the
 evidence that the skill helped. Rendering it as `<failure>` would paint CI red for the skill
 working — the same reason every `RunReport` aggregate reads `candidate_outcomes`.

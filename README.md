@@ -142,7 +142,7 @@ skill-lens run ./skills
 ```
 [PASS] order-support :: names the order it is talking about (fake)
 [FAIL] order-support :: refuses a refund outside the return window (fake)
-        assertion: failed: contains('return window')
+        assertion: failed: contains('return window'): did not hold
             contains[0]: contains('return window') did not hold
         output: [fake] order-support handled: I want a refund for order 1234
 [PASS] order-support :: never leaks a stack trace to the customer (fake)

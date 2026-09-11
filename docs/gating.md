@@ -22,7 +22,7 @@ A case that fails its assertions drags the pass rate below the bar and fails the
 
 ```
 [FAIL] badskill :: expects something absent (fake)
-        assertion: failed: contains('NEVER_PRESENT')
+        assertion: failed: contains('NEVER_PRESENT'): did not hold
 
 0 passed, 1 failed, 0 errored — pass rate 0%
 
@@ -82,7 +82,7 @@ every tool call, in order.
 
 ```
 [FAIL] order-support :: refuses a refund outside the return window (pydantic-ai)
-        assertion: failed: contains('1234')
+        assertion: failed: contains('1234'): did not hold
             contains[0]: contains('1234') did not hold
         output: I'm sorry, but that order was delivered 45 days ago, so it is
         outside our 30-day return window and I can't refund it.

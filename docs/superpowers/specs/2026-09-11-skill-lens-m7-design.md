@@ -45,6 +45,8 @@ request**.
 | Printing the transcript | `RunResult.transcript` is provider-shaped and large. Output plus tool calls answer "why did it fail"; the JSON report has the rest. |
 | Per-skill `min_delta`, `--baseline-ref`, both-arms-fail flagging | Gating features carried over from the M4 and M5 deferred lists; not DX. |
 | M6 Part 2 (running a bundled script) | Its own spec, unchanged. |
+| Single-mode `init` checking for *any* existing suite | Single mode only refuses when the exact target file exists; with `other.eval.yaml` beside `SKILL.md` it writes a second scaffold, whereas batch mode skips that skill. §5d keeps single-mode semantics unchanged; aligning the two is a later spec decision. |
+| Two-stage Markdown degradation | The failures block is now larger (output excerpt + tool calls) and is dropped whole under a tight `--markdown-max-chars`. Rendering failures *without* the excerpt before dropping the block would fit "detail before meaning"; nothing consumes it yet. |
 
 ## 2. Decisions
 

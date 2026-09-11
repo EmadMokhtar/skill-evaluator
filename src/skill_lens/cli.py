@@ -226,13 +226,14 @@ def run(
         else:
             active_judge = judge_class()
         if getattr(runner_class, "needs_api_key", False):
-            # A ceiling, not a forecast. The tag filter is applied here because
-            # `run_evals` applies it too and ignoring it can overstate the total
-            # wildly -- but the baseline arm is also dropped per-case for
-            # `mode: offered` under --baseline none, and per-skill when a
-            # previous version cannot be resolved. Both only ever *reduce* the
-            # count, and reproducing them here would mean duplicating the
-            # orchestrator's discovery (and its git calls) just to print a line.
+            # A ceiling, not a forecast. The tag and case filters are applied
+            # here because `run_evals` applies them too and ignoring them can
+            # overstate the total wildly -- but the baseline arm is also
+            # dropped per-case for `mode: offered` under --baseline none, and
+            # per-skill when a previous version cannot be resolved. Both only
+            # ever *reduce* the count, and reproducing them here would mean
+            # duplicating the orchestrator's discovery (and its git calls)
+            # just to print a line.
             arms = 2 if baseline_kind else 1
             case_count = 0
             for candidate_skill in skills:
