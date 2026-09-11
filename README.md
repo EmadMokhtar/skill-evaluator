@@ -167,7 +167,7 @@ above is what supplies it (from a checkout: `uv sync --extra pydantic-ai`). See
 ## Gate your pull requests
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v0.3.0
+- uses: EmadMokhtar/skill-evaluator@v0.4.0
   with:
     path: ./skills
     runner: pydantic-ai
