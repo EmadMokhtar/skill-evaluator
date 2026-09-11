@@ -373,7 +373,6 @@ def run_evals(
     evals_path: Path | None = None,
     evaluators: list[Evaluator] | None = None,
     tag: str | None = None,
-    case_filter: str | None = None,
     judge: Judge | None = None,
     baseline: BaselineKind | None = None,
     repeat: int = 1,
@@ -381,6 +380,7 @@ def run_evals(
     executor_factory: Callable[[int], Executor] | None = None,
     keep_workspace: bool = False,
     workspace_limits: WorkspaceLimits | None = None,
+    case_filter: str | None = None,
 ) -> RunReport:
     """Run every (skill, case, runner, arm, repetition) and aggregate the results.
 

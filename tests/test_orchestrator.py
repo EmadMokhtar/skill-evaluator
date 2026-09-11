@@ -864,3 +864,14 @@ def test_a_skill_emptied_by_the_tag_filter_is_not_also_case_filtered(tmp_path):
     )
     assert report.tag_filtered_skills == ["pdf"]
     assert report.case_filtered_skills == []
+
+
+def test_case_filter_is_appended_after_every_pre_existing_parameter():
+    # `run_evals` is library API. A caller that passed `judge` positionally
+    # before `case_filter` existed must still be binding `judge`, so the new
+    # parameter has to sit after every parameter that predates it.
+    import inspect
+
+    params = list(inspect.signature(run_evals).parameters)
+    assert params[-1] == "case_filter"
+    assert params.index("judge") == params.index("tag") + 1
