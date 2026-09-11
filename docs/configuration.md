@@ -2,7 +2,9 @@
 
 `skill-lens.toml` is optional. It is located via `--config`, or otherwise discovered by
 searching upward from the current directory — the repo root is the conventional home, not a
-requirement.
+requirement. [`examples/skill-lens.toml`](https://github.com/EmadMokhtar/skill-evaluator/blob/main/examples/skill-lens.toml)
+is a complete, annotated example: every key listed, the realistic ones live, the rest
+commented out at their defaults.
 
 ```toml
 default_runner = "fake"
