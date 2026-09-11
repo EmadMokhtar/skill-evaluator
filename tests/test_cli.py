@@ -760,7 +760,15 @@ def test_a_case_flag_matching_nothing_fails_the_gate_naming_the_flag(tmp_path):
 
 
 def test_the_run_plan_counts_only_cases_the_case_filter_keeps(tmp_path, monkeypatch):
+    # The plan line is printed before run_evals; stubbing run_evals keeps this
+    # test offline while still proving the count reflects the --case filter.
+    # (A version of this test that let the one surviving case run reached the
+    # provider on every run of the default tier.)
+    from skill_lens import cli as cli_module
+    from skill_lens.models import RunReport
+
     monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-parsing")
+    monkeypatch.setattr(cli_module, "run_evals", lambda *args, **kwargs: RunReport())
     _make_skill(tmp_path, cases=TWO_CASES_YAML)
     result = runner.invoke(app, ["run", str(tmp_path), "--runner", "pydantic-ai", "--case", "also"])
     assert "1 case(s) = 1 runs" in plain(result.stdout)

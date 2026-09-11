@@ -201,3 +201,21 @@ def test_batch_init_surfaces_a_malformed_skill_as_a_user_error(tmp_path):
     result = runner.invoke(app, ["init", str(root)])
     assert result.exit_code == 2
     assert "frontmatter" in result.output
+
+
+def test_batch_init_stops_at_a_write_failure_and_keeps_earlier_scaffolds(tmp_path):
+    # Spec: a write failure exits 2 naming the file; scaffolds already written
+    # stay. The second skill's `evals` is a *file*, so its directory cannot be
+    # created.
+    root = tmp_path / "skills"
+    for name in ("alpha", "beta"):
+        (root / name).mkdir(parents=True)
+        (root / name / "SKILL.md").write_text(f"---\nname: {name}\n---\n\nbody\n", encoding="utf-8")
+    (root / "beta" / "evals").write_text("not a directory\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["init", str(root)])
+    assert result.exit_code == 2
+    assert "cannot write" in result.output
+    assert str(root / "beta" / "evals" / "beta.eval.yaml") in result.output
+    assert (root / "alpha" / "evals" / "alpha.eval.yaml").is_file()
+    assert "Fill in every" not in result.output

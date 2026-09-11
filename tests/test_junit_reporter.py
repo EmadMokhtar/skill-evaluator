@@ -181,10 +181,10 @@ def test_illegal_xml_characters_are_stripped_so_the_document_parses():
     )
     root = _parse(report)  # would raise ParseError before the strip
     assert root.find("testsuite/testcase").get("name") == "weirdname"
-    # The body now carries the output context after the head line (Task 4),
-    # so only the head -- what the control-character stripping is about -- is
+    # The body now carries the output excerpt after the head line, so only
+    # the head -- what the control-character stripping is about -- is
     # checked here.
-    assert root.find("testsuite/testcase/error").text.startswith("boom")
+    assert root.find("testsuite/testcase/error").text.split("\n")[0] == "boom"
 
 
 def test_markup_in_names_survives_a_round_trip():

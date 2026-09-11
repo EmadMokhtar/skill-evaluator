@@ -106,8 +106,9 @@ def test_the_fifth_case_says_when_to_delete_it():
 
 
 def test_no_placeholder_sits_in_a_mapping_key():
-    # Task 8 made the loader refuse keys too; the template must still be
-    # refused for its *values* and never rely on a key to carry the marker.
+    # The loader refuses placeholders in mapping keys too; the template must
+    # still be refused for its *values* and never rely on a key to carry the
+    # marker.
     data = safe_load(render_scaffold(SKILL))
 
     def keys(node):
