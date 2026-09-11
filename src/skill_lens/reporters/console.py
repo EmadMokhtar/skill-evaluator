@@ -138,13 +138,10 @@ def _context_lines(outcome: CaseOutcome, output_limit: int | None) -> list[str]:
     if context is None:
         return []
     lines: list[str] = []
-    text = context.output.rstrip("\r\n")
-    if text:
-        text_lines = text.split("\n")
-        # Strip carriage returns from each line to handle CRLF input.
-        clean_lines = [line.rstrip("\r") for line in text_lines]
-        lines.append(f"{_INDENT}output: {clean_lines[0]}")
-        lines.extend(f"{_INDENT}{line}" for line in clean_lines[1:])
+    if context.output:
+        first, *rest = context.output.split("\n")
+        lines.append(f"{_INDENT}output: {first}")
+        lines.extend(f"{_INDENT}{line}" for line in rest)
     else:
         # "The agent said nothing" is the most useful fact about a failed
         # assertion; an absent line would look like the feature is missing.

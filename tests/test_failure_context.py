@@ -126,3 +126,31 @@ def test_calls_beyond_the_cap_are_counted_not_listed():
     assert context.tool_calls[0] == "t0()"
     assert context.more_calls == 5
     assert more_calls_note(context) == "… +5 more calls"
+
+
+def test_a_trailing_newline_is_stripped_from_the_excerpt():
+    context = failure_context(_outcome(result=RunResult(output="hello\n\n")), limit=OUTPUT_LIMIT)
+    assert context is not None
+    assert context.output == "hello"
+    assert context.cut == 0
+
+
+def test_crlf_line_endings_are_normalised():
+    context = failure_context(_outcome(result=RunResult(output="a\r\nb\rc")), limit=OUTPUT_LIMIT)
+    assert context is not None
+    assert context.output == "a\nb\nc"
+
+
+def test_an_output_that_is_only_line_breaks_is_empty():
+    context = failure_context(_outcome(result=RunResult(output="\r\n\n")), limit=OUTPUT_LIMIT)
+    assert context is not None
+    assert context.output == ""
+
+
+def test_the_cut_is_counted_on_the_raw_output_before_normalisation():
+    # 500 x's then a newline: the newline is the 501st raw character, so it is
+    # cut (cut == 1) and never reaches the excerpt either way.
+    context = failure_context(_outcome(result=RunResult(output="x" * 500 + "\n")), limit=500)
+    assert context is not None
+    assert context.cut == 1
+    assert context.output == "x" * 500

@@ -536,3 +536,17 @@ def test_an_empty_output_is_stated():
         ]
     )
     assert "```\n(empty)\n```" in render_markdown(report)
+
+
+def test_an_output_that_is_only_a_newline_is_stated_as_empty():
+    report = RunReport(
+        outcomes=[
+            _outcome(
+                name="silent",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output="\n"),
+            )
+        ]
+    )
+    assert "```\n(empty)\n```" in render_markdown(report)

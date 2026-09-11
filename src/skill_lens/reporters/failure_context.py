@@ -32,7 +32,11 @@ TOOL_CALL_LIMIT = 20
 
 @dataclass(frozen=True)
 class FailureContext:
-    """The excerpt. `output` is already cut; `cut` says by how much."""
+    """The excerpt. `output` is already cut, has normalised line endings
+
+    (CRLF/CR folded to LF), and carries no trailing newline; `cut` says how
+    much was cut, counted on the raw output before that normalisation.
+    """
 
     output: str
     cut: int
@@ -76,6 +80,10 @@ def failure_context(outcome: CaseOutcome, *, limit: int | None) -> FailureContex
     if limit is not None and len(output) > limit:
         cut = len(output) - limit
         output = output[:limit]
+    # Line endings are markup, not content: a trailing newline would render as a
+    # blank line in every reporter, and an output that is only line breaks said
+    # nothing. Normalised after the cut so `cut` stays a count over the raw text.
+    output = output.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n")
     calls = outcome.result.tool_calls
     return FailureContext(
         output=output,

@@ -301,3 +301,9 @@ def test_control_characters_in_the_output_are_stripped_so_the_document_parses():
 def test_an_empty_output_is_stated_in_the_body():
     root = _parse(RunReport(outcomes=[_failed("")]))
     assert "output:\n(empty)" in root.find("testsuite/testcase/failure").text
+
+
+def test_a_trailing_newline_does_not_leave_a_blank_line_in_the_body():
+    root = _parse(RunReport(outcomes=[_failed("done.\n")]))
+    assert "output:\ndone." in root.find("testsuite/testcase/failure").text
+    assert "done.\n\n" not in root.find("testsuite/testcase/failure").text
