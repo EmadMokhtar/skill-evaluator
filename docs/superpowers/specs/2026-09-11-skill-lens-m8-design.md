@@ -61,7 +61,7 @@ on feasibility grounds, and this milestone ships it as **one spec and two pull r
 | --- | --- |
 | **`create_agent`**, not `bind_tools` plus a hand-written loop. | The matrix exists to answer "does the skill work under LangChain's agent". A loop written here would compare two harnesses written here. |
 | The **prompt rules move to `runners/prompting.py`**; the retry loop to `runners/retry.py`. | The arm-identical and never-names-the-skill invariants are what `--min-delta` measures against. Two copies could drift; one function has one test. Neither helper imports a framework, so both sit outside the isolation allowlist. |
-| **Duck-typed transient detection** for LangChain: an exception with a `status_code` attribute is transient on 408/409/429/5xx; `TimeoutError` / `ConnectionError` are transient; nothing else is. | LangChain does not normalise provider exceptions. The `openai` and `anthropic` SDKs both expose `status_code`; matching on an attribute rather than on an SDK type keeps the adapter provider-neutral without importing any SDK. |
+| **Duck-typed transient detection** for LangChain: an exception with a `status_code` attribute is transient on 408/409/429/5xx; the builtin `TimeoutError` / `ConnectionError` are transient; so is any exception whose class name ends in `ConnectionError` or `TimeoutError`; nothing else is. | LangChain does not normalise provider exceptions. The `openai` and `anthropic` SDKs both expose `status_code` on HTTP errors, but their network errors (`APIConnectionError`, `APITimeoutError`) carry no status and do not subclass the builtins, so the class name is the one provider-neutral signal left. Matching attributes and names rather than SDK types keeps the rule identical for a provider package that is not installed. |
 | **A LangChain judge reports a malformed structured output as `errored`**, through the same retry loop, as non-transient (one attempt). | PydanticAI retries a malformed output internally; LangChain hands it back as `parsing_error`. An unreadable verdict is an infra signal, not a low score — the existing `errored` ≠ `failed` rule. |
 | **`with_structured_output(..., include_raw=True)`** in the judge. | Without `include_raw` LangChain returns only the parsed object; tokens, cost and the served model name would be unreadable, and `EvalScore.cost_usd` (judge overhead in the report) depends on them. |
 | **`genai-prices` is declared by the `[langchain]` extra.** | `calculate_cost` imports it and today it arrives only as a transitive dependency of `pydantic-ai`. A `[langchain]`-only install would otherwise stamp every case with a truthful-but-useless "not installed" note. |
@@ -81,10 +81,13 @@ Both are extracted from `runners/pydantic_ai.py` with no change in behaviour.
 `system_prompt(skill)` (identity first, then instructions; `BASELINE_PREAMBLE` when both
 `description` and `instructions` are empty) and `instructions(skill, case, has_workspace)`
 (offered preamble in `offered` mode, otherwise the skill prompt; the workspace preamble
-appended byte-identically whenever a workspace exists). The PydanticAI module keeps the
-same names bound so existing imports and tests continue to resolve.
+appended byte-identically whenever a workspace exists). The PydanticAI module imports
+`instructions` and nothing else from it; the tests and the cassette test that named the
+preambles through `runners/pydantic_ai.py` import them from `runners/prompting.py` instead,
+so no re-export is needed and ruff's unused-import rule stays clean.
 
-**`retry.py`** holds `TRANSIENT_STATUSES = {408, 409, 429}` and
+**`retry.py`** holds `TRANSIENT_STATUSES = {408, 409, 429}`, `transient_status(status_code)`
+(true for those three and for any 5xx — the one place the status policy is spelled) and
 
 ```python
 def run_with_retries(call, is_transient, retries, backoff_seconds, sleep) -> Any
