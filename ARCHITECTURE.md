@@ -224,6 +224,11 @@ A missing cassette skips; a mismatched request fails rather than reaching the ne
 older name, `skill-evaluator`, so `uses: EmadMokhtar/skill-evaluator@v<version>` installing
 `skill-lens` is expected, not a mistake. `tests/test_naming.py` fails if the pre-rename name
 reappears outside `docs/superpowers/`, which is a historical archive and is never rewritten.
+`CHANGELOG.md` is exempt from that scan on the same grounds and for one more: `cz bump`
+regenerates it from commit subjects and footers written before the rename, so an edit there
+would misquote the commit it came from *and* be undone by the next release. It is not left
+unguarded — a second test reads the file and allows only the exact lines history produced, so
+the old name arriving through a commit subject written after the rename still fails.
 
 **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
 
