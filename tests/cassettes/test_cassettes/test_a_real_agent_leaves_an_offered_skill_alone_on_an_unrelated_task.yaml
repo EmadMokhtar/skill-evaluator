@@ -42,16 +42,16 @@ interactions:
     uri: https://api.openai.com/v1/responses
   response:
     body:
-      string: "{\n  \"id\": \"resp_0b1f5539cd4ce145006a70eaff216c819db92a6f4843281ffb\",\n
-        \ \"object\": \"response\",\n  \"created_at\": 1785785087,\n  \"status\":
+      string: "{\n  \"id\": \"resp_0df757ef45091b00006aa3970750d887d2b9aa40da6800e0d3\",\n
+        \ \"object\": \"response\",\n  \"created_at\": 1789105927,\n  \"status\":
         \"completed\",\n  \"background\": false,\n  \"billing\": {\n    \"payer\":
-        \"openai\"\n  },\n  \"completed_at\": 1785785087,\n  \"error\": null,\n  \"frequency_penalty\":
+        \"openai\"\n  },\n  \"completed_at\": 1789105927,\n  \"error\": null,\n  \"frequency_penalty\":
         0.0,\n  \"incomplete_details\": null,\n  \"instructions\": \"You are a helpful
         assistant. Some capabilities are available to you as tools. Read their descriptions
         and use one when it genuinely fits the request. If none fits, just answer
         directly.\",\n  \"max_output_tokens\": null,\n  \"max_tool_calls\": null,\n
         \ \"model\": \"gpt-4o-mini-2024-07-18\",\n  \"moderation\": null,\n  \"output\":
-        [\n    {\n      \"id\": \"msg_0b1f5539cd4ce145006a70eaff8f48819da832b331c7f08a72\",\n
+        [\n    {\n      \"id\": \"msg_0df757ef45091b00006aa3970797a087d2bd57abb010c259c6\",\n
         \     \"type\": \"message\",\n      \"status\": \"completed\",\n      \"content\":
         [\n        {\n          \"type\": \"output_text\",\n          \"annotations\":
         [],\n          \"logprobs\": [],\n          \"text\": \"The capital of Egypt
@@ -89,9 +89,9 @@ interactions:
       content-type:
       - application/json
       date:
-      - Mon, 03 Aug 2026 19:24:47 GMT
+      - Fri, 11 Sep 2026 05:52:07 GMT
       openai-processing-ms:
-      - '661'
+      - '481'
       openai-version:
       - '2020-10-01'
       server:
@@ -107,11 +107,11 @@ interactions:
       x-ratelimit-limit-tokens:
       - '200000'
       x-ratelimit-remaining-requests:
-      - '9995'
+      - '9994'
       x-ratelimit-remaining-tokens:
       - '199707'
       x-ratelimit-reset-requests:
-      - 34.778s
+      - 47.521s
       x-ratelimit-reset-tokens:
       - 87ms
     status:

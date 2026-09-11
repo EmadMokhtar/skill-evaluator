@@ -42,18 +42,18 @@ interactions:
     uri: https://api.openai.com/v1/responses
   response:
     body:
-      string: "{\n  \"id\": \"resp_0c3e84f6ef9021ff006a70eaf95d7c81a2a582925bff0456e9\",\n
-        \ \"object\": \"response\",\n  \"created_at\": 1785785081,\n  \"status\":
+      string: "{\n  \"id\": \"resp_0dfe9623164edff0006aa397009bc887d2aa0d38dd1309dac0\",\n
+        \ \"object\": \"response\",\n  \"created_at\": 1789105920,\n  \"status\":
         \"completed\",\n  \"background\": false,\n  \"billing\": {\n    \"payer\":
-        \"openai\"\n  },\n  \"completed_at\": 1785785082,\n  \"error\": null,\n  \"frequency_penalty\":
+        \"openai\"\n  },\n  \"completed_at\": 1789105923,\n  \"error\": null,\n  \"frequency_penalty\":
         0.0,\n  \"incomplete_details\": null,\n  \"instructions\": \"You are a helpful
         assistant. Some capabilities are available to you as tools. Read their descriptions
         and use one when it genuinely fits the request. If none fits, just answer
         directly.\",\n  \"max_output_tokens\": null,\n  \"max_tool_calls\": null,\n
         \ \"model\": \"gpt-4o-mini-2024-07-18\",\n  \"moderation\": null,\n  \"output\":
-        [\n    {\n      \"id\": \"fc_0c3e84f6ef9021ff006a70eafa923481a2b0b7194b428fe191\",\n
+        [\n    {\n      \"id\": \"fc_0dfe9623164edff0006aa39703845c87d2a3da40ad73f49501\",\n
         \     \"type\": \"function_call\",\n      \"status\": \"completed\",\n      \"arguments\":
-        \"{}\",\n      \"call_id\": \"call_FVuvDFrfHF88d35827MSNb5K\",\n      \"name\":
+        \"{}\",\n      \"call_id\": \"call_0M6W9OqgflszEvdvNtVNbTBP\",\n      \"name\":
         \"order_support\"\n    }\n  ],\n  \"parallel_tool_calls\": true,\n  \"presence_penalty\":
         0.0,\n  \"previous_response_id\": null,\n  \"prompt_cache_key\": null,\n  \"prompt_cache_retention\":
         \"in_memory\",\n  \"reasoning\": {\n    \"context\": null,\n    \"effort\":
@@ -87,9 +87,9 @@ interactions:
       content-type:
       - application/json
       date:
-      - Mon, 03 Aug 2026 19:24:42 GMT
+      - Fri, 11 Sep 2026 05:52:03 GMT
       openai-processing-ms:
-      - '1538'
+      - '3104'
       openai-version:
       - '2020-10-01'
       server:
@@ -105,18 +105,18 @@ interactions:
       x-ratelimit-limit-tokens:
       - '200000'
       x-ratelimit-remaining-requests:
-      - '9998'
+      - '9997'
       x-ratelimit-remaining-tokens:
       - '199704'
       x-ratelimit-reset-requests:
-      - 13.953s
+      - 25.89s
       x-ratelimit-reset-tokens:
       - 88ms
     status:
       code: 200
       message: OK
 - request:
-    body: '{"input":[{"role":"user","content":"I want a refund for order 1234"},{"name":"order_support","arguments":"{}","call_id":"call_FVuvDFrfHF88d35827MSNb5K","type":"function_call"},{"type":"function_call_output","call_id":"call_FVuvDFrfHF88d35827MSNb5K","output":"Always
+    body: '{"input":[{"role":"user","content":"I want a refund for order 1234"},{"name":"order_support","arguments":"{}","call_id":"call_0M6W9OqgflszEvdvNtVNbTBP","type":"function_call"},{"type":"function_call_output","call_id":"call_0M6W9OqgflszEvdvNtVNbTBP","output":"Always
       call lookup_order before saying anything about an order. Never issue a refund
       for an order delivered more than 30 days ago."}],"instructions":"You are a helpful
       assistant. Some capabilities are available to you as tools. Read their descriptions
@@ -159,24 +159,24 @@ interactions:
     uri: https://api.openai.com/v1/responses
   response:
     body:
-      string: "{\n  \"id\": \"resp_01565b711594fb74006a70eafb390881a1a7d1243448637602\",\n
-        \ \"object\": \"response\",\n  \"created_at\": 1785785083,\n  \"status\":
+      string: "{\n  \"id\": \"resp_01799a73f2b8b70c006aa39703eebc87d29df244209be44ba0\",\n
+        \ \"object\": \"response\",\n  \"created_at\": 1789105923,\n  \"status\":
         \"completed\",\n  \"background\": false,\n  \"billing\": {\n    \"payer\":
-        \"openai\"\n  },\n  \"completed_at\": 1785785085,\n  \"error\": null,\n  \"frequency_penalty\":
+        \"openai\"\n  },\n  \"completed_at\": 1789105924,\n  \"error\": null,\n  \"frequency_penalty\":
         0.0,\n  \"incomplete_details\": null,\n  \"instructions\": \"You are a helpful
         assistant. Some capabilities are available to you as tools. Read their descriptions
         and use one when it genuinely fits the request. If none fits, just answer
         directly.\",\n  \"max_output_tokens\": null,\n  \"max_tool_calls\": null,\n
         \ \"model\": \"gpt-4o-mini-2024-07-18\",\n  \"moderation\": null,\n  \"output\":
-        [\n    {\n      \"id\": \"msg_01565b711594fb74006a70eafc3cf881a1971e309d3484b65d\",\n
+        [\n    {\n      \"id\": \"msg_01799a73f2b8b70c006aa397044a9c87d2aa8be851c8051466\",\n
         \     \"type\": \"message\",\n      \"status\": \"completed\",\n      \"content\":
         [\n        {\n          \"type\": \"output_text\",\n          \"annotations\":
         [],\n          \"logprobs\": [],\n          \"text\": \"I need to check the
         details of your order before proceeding with the refund request. Please hold
         on for a moment.\"\n        }\n      ],\n      \"role\": \"assistant\"\n    },\n
-        \   {\n      \"id\": \"fc_01565b711594fb74006a70eafcf7f081a18358091a72d38975\",\n
+        \   {\n      \"id\": \"fc_01799a73f2b8b70c006aa39704b28487d29babaa241c93f0af\",\n
         \     \"type\": \"function_call\",\n      \"status\": \"completed\",\n      \"arguments\":
-        \"{}\",\n      \"call_id\": \"call_RQBAoQG1XL3tNNu8XCOvd8Of\",\n      \"name\":
+        \"{}\",\n      \"call_id\": \"call_7uWG3SuX9h9HhtU2yxmhy0w2\",\n      \"name\":
         \"order_support\"\n    }\n  ],\n  \"parallel_tool_calls\": true,\n  \"presence_penalty\":
         0.0,\n  \"previous_response_id\": null,\n  \"prompt_cache_key\": null,\n  \"prompt_cache_retention\":
         \"in_memory\",\n  \"reasoning\": {\n    \"context\": null,\n    \"effort\":
@@ -210,9 +210,9 @@ interactions:
       content-type:
       - application/json
       date:
-      - Mon, 03 Aug 2026 19:24:45 GMT
+      - Fri, 11 Sep 2026 05:52:04 GMT
       openai-processing-ms:
-      - '1922'
+      - '955'
       openai-version:
       - '2020-10-01'
       server:
@@ -228,22 +228,22 @@ interactions:
       x-ratelimit-limit-tokens:
       - '200000'
       x-ratelimit-remaining-requests:
-      - '9996'
+      - '9995'
       x-ratelimit-remaining-tokens:
-      - '199635'
+      - '199435'
       x-ratelimit-reset-requests:
-      - 28.85s
+      - 41.867s
       x-ratelimit-reset-tokens:
-      - 109ms
+      - 169ms
     status:
       code: 200
       message: OK
 - request:
-    body: '{"input":[{"role":"user","content":"I want a refund for order 1234"},{"name":"order_support","arguments":"{}","call_id":"call_FVuvDFrfHF88d35827MSNb5K","type":"function_call"},{"type":"function_call_output","call_id":"call_FVuvDFrfHF88d35827MSNb5K","output":"Always
+    body: '{"input":[{"role":"user","content":"I want a refund for order 1234"},{"name":"order_support","arguments":"{}","call_id":"call_0M6W9OqgflszEvdvNtVNbTBP","type":"function_call"},{"type":"function_call_output","call_id":"call_0M6W9OqgflszEvdvNtVNbTBP","output":"Always
       call lookup_order before saying anything about an order. Never issue a refund
       for an order delivered more than 30 days ago."},{"role":"assistant","content":"I
       need to check the details of your order before proceeding with the refund request.
-      Please hold on for a moment."},{"name":"order_support","arguments":"{}","call_id":"call_RQBAoQG1XL3tNNu8XCOvd8Of","type":"function_call"},{"type":"function_call_output","call_id":"call_RQBAoQG1XL3tNNu8XCOvd8Of","output":"Always
+      Please hold on for a moment."},{"name":"order_support","arguments":"{}","call_id":"call_7uWG3SuX9h9HhtU2yxmhy0w2","type":"function_call"},{"type":"function_call_output","call_id":"call_7uWG3SuX9h9HhtU2yxmhy0w2","output":"Always
       call lookup_order before saying anything about an order. Never issue a refund
       for an order delivered more than 30 days ago."}],"instructions":"You are a helpful
       assistant. Some capabilities are available to you as tools. Read their descriptions
@@ -286,16 +286,16 @@ interactions:
     uri: https://api.openai.com/v1/responses
   response:
     body:
-      string: "{\n  \"id\": \"resp_04c33c1b03be1edb006a70eafd85dc81929aae7f7c4744db13\",\n
-        \ \"object\": \"response\",\n  \"created_at\": 1785785085,\n  \"status\":
+      string: "{\n  \"id\": \"resp_08bc7e12050a1391006aa397053b3887d2a8e62f0dbd3c318c\",\n
+        \ \"object\": \"response\",\n  \"created_at\": 1789105925,\n  \"status\":
         \"completed\",\n  \"background\": false,\n  \"billing\": {\n    \"payer\":
-        \"openai\"\n  },\n  \"completed_at\": 1785785086,\n  \"error\": null,\n  \"frequency_penalty\":
+        \"openai\"\n  },\n  \"completed_at\": 1789105926,\n  \"error\": null,\n  \"frequency_penalty\":
         0.0,\n  \"incomplete_details\": null,\n  \"instructions\": \"You are a helpful
         assistant. Some capabilities are available to you as tools. Read their descriptions
         and use one when it genuinely fits the request. If none fits, just answer
         directly.\",\n  \"max_output_tokens\": null,\n  \"max_tool_calls\": null,\n
         \ \"model\": \"gpt-4o-mini-2024-07-18\",\n  \"moderation\": null,\n  \"output\":
-        [\n    {\n      \"id\": \"msg_04c33c1b03be1edb006a70eafdf8d0819293dd7b8ae06093d1\",\n
+        [\n    {\n      \"id\": \"msg_08bc7e12050a1391006aa397063ecc87d291efca9aaac87986\",\n
         \     \"type\": \"message\",\n      \"status\": \"completed\",\n      \"content\":
         [\n        {\n          \"type\": \"output_text\",\n          \"annotations\":
         [],\n          \"logprobs\": [],\n          \"text\": \"It seems I need to
@@ -336,9 +336,9 @@ interactions:
       content-type:
       - application/json
       date:
-      - Mon, 03 Aug 2026 19:24:46 GMT
+      - Fri, 11 Sep 2026 05:52:07 GMT
       openai-processing-ms:
-      - '895'
+      - '1934'
       openai-version:
       - '2020-10-01'
       server:
@@ -358,7 +358,7 @@ interactions:
       x-ratelimit-remaining-tokens:
       - '199593'
       x-ratelimit-reset-requests:
-      - 36.377s
+      - 40.41s
       x-ratelimit-reset-tokens:
       - 122ms
     status:

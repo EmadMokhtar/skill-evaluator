@@ -39,14 +39,14 @@ interactions:
     uri: https://api.openai.com/v1/responses
   response:
     body:
-      string: "{\n  \"id\": \"resp_0316d6294b24e577006a72537d384881a2a04e2786c518957e\",\n
-        \ \"object\": \"response\",\n  \"created_at\": 1785877373,\n  \"status\":
+      string: "{\n  \"id\": \"resp_021b577e32fadf24006aa3970b14ec87d2b7c2acae8f190282\",\n
+        \ \"object\": \"response\",\n  \"created_at\": 1789105931,\n  \"status\":
         \"completed\",\n  \"background\": false,\n  \"billing\": {\n    \"payer\":
-        \"openai\"\n  },\n  \"completed_at\": 1785877374,\n  \"error\": null,\n  \"frequency_penalty\":
+        \"openai\"\n  },\n  \"completed_at\": 1789105931,\n  \"error\": null,\n  \"frequency_penalty\":
         0.0,\n  \"incomplete_details\": null,\n  \"instructions\": \"You are a helpful
         assistant.\",\n  \"max_output_tokens\": null,\n  \"max_tool_calls\": null,\n
         \ \"model\": \"gpt-4o-mini-2024-07-18\",\n  \"moderation\": null,\n  \"output\":
-        [\n    {\n      \"id\": \"msg_0316d6294b24e577006a72537eb5ac81a2a9e7817515d00179\",\n
+        [\n    {\n      \"id\": \"msg_021b577e32fadf24006aa3970b5be887d29b5e8a125b92efbe\",\n
         \     \"type\": \"message\",\n      \"status\": \"completed\",\n      \"content\":
         [\n        {\n          \"type\": \"output_text\",\n          \"annotations\":
         [],\n          \"logprobs\": [],\n          \"text\": \"Hello! How are you
@@ -80,9 +80,9 @@ interactions:
       content-type:
       - application/json
       date:
-      - Tue, 04 Aug 2026 21:02:55 GMT
+      - Fri, 11 Sep 2026 05:52:11 GMT
       openai-processing-ms:
-      - '1775'
+      - '470'
       openai-version:
       - '2020-10-01'
       server:
@@ -98,11 +98,11 @@ interactions:
       x-ratelimit-limit-tokens:
       - '200000'
       x-ratelimit-remaining-requests:
-      - '9999'
+      - '9990'
       x-ratelimit-remaining-tokens:
       - '199958'
       x-ratelimit-reset-requests:
-      - 8.64s
+      - 1m18.315s
       x-ratelimit-reset-tokens:
       - 12ms
     status:
