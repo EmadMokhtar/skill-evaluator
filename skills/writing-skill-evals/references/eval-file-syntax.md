@@ -149,4 +149,5 @@ tool in `called:`. Setting `skill_triggered` on a `loaded` case is an authoring 
 ## Placeholders
 
 `skill-lens init` writes `TODO(skill-lens)` into every field you must supply. A case still
-containing one aborts the run with exit 2, naming the field.
+containing one aborts the run with exit 2, naming the field. Mapping keys are checked too —
+an unfilled filename under `workspace: files:` is refused like any other placeholder.

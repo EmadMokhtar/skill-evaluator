@@ -94,15 +94,21 @@ order-support	5 case(s)	examples/order-support
 ## `init`
 
 ```bash
-skill-lens init <skill-dir> [--force]
+skill-lens init <path> [--force]
 ```
 
-`<skill-dir>` names exactly one skill directory containing `SKILL.md` — unlike `run` and
-`list`, `init` does not accept a directory of skill directories and does not discover.
+`<path>` is either one skill directory containing `SKILL.md`, or a directory of skill
+directories — `init` discovers recursively, exactly as `run` and `list` do.
 
-Writes a starter eval suite to `<skill-dir>/evals/<skill-name>.eval.yaml`: a common-case
-case, a policy-edge case carrying `tools:` and `trajectory:`, and both halves of the
-`mode: offered` triggering pair.
+**One skill.** Writes a starter eval suite of five cases: a common-case case, a policy-edge
+case carrying `tools:` and `trajectory:`, both halves of the `mode: offered` triggering pair,
+and a `workspace:` case with `file-produced` and `contains ... file:` assertions for a skill
+that produces a file (delete it if yours does not).
+
+The file goes where the skill already keeps its evals: `<skill-dir>/evals/<skill-name>.eval.yaml`,
+unless the skill has `*.eval.yaml` beside `SKILL.md` and no `evals/` directory, in which case
+it goes beside `SKILL.md` too. Discovery prefers `evals/` when it exists, so `init` never
+creates that directory next to files it would hide.
 
 Every field you have to supply holds the placeholder `TODO(skill-lens)`, and a case still
 containing one aborts the run as an [authoring error](eval-files.md#unfilled-scaffolds).
@@ -110,11 +116,24 @@ The generated file is therefore never a green suite that checks nothing.
 
 | Flag | Meaning |
 | --- | --- |
-| `--force` | Overwrite an existing eval file. Without it, an existing file is a user error. |
+| `--force` | Overwrite an existing eval file. Without it, an existing file is a user error. One skill only. |
 
-Exit `0` on success. Exit `2` when the path holds no `SKILL.md`, when `SKILL.md` is
-malformed, when the output file exists and `--force` was not given, or when the file
-cannot be written.
+**A directory of skills.** Every skill with no eval file gets a scaffold; every skill that
+already has one is skipped and named. Nothing existing is ever rewritten, and `--force` is
+a user error in this mode — rewriting every suite in a repository must never be one flag
+away.
+
+```
+Wrote skills/refund/evals/refund.eval.yaml
+Skipped order-support: already has 1 eval file(s)
+Wrote skills/triage/evals/triage.eval.yaml
+Fill in every TODO(skill-lens), then run: skill-lens list skills
+```
+
+Exit `0` on success, including when every skill already had a suite (`Nothing to do`).
+Exit `2` when the path holds no `SKILL.md` anywhere under it, when a `SKILL.md` is
+malformed, when a target file exists and `--force` was not given (one skill), when `--force`
+is given for a directory of skills, or when a file cannot be written.
 
 ## `--version`
 

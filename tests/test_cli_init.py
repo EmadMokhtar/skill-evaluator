@@ -135,3 +135,69 @@ def test_init_writes_beside_skill_md_when_evals_already_live_there(tmp_path):
         "order-support.eval.yaml",
         "other.eval.yaml",
     ]
+
+
+def _skills_root(tmp_path):
+    root = tmp_path / "skills"
+    for name in ("refund", "triage"):
+        (root / name).mkdir(parents=True)
+        (root / name / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {name} things\n---\n\nbody\n", encoding="utf-8"
+        )
+    covered = root / "covered"
+    covered.mkdir()
+    (covered / "SKILL.md").write_text(
+        "---\nname: covered\ndescription: already has a suite\n---\n\nbody\n", encoding="utf-8"
+    )
+    (covered / "covered.eval.yaml").write_text("cases: []\n", encoding="utf-8")
+    return root
+
+
+def test_batch_init_scaffolds_missing_suites_and_skips_covered_skills(tmp_path):
+    root = _skills_root(tmp_path)
+    result = runner.invoke(app, ["init", str(root)])
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert f"Wrote {root / 'refund' / 'evals' / 'refund.eval.yaml'}" in lines
+    assert f"Wrote {root / 'triage' / 'evals' / 'triage.eval.yaml'}" in lines
+    assert "Skipped covered: already has 1 eval file(s)" in lines
+    assert lines[-1] == f"Fill in every {UNFILLED_SENTINEL}, then run: skill-lens list {root}"
+    assert (root / "covered" / "covered.eval.yaml").read_text(encoding="utf-8") == "cases: []\n"
+    assert not (root / "covered" / "evals").exists()
+
+
+def test_batch_init_rejects_force(tmp_path):
+    root = _skills_root(tmp_path)
+    result = runner.invoke(app, ["init", str(root), "--force"])
+    assert result.exit_code == 2
+    assert "--force applies to one skill" in result.output
+    assert not (root / "refund" / "evals").exists()
+
+
+def test_batch_init_with_nothing_to_scaffold_exits_zero_and_says_so(tmp_path):
+    root = tmp_path / "skills"
+    (root / "covered").mkdir(parents=True)
+    (root / "covered" / "SKILL.md").write_text(
+        "---\nname: covered\n---\n\nbody\n", encoding="utf-8"
+    )
+    (root / "covered" / "covered.eval.yaml").write_text("cases: []\n", encoding="utf-8")
+    result = runner.invoke(app, ["init", str(root)])
+    assert result.exit_code == 0, result.output
+    assert f"Nothing to do: every skill under {root} already has an eval suite" in result.output
+
+
+def test_batch_init_over_a_directory_with_no_skills_is_a_user_error(tmp_path):
+    empty = tmp_path / "nothing-here"
+    empty.mkdir()
+    result = runner.invoke(app, ["init", str(empty)])
+    assert result.exit_code == 2
+    assert "SKILL.md" in result.output
+
+
+def test_batch_init_surfaces_a_malformed_skill_as_a_user_error(tmp_path):
+    root = tmp_path / "skills"
+    (root / "bad").mkdir(parents=True)
+    (root / "bad" / "SKILL.md").write_text("---\nname: [unclosed\n---\n\nbody\n", encoding="utf-8")
+    result = runner.invoke(app, ["init", str(root)])
+    assert result.exit_code == 2
+    assert "frontmatter" in result.output

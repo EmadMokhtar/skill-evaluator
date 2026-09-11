@@ -12,6 +12,7 @@ from skill_lens import __version__
 from skill_lens.cases.loader import (
     UNFILLED_SENTINEL,
     CaseParseError,
+    discover_eval_paths,
     load_cases_for_skill,
 )
 from skill_lens.comparison import build_delta
@@ -20,6 +21,7 @@ from skill_lens.evaluators.assertion import InvalidAssertionValue, UnknownAssert
 from skill_lens.gating import EXIT_OK, evaluate_gate
 from skill_lens.judges.fake import FakeJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
+from skill_lens.models import Skill
 from skill_lens.orchestrator import run_evals
 from skill_lens.reporters.console import render_console
 from skill_lens.reporters.failure_context import OUTPUT_LIMIT
@@ -326,20 +328,20 @@ def list_skills(
         raise typer.Exit(code=2) from exc
 
 
-@app.command()
-def init(
-    path: Annotated[Path, typer.Argument(help="A skill directory containing SKILL.md.")],
-    force: Annotated[
-        bool, typer.Option("--force", help="Overwrite an existing eval file.")
-    ] = False,
-) -> None:
-    """Write a starter eval suite beside a skill."""
-    skill_md = path / SKILL_FILENAME
-    if not skill_md.is_file():
-        typer.echo(f"no {SKILL_FILENAME} in {path}; point init at a skill directory")
-        raise typer.Exit(code=2)
+def _write_scaffold(target: Path, skill: Skill) -> None:
+    """Write one scaffold, or exit 2 naming the file."""
     try:
-        skill = parse_skill_file(skill_md)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(render_scaffold(skill), encoding="utf-8")
+    except OSError as exc:
+        typer.echo(f"cannot write {target}: {exc}")
+        raise typer.Exit(code=2) from exc
+
+
+def _init_one(path: Path, force: bool) -> None:
+    """The original `init`: exactly one skill directory, `--force` allowed."""
+    try:
+        skill = parse_skill_file(path / SKILL_FILENAME)
     except SkillParseError as exc:
         typer.echo(str(exc))
         raise typer.Exit(code=2) from exc
@@ -348,12 +350,60 @@ def init(
     if target.exists() and not force:
         typer.echo(f"{target} already exists; pass --force to overwrite it")
         raise typer.Exit(code=2)
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(render_scaffold(skill), encoding="utf-8")
-    except OSError as exc:
-        typer.echo(f"cannot write {target}: {exc}")
-        raise typer.Exit(code=2) from exc
-
+    _write_scaffold(target, skill)
     typer.echo(f"Wrote {target}")
     typer.echo(f"Fill in every {UNFILLED_SENTINEL}, then run: skill-lens list {path}")
+
+
+def _init_many(path: Path) -> None:
+    """Batch mode: scaffold every skill under `path` that has no suite.
+
+    Skips any skill with an eval file already -- batch init exists to fill in
+    the *missing* suites and must never rewrite one that is there to build on.
+    """
+    try:
+        skills = load_skills(path) if path.is_dir() else []
+    except SkillParseError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(code=2) from exc
+    if not skills:
+        typer.echo(
+            f"no {SKILL_FILENAME} under {path}; point init at a skill directory "
+            "or a directory of skill directories"
+        )
+        raise typer.Exit(code=2)
+
+    wrote = 0
+    for skill in skills:
+        existing = discover_eval_paths(skill)
+        if existing:
+            typer.echo(f"Skipped {skill.name}: already has {len(existing)} eval file(s)")
+            continue
+        target = scaffold_target(skill)
+        _write_scaffold(target, skill)
+        typer.echo(f"Wrote {target}")
+        wrote += 1
+    if wrote:
+        typer.echo(f"Fill in every {UNFILLED_SENTINEL}, then run: skill-lens list {path}")
+    else:
+        typer.echo(f"Nothing to do: every skill under {path} already has an eval suite")
+
+
+@app.command()
+def init(
+    path: Annotated[
+        Path, typer.Argument(help="A skill directory, or a directory of skill directories.")
+    ],
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite an existing eval file (one skill only).")
+    ] = False,
+) -> None:
+    """Write a starter eval suite beside a skill, or beside every skill that has none."""
+    if (path / SKILL_FILENAME).is_file():
+        _init_one(path, force)
+        return
+    if force:
+        # Rewriting every suite in a repository must never be one flag away.
+        typer.echo("--force applies to one skill; point init at that skill's directory")
+        raise typer.Exit(code=2)
+    _init_many(path)

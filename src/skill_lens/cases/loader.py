@@ -302,7 +302,7 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
                 )
 
 
-def _discover_paths(skill: Skill) -> list[Path]:
+def discover_eval_paths(skill: Skill) -> list[Path]:
     """Find eval files beside a skill: an evals/ dir, then *.eval.yaml."""
     evals_dir = skill.path / EVALS_DIRNAME
     if evals_dir.is_dir():
@@ -322,7 +322,7 @@ def load_cases_for_skill(skill: Skill, evals_path: Path | None = None) -> list[E
             else [evals_path]
         )
     else:
-        paths = _discover_paths(skill)
+        paths = discover_eval_paths(skill)
     cases: list[EvalCase] = []
     for path in paths:
         cases.extend(parse_cases_file(path, skill))
