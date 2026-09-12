@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import os
 import platform
-import re
 import shutil
 import signal
 import subprocess
@@ -110,55 +109,28 @@ class ScriptResult:
     workspace_warning: str | None = None
 
 
-_REGEX_METACHARS = re.compile(r"([.^$|?*+()\[\]{}\\])")
-
-
-def _profile_string_body(text: str) -> str:
-    """Escape backslash and quote for a profile string body.
-
-    Shared by the plain `"..."` literal and the regex `#"..."` literal: both
-    are the same quoted-string syntax, just read differently by the rule that
-    follows. A `"` in a temp path is impossible on macOS, but the builder
-    escapes anyway.
-    """
-    return text.replace("\\", "\\\\").replace('"', '\\"')
-
-
 def _quoted(path: Path) -> str:
-    """A path as a sandbox-profile string literal."""
-    return '"' + _profile_string_body(str(path)) + '"'
+    """A path as a sandbox-profile string literal.
 
-
-def _regex_literal(pattern: str) -> str:
-    """A regex source string as a sandbox-profile `#"..."` literal."""
-    return '#"' + _profile_string_body(pattern) + '"'
-
-
-def _skill_lens_siblings_pattern(tempdir: Path) -> str:
-    """A regex matching any `skill-lens-*` directory directly under `tempdir`.
-
-    Metacharacters in `tempdir` are escaped first, so a literal `.` or `+`
-    somewhere in a username does not turn into a wildcard.
+    A profile is a string, and a string is where injection lives: a `"` in a
+    temp path is impossible on macOS, but the builder escapes anyway.
     """
-    escaped = _REGEX_METACHARS.sub(r"\\\1", str(tempdir))
-    return f"^{escaped}/skill-lens-"
+    return '"' + str(path).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def macos_profile(workspace: Path, scratch: Path, tempdir: Path) -> str:
+def macos_profile(workspace: Path, scratch: Path, tempdir: Path, bundle: Path) -> str:
     """The `sandbox-exec` profile: allow by default, deny the two things that
     matter, then re-allow the places the script must reach. Later rules win.
 
-    The read denial targets `skill-lens-*` siblings under the temp directory
-    by regex rather than denying the whole temp directory: the bundle (the
-    script file itself) is *also* under the temp directory -- under pytest,
-    `tmp_path` lives at `.../T/pytest-of-<user>/...`, and in a real run the
-    skill's checkout can too -- so a blanket deny would make the interpreter
-    unable to read the very script it was asked to run. Denying only our own
-    sibling prefix keeps the property that matters (another workspace or
-    scratch directory, which always starts with `skill-lens-`, is unreadable)
-    without blocking reads of anything else already under the temp root.
+    The read denial on the temp directory is what stops a script reading the
+    baseline arm's workspace under --concurrency: every workspace and scratch
+    directory lives there, and only our own two are allowed back. The bundle
+    is allowed back too, read-only: it needs no write access, but a baseline
+    bundle is extracted under the temp directory, and under pytest so is the
+    working bundle (`tmp_path`), so without an explicit allow the blanket
+    temp-dir deny above would make the interpreter unable to read the very
+    script it was asked to run.
     """
-    deny_siblings = _regex_literal(_skill_lens_siblings_pattern(tempdir))
     return "\n".join(
         [
             "(version 1)",
@@ -167,18 +139,22 @@ def macos_profile(workspace: Path, scratch: Path, tempdir: Path) -> str:
             "(deny file-write*)",
             f"(allow file-write* (subpath {_quoted(workspace)}) (subpath {_quoted(scratch)}))",
             '(allow file-write-data (literal "/dev/null"))',
-            f"(deny file-read* (regex {deny_siblings}))",
-            f"(allow file-read* (subpath {_quoted(workspace)}) (subpath {_quoted(scratch)}))",
+            f"(deny file-read* (subpath {_quoted(tempdir)}))",
+            f"(allow file-read* (subpath {_quoted(workspace)}) (subpath {_quoted(scratch)}) "
+            f"(subpath {_quoted(bundle)}))",
         ]
     )
 
 
-def bwrap_argv(workspace: Path, scratch: Path, tempdir: Path, argv: Sequence[str]) -> list[str]:
+def bwrap_argv(
+    workspace: Path, scratch: Path, tempdir: Path, argv: Sequence[str], bundle: Path
+) -> list[str]:
     """The `bwrap` command line: the whole filesystem read-only, the temp
     directory replaced by an empty tmpfs so sibling workspaces vanish, our two
-    writable directories bound back in, no network, and `--die-with-parent`
-    so a killed harness takes the script with it. Order matters: the tmpfs
-    must be mounted before the binds it would otherwise hide.
+    writable directories and the read-only bundle bound back in, no network,
+    and `--die-with-parent` so a killed harness takes the script with it.
+    Order matters: the tmpfs must be mounted before the binds it would
+    otherwise hide.
     """
     return [
         "bwrap",
@@ -188,6 +164,7 @@ def bwrap_argv(workspace: Path, scratch: Path, tempdir: Path, argv: Sequence[str
         "--tmpfs", str(tempdir),
         "--bind", str(workspace), str(workspace),
         "--bind", str(scratch), str(scratch),
+        "--ro-bind", str(bundle), str(bundle),
         "--unshare-net",
         "--unshare-pid",
         "--die-with-parent",
@@ -198,13 +175,23 @@ def bwrap_argv(workspace: Path, scratch: Path, tempdir: Path, argv: Sequence[str
 
 
 def wrap(
-    backend: SandboxBackend, argv: Sequence[str], workspace: Path, scratch: Path, tempdir: Path
+    backend: SandboxBackend,
+    argv: Sequence[str],
+    workspace: Path,
+    scratch: Path,
+    tempdir: Path,
+    bundle: Path,
 ) -> list[str]:
     """argv, wrapped in the backend's launcher -- or unchanged for `none`."""
     if backend == "sandbox-exec":
-        return ["sandbox-exec", "-p", macos_profile(workspace, scratch, tempdir), *argv]
+        return [
+            "sandbox-exec",
+            "-p",
+            macos_profile(workspace, scratch, tempdir, bundle),
+            *argv,
+        ]
     if backend == "bwrap":
-        return bwrap_argv(workspace, scratch, tempdir, argv)
+        return bwrap_argv(workspace, scratch, tempdir, argv, bundle)
     return list(argv)
 
 
@@ -246,6 +233,15 @@ def probe_sandbox(
     if system == "Darwin":
         if which("sandbox-exec") is None:
             return SandboxStatus("none", "sandbox-exec not found on PATH")
+        # A profile is a quoted string; a `"` in the temp path would close the
+        # literal early and corrupt every rule after it. Checked before any
+        # process is spawned, empirical probe included.
+        if '"' in str(Path(tempfile.gettempdir()).resolve()):
+            return SandboxStatus(
+                "none",
+                "temp directory path contains a double quote, which a sandbox-exec "
+                "profile cannot express",
+            )
         argv = ["sandbox-exec", "-p", "(version 1)(allow default)(deny network*)", "/usr/bin/true"]
         return _probe("sandbox-exec", argv, run)
     if system == "Linux":
@@ -404,7 +400,7 @@ def run_script(
         return ScriptResult(refused=f"refused: cannot create a scratch directory: {exc}")
     try:
         tempdir = Path(tempfile.gettempdir()).resolve()
-        wrapped = wrap(runtime.sandbox.backend, argv, workspace.root, scratch, tempdir)
+        wrapped = wrap(runtime.sandbox.backend, argv, workspace.root, scratch, tempdir, bundle.root)
         stdout_path = scratch / "stdout"
         stderr_path = scratch / "stderr"
         with ExitStack() as stack:

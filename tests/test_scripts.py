@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -41,6 +42,7 @@ from skill_lens.workspace import Workspace, WorkspaceLimits
 WS = Path("/private/var/folders/ab/T/skill-lens-x")
 SCRATCH = Path("/private/var/folders/ab/T/skill-lens-scratch-y")
 TEMPDIR = Path("/private/var/folders/ab/T")
+BUNDLE = Path("/private/var/folders/ab/T/pytest-of-user/pytest-1/test-case0/skill")
 
 
 def test_the_defaults_are_the_documented_ones():
@@ -53,7 +55,7 @@ def test_the_defaults_are_the_documented_ones():
 
 
 def test_the_macos_profile_denies_network_and_writes_then_reallows_the_two_directories():
-    profile = macos_profile(WS, SCRATCH, TEMPDIR)
+    profile = macos_profile(WS, SCRATCH, TEMPDIR, BUNDLE)
     lines = profile.splitlines()
     assert lines[0] == "(version 1)"
     assert "(allow default)" in lines
@@ -61,42 +63,57 @@ def test_the_macos_profile_denies_network_and_writes_then_reallows_the_two_direc
     assert "(deny file-write*)" in lines
     assert f'(allow file-write* (subpath "{WS}") (subpath "{SCRATCH}"))' in lines
     assert '(allow file-write-data (literal "/dev/null"))' in lines
-    # Sibling workspaces vanish: deny every other skill-lens-* directory under
-    # the temp root by regex (not the whole temp dir -- the bundle itself can
-    # live there too, e.g. under pytest's tmp_path), then re-allow our two.
-    assert lines.index(f'(deny file-read* (regex #"^{TEMPDIR}/skill-lens-"))') < lines.index(
-        f'(allow file-read* (subpath "{WS}") (subpath "{SCRATCH}"))'
+    # Sibling workspaces vanish: deny the whole temp dir, re-allow our two --
+    # plus the bundle, which also lives under the temp dir (e.g. pytest's
+    # tmp_path, or an extracted baseline) and must stay readable.
+    assert lines.index(f'(deny file-read* (subpath "{TEMPDIR}"))') < lines.index(
+        f'(allow file-read* (subpath "{WS}") (subpath "{SCRATCH}") (subpath "{BUNDLE}"))'
     )
 
 
 def test_the_macos_profile_escapes_quotes_and_backslashes_in_paths():
     odd = Path('/tmp/we"ird\\dir')
-    profile = macos_profile(odd, SCRATCH, TEMPDIR)
+    profile = macos_profile(odd, SCRATCH, TEMPDIR, BUNDLE)
     assert '(subpath "/tmp/we\\"ird\\\\dir")' in profile
 
 
-def test_the_bwrap_argv_binds_the_two_directories_over_a_read_only_root():
-    argv = bwrap_argv(WS, SCRATCH, TEMPDIR, ["python3", "x.py"])
+def test_the_bwrap_argv_binds_the_two_directories_and_the_bundle_over_a_read_only_root():
+    argv = bwrap_argv(WS, SCRATCH, TEMPDIR, ["python3", "x.py"], BUNDLE)
     assert argv[:7] == ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc"]
     tmpfs = argv.index("--tmpfs")
     assert argv[tmpfs + 1] == str(TEMPDIR)
     # The tmpfs must come BEFORE the binds, or it would hide them.
     assert tmpfs < argv.index("--bind")
+    last_bind = len(argv) - 1 - argv[::-1].index("--bind")
     assert argv[argv.index("--bind") : argv.index("--bind") + 3] == ["--bind", str(WS), str(WS)]
+    # The bundle is read-only, and bound in after the two writable binds so
+    # the tmpfs above cannot have hidden it, and before --unshare-net.
+    ro_bind = argv.index("--ro-bind", last_bind)
+    assert ro_bind > last_bind
+    assert argv[ro_bind : ro_bind + 3] == ["--ro-bind", str(BUNDLE), str(BUNDLE)]
+    assert ro_bind < argv.index("--unshare-net")
     for flag in ("--unshare-net", "--unshare-pid", "--die-with-parent", "--new-session"):
         assert flag in argv
     assert argv[-3:] == ["--", "python3", "x.py"]
 
 
 def test_wrap_leaves_argv_alone_without_a_backend():
-    assert wrap("none", ["python3", "x.py"], WS, SCRATCH, TEMPDIR) == ["python3", "x.py"]
+    assert wrap("none", ["python3", "x.py"], WS, SCRATCH, TEMPDIR, BUNDLE) == [
+        "python3",
+        "x.py",
+    ]
 
 
 def test_wrap_prefixes_sandbox_exec_with_the_profile():
-    wrapped = wrap("sandbox-exec", ["python3", "x.py"], WS, SCRATCH, TEMPDIR)
+    wrapped = wrap("sandbox-exec", ["python3", "x.py"], WS, SCRATCH, TEMPDIR, BUNDLE)
     assert wrapped[:2] == ["sandbox-exec", "-p"]
-    assert wrapped[2] == macos_profile(WS, SCRATCH, TEMPDIR)
+    assert wrapped[2] == macos_profile(WS, SCRATCH, TEMPDIR, BUNDLE)
     assert wrapped[3:] == ["python3", "x.py"]
+
+
+def test_wrap_prefixes_bwrap_with_the_bundle_bound_read_only():
+    wrapped = wrap("bwrap", ["python3", "x.py"], WS, SCRATCH, TEMPDIR, BUNDLE)
+    assert wrapped == bwrap_argv(WS, SCRATCH, TEMPDIR, ["python3", "x.py"], BUNDLE)
 
 
 def _completed(returncode: int, stderr: bytes = b"") -> subprocess.CompletedProcess:
@@ -132,6 +149,28 @@ def test_macos_with_a_working_sandbox_exec():
 def test_macos_without_sandbox_exec_on_path():
     status = probe_sandbox("auto", system="Darwin", which=lambda _n: None, run=None)
     assert status == SandboxStatus(backend="none", detail="sandbox-exec not found on PATH")
+
+
+def test_macos_refuses_a_temp_directory_it_cannot_express(monkeypatch):
+    # tempfile.gettempdir() caches its answer in tempfile.tempdir; set that
+    # directly so the injected path is picked up without touching the real
+    # filesystem temp dir. The directory need not exist -- the check must
+    # happen before any process is spawned, probe included.
+    monkeypatch.setattr(tempfile, "tempdir", '/tmp/we"ird')
+
+    def run(*_a, **_k):
+        raise AssertionError("the probe must not run: the temp path is unexpressible")
+
+    status = probe_sandbox(
+        "auto", system="Darwin", which=lambda _n: "/usr/bin/sandbox-exec", run=run
+    )
+    assert status == SandboxStatus(
+        backend="none",
+        detail=(
+            "temp directory path contains a double quote, which a sandbox-exec "
+            "profile cannot express"
+        ),
+    )
 
 
 def test_linux_reports_the_first_stderr_line_of_a_failing_bwrap_probe():
