@@ -30,6 +30,7 @@ from skill_lens.reporters.junit import render_junit
 from skill_lens.reporters.markdown import render_markdown
 from skill_lens.runners.base import RunnerDependencyError
 from skill_lens.runners.fake import FakeRunner
+from skill_lens.runners.langchain import LangChainRunner
 from skill_lens.runners.preflight import MissingAPIKey, check_api_key
 from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.scaffold import render_scaffold, scaffold_target
@@ -38,7 +39,7 @@ from skill_lens.workspace import WorkspaceLimits
 
 app = typer.Typer(help="Run evaluations on Agent Skills (SKILL.md).", no_args_is_help=True)
 
-_RUNNERS = {"fake": FakeRunner, "pydantic-ai": PydanticAIRunner}
+_RUNNERS = {"fake": FakeRunner, "pydantic-ai": PydanticAIRunner, "langchain": LangChainRunner}
 _JUDGES = {"fake": FakeJudge, "pydantic-ai": PydanticAIJudge}
 
 # Authoring errors: bad skill/case/config files, or a malformed assertion in an

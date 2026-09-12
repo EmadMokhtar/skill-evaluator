@@ -235,6 +235,19 @@ def test_the_real_runner_is_registered(tmp_path):
     assert "OPENAI_API_KEY" in result.output
 
 
+def test_the_langchain_runner_is_registered(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(
+        app,
+        ["run", str(skill_dir), "--runner", "langchain", "--model", "openai:gpt-4o-mini"],
+        env={"OPENAI_API_KEY": ""},
+    )
+    # No key, so preflight stops it before any spend -- the same contract as
+    # the PydanticAI runner.
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+
+
 def test_preflight_names_the_missing_variable(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     skill_dir = _make_skill(tmp_path)
