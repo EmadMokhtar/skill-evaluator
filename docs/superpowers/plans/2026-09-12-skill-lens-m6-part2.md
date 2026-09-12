@@ -66,12 +66,12 @@ Every task's requirements implicitly include this section.
 | `src/skill_lens/runners/tools.py` | `WORKSPACE_TOOL_NAMES`, `BUNDLE_TOOL_NAMES`, six-name `BUILTIN_TOOL_NAMES`, `build_bundle_tools`, `render_script_result` | 8 |
 | `src/skill_lens/cases/loader.py` | one hint message | 8 |
 | `src/skill_lens/runners/base.py`, `runners/fake.py`, `runners/pydantic_ai.py` | `scripts=` keyword; adapter registers bundle tools | 9 |
-| `src/skill_lens/config.py` | five keys, normalisation, `script_policy()` | 10 |
+| `src/skill_lens/config.py`, `examples/skill-lens.toml` | five keys, normalisation, `script_policy()`; the annotated example config | 10 |
 | `src/skill_lens/cli.py` | `--allow-scripts/--no-allow-scripts`, `RunOptions`, `ScriptSetupError` in `_AUTHORING_ERRORS` | 10, 11 |
 | `src/skill_lens/orchestrator.py` | `RunOptions`, preflight, `ScriptNote`s, baseline store cleanup | 11, 12 |
 | `src/skill_lens/skills/baseline.py` | `into=` keyword, bundle extraction from `git archive` | 12 |
 | `src/skill_lens/reporters/{console,markdown,junit,json_reporter}.py` | script status and notes | 13 |
-| `examples/log-triage/` (new), `examples/skill-lens.toml`, `tests/test_examples.py` | the shipped example | 14 |
+| `examples/log-triage/` (new), `tests/test_examples.py` | the shipped example | 14 |
 | `tests/test_cassettes.py`, `tests/cassettes/` | a recorded `run_script` call | 15 |
 | `docs/*.md`, `ARCHITECTURE.md`, `CLAUDE.md`, the Part 1 spec | documentation | 16 |
 | (whole suite, real runs, the PR) | verification | 17 |
@@ -2517,18 +2517,63 @@ and after `resolved_full_output = ...`:
 that is expected for this one commit, so silence it with a trailing
 `# noqa: F841 - wired in the next commit` and remove the noqa in Task 11.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [ ] **Step 5: The annotated example config**
 
-Run: `uv run pytest tests/test_config.py tests/test_cli.py -v`
+`tests/test_examples.py::test_the_example_config_mentions_every_key` requires every
+`Config` field to appear in `examples/skill-lens.toml`. In that test file, add to
+`test_the_example_config_parses_and_sets_what_it_claims`:
+`assert config.allow_scripts is True` and `assert config.script_sandbox == "auto"`.
+
+In `examples/skill-lens.toml`, replace the block after the three caps and before
+`[per_skill_min]` with:
+
+```toml
+# Runaway guards on what one case's workspace may write.
+# max_file_bytes = 1000000
+# max_files = 200
+# max_total_bytes = 5000000
+
+# Run the scripts a skill bundles under scripts/. Off by default: a SKILL.md
+# under evaluation is unvetted code, and skill-lens runs in CI. On here so
+# that examples/log-triage can run its counting script.
+allow_scripts = true
+
+# "auto": use sandbox-exec (macOS) or bwrap (Linux) when the probe succeeds,
+# otherwise the portable guards alone; "required" refuses to run without one;
+# "off" never probes. The report says which applied on every run.
+# script_sandbox = "auto"
+
+# Wall clock per script call; the whole process tree is killed at expiry.
+# script_timeout_seconds = 30.0
+
+# Per stream; anything beyond is cut with a visible marker.
+# max_script_output_bytes = 20000
+
+# Interpreter per file extension, looked up on PATH. Anything else is refused.
+# [script_interpreters]
+# py = ["python3"]
+# sh = ["bash"]
+
+# A stricter floor for one skill, by name. Must stay the last section: in
+# TOML every key after a [table] header belongs to that table.
+[per_skill_min]
+order-support = 1.0
+```
+
+(`[script_interpreters]` stays commented out so `[per_skill_min]` remains the last live
+table — the comment above it explains why that matters.)
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+Run: `uv run pytest tests/test_config.py tests/test_cli.py tests/test_examples.py -v`
 Expected: PASS except `test_allow_scripts_flags_override_the_config_in_both_directions`
-(deferred to Task 13). `tests/test_examples.py::test_the_example_config_mentions_every_key`
-now fails too — Task 14 fixes it; note it, do not touch `examples/` here.
+(deferred to Task 13).
 
-- [ ] **Step 6: Lint and commit**
+- [ ] **Step 7: Lint and commit**
 
 ```bash
 uv run ruff check . && uv run ruff format .
-git add src/skill_lens/config.py src/skill_lens/cli.py tests/test_config.py tests/test_cli.py
+git add src/skill_lens/config.py src/skill_lens/cli.py examples/skill-lens.toml tests/test_config.py tests/test_cli.py tests/test_examples.py
 git commit -m "feat(config): add allow_scripts, the sandbox mode and the script caps"
 ```
 
@@ -3383,16 +3428,16 @@ git commit -m "feat(reporters): say which sandbox ran the scripts, and which scr
 **Files:**
 - Create: `examples/log-triage/SKILL.md`, `examples/log-triage/scripts/count_levels.py`,
   `examples/log-triage/references/report-format.md`, `examples/log-triage/log-triage.eval.yaml`
-- Modify: `examples/skill-lens.toml`
 - Test: `tests/test_examples.py`
+
+(`examples/skill-lens.toml` already carries the script keys — Task 10 did that so the
+config test never went red in between.)
 
 - [ ] **Step 1: Update the examples tests**
 
 In `tests/test_examples.py`:
 - `test_every_example_skill_is_discovered`: expected list becomes
   `["csv-report", "greeting", "log-triage", "order-support"]`.
-- `test_the_example_config_parses_and_sets_what_it_claims`: add
-  `assert config.allow_scripts is True` and `assert config.script_sandbox == "auto"`.
 - Append:
 
 ```python
@@ -3432,7 +3477,7 @@ def test_the_log_triage_script_counts_levels_with_the_standard_library_only(tmp_
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run pytest tests/test_examples.py -v`
-Expected: FAIL — the discovered names list lacks `log-triage`, and the config lacks the keys.
+Expected: FAIL — the discovered names list lacks `log-triage`.
 
 - [ ] **Step 3: Write the example**
 
@@ -3557,45 +3602,6 @@ cases:
         value: "DEBUG"
         file: triage.md
 ```
-
-`examples/skill-lens.toml` — replace the block after the three caps and before
-`[per_skill_min]` with:
-
-```toml
-# Runaway guards on what one case's workspace may write.
-# max_file_bytes = 1000000
-# max_files = 200
-# max_total_bytes = 5000000
-
-# Run the scripts a skill bundles under scripts/. Off by default: a SKILL.md
-# under evaluation is unvetted code, and skill-lens runs in CI. On here so
-# that examples/log-triage can run its counting script.
-allow_scripts = true
-
-# "auto": use sandbox-exec (macOS) or bwrap (Linux) when the probe succeeds,
-# otherwise the portable guards alone; "required" refuses to run without one;
-# "off" never probes. The report says which applied on every run.
-# script_sandbox = "auto"
-
-# Wall clock per script call; the whole process tree is killed at expiry.
-# script_timeout_seconds = 30.0
-
-# Per stream; anything beyond is cut with a visible marker.
-# max_script_output_bytes = 20000
-
-# Interpreter per file extension, looked up on PATH. Anything else is refused.
-# [script_interpreters]
-# py = ["python3"]
-# sh = ["bash"]
-
-# A stricter floor for one skill, by name. Must stay the last section: in
-# TOML every key after a [table] header belongs to that table.
-[per_skill_min]
-order-support = 1.0
-```
-
-(`[script_interpreters]` stays commented out so `[per_skill_min]` remains the last live
-table — the comment above it explains why that matters.)
 
 - [ ] **Step 4: Run the tests and the self-check**
 
