@@ -14,6 +14,7 @@ from promptly import promptly
 from skill_lens.models import WorkspaceSpec
 from skill_lens.workspace import (
     DEFAULT_LIMITS,
+    FileTooLarge,
     PathRefused,
     Workspace,
     WorkspaceError,
@@ -352,8 +353,11 @@ def test_a_file_over_max_file_bytes_is_refused_on_read_and_names_the_cap(tmp_pat
         handle.seek(2_000_000)
         handle.write(b"x")
     expected = r"huge.txt is 2,000,001 bytes; max_file_bytes is 1,000,000"
-    with pytest.raises(PathRefused, match=expected):
+    # A distinct subclass, so the judge can name the file as too large rather
+    # than absent without matching on the message text.
+    with pytest.raises(FileTooLarge, match=expected):
         ws.read("huge.txt")
+    assert issubclass(FileTooLarge, PathRefused)
 
 
 def test_a_file_at_max_file_bytes_is_still_read(tmp_path):

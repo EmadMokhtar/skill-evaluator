@@ -44,9 +44,12 @@ _LISTING_LIMIT = 20
 def _workspace_of(result: RunResult) -> Workspace:
     """The run's workspace, rebuilt from its path.
 
-    Limits are irrelevant here -- they constrain writes, and an evaluator only
-    reads -- which is why `Workspace` defaults them and this stays a
-    one-argument call.
+    Rebuilt with the default limits, because a `RunResult` carries the path
+    and not the repository's configuration. Limits bound reads as well as
+    writes, so a `file:` assertion refuses a file over the default
+    `max_file_bytes` (1 MB) even where the repository raised it -- the
+    configured value applies to the agent's tools, whose workspace the
+    orchestrator built with it. `docs/configuration.md` says so.
     """
     if result.workspace is None:
         raise InvalidAssertionValue(

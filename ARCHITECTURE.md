@@ -690,8 +690,13 @@ mistake in the eval file. A `PathRefused` raised *afterwards* by `Workspace.reso
 `read` (a symlink the script planted that resolves outside, a FIFO, a loop, an over-size
 file) is a **failed** `CheckResult` carrying the refusal text as evidence, never an
 exception: it is the skill's doing, and an exception would turn an eval failure into exit
-2 and, under `--concurrency`, cancel every queued case. The judge draws the same line
-(`NOT_PRODUCED`), and `runners/tools.py` turns every one of these into a tool-result string.
+2 and, under `--concurrency`, cancel every queued case. The judge draws the same line — a
+refused artifact is rendered as `NOT_PRODUCED`, except an over-size one, which `Workspace.read`
+raises as `FileTooLarge` (a `PathRefused` subclass) and the judge renders as `TOO_LARGE`
+(`(too large to read)`), because the file exists and "not produced" would misdescribe the
+skill's output to the judge; it is a harness-authored sentinel, so like the others it never
+consumes the artifact content budget — and `runners/tools.py` turns every one of these into
+a tool-result string.
 
 **`scripts=` reaches a runner only when execution is on.** `_run_one` passes the keyword
 only when the runtime is set, so a third-party runner written against M6 part 1 keeps

@@ -16,7 +16,7 @@ from skill_lens.models import (
     RubricCheck,
     RunResult,
 )
-from skill_lens.workspace import PathRefused, Workspace
+from skill_lens.workspace import FileTooLarge, PathRefused, Workspace
 
 NO_EVIDENCE = "recorded as failed: passed with no evidence"
 
@@ -31,10 +31,13 @@ NO_EVIDENCE = "recorded as failed: passed with no evidence"
 MAX_ARTIFACT_BYTES = 20_000
 MAX_ARTIFACTS_TOTAL_BYTES = 60_000
 
-# Absences are rendered, never raised. Both are facts about the skill, not
+# Absences are rendered, never raised. Each is a fact about the skill, not
 # about the harness, so the rubric fails honestly instead of the case erroring.
+# TOO_LARGE is kept apart from NOT_PRODUCED because the file *does* exist:
+# telling the judge it was never produced would misdescribe the skill's output.
 NOT_PRODUCED = "(not produced)"
 NOT_TEXT = "(not valid UTF-8 text)"
+TOO_LARGE = "(too large to read)"
 BUDGET_EXHAUSTED = "(omitted, artifact budget exhausted)"
 
 # Room reserved out of `budget`, not added on top of it, for the marker
@@ -86,7 +89,7 @@ def _artifacts(spec: JudgeSpec, result: RunResult) -> dict[str, str]:
        is smaller than the truncation marker's reserve -- only a file that
        genuinely does not fit, with too little budget left to say so
        visibly, becomes BUDGET_EXHAUSTED.
-    2. A sentinel (NOT_PRODUCED, NOT_TEXT, BUDGET_EXHAUSTED) never
+    2. A sentinel (NOT_PRODUCED, NOT_TEXT, TOO_LARGE, BUDGET_EXHAUSTED) never
        decrements `remaining`, because it is fixed, harness-authored text,
        not model content -- there is nothing here for a total-byte budget
        to police.
@@ -108,6 +111,12 @@ def _artifacts(spec: JudgeSpec, result: RunResult) -> dict[str, str]:
             content = workspace.read(name)
         except UnicodeDecodeError:
             artifacts[name] = NOT_TEXT
+            continue
+        except FileTooLarge:
+            # Over max_file_bytes: refused before a byte was read, so the
+            # artifact budget below never sees it. Caught before PathRefused,
+            # which it subclasses.
+            artifacts[name] = TOO_LARGE
             continue
         except (PathRefused, OSError, ValueError):
             # ValueError alongside PathRefused/OSError: a name carrying an

@@ -36,6 +36,15 @@ class PathRefused(Exception):
     """
 
 
+class FileTooLarge(PathRefused):
+    """A file that exists but is over `max_file_bytes`, so `read` will not load it.
+
+    A `PathRefused` like any other to the tools and the assertion evaluator;
+    a distinct class so the judge evaluator can render "too large to read"
+    rather than "not produced" without matching on the message text.
+    """
+
+
 class WorkspaceError(Exception):
     """Creating or seeding a workspace failed.
 
@@ -219,7 +228,7 @@ class Workspace:
         """
         target, found = self._inspect(candidate)
         if found is not None and found.st_size > self.limits.max_file_bytes:
-            raise PathRefused(
+            raise FileTooLarge(
                 f"refused: {candidate} is {found.st_size:,} bytes; "
                 f"max_file_bytes is {self.limits.max_file_bytes:,}"
             )

@@ -115,8 +115,10 @@ file larger than `max_file_bytes` before reading a byte of it — `refused: repo
 [configured](configuration.md) value; the assertion, the judge and `read_skill_file` use
 the built-in default of 1 MB. A sparse file has whatever apparent size a script gives it at
 almost no cost on disk, so the cap on `st_size` is what bounds what reaches a model or an
-evaluator. `file-produced` is unaffected: it asks whether the file exists, not whether it is
-readable.
+evaluator. A `file:` assertion scores the refusal as a failed check; the judge sees the
+artifact rendered as `(too large to read)` — distinct from `(not produced)`, because the
+file does exist. `file-produced` is unaffected: it asks whether the file exists, not whether
+it is readable.
 
 **The caps.** Three [configured](configuration.md) limits — `max_file_bytes`, `max_files`,
 `max_total_bytes` — bound what one case may write. They default to roughly 100x a realistic

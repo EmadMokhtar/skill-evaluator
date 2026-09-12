@@ -22,6 +22,7 @@ from pathlib import Path
 
 from skill_lens.workspace import (
     DEFAULT_LIMITS,
+    FileTooLarge,
     PathRefused,
     check_relative_path,
     resolve_under,
@@ -108,7 +109,7 @@ class SkillBundle:
         target, found = self._inspect(candidate)
         cap = DEFAULT_LIMITS.max_file_bytes
         if found is not None and found.st_size > cap:
-            raise PathRefused(
+            raise FileTooLarge(
                 f"refused: {candidate} is {found.st_size:,} bytes; max_file_bytes is {cap:,}"
             )
         return target.read_text(encoding="utf-8")

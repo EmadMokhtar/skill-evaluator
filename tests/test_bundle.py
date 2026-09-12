@@ -14,7 +14,7 @@ import pytest
 
 from promptly import promptly
 from skill_lens.bundle import BUNDLE_DIRS, SkillBundle, has_bundle, script_extension
-from skill_lens.workspace import PathRefused
+from skill_lens.workspace import FileTooLarge, PathRefused
 
 INTERPRETERS = {"py": ("python3",), "sh": ("bash",)}
 
@@ -182,5 +182,5 @@ def test_a_bundled_file_over_max_file_bytes_is_refused_and_names_the_cap(tmp_pat
         handle.seek(2_000_000)
         handle.write(b"x")
     expected = r"huge.md is 2,000,001 bytes; max_file_bytes is 1,000,000"
-    with pytest.raises(PathRefused, match=expected):
+    with pytest.raises(FileTooLarge, match=expected):
         SkillBundle(root).read("references/huge.md")
