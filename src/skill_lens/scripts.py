@@ -30,9 +30,10 @@ import signal
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 from skill_lens.bundle import SkillBundle, script_extension
 from skill_lens.models import SandboxBackend, SandboxMode, Skill
@@ -310,12 +311,22 @@ def _kill_tree(process: subprocess.Popen[bytes]) -> None:
         pass
 
 
-def _read_capped(path: Path, budget: int) -> str:
-    """The first `budget` bytes of a captured stream, plus an honest marker."""
+def _read_capped_handle(handle: IO[bytes], budget: int) -> str:
+    """The first `budget` bytes of an already-open capture stream, plus an
+    honest marker.
+
+    Reads through the harness's own handle -- never by reopening the path.
+    Popen shares this file's open-file description with the child (it dups
+    the descriptor), so the inode being written is fixed at spawn time: a
+    script that later unlinks the path and replaces it with a symlink (to
+    smuggle in another file's content) or a FIFO (whose `open("rb")` would
+    block forever, past the point the timeout was already enforced) cannot
+    change what this reads.
+    """
     try:
-        size = path.stat().st_size
-        with path.open("rb") as handle:
-            data = handle.read(budget)
+        size = os.fstat(handle.fileno()).st_size
+        handle.seek(0)
+        data = handle.read(budget)
     except OSError as exc:
         return f"(unreadable: {exc})"
     text = data.decode("utf-8", errors="replace")
@@ -333,10 +344,13 @@ def run_script(
 ) -> ScriptResult:
     """Run one bundled script with the workspace as its working directory.
 
-    Never raises: every outcome, including an interpreter that will not start,
-    is a `ScriptResult`. Output goes to files in the scratch directory, not
-    into memory -- a script printing gigabytes inside the timeout must not
-    take the harness down with it -- and is read back capped.
+    Never raises: every outcome -- including an interpreter that will not
+    start, an argument that embeds a NUL byte, or a scratch directory that
+    cannot be written to -- is a `ScriptResult`. Output goes to files in the
+    scratch directory, not into memory -- a script printing gigabytes inside
+    the timeout must not take the harness down with it -- and is read back
+    capped, through the same handle the child wrote through (see
+    `_read_capped_handle`).
     """
     policy = runtime.policy
     try:
@@ -360,18 +374,28 @@ def run_script(
         wrapped = wrap(runtime.sandbox.backend, argv, workspace.root, scratch, tempdir)
         stdout_path = scratch / "stdout"
         stderr_path = scratch / "stderr"
-        with stdout_path.open("wb") as out, stderr_path.open("wb") as err:
+        with ExitStack() as stack:
+            try:
+                # w+b, not wb: read back through these same handles below,
+                # never by reopening the path -- see _read_capped_handle.
+                stdout_handle = stack.enter_context(stdout_path.open("w+b"))
+                stderr_handle = stack.enter_context(stderr_path.open("w+b"))
+            except OSError as exc:
+                return ScriptResult(refused=f"refused: cannot create the capture files: {exc}")
             try:
                 process = subprocess.Popen(  # noqa: S603 - argv list, shell=False, nothing joined
                     wrapped,
                     cwd=workspace.root,
                     env=script_environment(scratch),
                     stdin=subprocess.DEVNULL,
-                    stdout=out,
-                    stderr=err,
+                    stdout=stdout_handle,
+                    stderr=stderr_handle,
                     **_group_kwargs(),
                 )
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
+                # ValueError: an argv entry with an embedded NUL byte. A
+                # model can put one in a tool-call argument; Popen rejects it
+                # before anything is spawned.
                 return ScriptResult(refused=f"refused: cannot start {prefix[0]}: {exc}")
             timed_out = False
             exit_code: int | None
@@ -381,12 +405,12 @@ def run_script(
                 timed_out = True
                 exit_code = None
                 _kill_tree(process)
-        return ScriptResult(
-            exit_code=exit_code,
-            timed_out=timed_out,
-            stdout=_read_capped(stdout_path, policy.max_output_bytes),
-            stderr=_read_capped(stderr_path, policy.max_output_bytes),
-            workspace_warning=workspace.over_limit(),
-        )
+            return ScriptResult(
+                exit_code=exit_code,
+                timed_out=timed_out,
+                stdout=_read_capped_handle(stdout_handle, policy.max_output_bytes),
+                stderr=_read_capped_handle(stderr_handle, policy.max_output_bytes),
+                workspace_warning=workspace.over_limit(),
+            )
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

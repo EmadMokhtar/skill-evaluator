@@ -416,3 +416,73 @@ def test_an_interpreter_that_will_not_start_is_a_refusal(tmp_path):
     result = run_script(bundle, _workspace(tmp_path), "scripts/x.py", [], runtime)
     assert result.refused is not None
     assert result.refused.startswith(f"refused: cannot start {broken}")
+
+
+# --- guard hardening (fix round 1) --------------------------------------------
+
+
+def test_a_symlink_planted_over_the_capture_file_does_not_leak_its_target(tmp_path):
+    # A script that unlinks $TMPDIR/stdout and replaces it with a symlink to
+    # another skill-lens workspace must not make the harness read that
+    # target's content back instead of what was actually captured.
+    target = tmp_path / "secret.txt"
+    target.write_text("attacker content", encoding="utf-8")
+    source = (
+        "import os\n"
+        "print('real output', flush=True)\n"
+        "capture = os.path.join(os.environ['TMPDIR'], 'stdout')\n"
+        "os.remove(capture)\n"
+        f"os.symlink({str(target)!r}, capture)\n"
+    )
+    bundle = _bundle(tmp_path, **{"swap.py": source})
+    result = run_script(bundle, _workspace(tmp_path), "scripts/swap.py", [], _runtime())
+    assert result.stdout.strip() == "real output"
+    assert "attacker" not in result.stdout
+
+
+@pytest.mark.skipif(os.name == "nt", reason="os.mkfifo does not exist on Windows")
+def test_a_fifo_planted_over_the_capture_file_does_not_hang_the_call(tmp_path):
+    # A script that replaces $TMPDIR/stdout with a FIFO must not make the
+    # harness block forever trying to read it back after the run is over.
+    source = (
+        "import os\n"
+        "print('real output', flush=True)\n"
+        "capture = os.path.join(os.environ['TMPDIR'], 'stdout')\n"
+        "os.remove(capture)\n"
+        "os.mkfifo(capture)\n"
+    )
+    bundle = _bundle(tmp_path, **{"fifo.py": source})
+    started = time.monotonic()
+    result = run_script(bundle, _workspace(tmp_path), "scripts/fifo.py", [], _runtime())
+    assert time.monotonic() - started < 10
+    assert result.stdout.strip() == "real output"
+
+
+def test_a_null_byte_in_an_argument_is_a_refusal_not_a_crash(tmp_path):
+    # A model can put a NUL byte inside a JSON tool-call argument; str()
+    # preserves it, and Popen raises ValueError for it rather than OSError.
+    bundle = _bundle(tmp_path, **{"count.py": PRINTS})
+    result = run_script(bundle, _workspace(tmp_path), "scripts/count.py", ["a\x00b"], _runtime())
+    assert result.refused is not None
+    assert result.refused.startswith("refused: cannot start")
+
+
+def test_a_capture_file_that_cannot_be_created_is_a_refusal(tmp_path, monkeypatch):
+    # Opening the stdout/stderr capture files sat outside any handler: a full
+    # disk or a read-only temp filesystem after mkdtemp succeeded would have
+    # propagated as a raw OSError. Patch Path.open narrowly -- only for a
+    # path literally named "stdout" -- so the rest of run_script (resolving
+    # the script, creating the scratch directory) still goes through the
+    # real filesystem; this is the least invasive way to exercise a disk
+    # failure that arrives exactly when the capture files are opened.
+    bundle = _bundle(tmp_path, **{"count.py": PRINTS})
+    real_open = Path.open
+
+    def failing_open(self, *args, **kwargs):
+        if self.name == "stdout":
+            raise OSError("no space left on device")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", failing_open)
+    result = run_script(bundle, _workspace(tmp_path), "scripts/count.py", [], _runtime())
+    assert result.refused == "refused: cannot create the capture files: no space left on device"
