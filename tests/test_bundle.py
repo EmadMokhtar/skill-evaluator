@@ -12,6 +12,7 @@ import os
 
 import pytest
 
+from promptly import promptly
 from skill_lens.bundle import BUNDLE_DIRS, SkillBundle, has_bundle, script_extension
 from skill_lens.workspace import PathRefused
 
@@ -140,3 +141,46 @@ def test_script_refuses_an_unmapped_extension_and_lists_the_allowed_ones(tmp_pat
 def test_script_extension_is_lower_cased_without_the_dot():
     assert script_extension("scripts/Count.PY") == "py"
     assert script_extension("scripts/noext") == ""
+
+
+# --- regular files only ----------------------------------------------------
+#
+# A bundle is committed content, but a checkout can still carry a FIFO, a
+# symlink loop or a sparse file, and the tools on top must never block or
+# swallow memory on one.
+
+posix_only = pytest.mark.skipif(os.name == "nt", reason="FIFOs and symlinks are POSIX features")
+
+
+@posix_only
+def test_a_fifo_in_the_bundle_is_refused_before_it_is_opened(tmp_path):
+    root = _skill_dir(tmp_path)
+    os.mkfifo(root / "references" / "pipe.md")
+    os.mkfifo(root / "scripts" / "pipe.py")
+    bundle = SkillBundle(root)
+    with pytest.raises(PathRefused, match="not a regular file"):
+        promptly(lambda: bundle.read("references/pipe.md"))
+    with pytest.raises(PathRefused, match="not a regular file"):
+        bundle.script("scripts/pipe.py", {"py": ("python3",)})
+    assert "references/pipe.md" not in bundle.listing()
+
+
+@posix_only
+def test_a_symlink_loop_in_the_bundle_is_a_refusal_on_every_python(tmp_path):
+    root = _skill_dir(tmp_path)
+    os.symlink("loop", root / "references" / "loop")
+    bundle = SkillBundle(root)
+    for candidate in ("references/loop", "references/loop/style.md"):
+        with pytest.raises(PathRefused):
+            bundle.read(candidate)
+    assert "references/loop" not in bundle.listing()
+
+
+def test_a_bundled_file_over_max_file_bytes_is_refused_and_names_the_cap(tmp_path):
+    root = _skill_dir(tmp_path)
+    with (root / "references" / "huge.md").open("wb") as handle:
+        handle.seek(2_000_000)
+        handle.write(b"x")
+    expected = r"huge.md is 2,000,001 bytes; max_file_bytes is 1,000,000"
+    with pytest.raises(PathRefused, match=expected):
+        SkillBundle(root).read("references/huge.md")

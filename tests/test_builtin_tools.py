@@ -7,10 +7,12 @@ surface that as an infra error and mark the case errored instead of scoring it.
 
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
 
+from promptly import promptly
 from skill_lens.bundle import SkillBundle
 from skill_lens.runners.tools import (
     BUILTIN_TOOL_NAMES,
@@ -274,3 +276,63 @@ def test_render_script_result_states_a_timeout_and_a_warning():
 
 def test_render_script_result_passes_a_refusal_through():
     assert render_script_result(ScriptResult(refused="refused: nope"), 30.0) == "refused: nope"
+
+
+# --- regular files only ----------------------------------------------------
+
+posix_only = pytest.mark.skipif(os.name == "nt", reason="FIFOs and symlinks are POSIX features")
+
+
+@posix_only
+def test_read_file_and_write_file_refuse_a_fifo_promptly(tmp_path):
+    # A script may plant a FIFO in the workspace; open() on it would block the
+    # agent loop forever, where no timeout applies at all.
+    _, tools = _tools(tmp_path)
+    os.mkfifo(tmp_path / "report.md")
+    assert promptly(lambda: tools["read_file"].call(path="report.md")).startswith("refused:")
+    assert promptly(lambda: tools["write_file"].call(path="report.md", content="x")).startswith(
+        "refused:"
+    )
+
+
+@posix_only
+def test_read_file_refuses_a_symlink_loop(tmp_path):
+    _, tools = _tools(tmp_path)
+    os.symlink("loop", tmp_path / "loop")
+    assert tools["read_file"].call(path="loop").startswith("refused:")
+    assert tools["read_file"].call(path="loop/x.md").startswith("refused:")
+
+
+def test_read_file_refuses_a_file_over_max_file_bytes_naming_the_cap(tmp_path):
+    _, tools = _tools(tmp_path, max_file_bytes=100)
+    with (tmp_path / "huge.txt").open("wb") as handle:
+        handle.seek(2_000_000)
+        handle.write(b"x")
+    assert (
+        tools["read_file"].call(path="huge.txt")
+        == "refused: huge.txt is 2,000,001 bytes; max_file_bytes is 100"
+    )
+
+
+@posix_only
+def test_read_skill_file_refuses_a_fifo_and_a_loop_promptly(tmp_path):
+    _, tools = _bundle_tools(tmp_path)
+    root = tmp_path / "skill"
+    os.mkfifo(root / "references" / "pipe.md")
+    os.symlink("loop", root / "references" / "loop")
+    assert promptly(lambda: tools["read_skill_file"].call(path="references/pipe.md")).startswith(
+        "refused:"
+    )
+    assert tools["read_skill_file"].call(path="references/loop").startswith("refused:")
+
+
+def test_read_skill_file_refuses_a_file_over_max_file_bytes(tmp_path):
+    _, tools = _bundle_tools(tmp_path)
+    with (tmp_path / "skill" / "references" / "huge.md").open("wb") as handle:
+        handle.seek(2_000_000)
+        handle.write(b"x")
+    assert (
+        tools["read_skill_file"]
+        .call(path="references/huge.md")
+        .startswith("refused: references/huge.md is 2,000,001 bytes; max_file_bytes is")
+    )

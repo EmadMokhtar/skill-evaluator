@@ -15,11 +15,18 @@ path is an eval signal and an exception would surface it as an infra error.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from skill_lens.workspace import PathRefused, check_relative_path
+from skill_lens.workspace import (
+    DEFAULT_LIMITS,
+    PathRefused,
+    check_relative_path,
+    resolve_under,
+    stat_regular,
+)
 
 BUNDLE_DIRS: tuple[str, ...] = ("scripts", "references", "assets")
 SCRIPTS_DIR = "scripts"
@@ -46,11 +53,17 @@ class SkillBundle:
 
     root: Path
 
-    def _contained(self, candidate: str) -> Path:
-        """The absolute path `candidate` names, or raise if it is not bundle."""
+    def _inspect(self, candidate: str) -> tuple[Path, os.stat_result | None]:
+        """The contained path plus its stat (None when there is no such file).
+
+        The same rule as `Workspace`: only a regular file or a directory is
+        ever resolved. A checkout can carry a FIFO or a symlink loop as
+        easily as a script can plant one, and `read_skill_file` must not
+        block on the former or crash on the latter.
+        """
         check_relative_path(candidate)
         text = candidate.strip()
-        target = (self.root / text).resolve()
+        target = resolve_under(self.root, candidate)
         if target == self.root or not target.is_relative_to(self.root):
             raise PathRefused(f"refused: {candidate!r} resolves outside the skill's directory")
         if Path(text).parts[0] not in BUNDLE_DIRS:
@@ -58,7 +71,11 @@ class SkillBundle:
                 f"refused: {candidate!r} is not under scripts/, references/ or assets/; "
                 "only those three directories are readable"
             )
-        return target
+        return target, stat_regular(target, candidate)
+
+    def _contained(self, candidate: str) -> Path:
+        """The absolute path `candidate` names, or raise if it is not bundle."""
+        return self._inspect(candidate)[0]
 
     def listing(self) -> list[str]:
         """Every bundled file, relative to the root, sorted, recursive.
@@ -81,8 +98,20 @@ class SkillBundle:
         return [entry for entry in self.listing() if entry.split("/", 1)[0] == SCRIPTS_DIR]
 
     def read(self, candidate: str) -> str:
-        """The file's text. Raises OSError if missing, UnicodeDecodeError if binary."""
-        return self._contained(candidate).read_text(encoding="utf-8")
+        """The file's text. Raises OSError if missing, UnicodeDecodeError if binary.
+
+        Capped at the default `max_file_bytes` before a byte is read, like
+        `Workspace.read`: a bundle is committed content, but a sparse file
+        in a checkout has any apparent size, and what reaches the model is
+        bounded by this cap rather than by the repository's disk.
+        """
+        target, found = self._inspect(candidate)
+        cap = DEFAULT_LIMITS.max_file_bytes
+        if found is not None and found.st_size > cap:
+            raise PathRefused(
+                f"refused: {candidate} is {found.st_size:,} bytes; max_file_bytes is {cap:,}"
+            )
+        return target.read_text(encoding="utf-8")
 
     def script(self, candidate: str, interpreters: Mapping[str, Sequence[str]]) -> Path:
         """The absolute path of a runnable script, or raise saying why not.

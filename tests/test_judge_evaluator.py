@@ -1,5 +1,10 @@
 """Rubric scoring. The judge is scripted, so every test here is free."""
 
+import os
+
+import pytest
+
+from promptly import promptly
 from skill_lens.evaluators.base import Evaluator
 from skill_lens.evaluators.judge import (
     BUDGET_EXHAUSTED,
@@ -345,3 +350,28 @@ def test_a_surrogate_bearing_artifact_name_is_rendered_not_raised(tmp_path):
     # (PathRefused, OSError)-only catch would let escape.
     request = build_request(_case("a\ud800b.txt"), RunResult(output="o", workspace=tmp_path))
     assert request.artifacts == {"a\ud800b.txt": NOT_PRODUCED}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="FIFOs and symlinks are POSIX features")
+def test_a_fifo_artifact_is_rendered_absent_without_being_opened(tmp_path):
+    # A script can plant a FIFO under the artifact's name; opening it would
+    # block the judge forever. The workspace refuses it from stat(), and the
+    # judge renders the refusal as an absence rather than reading anything.
+    os.mkfifo(tmp_path / "report.md")
+    os.symlink("loop", tmp_path / "loop.md")
+    request = promptly(
+        lambda: build_request(
+            _case("report.md", "loop.md"), RunResult(output="o", workspace=tmp_path)
+        )
+    )
+    assert request.artifacts == {"report.md": NOT_PRODUCED, "loop.md": NOT_PRODUCED}
+
+
+def test_a_sparse_artifact_over_the_read_cap_is_rendered_absent_not_loaded(tmp_path):
+    # Apparent size is what a sparse file has; loading it whole before the
+    # artifact budget applied is a MemoryError waiting to happen.
+    with (tmp_path / "huge.md").open("wb") as handle:
+        handle.seek(2_000_000)
+        handle.write(b"x")
+    request = build_request(_case("huge.md"), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {"huge.md": NOT_PRODUCED}
