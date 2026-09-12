@@ -1038,3 +1038,20 @@ def test_the_baseline_arm_sees_the_previous_bundle_and_the_candidate_the_current
     runner = _Peeking()
     run_evals([skill], [runner], evals_path=_evals(tmp_path, _case()), baseline="previous")
     assert seen == {"candidate": "print('new')", "baseline": "print('old')"}
+
+
+def test_baseline_none_arm_gets_no_bundle_even_when_the_candidate_has_one(tmp_path):
+    # Keying the bundle tools on path instead of bundle_root would leak the
+    # candidate's scripts into the "no skill" arm, since --baseline none's
+    # skill shares the candidate's path. bundle_root must stay None instead.
+    skill = _bundled_skill(tmp_path, "a.py")
+    seen: dict[str, Path | None] = {}
+
+    class _Peeking(_ScriptAwareRunner):
+        def run(self, s, case, workspace=None, scripts=None):
+            seen[s.variant] = s.bundle_root
+            return super().run(s, case, workspace=workspace, scripts=scripts)
+
+    run_evals([skill], [_Peeking()], evals_path=_evals(tmp_path, _case()), baseline="none")
+    assert seen["candidate"] == skill.bundle_root
+    assert seen["baseline"] is None
