@@ -29,6 +29,7 @@ import shutil
 import signal
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, field
@@ -313,15 +314,66 @@ def preflight(
 
 
 def _group_kwargs() -> dict[str, Any]:
-    """Make the child lead its own process group, so a timeout can kill the tree."""
+    """Make the child lead its own process group, so the group can be killed.
+
+    On POSIX `start_new_session=True` makes the child a session leader, which
+    guarantees its process-group id equals its pid -- what lets
+    `_reap_and_kill_group` address the group as `process.pid` without a
+    `getpgid` lookup that would fail exactly when it matters, after the
+    leader has been reaped.
+    """
     if os.name == "nt":
         return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
     return {"start_new_session": True}
 
 
-def _kill_tree(process: subprocess.Popen[bytes]) -> None:
-    """Kill the child and everything it started. Never raises."""
-    if os.name == "nt":
+# How long the reap after SIGKILL may take. SIGKILL cannot be ignored, so this
+# only binds on a process stuck in an uninterruptible kernel wait.
+_REAP_TIMEOUT_SECONDS = 5.0
+
+
+def _exited_unreaped(process: subprocess.Popen[bytes], timeout: float) -> bool:
+    """Wait up to `timeout` for the child to exit, leaving it *unreaped*.
+
+    The same poll-and-back-off loop `Popen.wait` runs, but through `waitid`
+    with `WNOWAIT` so the exit is observed without collecting it. A reaped
+    pid can be reused by an unrelated process; an unreaped one cannot, which
+    is what keeps the `killpg` that follows aimed at this script's group.
+    """
+    deadline = time.monotonic() + timeout
+    delay = 0.0005
+    while True:
+        if os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(delay, remaining))
+        delay = min(delay * 2, 0.05)
+
+
+def _kill_group_posix(process: subprocess.Popen[bytes]) -> None:
+    """SIGKILL the whole process group. Never raises.
+
+    `ProcessLookupError` means the group is already gone; `PermissionError`
+    is what macOS returns when the group's only remaining member is the
+    zombie leader. Neither is a failure to clean up.
+    """
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _kill_tree_windows(process: subprocess.Popen[bytes]) -> None:
+    """`taskkill /T /F` the child's tree. Never raises.
+
+    `taskkill /T` walks the tree from the parent, so once the parent has
+    exited on its own it finds nothing to walk -- a script that starts a
+    background process and exits normally leaves that process running on
+    Windows. The timeout path, where the parent is still alive, is covered.
+    """
+    try:
         subprocess.run(  # noqa: S603 - fixed argv, no shell
             # S607: taskkill is found on PATH on purpose; it lives in System32
             # on every Windows install and an absolute path would be wrong.
@@ -329,15 +381,41 @@ def _kill_tree(process: subprocess.Popen[bytes]) -> None:
             capture_output=True,
             check=False,
         )
-    else:
-        try:
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-    try:
-        process.wait(timeout=5)
-    except subprocess.TimeoutExpired:  # pragma: no cover - SIGKILL cannot be ignored
+    except OSError:
         pass
+    # taskkill missing or refused must not leave a timed-out child alive.
+    process.kill()
+
+
+def _reap_and_kill_group(
+    process: subprocess.Popen[bytes], timeout: float
+) -> tuple[int | None, bool]:
+    """Wait for the script, then kill its group. `(exit_code, timed_out)`.
+
+    The group is killed after *every* exit, not only a timeout: a script that
+    starts `sleep 1000` and exits at once has left something behind, and the
+    docs promise it does not. On POSIX the order is observe the exit
+    (unreaped), kill the group, then reap -- so the leader's pid is still
+    held and cannot have been handed to an unrelated process by the time
+    `killpg` runs. Never raises.
+    """
+    if os.name == "nt":
+        try:
+            process.wait(timeout=timeout)
+            timed_out = False
+        except subprocess.TimeoutExpired:
+            timed_out = True
+        _kill_tree_windows(process)
+    else:
+        timed_out = not _exited_unreaped(process, timeout)
+        _kill_group_posix(process)
+    # Reaps on POSIX (the status `waitid` left in place, or the SIGKILL); on
+    # Windows this is the code already collected, or the kill's.
+    try:
+        exit_code = process.wait(timeout=_REAP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:  # pragma: no cover - SIGKILL cannot be ignored
+        return None, True
+    return (None if timed_out else exit_code), timed_out
 
 
 def _read_capped_handle(handle: IO[bytes], budget: int) -> str:
@@ -426,14 +504,7 @@ def run_script(
                 # model can put one in a tool-call argument; Popen rejects it
                 # before anything is spawned.
                 return ScriptResult(refused=f"refused: cannot start {prefix[0]}: {exc}")
-            timed_out = False
-            exit_code: int | None
-            try:
-                exit_code = process.wait(timeout=policy.timeout_seconds)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                exit_code = None
-                _kill_tree(process)
+            exit_code, timed_out = _reap_and_kill_group(process, policy.timeout_seconds)
             return ScriptResult(
                 exit_code=exit_code,
                 timed_out=timed_out,

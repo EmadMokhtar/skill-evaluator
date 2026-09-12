@@ -373,7 +373,7 @@ def test_a_script_that_outlives_the_timeout_is_stopped_and_reported(tmp_path):
     bundle = _bundle(tmp_path, **{"sleep.py": source})
     started = time.monotonic()
     result = run_script(
-        bundle, _workspace(tmp_path), "scripts/sleep.py", [], _runtime(timeout_seconds=0.5)
+        bundle, _workspace(tmp_path), "scripts/sleep.py", [], _runtime(timeout_seconds=2.0)
     )
     assert time.monotonic() - started < 10
     assert result.timed_out is True
@@ -393,7 +393,7 @@ def test_a_timeout_kills_the_grandchild_too(tmp_path):
     )
     bundle = _bundle(tmp_path, **{"spawn.py": source})
     result = run_script(
-        bundle, _workspace(tmp_path), "scripts/spawn.py", [], _runtime(timeout_seconds=0.5)
+        bundle, _workspace(tmp_path), "scripts/spawn.py", [], _runtime(timeout_seconds=2.0)
     )
     assert result.timed_out is True
     grandchild = int(result.stdout.strip())
@@ -407,6 +407,37 @@ def test_a_timeout_kills_the_grandchild_too(tmp_path):
     else:
         os.kill(grandchild, 9)
         pytest.fail("the grandchild survived the group kill")
+
+
+def _gone_within(pid: int, seconds: float) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    os.kill(pid, 9)
+    return False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="process groups are POSIX; Windows uses taskkill")
+def test_a_normal_exit_kills_what_the_script_left_running(tmp_path):
+    # The guarantee in the docs: a script that starts a sleeper and exits at
+    # once leaves nothing behind. Only the timeout path used to kill the
+    # group; a script exiting normally, with its child still running, is the
+    # common shape of "leaves something behind".
+    source = (
+        "import subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "print(child.pid, flush=True)\n"
+    )
+    bundle = _bundle(tmp_path, **{"orphan.py": source})
+    result = run_script(bundle, _workspace(tmp_path), "scripts/orphan.py", [], _runtime())
+    assert result.timed_out is False
+    assert result.exit_code == 0
+    grandchild = int(result.stdout.strip())
+    assert _gone_within(grandchild, 5), "the orphaned grandchild survived a normal exit"
 
 
 def test_output_past_the_cap_is_cut_with_the_exact_count(tmp_path):
