@@ -22,7 +22,7 @@ from skill_lens.gating import EXIT_OK, evaluate_gate
 from skill_lens.judges.fake import FakeJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.models import Skill
-from skill_lens.orchestrator import run_evals
+from skill_lens.orchestrator import RunOptions, run_evals
 from skill_lens.reporters.console import render_console
 from skill_lens.reporters.failure_context import OUTPUT_LIMIT
 from skill_lens.reporters.json_reporter import render_json
@@ -32,6 +32,7 @@ from skill_lens.runners.fake import FakeRunner
 from skill_lens.runners.preflight import MissingAPIKey, check_api_key
 from skill_lens.runners.pydantic_ai import PydanticAIRunner, RunnerDependencyError
 from skill_lens.scaffold import render_scaffold, scaffold_target
+from skill_lens.scripts import ScriptSetupError
 from skill_lens.skills.loader import SKILL_FILENAME, SkillParseError, load_skills, parse_skill_file
 from skill_lens.workspace import WorkspaceLimits
 
@@ -53,6 +54,9 @@ _AUTHORING_ERRORS = (
     InvalidAssertionValue,
     MissingAPIKey,
     RunnerDependencyError,
+    # scripts enabled but cannot run here: a missing interpreter, or a
+    # required sandbox that is absent
+    ScriptSetupError,
 )
 
 
@@ -176,7 +180,7 @@ def run(
             keep_workspace if keep_workspace is not None else settings.keep_workspace
         )
         resolved_full_output = full_output if full_output is not None else settings.full_output
-        resolved_allow_scripts = (  # noqa: F841 - wired in the next commit
+        resolved_allow_scripts = (
             allow_scripts if allow_scripts is not None else settings.allow_scripts
         )
         # None means "no cap" to every reporter.
@@ -268,8 +272,11 @@ def run(
             baseline=baseline_kind or None,
             repeat=resolved_repeat,
             concurrency=resolved_concurrency,
-            keep_workspace=resolved_keep_workspace,
-            workspace_limits=workspace_limits,
+            options=RunOptions(
+                keep_workspace=resolved_keep_workspace,
+                limits=workspace_limits,
+                scripts=settings.script_policy() if resolved_allow_scripts else None,
+            ),
         )
     except _AUTHORING_ERRORS as exc:
         typer.echo(str(exc))

@@ -36,6 +36,10 @@ inputs:
     description: Keep each case's temporary directory instead of deleting it. true or false.
   full-output:
     description: Print a failing case's whole output instead of the first 500 characters. true or false.
+  allow-scripts:
+    description: >-
+      Run the scripts a skill bundles under scripts/. Off by default: a SKILL.md under
+      evaluation is unvetted code. true or false.
   json-output:
     description: Where to write the JSON report. Also read back for this action's outputs.
     default: skill-lens-report.json
@@ -125,6 +129,7 @@ runs:
         SE_CONCURRENCY: ${{ inputs.concurrency }}
         SE_KEEP_WORKSPACE: ${{ inputs.keep-workspace }}
         SE_FULL_OUTPUT: ${{ inputs.full-output }}
+        SE_ALLOW_SCRIPTS: ${{ inputs.allow-scripts }}
         SE_JSON: ${{ inputs.json-output }}
         SE_JUNIT: ${{ inputs.junit-output }}
         SE_MARKDOWN: ${{ inputs.markdown-output }}
@@ -153,6 +158,7 @@ runs:
         add --concurrency "$SE_CONCURRENCY"
         add_flag --keep-workspace "$SE_KEEP_WORKSPACE" --no-keep-workspace
         add_flag --full-output "$SE_FULL_OUTPUT" --no-full-output
+        add_flag --allow-scripts "$SE_ALLOW_SCRIPTS" --no-allow-scripts
         add --json-output "$SE_JSON"
         add --junit-output "$SE_JUNIT"
         add --markdown-output "$SE_MARKDOWN"

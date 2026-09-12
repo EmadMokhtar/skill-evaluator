@@ -1,3 +1,4 @@
+import sys
 import threading
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from pathlib import Path
@@ -14,14 +15,16 @@ from skill_lens.models import (
     EvalScore,
     JudgeVerdict,
     RunResult,
+    ScriptNote,
     Skill,
     ToolCall,
     WorkspaceSpec,
 )
-from skill_lens.orchestrator import _execute, _WorkItem, run_evals
+from skill_lens.orchestrator import RunOptions, _execute, _WorkItem, run_evals
 from skill_lens.runners.fake import FakeRunner
+from skill_lens.scripts import ScriptPolicy, ScriptRuntime, ScriptSetupError
 from skill_lens.skills.loader import load_skills
-from skill_lens.workspace import Workspace, WorkspaceLimits
+from skill_lens.workspace import DEFAULT_LIMITS, Workspace, WorkspaceLimits
 
 CASES_YAML = """cases:
   - name: passes
@@ -673,7 +676,7 @@ def test_keep_workspace_leaves_the_directory_and_the_path(tmp_path):
         [_skill(tmp_path)],
         [runner],
         evals_path=_evals(tmp_path, case),
-        keep_workspace=True,
+        options=RunOptions(keep_workspace=True),
     )
     kept = report.outcomes[0].result.workspace
     try:
@@ -725,7 +728,7 @@ def test_configured_limits_reach_the_workspace(tmp_path):
         [_skill(tmp_path)],
         [runner],
         evals_path=_evals(tmp_path, case),
-        workspace_limits=WorkspaceLimits(max_files=7),
+        options=RunOptions(limits=WorkspaceLimits(max_files=7)),
     )
     assert runner.seen[0].limits.max_files == 7
 
@@ -875,3 +878,93 @@ def test_case_filter_is_appended_after_every_pre_existing_parameter():
     params = list(inspect.signature(run_evals).parameters)
     assert params[-1] == "case_filter"
     assert params.index("judge") == params.index("tag") + 1
+
+
+def _bundled_skill(tmp_path, *scripts: str) -> Skill:
+    root = tmp_path / "bundled"
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    for name in scripts:
+        (root / "scripts" / name).write_text("print('x')", encoding="utf-8")
+    return Skill(
+        name="bundled", description="d", instructions="i", path=root, bundle_root=root.resolve()
+    )
+
+
+class _ScriptAwareRunner(_RecordingRunner):
+    """Records the runtime it was handed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.runtimes: list[ScriptRuntime | None] = []
+
+    def run(self, skill, case, workspace=None, scripts=None):
+        self.runtimes.append(scripts)
+        return super().run(skill, case, workspace=workspace)
+
+
+def test_run_options_defaults_reproduce_the_old_behaviour(tmp_path):
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    assert report.scripts is None
+    assert report.script_notes == []
+    assert report.outcomes[0].result.workspace is None
+    assert runner.seen[0].limits == DEFAULT_LIMITS
+
+
+def test_scripts_off_leaves_a_note_per_skill_that_bundles_scripts(tmp_path):
+    runner = _RecordingRunner()
+    skill = _bundled_skill(tmp_path, "a.py", "b.sh")
+    report = run_evals([skill], [runner], evals_path=_evals(tmp_path, _case()))
+    assert report.scripts is None
+    assert report.script_notes == [ScriptNote(skill_name="bundled", script_count=2)]
+
+
+def test_scripts_off_notes_nothing_for_a_bundle_without_scripts(tmp_path):
+    runner = _RecordingRunner()
+    skill = _bundled_skill(tmp_path)
+    (tmp_path / "bundled" / "scripts").rmdir()
+    (tmp_path / "bundled" / "references").mkdir()
+    report = run_evals([skill], [runner], evals_path=_evals(tmp_path, _case()))
+    assert report.script_notes == []
+
+
+def test_scripts_on_runs_preflight_once_and_hands_the_runtime_to_the_runner(tmp_path):
+    runner = _ScriptAwareRunner()
+    policy = ScriptPolicy(sandbox="off", interpreters={"py": (sys.executable,)})
+    report = run_evals(
+        [_bundled_skill(tmp_path, "a.py")],
+        [runner],
+        evals_path=_evals(tmp_path, _case(workspace=WorkspaceSpec())),
+        options=RunOptions(scripts=policy),
+    )
+    assert report.scripts is not None
+    assert report.scripts.sandbox == "none"
+    assert report.scripts.detail == 'script_sandbox = "off"'
+    assert report.script_notes == []
+    (runtime,) = runner.runtimes
+    assert runtime is not None and runtime.policy is policy
+
+
+def test_scripts_off_passes_no_scripts_keyword_so_part_1_runners_keep_working(tmp_path):
+    class _PartOneRunner:
+        name = "old"
+
+        def run(self, skill, case, workspace=None):
+            return RunResult(output="ok")
+
+    report = run_evals([_skill(tmp_path)], [_PartOneRunner()], evals_path=_evals(tmp_path, _case()))
+    assert report.outcomes[0].status == "passed"
+
+
+def test_a_setup_error_aborts_before_any_case_runs(tmp_path):
+    runner = _ScriptAwareRunner()
+    policy = ScriptPolicy(sandbox="off", interpreters={"py": ("no-such-interpreter-xyz",)})
+    with pytest.raises(ScriptSetupError, match="no-such-interpreter-xyz"):
+        run_evals(
+            [_bundled_skill(tmp_path, "a.py")],
+            [runner],
+            evals_path=_evals(tmp_path, _case()),
+            options=RunOptions(scripts=policy),
+        )
+    assert runner.runtimes == []
