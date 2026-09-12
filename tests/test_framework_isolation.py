@@ -16,6 +16,7 @@ ALLOWED = {
     Path("runners/pydantic_ai.py"),
     Path("judges/pydantic_ai.py"),
     Path("runners/langchain.py"),
+    Path("judges/langchain.py"),
 }
 
 # `pydantic_ai`; `langchain`, `langchain_core`, `langchain_openai`, ...; `langgraph`.

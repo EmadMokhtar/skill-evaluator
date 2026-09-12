@@ -321,6 +321,17 @@ def test_a_real_judge_without_its_api_key_fails_preflight(tmp_path, monkeypatch)
     assert "OPENAI_API_KEY" in result.output
 
 
+def test_the_langchain_judge_is_registered(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-lens.toml").write_text('judge = "langchain"\n', encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-lens.toml")]
+    )
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+
+
 def test_the_judge_model_falls_back_to_the_run_model(tmp_path, monkeypatch):
     # An empty judge_model must not reach the provider as an empty model id.
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
