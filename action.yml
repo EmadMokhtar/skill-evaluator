@@ -38,8 +38,9 @@ inputs:
     description: Print a failing case's whole output instead of the first 500 characters. true or false.
   allow-scripts:
     description: >-
-      Run the scripts a skill bundles under scripts/. Off by default: a SKILL.md under
-      evaluation is unvetted code. true or false.
+      Run the scripts a skill bundles under scripts/. Off unless turned on: a SKILL.md under
+      evaluation is unvetted code. true or false. Unset lets skill-lens.toml in the checkout
+      decide; pass false explicitly where the checkout is a pull request you do not trust.
   json-output:
     description: Where to write the JSON report. Also read back for this action's outputs.
     default: skill-lens-report.json

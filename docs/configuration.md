@@ -80,6 +80,13 @@ policy set once per repository rather than a per-run decision. Roughly 100x a re
 artifact, so they only bind when a case is genuinely stuck (writing the same file repeatedly,
 or writing many small ones) rather than when it legitimately produces something large.
 
+`max_file_bytes` also caps what is *read*: the agent's `read_file` refuses a larger file
+before opening it, because a bundled script can leave a sparse file of any apparent size
+behind. The configured value applies to the agent's tools; a `file:` assertion, a judge
+artifact and `read_skill_file` apply the built-in default of `1000000`, so a produced file
+larger than 1 MB is scored as unreadable (a failed check) even where this setting is raised.
+See [The workspace](runners.md#the-workspace).
+
 `model`, `retries`, and `retry_backoff_seconds` only matter to components that reach a
 provider (`pydantic-ai` or `langchain`, as a runner or a judge); `FakeRunner` and `FakeJudge`
 ignore them.

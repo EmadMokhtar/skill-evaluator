@@ -101,6 +101,23 @@ resolved once, at creation — on macOS `/tmp` is a symlink to `/private/tmp`, a
 unresolved root against a resolved candidate path would make every containment check compare
 two spellings of the same directory.
 
+**Regular files only.** A path that exists and is neither a regular file nor a directory —
+a FIFO (a named pipe), a device, a socket — is refused, and so is a symbolic-link loop,
+whichever exception the running Python raises for it. The check is a `stat`, never an
+`open`: opening a FIFO blocks until the other end connects, which no reader in skill-lens
+ever is, so a bundled script that planted one under the name an assertion reads would
+otherwise hang the run. The same rule applies to the skill's bundle, so `read_skill_file`
+cannot block on a FIFO committed to the repository either.
+
+**Reads are capped too.** `read_file`, a `file:` assertion and a judge artifact refuse a
+file larger than `max_file_bytes` before reading a byte of it — `refused: report.md is
+2,000,001 bytes; max_file_bytes is 1,000,000`. `read_file` uses the
+[configured](configuration.md) value; the assertion, the judge and `read_skill_file` use
+the built-in default of 1 MB. A sparse file has whatever apparent size a script gives it at
+almost no cost on disk, so the cap on `st_size` is what bounds what reaches a model or an
+evaluator. `file-produced` is unaffected: it asks whether the file exists, not whether it is
+readable.
+
 **The caps.** Three [configured](configuration.md) limits — `max_file_bytes`, `max_files`,
 `max_total_bytes` — bound what one case may write. They default to roughly 100x a realistic
 artifact (a report or a JSON file is kilobytes), so they only bind when a run is genuinely
@@ -206,12 +223,18 @@ reading that fact is the eval signal. `run_script` never raises. Standard input 
   the judge's artifacts.
 - A script runs with `shell=False`, its arguments as argv. Nothing the model sends is ever
   joined into a command line.
-- A wall-clock timeout (`script_timeout_seconds`) kills the whole process group, not only
-  the direct child, so a script that starts `sleep 1000` and exits leaves nothing behind.
-  One honest limit: the kill is `os.killpg`, so a script that calls `os.setsid()` leaves
-  that group and survives it on every POSIX platform; only the `bwrap` backend closes that
-  gap (`--unshare-pid` puts the script in its own PID namespace and `--die-with-parent`
-  takes it down with the sandbox) — and the stock Ubuntu runner has no working `bwrap`.
+- The script's whole process group is killed after **every** exit — a normal one as much
+  as a wall-clock timeout (`script_timeout_seconds`) — so a script that starts `sleep 1000`
+  and exits at once leaves nothing behind. On POSIX the exit is observed before the leader
+  is reaped, the group is killed, and only then is it reaped, so the pid cannot have been
+  handed to an unrelated process by the time the kill runs. One honest limit: the kill is
+  `os.killpg`, so a script that calls `os.setsid()` leaves that group and survives it on
+  every POSIX platform; only the `bwrap` backend closes that gap (`--unshare-pid` puts the
+  script in its own PID namespace and `--die-with-parent` takes it down with the sandbox)
+  — and a stock Ubuntu runner may not have a working `bwrap`. On Windows the kill is
+  `taskkill /T /F`, which walks the tree from the parent: it covers the timeout, where the
+  parent is still alive, but after the parent has exited on its own it finds no tree, so a
+  background process a script started stays running there.
 - stdout and stderr are written to files in the scratch directory, not held in memory, and
   read back capped at `max_script_output_bytes` each; a cut ends with `... [truncated, N
   bytes omitted]` stating the exact count. The harness reads them through the descriptors
@@ -221,7 +244,10 @@ reading that fact is the eval signal. `run_script` never raises. Standard input 
   After the call the directory is measured, and if it is over `max_files` or
   `max_total_bytes` the tool result ends with a `warning:` line (`warning: the working
   directory now holds 12,345,678 bytes; max_total_bytes is 5,000,000`) and every later
-  `write_file` is refused. The timeout is the real bound on what one script can write.
+  `write_file` is refused. Nothing bounds what a script can *leave* on disk — a sparse file
+  has any apparent size at almost no cost — so the bound that matters is on what is read
+  back: every reader refuses a file over `max_file_bytes` before opening it (see
+  [The workspace](#the-workspace)).
 
 **The OS sandbox**, where one exists (`script_sandbox = "auto"`, the default), is a second
 layer on top. Under either backend a script cannot open a network connection; cannot write
@@ -230,22 +256,28 @@ writes under the temporary directory and `/dev/shm` land in an in-memory mount t
 discarded when the script exits — bounded, like output, only by the timeout); and cannot
 read anything under the system temporary directory except the workspace, the scratch
 directory and the skill's own bundle — so under `--concurrency N` a script cannot read the
-baseline arm's workspace or another case's scratch directory. The bundle is allowed back
+baseline arm's workspace or another case's scratch directory. One difference between the
+two: `bwrap`'s `--unshare-net` isolates the network stack only, so a Unix-domain socket the
+CI user can reach through the filesystem — `/var/run/docker.sock` is the usual one — is
+still connectable there, whereas macOS's `(deny network*)` covers Unix sockets too. A
+runner whose user can reach the Docker socket should not run scripts you would not run by
+hand. The bundle is allowed back
 explicitly because a `--baseline previous` bundle is extracted under that temporary
 directory. Reads anywhere else are allowed (see below).
 
 | | Backend | How |
 | --- | --- | --- |
 | macOS | `sandbox-exec` | A profile that allows everything, then denies `network*` and `file-write*`, re-allows writes under the workspace and the scratch directory (plus `file-write-data` on `/dev/null`), denies `file-read*` under the temporary directory, then re-allows reads under the workspace, the scratch directory and the bundle. Later rules win. `sandbox-exec` is marked deprecated in Apple's documentation, is present and working on current macOS, and is what Bazel, Chromium and Claude Code use. |
-| Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install; a stock Ubuntu CI image refuses the former, so the probe reports `none` there and says why. |
+| Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install. A stock Ubuntu CI image may not ship `bwrap`, or may refuse unprivileged user namespaces; the report's `sandbox:` line says which. `--unshare-net` does not block Unix-domain sockets (see above). |
 | Windows | none | The portable guards only. `"required"` refuses to run. |
 
 The probe runs once per run, after discovery and before any case. The backend is
 *executed* — `sandbox-exec -p '(version 1)(allow default)(deny network*)' /usr/bin/true`, or
 `bwrap --ro-bind / / --dev /dev --proc /proc --unshare-net --unshare-pid --die-with-parent
--- /bin/true` — not merely found on `PATH`, because present is not the same as working: an
-Ubuntu 24.04 runner refuses user namespaces under AppArmor, and the first line of that
-refusal is what the report shows. The result is on every report that enabled scripts —
+-- /bin/true` — not merely found on `PATH`, because present is not the same as working: a
+stock Ubuntu runner may not ship `bwrap` at all, or may refuse unprivileged user namespaces,
+and the first line of that refusal is what the report shows. The result is on every report
+that enabled scripts —
 `scripts: on, sandbox: bwrap`, or `scripts: on, sandbox: none (bwrap not found on PATH)` —
 so you can tell from a log whether the isolation you expected applied. `"required"` turns a
 missing backend into exit 2 before any money is spent. The probe fails closed on one more

@@ -210,6 +210,14 @@ included: an unreadable file fails regardless of kind, rather than being read as
 "the value isn't there" — an author checking `not_contains` against a file the skill never
 wrote should not expect that to pass.
 
+The same split applies to what the run *put* at the path. A `file:` that could never name
+a workspace file — empty, absolute, containing `..` — is an authoring error and aborts the
+run. A well-formed `file:` whose target the workspace refuses to read — a symbolic link a
+bundled script planted that points outside the workspace, a FIFO, a symlink loop, or a
+file larger than `max_file_bytes` — **fails** the assertion, with the refusal as the
+check's evidence: that is the skill's doing, not the author's. See
+[The workspace](runners.md#the-workspace) for the read rules.
+
 ## Per-check results
 
 `assertions`, `trajectory` and `budget` each report one result per declared check, not just

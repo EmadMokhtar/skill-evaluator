@@ -564,12 +564,23 @@ for the run is absent by construction, not by remembering to delete it.
 sends is joined into a command line; a NUL byte in an argument is refused by `Popen`
 before anything is spawned, and that refusal is text the model reads.
 
-**A timeout kills the process group, not just the child.** `start_new_session=True` on
-POSIX (`CREATE_NEW_PROCESS_GROUP` + `taskkill /T` on Windows), so a script that starts
-`sleep 1000` and exits leaves nothing behind. One honest limit: the kill is `os.killpg`, so
-a script that calls `os.setsid()` leaves the group and survives it on every POSIX platform;
-only under `bwrap` do `--unshare-pid` and `--die-with-parent` still take it down with the
-sandbox, and the stock Ubuntu runner has no working `bwrap`.
+**The process group is killed after every exit, not only a timeout.** `_reap_and_kill_group`
+in `scripts.py` runs whether the script exited on its own or ran past
+`script_timeout_seconds`, so a script that starts `sleep 1000` and exits at once leaves
+nothing behind — the promise the docs make, which a kill confined to the `TimeoutExpired`
+branch did not keep. On POSIX the order is observe-kill-reap: `os.waitid(P_PID, pid,
+WEXITED | WNOWAIT)` sees the exit without collecting it, `os.killpg(process.pid, SIGKILL)`
+kills the group while the leader's pid is still held (so it cannot have been reused), and
+`process.wait()` reaps last. The group id *is* `process.pid` because `start_new_session=True`
+makes the child a session leader; a `getpgid` lookup would fail after the reap, exactly when
+the kill matters. `ProcessLookupError` and `PermissionError` (macOS, when the only member
+left is the zombie leader) are both "already gone". On Windows the kill is `taskkill /T /F`
+wrapped in `except OSError`, then `process.kill()`; `taskkill /T` walks the tree from the
+parent, so after the parent has exited on its own there is no tree to walk, and a background
+process outlives a normal exit there — the docs say so. One honest limit everywhere: the
+kill is a group kill, so a script that calls `os.setsid()` leaves the group and survives it
+on every POSIX platform; only under `bwrap` do `--unshare-pid` and `--die-with-parent` still
+take it down with the sandbox, and a stock Ubuntu runner may not have a working `bwrap`.
 
 **Script output is read from files, capped, and a cut is never silent.** Captured into
 memory, a script printing gigabytes inside the timeout would take the harness down. The
@@ -638,13 +649,50 @@ scratch directory outside it, deleted afterwards, so `list_files`, `file-produce
 judge's artifacts see only what the agent and the script deliberately produced. A script
 writes to disk directly, so the workspace caps cannot refuse it beforehand: the directory
 is measured after the call, an overrun becomes a `warning:` line on the tool result, and
-every later `write_file` is refused by the existing projection. The timeout is the real
-bound on what one script can write.
+every later `write_file` is refused by the existing projection. Nothing bounds what a
+script can *leave* on disk — a sparse file has any apparent size for almost no blocks — so
+the bound that matters is on the way back in: every reader refuses a file over
+`max_file_bytes` before opening it (next).
+
+**Only a regular file or a directory is ever resolved, and reads are capped.** Part 1's
+`Workspace` assumed its only writer was `Workspace.write`, which creates regular files; a
+bundled script can create anything. `Workspace._inspect` and `SkillBundle._inspect` share
+two helpers in `workspace.py`: `resolve_under`, which turns a `Path.resolve()` failure into
+`PathRefused` (3.11 and 3.12 raise `RuntimeError` on a symlink loop; 3.13 stops resolving
+and the stat that follows raises `ELOOP` — both must become one refusal), and
+`stat_regular`, which refuses an existing target that is neither `S_ISREG` nor `S_ISDIR`.
+The check is `os.stat` on the resolved path (symlinks already followed), **never an open**:
+opening a FIFO blocks until a writer connects, which no reader in the harness is, so a FIFO
+a script planted under the name an assertion reads would hang the evaluator, the judge, and
+`read_file` inside the agent loop where no timeout applies. `Workspace.read` and
+`SkillBundle.read` then refuse `st_size > max_file_bytes` before reading a byte, naming the
+cap the way `write` does. The agent's `read_file` sees the configured value, because the
+orchestrator created that workspace with the repository's limits; the evaluators and the
+judge rebuild `Workspace(root=…)` from the result's path with default limits, so their
+ceiling is the 1 MB default even where `max_file_bytes` is raised, and the bundle always
+uses the default — `docs/configuration.md` says so. A sparse file with an apparent size of 50 GB used to
+be `read_text()`ed whole before any budget applied, a `MemoryError` escaping the assertion
+evaluator. `file-produced` is unaffected by the cap: it asks whether the file exists.
+Every FIFO test runs the read in a thread with a join timeout, so a regression fails the
+suite rather than hanging it.
+
+**The author's path and the run's target are judged separately.** `AssertionEvaluator`
+calls `check_relative_path` on the `file:` first and raises `InvalidAssertionValue` for a
+path that could never name a workspace file — empty, absolute, `..` — because that is a
+mistake in the eval file. A `PathRefused` raised *afterwards* by `Workspace.resolve` or
+`read` (a symlink the script planted that resolves outside, a FIFO, a loop, an over-size
+file) is a **failed** `CheckResult` carrying the refusal text as evidence, never an
+exception: it is the skill's doing, and an exception would turn an eval failure into exit
+2 and, under `--concurrency`, cancel every queued case. The judge draws the same line
+(`NOT_PRODUCED`), and `runners/tools.py` turns every one of these into a tool-result string.
 
 **`scripts=` reaches a runner only when execution is on.** `_run_one` passes the keyword
 only when the runtime is set, so a third-party runner written against M6 part 1 keeps
-working until the day someone turns scripts on — at which point a `TypeError` names the
-runner that cannot take them, rather than the scripts silently never running.
+working until the day someone turns scripts on — at which point the `TypeError` names
+`run()` as the method that cannot take the keyword and escapes `run_evals` as an uncaught
+traceback (exit 1), rather than the scripts silently never running. Both bundled adapters,
+PydanticAI and LangChain, take it and register the same six built-in tools under the same
+conditions.
 
 ### Developer experience (M7)
 

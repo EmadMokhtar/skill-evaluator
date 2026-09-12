@@ -307,11 +307,25 @@ form, that file is the explanation.
 - **`Skill.bundle_root` defaults to `None`; only the loader and the baseline resolver set
   it**, so the `--baseline none` skill never carries the candidate's scripts.
 - **A script's environment is an allowlist, never `os.environ` minus keys**; `shell=False`
-  always; a timeout kills the process group (a script that calls `os.setsid()` escapes
-  `os.killpg` on every POSIX platform; only the `bwrap` backend closes that); output is
-  read from files through the
-  descriptors the harness opened before the process started — never by re-opening the path
-  — capped, and a cut is never silent.
+  always; output is read from files through the descriptors the harness opened before the
+  process started — never by re-opening the path — capped, and a cut is never silent.
+- **The process group is killed after every exit, not only a timeout**, in the order
+  observe (`waitid` + `WNOWAIT`), `killpg(process.pid)`, reap — so the leader's pid is
+  still held when the kill runs. `pgid == pid` because of `start_new_session=True`; never
+  `getpgid`, which fails after the reap. A script that calls `os.setsid()` escapes
+  `os.killpg` on every POSIX platform; only the `bwrap` backend closes that. On Windows
+  `taskkill /T` after a normal exit finds no tree; the docs say so.
+- **Only a regular file or a directory is ever resolved, and reads are capped.**
+  `resolve_under` and `stat_regular` in `workspace.py` serve both `Workspace` and
+  `SkillBundle`: a FIFO, a device or a symlink loop (a `RuntimeError` from `resolve()` on
+  3.11/3.12, `ELOOP` from the stat on 3.13) is `PathRefused` from a `stat`, never from an
+  `open` that would block; `read` refuses `st_size > max_file_bytes` before reading a byte,
+  so a sparse file of any apparent size never reaches memory. Every FIFO test runs the read
+  in a thread with a join timeout.
+- **The author's path is an authoring error; the run's target is a failed check.**
+  `AssertionEvaluator` runs `check_relative_path` on the `file:` first and raises for that;
+  a `PathRefused` from `resolve`/`read` afterwards (a script-planted symlink, FIFO, loop or
+  over-size file) is a failed `CheckResult` with the refusal as evidence, never exit 2.
 - **`run_script` never raises, and an unrunnable script is never `RunResult.error`.**
 - **The sandbox decision is made once per run, in preflight, and appears on every report.**
   `required` without a backend and a missing interpreter abort with exit 2 before any case
@@ -328,7 +342,16 @@ form, that file is the explanation.
   10 s git timeout is a `BaselineNote`, not an error. Baseline bundle directories are deleted
   in a `finally`, and `--keep-workspace` does not keep them.
 - **Bundle tools require a `workspace:` block; all six built-in names are reserved in
-  every workspace case; the workspace preamble is unchanged.**
+  every workspace case; the workspace preamble is unchanged.** Both bundled adapters
+  (`runners/pydantic_ai.py`, `runners/langchain.py`) take `scripts=` and register the same
+  six tools under the same conditions, offered mode included.
+- **`skill-lens.toml` is inside the trust boundary.** In a `pull_request` workflow the
+  checkout is the PR, so the file can turn scripts on for itself; the action's
+  `allow-scripts` input is unset by default so the file decides, and `pull_request_target`,
+  collaborator-PR and self-hosted workflows should pass `allow-scripts: false` explicitly.
+  Docs-only: `docs/security.md`, `docs/ci.md`.
+- **`bwrap` does not block Unix-domain sockets** (`/var/run/docker.sock`); macOS's
+  `(deny network*)` does. Documented in the Linux row and the guarantee paragraph.
 - **The dependency audit is one command, spelled identically in three places, and its
   exceptions live in one table.** `uv audit --preview-features audit --locked` runs in
   `security.yml` (every PR, every push to `main`, weekly on a schedule, and on demand), in

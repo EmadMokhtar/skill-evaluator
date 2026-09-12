@@ -67,10 +67,11 @@ filesystem readable. The script's environment is rebuilt from an allowlist, so `
 and every other secret in `env` are not *inherited* — but that is the only layer between a
 script and the token. `actions/checkout` persists the job token on disk by default
 (`persist-credentials: true`, in `.git/config` of the checkout), readable by the same user the
-script runs as; and on a stock `ubuntu-latest` runner no OS sandbox applies (the report's
-`scripts: on, sandbox: none (...)` line says so), so the network is open and nothing stops a
-script reading the token and sending it out. If you enable scripts, tell the checkout not to
-persist the token, and give the job only the permissions the run needs:
+script runs as; and a stock `ubuntu-latest` runner may not ship `bwrap`, or may refuse
+unprivileged user namespaces, in which case no OS sandbox applies (the report's `scripts: on,
+sandbox: none (...)` line says which), the network is open and nothing stops a script reading
+the token and sending it out. If you enable scripts, tell the checkout not to persist the
+token, and give the job only the permissions the run needs:
 
 ```yaml
 permissions:
@@ -79,7 +80,7 @@ steps:
   - uses: actions/checkout@v4
     with:
       persist-credentials: false
-  - uses: EmadMokhtar/skill-evaluator@v0.3.0
+  - uses: EmadMokhtar/skill-evaluator@v0.4.0
     with:
       path: ./skills
       allow-scripts: true
@@ -88,6 +89,21 @@ steps:
 Files on disk (the checkout, the runner's tools) stay readable either way. Turn scripts on
 only for skills you would run by hand. See
 [Running bundled scripts](security.md#running-bundled-scripts).
+
+The input being unset is not the same as `false`. Unset, the action lets `skill-lens.toml`
+decide — and in a `pull_request` workflow that file comes from the pull request, which can
+set `allow_scripts = true` and `script_sandbox = "off"` for itself. A fork's PR gets no
+secrets under plain `pull_request`, so a real runner fails at the missing key first; a
+`pull_request_target` workflow, a collaborator's PR, or a self-hosted runner has no such
+backstop. In those workflows pass `allow-scripts: false` explicitly, which overrides the
+file:
+
+```yaml
+  - uses: EmadMokhtar/skill-evaluator@v0.4.0
+    with:
+      path: ./skills
+      allow-scripts: false
+```
 
 `json-output`, `junit-output` and `markdown-output` default to real paths rather than being
 unset, because the action reads the JSON back to produce `passed` and `pass-rate`.

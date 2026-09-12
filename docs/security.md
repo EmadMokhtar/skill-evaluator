@@ -183,17 +183,37 @@ adds — and the trust model is:
 - **Off by default, on only by the operator's decision.** `allow_scripts = true` in
   `skill-lens.toml` or `--allow-scripts`. Nothing in an eval file or a `SKILL.md` can turn
   it on. A `SKILL.md` under evaluation is unvetted code, and skill-lens runs in CI.
+- **The config file is inside the trust boundary.** `skill-lens.toml` is read from the
+  checkout, and in a `pull_request` workflow the checkout *is* the pull request: a PR can
+  set `allow_scripts = true` and `script_sandbox = "off"` itself. The action's
+  `allow-scripts` input is unset by default so the file decides, exactly like
+  `keep-workspace`. Under plain `pull_request` a fork gets no secrets, so a real runner
+  stops at the missing API key before any script runs; the exposure is
+  `pull_request_target`, pull requests from collaborators, and self-hosted runners. A
+  workflow in any of those positions should pass `allow-scripts: false` explicitly, which
+  overrides the file whatever it says.
 - **Portable guards always apply:** an environment rebuilt from an allowlist (no provider
   key, no inherited secret — absent by construction, not by deletion), a scratch directory
-  for temporary files, no shell, a timeout that kills the process group, output read from
-  files and capped with a visible cut.
+  for temporary files, no shell, a process group that is killed after every exit (a
+  timeout as much as a normal one), output read from files and capped with a visible cut.
+- **What a script leaves behind is read on the harness's terms.** Every reader — the
+  agent's `read_file` and `read_skill_file`, a `file:` assertion, a judge artifact —
+  refuses a path that is not a regular file or a directory (a FIFO, a device, a symbolic-link
+  loop) from a `stat` rather than an `open`, so a planted FIFO cannot block the run, and
+  refuses a file over `max_file_bytes` before reading a byte of it, so a sparse file of any
+  apparent size cannot exhaust memory. A refusal an assertion meets is a **failed** check,
+  never an aborted run.
 - **An OS sandbox applies where one exists** — `sandbox-exec` on macOS, `bwrap` on Linux.
   Under it a script cannot open a network connection, cannot write to the host filesystem
   outside the workspace and its scratch directory (under `bwrap`, writes under the
   temporary directory and `/dev/shm` land in an in-memory mount discarded when the script
   exits), and cannot read anything under the system temporary directory except the
   workspace, the scratch directory and the skill's own bundle — so other arms' and other
-  cases' workspaces are hidden from it. The backend is executed once per
+  cases' workspaces are hidden from it. One gap to know about: `bwrap`'s `--unshare-net`
+  isolates the network stack only and does not block a Unix-domain socket reachable
+  through the filesystem, so on a runner whose user can reach `/var/run/docker.sock` a
+  script can talk to the Docker daemon — a full escape on that host; macOS's `(deny
+  network*)` covers Unix sockets too. The backend is executed once per
   run before any case, not merely found on `PATH`; `script_sandbox = "required"` makes its
   absence exit 2, and the report always says which backend applied. `sandbox-exec` is
   marked deprecated in Apple's documentation and remains present and working on current
