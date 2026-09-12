@@ -1,0 +1,416 @@
+interactions:
+- request:
+    body: '{"messages":[{"content":"You are a helpful assistant. Some capabilities
+      are available to you as tools. Read their descriptions and use one when it genuinely
+      fits the request. If none fits, just answer directly.","role":"system"},{"content":"I
+      want a refund for order 1234","role":"user"}],"model":"gpt-4o-mini","stream":false,"temperature":0.0,"tools":[{"type":"function","function":{"name":"order_support","description":"Handle
+      customer refund requests","parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false}}}]}'
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, zstd
+      connection:
+      - keep-alive
+      content-length:
+      - '548'
+      content-type:
+      - application/json
+      host:
+      - api.openai.com
+      user-agent:
+      - OpenAI/Python 2.52.0
+      x-stainless-arch:
+      - arm64
+      x-stainless-async:
+      - 'false'
+      x-stainless-lang:
+      - python
+      x-stainless-os:
+      - MacOS
+      x-stainless-package-version:
+      - 2.52.0
+      x-stainless-raw-response:
+      - 'true'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-runtime:
+      - CPython
+      x-stainless-runtime-version:
+      - 3.13.4
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: "{\n  \"id\": \"chatcmpl-ENICbRrGSXjvMwXfHrEjBIy79LbUs\",\n  \"object\":
+        \"chat.completion\",\n  \"created\": 1789220221,\n  \"model\": \"gpt-4o-mini-2024-07-18\",\n
+        \ \"choices\": [\n    {\n      \"index\": 0,\n      \"message\": {\n        \"role\":
+        \"assistant\",\n        \"content\": null,\n        \"tool_calls\": [\n          {\n
+        \           \"id\": \"call_1AiZh87g8IZORirGdGwEbvl4\",\n            \"type\":
+        \"function\",\n            \"function\": {\n              \"name\": \"order_support\",\n
+        \             \"arguments\": \"{}\"\n            }\n          }\n        ],\n
+        \       \"refusal\": null,\n        \"annotations\": []\n      },\n      \"logprobs\":
+        null,\n      \"finish_reason\": \"tool_calls\"\n    }\n  ],\n  \"usage\":
+        {\n    \"prompt_tokens\": 81,\n    \"completion_tokens\": 10,\n    \"total_tokens\":
+        91,\n    \"prompt_tokens_details\": {\n      \"cached_tokens\": 0,\n      \"audio_tokens\":
+        0\n    },\n    \"completion_tokens_details\": {\n      \"reasoning_tokens\":
+        0,\n      \"audio_tokens\": 0,\n      \"accepted_prediction_tokens\": 0,\n
+        \     \"rejected_prediction_tokens\": 0\n    }\n  },\n  \"service_tier\":
+        \"default\",\n  \"system_fingerprint\": \"fp_62666fb687\"\n}\n"
+    headers:
+      alt-svc:
+      - h3=":443"; ma=86400
+      cf-cache-status:
+      - DYNAMIC
+      connection:
+      - keep-alive
+      content-length:
+      - '1068'
+      content-type:
+      - application/json
+      date:
+      - Sat, 12 Sep 2026 13:37:01 GMT
+      openai-processing-ms:
+      - '358'
+      openai-version:
+      - '2020-10-01'
+      server:
+      - cloudflare
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      transfer-encoding:
+      - chunked
+      x-content-type-options:
+      - nosniff
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9987'
+      x-ratelimit-remaining-tokens:
+      - '199943'
+      x-ratelimit-reset-requests:
+      - 1m48.286s
+      x-ratelimit-reset-tokens:
+      - 17ms
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"content":"You are a helpful assistant. Some capabilities
+      are available to you as tools. Read their descriptions and use one when it genuinely
+      fits the request. If none fits, just answer directly.","role":"system"},{"content":"I
+      want a refund for order 1234","role":"user"},{"content":null,"role":"assistant","tool_calls":[{"type":"function","id":"call_1AiZh87g8IZORirGdGwEbvl4","function":{"name":"order_support","arguments":"{}"}}]},{"content":"Always
+      call lookup_order before saying anything about an order. Never issue a refund
+      for an order delivered more than 30 days ago.","role":"tool","tool_call_id":"call_1AiZh87g8IZORirGdGwEbvl4"}],"model":"gpt-4o-mini","stream":false,"temperature":0.0,"tools":[{"type":"function","function":{"name":"order_support","description":"Handle
+      customer refund requests","parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false}}}]}'
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, zstd
+      connection:
+      - keep-alive
+      content-length:
+      - '915'
+      content-type:
+      - application/json
+      host:
+      - api.openai.com
+      user-agent:
+      - OpenAI/Python 2.52.0
+      x-stainless-arch:
+      - arm64
+      x-stainless-async:
+      - 'false'
+      x-stainless-lang:
+      - python
+      x-stainless-os:
+      - MacOS
+      x-stainless-package-version:
+      - 2.52.0
+      x-stainless-raw-response:
+      - 'true'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-runtime:
+      - CPython
+      x-stainless-runtime-version:
+      - 3.13.4
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: "{\n  \"id\": \"chatcmpl-ENICbChZZsdXLIxNh1QdwoPuBPySc\",\n  \"object\":
+        \"chat.completion\",\n  \"created\": 1789220221,\n  \"model\": \"gpt-4o-mini-2024-07-18\",\n
+        \ \"choices\": [\n    {\n      \"index\": 0,\n      \"message\": {\n        \"role\":
+        \"assistant\",\n        \"content\": null,\n        \"tool_calls\": [\n          {\n
+        \           \"id\": \"call_IbT3vKoON79uQLUXlQfqt0F9\",\n            \"type\":
+        \"function\",\n            \"function\": {\n              \"name\": \"order_support\",\n
+        \             \"arguments\": \"{}\"\n            }\n          }\n        ],\n
+        \       \"refusal\": null,\n        \"annotations\": []\n      },\n      \"logprobs\":
+        null,\n      \"finish_reason\": \"tool_calls\"\n    }\n  ],\n  \"usage\":
+        {\n    \"prompt_tokens\": 125,\n    \"completion_tokens\": 10,\n    \"total_tokens\":
+        135,\n    \"prompt_tokens_details\": {\n      \"cached_tokens\": 0,\n      \"audio_tokens\":
+        0\n    },\n    \"completion_tokens_details\": {\n      \"reasoning_tokens\":
+        0,\n      \"audio_tokens\": 0,\n      \"accepted_prediction_tokens\": 0,\n
+        \     \"rejected_prediction_tokens\": 0\n    }\n  },\n  \"service_tier\":
+        \"default\",\n  \"system_fingerprint\": \"fp_62666fb687\"\n}\n"
+    headers:
+      alt-svc:
+      - h3=":443"; ma=86400
+      cf-cache-status:
+      - DYNAMIC
+      connection:
+      - keep-alive
+      content-length:
+      - '1070'
+      content-type:
+      - application/json
+      date:
+      - Sat, 12 Sep 2026 13:37:02 GMT
+      openai-processing-ms:
+      - '426'
+      openai-version:
+      - '2020-10-01'
+      server:
+      - cloudflare
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      transfer-encoding:
+      - chunked
+      x-content-type-options:
+      - nosniff
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9986'
+      x-ratelimit-remaining-tokens:
+      - '199908'
+      x-ratelimit-reset-requests:
+      - 1m56.388s
+      x-ratelimit-reset-tokens:
+      - 27ms
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"content":"You are a helpful assistant. Some capabilities
+      are available to you as tools. Read their descriptions and use one when it genuinely
+      fits the request. If none fits, just answer directly.","role":"system"},{"content":"I
+      want a refund for order 1234","role":"user"},{"content":null,"role":"assistant","tool_calls":[{"type":"function","id":"call_1AiZh87g8IZORirGdGwEbvl4","function":{"name":"order_support","arguments":"{}"}}]},{"content":"Always
+      call lookup_order before saying anything about an order. Never issue a refund
+      for an order delivered more than 30 days ago.","role":"tool","tool_call_id":"call_1AiZh87g8IZORirGdGwEbvl4"},{"content":null,"role":"assistant","tool_calls":[{"type":"function","id":"call_IbT3vKoON79uQLUXlQfqt0F9","function":{"name":"order_support","arguments":"{}"}}]},{"content":"Always
+      call lookup_order before saying anything about an order. Never issue a refund
+      for an order delivered more than 30 days ago.","role":"tool","tool_call_id":"call_IbT3vKoON79uQLUXlQfqt0F9"}],"model":"gpt-4o-mini","stream":false,"temperature":0.0,"tools":[{"type":"function","function":{"name":"order_support","description":"Handle
+      customer refund requests","parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false}}}]}'
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, zstd
+      connection:
+      - keep-alive
+      content-length:
+      - '1282'
+      content-type:
+      - application/json
+      host:
+      - api.openai.com
+      user-agent:
+      - OpenAI/Python 2.52.0
+      x-stainless-arch:
+      - arm64
+      x-stainless-async:
+      - 'false'
+      x-stainless-lang:
+      - python
+      x-stainless-os:
+      - MacOS
+      x-stainless-package-version:
+      - 2.52.0
+      x-stainless-raw-response:
+      - 'true'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-runtime:
+      - CPython
+      x-stainless-runtime-version:
+      - 3.13.4
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: "{\n  \"id\": \"chatcmpl-ENICcWuSpBYp6GSkQaXeepIH6b17d\",\n  \"object\":
+        \"chat.completion\",\n  \"created\": 1789220222,\n  \"model\": \"gpt-4o-mini-2024-07-18\",\n
+        \ \"choices\": [\n    {\n      \"index\": 0,\n      \"message\": {\n        \"role\":
+        \"assistant\",\n        \"content\": \"I need to look up the details of your
+        order before proceeding with the refund request. Please hold on for a moment.\",\n
+        \       \"tool_calls\": [\n          {\n            \"id\": \"call_qmjH6nQn6B8R5A6cofaj8AhY\",\n
+        \           \"type\": \"function\",\n            \"function\": {\n              \"name\":
+        \"order_support\",\n              \"arguments\": \"{}\"\n            }\n          }\n
+        \       ],\n        \"refusal\": null,\n        \"annotations\": []\n      },\n
+        \     \"logprobs\": null,\n      \"finish_reason\": \"tool_calls\"\n    }\n
+        \ ],\n  \"usage\": {\n    \"prompt_tokens\": 169,\n    \"completion_tokens\":
+        35,\n    \"total_tokens\": 204,\n    \"prompt_tokens_details\": {\n      \"cached_tokens\":
+        0,\n      \"audio_tokens\": 0\n    },\n    \"completion_tokens_details\":
+        {\n      \"reasoning_tokens\": 0,\n      \"audio_tokens\": 0,\n      \"accepted_prediction_tokens\":
+        0,\n      \"rejected_prediction_tokens\": 0\n    }\n  },\n  \"service_tier\":
+        \"default\",\n  \"system_fingerprint\": \"fp_62666fb687\"\n}\n"
+    headers:
+      alt-svc:
+      - h3=":443"; ma=86400
+      cf-cache-status:
+      - DYNAMIC
+      connection:
+      - keep-alive
+      content-length:
+      - '1183'
+      content-type:
+      - application/json
+      date:
+      - Sat, 12 Sep 2026 13:37:02 GMT
+      openai-processing-ms:
+      - '677'
+      openai-version:
+      - '2020-10-01'
+      server:
+      - cloudflare
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      transfer-encoding:
+      - chunked
+      x-content-type-options:
+      - nosniff
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9985'
+      x-ratelimit-remaining-tokens:
+      - '199874'
+      x-ratelimit-reset-requests:
+      - 2m4.413s
+      x-ratelimit-reset-tokens:
+      - 37ms
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"content":"You are a helpful assistant. Some capabilities
+      are available to you as tools. Read their descriptions and use one when it genuinely
+      fits the request. If none fits, just answer directly.","role":"system"},{"content":"I
+      want a refund for order 1234","role":"user"},{"content":null,"role":"assistant","tool_calls":[{"type":"function","id":"call_1AiZh87g8IZORirGdGwEbvl4","function":{"name":"order_support","arguments":"{}"}}]},{"content":"Always
+      call lookup_order before saying anything about an order. Never issue a refund
+      for an order delivered more than 30 days ago.","role":"tool","tool_call_id":"call_1AiZh87g8IZORirGdGwEbvl4"},{"content":null,"role":"assistant","tool_calls":[{"type":"function","id":"call_IbT3vKoON79uQLUXlQfqt0F9","function":{"name":"order_support","arguments":"{}"}}]},{"content":"Always
+      call lookup_order before saying anything about an order. Never issue a refund
+      for an order delivered more than 30 days ago.","role":"tool","tool_call_id":"call_IbT3vKoON79uQLUXlQfqt0F9"},{"content":"I
+      need to look up the details of your order before proceeding with the refund
+      request. Please hold on for a moment.","role":"assistant","tool_calls":[{"type":"function","id":"call_qmjH6nQn6B8R5A6cofaj8AhY","function":{"name":"order_support","arguments":"{}"}}]},{"content":"Always
+      call lookup_order before saying anything about an order. Never issue a refund
+      for an order delivered more than 30 days ago.","role":"tool","tool_call_id":"call_qmjH6nQn6B8R5A6cofaj8AhY"}],"model":"gpt-4o-mini","stream":false,"temperature":0.0,"tools":[{"type":"function","function":{"name":"order_support","description":"Handle
+      customer refund requests","parameters":{"type":"object","properties":{},"required":[],"additionalProperties":false}}}]}'
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, zstd
+      connection:
+      - keep-alive
+      content-length:
+      - '1762'
+      content-type:
+      - application/json
+      host:
+      - api.openai.com
+      user-agent:
+      - OpenAI/Python 2.52.0
+      x-stainless-arch:
+      - arm64
+      x-stainless-async:
+      - 'false'
+      x-stainless-lang:
+      - python
+      x-stainless-os:
+      - MacOS
+      x-stainless-package-version:
+      - 2.52.0
+      x-stainless-raw-response:
+      - 'true'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-runtime:
+      - CPython
+      x-stainless-runtime-version:
+      - 3.13.4
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: "{\n  \"id\": \"chatcmpl-ENICdmjdYH7YUsBmEZjJLbRh1IcZw\",\n  \"object\":
+        \"chat.completion\",\n  \"created\": 1789220223,\n  \"model\": \"gpt-4o-mini-2024-07-18\",\n
+        \ \"choices\": [\n    {\n      \"index\": 0,\n      \"message\": {\n        \"role\":
+        \"assistant\",\n        \"content\": \"It seems that I am unable to retrieve
+        the order details directly. Please provide me with the order date or any additional
+        information about order 1234, so I can assist you further with your refund
+        request.\",\n        \"refusal\": null,\n        \"annotations\": []\n      },\n
+        \     \"logprobs\": null,\n      \"finish_reason\": \"stop\"\n    }\n  ],\n
+        \ \"usage\": {\n    \"prompt_tokens\": 241,\n    \"completion_tokens\": 42,\n
+        \   \"total_tokens\": 283,\n    \"prompt_tokens_details\": {\n      \"cached_tokens\":
+        0,\n      \"audio_tokens\": 0\n    },\n    \"completion_tokens_details\":
+        {\n      \"reasoning_tokens\": 0,\n      \"audio_tokens\": 0,\n      \"accepted_prediction_tokens\":
+        0,\n      \"rejected_prediction_tokens\": 0\n    }\n  },\n  \"service_tier\":
+        \"default\",\n  \"system_fingerprint\": \"fp_62666fb687\"\n}\n"
+    headers:
+      alt-svc:
+      - h3=":443"; ma=86400
+      cf-cache-status:
+      - DYNAMIC
+      connection:
+      - keep-alive
+      content-length:
+      - '1014'
+      content-type:
+      - application/json
+      date:
+      - Sat, 12 Sep 2026 13:37:03 GMT
+      openai-processing-ms:
+      - '566'
+      openai-version:
+      - '2020-10-01'
+      server:
+      - cloudflare
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      transfer-encoding:
+      - chunked
+      x-content-type-options:
+      - nosniff
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9984'
+      x-ratelimit-remaining-tokens:
+      - '199811'
+      x-ratelimit-reset-requests:
+      - 2m12.207s
+      x-ratelimit-reset-tokens:
+      - 56ms
+    status:
+      code: 200
+      message: OK
+version: 1
