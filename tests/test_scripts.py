@@ -326,6 +326,16 @@ def test_exit_code_stdout_stderr_and_args_round_trip(tmp_path):
     assert result.workspace_warning is None
 
 
+def test_an_argument_with_shell_metacharacters_reaches_the_script_literally(tmp_path):
+    # shell=False, argv always: run through a shell, "; echo pwned" would
+    # execute as a second command instead of arriving as one literal argument.
+    bundle = _bundle(tmp_path, **{"count.py": PRINTS})
+    payload = "a; echo pwned; $(true) && b|c"
+    result = run_script(bundle, _workspace(tmp_path), "scripts/count.py", [payload], _runtime())
+    assert result.refused is None
+    assert result.stdout.strip() == f"out {payload}"
+
+
 def test_the_working_directory_is_the_workspace(tmp_path):
     bundle = _bundle(tmp_path, **{"cwd.py": "import os; print(os.getcwd())"})
     workspace = _workspace(tmp_path)
