@@ -658,3 +658,16 @@ def test_a_model_running_a_script_gets_its_output_back(tmp_path):
     # is the adapter's business. What matters is that the script's output
     # reached the model at all.
     assert "hi from script" in str(result.transcript)
+
+
+def test_a_model_running_a_missing_script_is_refused_not_errored(tmp_path):
+    # run_script never raises: a bad path comes back as a tool result the
+    # model reads, never an exception that would mark the whole run errored.
+    runner = PydanticAIRunner(
+        model=scripted(tool_call("run_script", {"path": "scripts/nope.py"}), text("done"))
+    )
+    workspace = Workspace(root=(tmp_path / "ws").resolve())
+    workspace.root.mkdir()
+    result = runner.run(_bundled_skill(tmp_path), case(), workspace=workspace, scripts=RUNTIME)
+    assert result.error is None
+    assert "refused" in str(result.transcript)
