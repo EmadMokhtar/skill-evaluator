@@ -71,7 +71,11 @@ dev = [
     "pre-commit>=4.6.1",
     "pytest-recording>=0.13",
     "vcrpy>=8.0",
+    # Both frameworks, so `uv sync && uv run pytest` collects every adapter
+    # test without an extra. Test-only; installers choose an extra instead.
     "pydantic-ai-slim[openai]>=2.22",
+    "langchain>=1.0",
+    "langchain-openai>=1.0",
 ]
 docs = [
     # Capped below 2.0: MkDocs 2.0 removes the plugin system entirely, with no
