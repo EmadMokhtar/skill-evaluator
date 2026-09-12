@@ -275,3 +275,28 @@ def test_two_workspaces_never_share_a_directory():
 )
 def test_sanitise_label(raw, expected):
     assert sanitise_label(raw) == expected
+
+
+def test_over_limit_is_none_inside_the_caps(tmp_path):
+    workspace = Workspace(root=tmp_path.resolve(), limits=WorkspaceLimits(max_files=2))
+    workspace.write("a.txt", "a")
+    assert workspace.over_limit() is None
+
+
+def test_over_limit_names_the_file_cap_a_script_blew_through(tmp_path):
+    # A script writes to disk directly, so Workspace.write's projection never
+    # saw these files. The check after the run is what makes that visible.
+    workspace = Workspace(root=tmp_path.resolve(), limits=WorkspaceLimits(max_files=2))
+    for name in ("a", "b", "c"):
+        (tmp_path / f"{name}.txt").write_text(name, encoding="utf-8")
+    assert workspace.over_limit() == (
+        "warning: the working directory now holds 3 files; max_files is 2"
+    )
+
+
+def test_over_limit_names_the_byte_cap(tmp_path):
+    workspace = Workspace(root=tmp_path.resolve(), limits=WorkspaceLimits(max_total_bytes=10))
+    (tmp_path / "big.txt").write_text("x" * 11, encoding="utf-8")
+    assert workspace.over_limit() == (
+        "warning: the working directory now holds 11 bytes; max_total_bytes is 10"
+    )

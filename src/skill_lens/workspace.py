@@ -193,6 +193,27 @@ class Workspace:
         target.write_text(content, encoding="utf-8")
         return size
 
+    def over_limit(self) -> str | None:
+        """A warning if the directory already exceeds a cap, else None.
+
+        For what a script wrote: it goes straight to disk, so `write`'s
+        projection never saw it. The message is a warning, not a refusal --
+        the bytes are already there -- and every later `write` is refused by
+        the projection anyway.
+        """
+        count, total = self._totals()
+        if count > self.limits.max_files:
+            return (
+                f"warning: the working directory now holds {count:,} files; "
+                f"max_files is {self.limits.max_files:,}"
+            )
+        if total > self.limits.max_total_bytes:
+            return (
+                f"warning: the working directory now holds {total:,} bytes; "
+                f"max_total_bytes is {self.limits.max_total_bytes:,}"
+            )
+        return None
+
     def cleanup(self) -> None:
         """Delete the directory. Never raises.
 
