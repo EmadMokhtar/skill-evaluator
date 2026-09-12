@@ -68,7 +68,10 @@ problem (errored) from a low score (failed).
 | `workspace.py` | The per-case temporary directory: creation, seeding, path containment, and cleanup. Framework-neutral, like every other top-level module. Its methods **raise** (`PathRefused`, `WorkspaceError`) for `cases/loader.py` and the evaluators to catch as authoring or infra errors; `runners/tools.py`'s built-in tools catch those same exceptions and turn them into ordinary tool-result strings instead. |
 | `runners/base.py` | The `Runner` protocol. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
-| `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of only two modules that import an agent framework.** |
+| `runners/prompting.py` | The three preambles and the system-prompt builder every runner calls. Framework-free, so the rules `--min-delta` measures against exist once. |
+| `runners/retry.py` | The transient-retry loop and the HTTP status policy every adapter shares; each adapter supplies its own `is_transient`. |
+| `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of the four modules that import an agent framework.** |
+| `runners/langchain.py` | The LangChain runner adapter. **One of the four modules that import an agent framework.** |
 | `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block, and the built-in workspace tools. |
 | `runners/preflight.py` | Verifies the provider API key is present before any spend. |
 | `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
@@ -81,7 +84,8 @@ problem (errored) from a low score (failed).
 | `judges/base.py` | The `Judge` protocol. |
 | `judges/prompt.py` | Renders a `JudgeRequest` into prompt text. Pure, deterministic, no IO. |
 | `judges/fake.py` | A scripted, offline judge. The default — and unscripted it *errors* rather than passing, so an unjudged rubric is never a quiet green. |
-| `judges/pydantic_ai.py` | The PydanticAI judge adapter. **The other module that imports an agent framework.** |
+| `judges/pydantic_ai.py` | The PydanticAI judge adapter. **Another of the four.** |
+| `judges/langchain.py` | The LangChain judge adapter. **The last of the four.** |
 | `reporters/console.py` | Human-readable run summary. |
 | `reporters/failure_context.py` | The excerpt a non-passing case shows — output, cut count, tool-call lines. One helper for all three reporters; no markup. |
 | `reporters/json_reporter.py` | Machine-readable run report. |
@@ -185,12 +189,14 @@ the string.
 **Secrets come from environment variables only** — never from `skill-lens.toml`. A config
 file is committed; a key must not be.
 
-**Agent-framework imports appear in exactly two modules** — `runners/pydantic_ai.py` and
-`judges/pydantic_ai.py`. `runners/tools.py` builds framework-neutral mock tools and the
-adapter wraps them. `tests/test_framework_isolation.py` scans the whole package for
-top-level framework imports and allows only those two files; it matches import *forms*, so
-`cli.py` importing our own `skill_lens.runners.pydantic_ai` is not a false positive. This is
-what keeps the `Runner` and `Judge` seams real rather than nominal.
+**Agent-framework imports appear in exactly four modules** — `runners/pydantic_ai.py`,
+`judges/pydantic_ai.py`, `runners/langchain.py` and `judges/langchain.py`. `runners/tools.py`
+builds framework-neutral mock tools and the adapters wrap them. The prompt rules
+(`runners/prompting.py`) and the retry loop (`runners/retry.py`) import no framework, which
+is what lets both adapters share them. `tests/test_framework_isolation.py` scans the whole
+package for top-level framework imports and allows only those four files; it matches import
+*forms*, so `cli.py` importing our own `skill_lens.runners.pydantic_ai` is not a false
+positive. This is what keeps the `Runner` and `Judge` seams real rather than nominal.
 
 **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` plus a
 `cost_note`. Pricing is reporting metadata; it must never be why a run errors. In
@@ -252,7 +258,7 @@ side is visible without ever feeding the numbers the gate reads. A strong baseli
 skill was unnecessary, not that CI should go red.
 
 **The baseline arm never receives the skill's name, description or instructions** under
-`--baseline none`. `_system_prompt` emits a neutral `BASELINE_PREAMBLE` instead of the normal
+`--baseline none`. `prompting.system_prompt` emits a neutral `BASELINE_PREAMBLE` instead of the normal
 `# {name}` header whenever both `description` and `instructions` are empty. The rule keys on
 emptiness, not on `variant`, so no runner can — or has to — branch on which arm it is serving;
 a runner that could branch on the arm could cheat the comparison.
@@ -443,7 +449,7 @@ let the baseline arm read what the candidate wrote, or vice versa, corrupting th
 comparison `--baseline` exists to make.
 
 **The workspace preamble is byte-identical in both arms and never names the skill.**
-`WORKSPACE_PREAMBLE` is appended in `_instructions` purely on whether the case has a
+`WORKSPACE_PREAMBLE` is appended in `prompting.instructions` purely on whether the case has a
 workspace, never on which arm is running — the same discipline `BASELINE_PREAMBLE` already
 follows for the skill's own text. Added to the candidate arm only, that text would itself
 become part of what `--min-delta` measures, inflating (or deflating) a comparison that is
@@ -649,7 +655,9 @@ call is refused — a tightening that would only have shown up on the next push 
 `cli._RUNNERS`, and put every framework import inside that module. Set
 `needs_api_key = True` if it spends money — `cli.py` then runs the preflight key check
 before constructing it. Never raise for a provider failure; return a `RunResult` with
-`error` set.
+`error` set. Build the system prompt with `runners/prompting.instructions` and wrap provider
+calls in `runners/retry.run_with_retries` rather than writing either again — both adapters
+must measure the same thing.
 
 **Adding an evaluator.** Implement `Evaluator` in a new module under `evaluators/` and add
 it to the evaluator list in `orchestrator.py`. Return `passed=False` for a real failure;

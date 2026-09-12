@@ -140,7 +140,7 @@ Each version published to PyPI is accompanied by:
   `https://github.com/EmadMokhtar/skill-evaluator/releases/download/vX.Y.Z/skill-lens-X.Y.Z.cdx.json`.
   It is exported from the lockfile the release gate just audited, with `--frozen` so nothing
   is re-resolved, and it describes what an installer gets — the runtime dependencies plus the
-  optional `pydantic-ai` extra — not the dev or docs tooling, which ships to nobody. The wheel
+  optional extras (`pydantic-ai`, `langchain`) — not the dev or docs tooling, which ships to nobody. The wheel
   and sdist PyPI received are attached beside it.
 - **Signed attestations on PyPI.** The upload uses Trusted Publishing (PyPI trusts a specific
   GitHub workflow through short-lived tokens; no stored password or API token exists), and

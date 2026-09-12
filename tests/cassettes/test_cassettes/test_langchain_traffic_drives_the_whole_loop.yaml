@@ -1,0 +1,204 @@
+interactions:
+- request:
+    body: '{"messages":[{"content":"# order-support\n\nHandle customer refund requests\n\nAlways
+      call lookup_order before saying anything about an order. Never issue a refund
+      for an order delivered more than 30 days ago.","role":"system"},{"content":"I
+      want a refund for order 1234","role":"user"}],"model":"gpt-4o-mini","stream":false,"temperature":0.0,"tools":[{"type":"function","function":{"name":"lookup_order","description":"Look
+      up an order by its id","parameters":{"type":"object","properties":{"order_id":{"type":"string"}},"required":["order_id"],"additionalProperties":false}}},{"type":"function","function":{"name":"issue_refund","description":"Issue
+      a refund for an order","parameters":{"type":"object","properties":{"order_id":{"type":"string"}},"required":["order_id"],"additionalProperties":false}}}]}'
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, zstd
+      connection:
+      - keep-alive
+      content-length:
+      - '806'
+      content-type:
+      - application/json
+      host:
+      - api.openai.com
+      user-agent:
+      - OpenAI/Python 2.52.0
+      x-stainless-arch:
+      - arm64
+      x-stainless-async:
+      - 'false'
+      x-stainless-lang:
+      - python
+      x-stainless-os:
+      - MacOS
+      x-stainless-package-version:
+      - 2.52.0
+      x-stainless-raw-response:
+      - 'true'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-runtime:
+      - CPython
+      x-stainless-runtime-version:
+      - 3.13.4
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: "{\n  \"id\": \"chatcmpl-ENICXSv0A78Pt0yoRpyF7dq3tyl9x\",\n  \"object\":
+        \"chat.completion\",\n  \"created\": 1789220217,\n  \"model\": \"gpt-4o-mini-2024-07-18\",\n
+        \ \"choices\": [\n    {\n      \"index\": 0,\n      \"message\": {\n        \"role\":
+        \"assistant\",\n        \"content\": null,\n        \"tool_calls\": [\n          {\n
+        \           \"id\": \"call_7OhQIrBO3Zb2CcFBn8D8bgPF\",\n            \"type\":
+        \"function\",\n            \"function\": {\n              \"name\": \"lookup_order\",\n
+        \             \"arguments\": \"{\\\"order_id\\\":\\\"1234\\\"}\"\n            }\n
+        \         }\n        ],\n        \"refusal\": null,\n        \"annotations\":
+        []\n      },\n      \"logprobs\": null,\n      \"finish_reason\": \"tool_calls\"\n
+        \   }\n  ],\n  \"usage\": {\n    \"prompt_tokens\": 113,\n    \"completion_tokens\":
+        16,\n    \"total_tokens\": 129,\n    \"prompt_tokens_details\": {\n      \"cached_tokens\":
+        0,\n      \"audio_tokens\": 0\n    },\n    \"completion_tokens_details\":
+        {\n      \"reasoning_tokens\": 0,\n      \"audio_tokens\": 0,\n      \"accepted_prediction_tokens\":
+        0,\n      \"rejected_prediction_tokens\": 0\n    }\n  },\n  \"service_tier\":
+        \"default\",\n  \"system_fingerprint\": \"fp_b85f3645a5\"\n}\n"
+    headers:
+      alt-svc:
+      - h3=":443"; ma=86400
+      cf-cache-status:
+      - DYNAMIC
+      connection:
+      - keep-alive
+      content-length:
+      - '1090'
+      content-type:
+      - application/json
+      date:
+      - Sat, 12 Sep 2026 13:36:58 GMT
+      openai-processing-ms:
+      - '569'
+      openai-version:
+      - '2020-10-01'
+      server:
+      - cloudflare
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      transfer-encoding:
+      - chunked
+      x-content-type-options:
+      - nosniff
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9990'
+      x-ratelimit-remaining-tokens:
+      - '199944'
+      x-ratelimit-reset-requests:
+      - 1m25.974s
+      x-ratelimit-reset-tokens:
+      - 16ms
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"messages":[{"content":"# order-support\n\nHandle customer refund requests\n\nAlways
+      call lookup_order before saying anything about an order. Never issue a refund
+      for an order delivered more than 30 days ago.","role":"system"},{"content":"I
+      want a refund for order 1234","role":"user"},{"content":null,"role":"assistant","tool_calls":[{"type":"function","id":"call_7OhQIrBO3Zb2CcFBn8D8bgPF","function":{"name":"lookup_order","arguments":"{\"order_id\":
+      \"1234\"}"}}]},{"content":"{\"id\": \"1234\", \"status\": \"delivered\", \"days_since_delivery\":
+      45}","role":"tool","tool_call_id":"call_7OhQIrBO3Zb2CcFBn8D8bgPF"}],"model":"gpt-4o-mini","stream":false,"temperature":0.0,"tools":[{"type":"function","function":{"name":"lookup_order","description":"Look
+      up an order by its id","parameters":{"type":"object","properties":{"order_id":{"type":"string"}},"required":["order_id"],"additionalProperties":false}}},{"type":"function","function":{"name":"issue_refund","description":"Issue
+      a refund for an order","parameters":{"type":"object","properties":{"order_id":{"type":"string"}},"required":["order_id"],"additionalProperties":false}}}]}'
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, zstd
+      connection:
+      - keep-alive
+      content-length:
+      - '1138'
+      content-type:
+      - application/json
+      host:
+      - api.openai.com
+      user-agent:
+      - OpenAI/Python 2.52.0
+      x-stainless-arch:
+      - arm64
+      x-stainless-async:
+      - 'false'
+      x-stainless-lang:
+      - python
+      x-stainless-os:
+      - MacOS
+      x-stainless-package-version:
+      - 2.52.0
+      x-stainless-raw-response:
+      - 'true'
+      x-stainless-retry-count:
+      - '0'
+      x-stainless-runtime:
+      - CPython
+      x-stainless-runtime-version:
+      - 3.13.4
+    method: POST
+    uri: https://api.openai.com/v1/chat/completions
+  response:
+    body:
+      string: "{\n  \"id\": \"chatcmpl-ENICYjy4D9lwLnt9dHT7rjPU8AZvH\",\n  \"object\":
+        \"chat.completion\",\n  \"created\": 1789220218,\n  \"model\": \"gpt-4o-mini-2024-07-18\",\n
+        \ \"choices\": [\n    {\n      \"index\": 0,\n      \"message\": {\n        \"role\":
+        \"assistant\",\n        \"content\": \"I'm sorry, but I cannot issue a refund
+        for order 1234 as it was delivered more than 30 days ago. If you have any
+        other questions or need further assistance, feel free to ask!\",\n        \"refusal\":
+        null,\n        \"annotations\": []\n      },\n      \"logprobs\": null,\n
+        \     \"finish_reason\": \"stop\"\n    }\n  ],\n  \"usage\": {\n    \"prompt_tokens\":
+        159,\n    \"completion_tokens\": 42,\n    \"total_tokens\": 201,\n    \"prompt_tokens_details\":
+        {\n      \"cached_tokens\": 0,\n      \"audio_tokens\": 0\n    },\n    \"completion_tokens_details\":
+        {\n      \"reasoning_tokens\": 0,\n      \"audio_tokens\": 0,\n      \"accepted_prediction_tokens\":
+        0,\n      \"rejected_prediction_tokens\": 0\n    }\n  },\n  \"service_tier\":
+        \"default\",\n  \"system_fingerprint\": \"fp_b85f3645a5\"\n}\n"
+    headers:
+      alt-svc:
+      - h3=":443"; ma=86400
+      cf-cache-status:
+      - DYNAMIC
+      connection:
+      - keep-alive
+      content-length:
+      - '983'
+      content-type:
+      - application/json
+      date:
+      - Sat, 12 Sep 2026 13:36:59 GMT
+      openai-processing-ms:
+      - '910'
+      openai-version:
+      - '2020-10-01'
+      server:
+      - cloudflare
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      transfer-encoding:
+      - chunked
+      x-content-type-options:
+      - nosniff
+      x-openai-proxy-wasm:
+      - v0.1
+      x-ratelimit-limit-requests:
+      - '10000'
+      x-ratelimit-limit-tokens:
+      - '200000'
+      x-ratelimit-remaining-requests:
+      - '9989'
+      x-ratelimit-remaining-tokens:
+      - '199926'
+      x-ratelimit-reset-requests:
+      - 1m33.865s
+      x-ratelimit-reset-tokens:
+      - 22ms
+    status:
+      code: 200
+      message: OK
+version: 1

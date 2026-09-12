@@ -9,7 +9,7 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M7 (complete)**: the pipeline runs real agents through `PydanticAIRunner`
+Currently at **M8 (part 1 complete)**: the pipeline runs real agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
 remains the default and the backbone of the zero-cost test tier. M3 adds a
@@ -31,14 +31,17 @@ assertions, a `file:` modifier and `judge: artifacts:`. M7 makes a failing
 case explain itself (output and tool calls in every reporter, `--full-output`),
 adds `--case`, brings `init` up to M6 with a workspace case and a batch mode,
 and ships a versioned comparative example, an annotated config and an
-end-to-end quickstart. Milestones are defined in
+end-to-end quickstart. M8 part 1 adds a LangChain runner and judge behind the same
+protocols, installable as the `[langchain]` extra, with the prompt rules and retry loop
+extracted into `runners/prompting.py` and `runners/retry.py`. Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
 is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
 design is in `docs/superpowers/specs/2026-08-03-skill-eval-m4-design.md`, the
 M5 design is in `docs/superpowers/specs/2026-08-05-skill-eval-m5-design.md`,
 the M6 design is in `docs/superpowers/specs/2026-09-10-skill-lens-m6-design.md`,
-and the M7 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m7-design.md`.
+the M7 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m7-design.md`, and the
+M8 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m8-design.md`.
 
 ## Commands
 
@@ -124,11 +127,13 @@ form, that file is the explanation.
   narrower test pins the exact lines history produced, so a commit subject written after the
   rename that carries the old name still fails.
 - **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
-- **No agent-framework type may appear outside `runners/pydantic_ai.py` and
-  `judges/pydantic_ai.py`.** `runners/tools.py` builds framework-neutral `AgentTool`s (name +
-  JSON schema + callable); the adapters wrap them. `tests/test_framework_isolation.py` guards
-  this: it asserts no other module under `src/skill_lens/` imports `pydantic_ai` at the top
-  level.
+- **No agent-framework type may appear outside the four adapter modules** —
+  `runners/pydantic_ai.py`, `judges/pydantic_ai.py`, `runners/langchain.py`,
+  `judges/langchain.py`. `runners/tools.py` builds framework-neutral `AgentTool`s (name +
+  JSON schema + callable); `runners/prompting.py` and `runners/retry.py` hold the prompt and
+  retry rules both adapters share; the adapters wrap them. `tests/test_framework_isolation.py`
+  guards this: it asserts no other module under `src/skill_lens/` imports `pydantic_ai`,
+  `langchain*` or `langgraph` at the top level.
 - **`RunResult.tokens` is derived**, not stored — `extra="forbid"` makes writing it a loud
   error rather than a total that silently disagrees with the input/output split it was priced from.
 - **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` plus a

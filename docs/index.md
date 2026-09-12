@@ -31,7 +31,8 @@ uv tool install "skill-lens[pydantic-ai]"
 
 `pip install "skill-lens[pydantic-ai]"` works the same way. The `pydantic-ai` extra is only
 needed to evaluate against a real agent; `skill-lens` on its own is enough for the offline
-default runner.
+default runner. The `langchain` extra installs the LangChain runner and judge the same way;
+the two can be installed together.
 
 To work on `skill-lens` itself, or to have the example skills to hand, install from a
 checkout instead — every command then runs as `uv run skill-lens ...`:

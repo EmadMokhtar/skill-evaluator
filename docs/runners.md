@@ -1,16 +1,43 @@
 # Runners
 
 The default runner is `fake` (offline, scripted, free). To evaluate a skill with a
-real agent you need the `pydantic-ai` extra, a key in the environment, and a model:
+real agent you need one of the two framework extras, a key in the environment, and a
+model:
 
 ```bash
-uv tool install "skill-lens[pydantic-ai]"
+uv tool install "skill-lens[pydantic-ai]"       # or "skill-lens[langchain]", or both
 export OPENAI_API_KEY=...
 skill-lens run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
+skill-lens run ./skills --runner langchain --model openai:gpt-4o-mini
 ```
 
-From a checkout instead, the extra comes from `uv sync --extra pydantic-ai` and every
-command runs as `uv run skill-lens ...`.
+From a checkout instead, the extra comes from `uv sync --extra pydantic-ai` (or
+`--extra langchain`) and every command runs as `uv run skill-lens ...`.
+
+## Two frameworks, one measurement
+
+| Runner | Extra | Agent loop | Bundled providers |
+| --- | --- | --- | --- |
+| `pydantic-ai` | `skill-lens[pydantic-ai]` | PydanticAI `Agent` | OpenAI, Anthropic |
+| `langchain` | `skill-lens[langchain]` | LangChain 1.x `create_agent` (LangGraph underneath) | OpenAI, Anthropic |
+
+Both runners receive the same inputs — the same system prompt built by one shared
+function, the same mock tools, the same offered-mode skill tool, the same workspace
+tools — and produce the same `RunResult`, so a case passing under one and failing under
+the other says something about the skill's instructions, not about the harness. The
+judge is chosen separately (`judge = "pydantic-ai"` or `"langchain"`), and one judge grades
+every runner's output.
+
+`--model` is passed to each framework unchanged. `openai:` and `anthropic:` are spelled
+the same in both; other providers differ (PydanticAI `google-gla:`, LangChain
+`google_genai:`) and need their provider package installed beside the extra
+(`pip install langchain-google-genai`, or `pydantic-ai-slim[google]`).
+
+Per turn, LangChain reports token usage on each model response and the served model
+name in the response metadata; the runner sums the former and reads the latter from the
+last response that carries one. A LangChain judge that returns a structured verdict the
+schema cannot parse is recorded as **errored**, never as a failed check — an unreadable
+verdict is an infrastructure signal, not a low score.
 
 API keys are read from the environment only — never from `skill-lens.toml`.
 `skill-lens` checks for the key before making any request, so a missing key costs
