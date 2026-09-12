@@ -51,7 +51,17 @@ Issues = "https://github.com/EmadMokhtar/skill-evaluator/issues"
 skill-lens = "skill_lens.cli:app"
 
 [project.optional-dependencies]
-pydantic-ai = ["pydantic-ai-slim[openai]>=2.22"]
+# Anthropic is in both so a matrix run can name one --model every runner accepts.
+pydantic-ai = ["pydantic-ai-slim[openai,anthropic]>=2.22"]
+langchain = [
+    "langchain>=1.0",
+    "langchain-openai>=1.0",
+    "langchain-anthropic>=1.0",
+    # `runners/pricing.py` imports it; without this line it only arrives as a
+    # transitive dependency of pydantic-ai, and a [langchain]-only install
+    # would stamp every case with "genai-prices is not installed".
+    "genai-prices>=0.1",
+]
 
 [dependency-groups]
 dev = [
