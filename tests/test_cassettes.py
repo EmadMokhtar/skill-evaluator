@@ -33,7 +33,8 @@ from skill_lens.models import (
     ToolSpec,
     TrajectorySpec,
 )
-from skill_lens.runners.pydantic_ai import BASELINE_PREAMBLE, PydanticAIRunner
+from skill_lens.runners.prompting import BASELINE_PREAMBLE
+from skill_lens.runners.pydantic_ai import PydanticAIRunner
 
 
 def _request_body(request) -> str:

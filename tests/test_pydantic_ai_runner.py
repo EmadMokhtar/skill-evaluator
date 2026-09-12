@@ -9,13 +9,8 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from skill_lens.models import EvalCase, Skill, ToolSpec
 from skill_lens.runners.base import Runner
-from skill_lens.runners.pydantic_ai import (
-    BASELINE_PREAMBLE,
-    OFFERED_PREAMBLE,
-    WORKSPACE_PREAMBLE,
-    PydanticAIRunner,
-    _instructions,
-)
+from skill_lens.runners.prompting import BASELINE_PREAMBLE, OFFERED_PREAMBLE
+from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.runners.tools import BUILTIN_TOOL_NAMES, skill_tool_name
 from skill_lens.workspace import Workspace
 
@@ -504,31 +499,6 @@ def test_a_baseline_resolved_from_git_still_gets_its_own_prompt():
 
     PydanticAIRunner(model=FunctionModel(reply)).run(previous, case())
     assert "Old instructions." in seen["instructions"]
-
-
-def test_no_workspace_leaves_the_instructions_untouched():
-    plain = _instructions(SKILL, case(), has_workspace=False)
-    assert WORKSPACE_PREAMBLE not in plain
-
-
-def test_the_workspace_preamble_is_byte_identical_in_both_arms():
-    # If it were added to the candidate arm only, --min-delta would be
-    # measuring the preamble rather than the skill.
-    candidate = _instructions(SKILL, case(), has_workspace=True)
-    baseline = _instructions(EMPTY_SKILL, case(), has_workspace=True)
-    assert candidate.endswith(WORKSPACE_PREAMBLE)
-    assert baseline.endswith(WORKSPACE_PREAMBLE)
-    assert baseline == f"{BASELINE_PREAMBLE}\n\n{WORKSPACE_PREAMBLE}"
-
-
-def test_the_workspace_preamble_never_names_the_skill():
-    assert "order-support" not in WORKSPACE_PREAMBLE
-    assert EMPTY_SKILL.name not in _instructions(EMPTY_SKILL, case(), has_workspace=True)
-
-
-def test_an_offered_case_keeps_its_own_preamble_and_gains_the_workspace_one():
-    offered = _instructions(SKILL, case(mode="offered"), has_workspace=True)
-    assert offered == f"{OFFERED_PREAMBLE}\n\n{WORKSPACE_PREAMBLE}"
 
 
 def test_the_builtin_tools_are_registered_when_a_workspace_is_given(tmp_path):
