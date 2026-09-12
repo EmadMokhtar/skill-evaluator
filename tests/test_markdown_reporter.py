@@ -577,3 +577,14 @@ def test_the_scripts_block_is_optional_and_dropped_under_truncation():
     trimmed = render_markdown(report, max_chars=len(full) - 1)
     assert len(trimmed) <= len(full) - 1
     assert "Scripts: on" not in trimmed
+
+
+def test_a_backtick_in_a_skill_name_cannot_close_its_scripts_code_span():
+    """Skill names come from `SKILL.md` frontmatter, which in the documented
+    pull-request flow can come from a fork -- same untrusted-name class as the
+    check ids `_code()` already protects elsewhere."""
+    report = _mixed_report().model_copy(
+        update={"script_notes": [ScriptNote(skill_name="a`b", script_count=1)]}
+    )
+    text = render_markdown(report)
+    assert "``a`b``" in text

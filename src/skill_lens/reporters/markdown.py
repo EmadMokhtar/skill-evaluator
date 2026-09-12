@@ -342,7 +342,7 @@ def _scripts(report: RunReport) -> str:
     for note in report.script_notes:
         plural = "" if note.script_count == 1 else "s"
         bits.append(
-            f"`{_escape(note.skill_name)}` bundles {note.script_count} script{plural}; "
+            f"{_code(note.skill_name)} bundles {note.script_count} script{plural}; "
             "execution is off (`allow_scripts = true` or `--allow-scripts`)"
         )
     return "<sub>" + "<br>".join(bits) + "</sub>" if bits else ""
