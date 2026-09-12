@@ -9,7 +9,7 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M7 (complete)**: the pipeline runs real agents through `PydanticAIRunner`
+Currently at **M8 (part 1 complete)**: the pipeline runs real agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
 remains the default and the backbone of the zero-cost test tier. M3 adds a

@@ -135,9 +135,17 @@ def _usage(messages: list[Any]) -> tuple[int, int]:
 
 
 def _model_name(messages: list[Any], fallback: str) -> str:
-    """The model the provider actually served, which may be a dated snapshot."""
+    """The model the provider actually served, which may be a dated snapshot.
+
+    Provider integrations do not agree on the key: `langchain-openai` writes
+    `model_name`, and `langchain-anthropic` has written `model` (its API's own
+    field) in releases the extra's floor still admits. Both are read, in that
+    order, so an Anthropic run is priced and reported by what was served
+    rather than falling back to the configured string.
+    """
     for message in reversed(_ai_messages(messages)):
-        name = message.response_metadata.get("model_name")
+        metadata = message.response_metadata
+        name = metadata.get("model_name") or metadata.get("model")
         if name:
             return str(name)
     return fallback

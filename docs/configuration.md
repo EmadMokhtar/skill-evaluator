@@ -76,7 +76,8 @@ artifact, so they only bind when a case is genuinely stuck (writing the same fil
 or writing many small ones) rather than when it legitimately produces something large.
 
 `model`, `retries`, and `retry_backoff_seconds` only matter to components that reach a
-provider (`pydantic-ai`, as a runner or a judge); `FakeRunner` and `FakeJudge` ignore them.
+provider (`pydantic-ai` or `langchain`, as a runner or a judge); `FakeRunner` and `FakeJudge`
+ignore them.
 `temperature` accepts a float or the literal string `"unset"`, for reasoning models that
 reject any explicit temperature:
 

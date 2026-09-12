@@ -141,6 +141,21 @@ def test_the_served_model_name_is_read_from_the_last_response_that_has_one():
     assert result.model == "gpt-4o-mini-2026-01-01"
 
 
+def test_the_served_model_name_is_also_read_from_the_anthropic_shaped_key():
+    # langchain-openai writes `model_name`; langchain-anthropic has written the
+    # API's own `model` field. Either must be read, or an Anthropic run falls
+    # back to the configured string and is reported and priced wrongly.
+    runner = LangChainRunner(model=scripted(text("done", model="claude-sonnet-4-6-20260301")))
+    assert runner.run(SKILL, case()).model == "claude-sonnet-4-6-20260301"
+
+
+def test_model_name_wins_over_model_when_both_are_present():
+    runner = LangChainRunner(
+        model=scripted(text("done", model_name="served-snapshot", model="raw-field"))
+    )
+    assert runner.run(SKILL, case()).model == "served-snapshot"
+
+
 def test_a_model_instance_with_no_served_name_reports_an_empty_model():
     # A string model falls back to the configured id; an instance has none.
     result = LangChainRunner(model=scripted(text("done"))).run(SKILL, case())
