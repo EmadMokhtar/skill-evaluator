@@ -225,9 +225,12 @@ reading that fact is the eval signal. `run_script` never raises. Standard input 
   joined into a command line.
 - The script's whole process group is killed after **every** exit — a normal one as much
   as a wall-clock timeout (`script_timeout_seconds`) — so a script that starts `sleep 1000`
-  and exits at once leaves nothing behind. On POSIX the exit is observed before the leader
-  is reaped, the group is killed, and only then is it reaped, so the pid cannot have been
-  handed to an unrelated process by the time the kill runs. One honest limit: the kill is
+  and exits at once leaves nothing behind. Where Python provides `os.waitid` — Linux, and
+  macOS from Python 3.13 — the exit is observed before the leader is reaped, the group is
+  killed, and only then is it reaped, so the pid cannot have been handed to an unrelated
+  process by the time the kill runs; elsewhere the child is waited for first and the group
+  killed after, which is still safe because POSIX never hands out a pid while a process
+  group with that id exists. One honest limit: the kill is
   `os.killpg`, so a script that calls `os.setsid()` leaves that group and survives it on
   every POSIX platform; only the `bwrap` backend closes that gap (`--unshare-pid` puts the
   script in its own PID namespace and `--die-with-parent` takes it down with the sandbox)

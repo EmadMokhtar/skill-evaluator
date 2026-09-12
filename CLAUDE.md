@@ -311,7 +311,10 @@ form, that file is the explanation.
   process started — never by re-opening the path — capped, and a cut is never silent.
 - **The process group is killed after every exit, not only a timeout**, in the order
   observe (`waitid` + `WNOWAIT`), `killpg(process.pid)`, reap — so the leader's pid is
-  still held when the kill runs. `pgid == pid` because of `start_new_session=True`; never
+  still held when the kill runs — where `os.waitid` exists (Linux; macOS on 3.13+; CPython
+  omits it on older macOS), and `Popen.wait` then `killpg` elsewhere or on `ECHILD`, which
+  is safe because a pid is never reused while a process group with that id exists. Never
+  call `os.waitid` unguarded. `pgid == pid` because of `start_new_session=True`; never
   `getpgid`, which fails after the reap. A script that calls `os.setsid()` escapes
   `os.killpg` on every POSIX platform; only the `bwrap` backend closes that. On Windows
   `taskkill /T` after a normal exit finds no tree; the docs say so.

@@ -568,10 +568,17 @@ before anything is spawned, and that refusal is text the model reads.
 in `scripts.py` runs whether the script exited on its own or ran past
 `script_timeout_seconds`, so a script that starts `sleep 1000` and exits at once leaves
 nothing behind — the promise the docs make, which a kill confined to the `TimeoutExpired`
-branch did not keep. On POSIX the order is observe-kill-reap: `os.waitid(P_PID, pid,
-WEXITED | WNOWAIT)` sees the exit without collecting it, `os.killpg(process.pid, SIGKILL)`
-kills the group while the leader's pid is still held (so it cannot have been reused), and
-`process.wait()` reaps last. The group id *is* `process.pid` because `start_new_session=True`
+branch did not keep. On POSIX the order is observe-kill-reap. Where `os.waitid` exists —
+Linux, and macOS from Python 3.13; CPython does not build it on macOS before then, and the
+supported floor is 3.11.4 — `_exit_observed` uses `os.waitid(P_PID, pid, WEXITED | WNOWAIT)`
+to see the exit without collecting it, `os.killpg(process.pid, SIGKILL)` kills the group
+while the leader's pid is still held (so it cannot have been reused), and `process.wait()`
+reaps last. Where it is missing, or if something already reaped the child (`ECHILD`), the
+fallback is `Popen.wait` then the same `killpg`: still safe from pid reuse, because POSIX
+forbids `fork` from returning a pid that matches an existing process *group* id, and a
+group with live members is exactly the case where the kill matters. `tests/test_scripts.py`
+exercises the fallback on every interpreter by deleting `os.waitid` with `monkeypatch`.
+The group id *is* `process.pid` because `start_new_session=True`
 makes the child a session leader; a `getpgid` lookup would fail after the reap, exactly when
 the kill matters. `ProcessLookupError` and `PermissionError` (macOS, when the only member
 left is the zombie leader) are both "already gone". On Windows the kill is `taskkill /T /F`

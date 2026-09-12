@@ -409,6 +409,13 @@ def test_a_timeout_kills_the_grandchild_too(tmp_path):
         pytest.fail("the grandchild survived the group kill")
 
 
+_SPAWN_AND_EXIT = (
+    "import subprocess, sys\n"
+    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+    "print(child.pid, flush=True)\n"
+)
+
+
 def _gone_within(pid: int, seconds: float) -> bool:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -427,17 +434,44 @@ def test_a_normal_exit_kills_what_the_script_left_running(tmp_path):
     # once leaves nothing behind. Only the timeout path used to kill the
     # group; a script exiting normally, with its child still running, is the
     # common shape of "leaves something behind".
-    source = (
-        "import subprocess, sys\n"
-        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-        "print(child.pid, flush=True)\n"
-    )
-    bundle = _bundle(tmp_path, **{"orphan.py": source})
+    bundle = _bundle(tmp_path, **{"orphan.py": _SPAWN_AND_EXIT})
     result = run_script(bundle, _workspace(tmp_path), "scripts/orphan.py", [], _runtime())
     assert result.timed_out is False
     assert result.exit_code == 0
     grandchild = int(result.stdout.strip())
     assert _gone_within(grandchild, 5), "the orphaned grandchild survived a normal exit"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="process groups are POSIX; Windows uses taskkill")
+def test_a_normal_exit_kills_what_the_script_left_running_without_waitid(tmp_path, monkeypatch):
+    # CPython does not provide os.waitid on macOS before 3.13, and macOS is
+    # the platform with sandbox-exec. The fallback -- wait, then killpg --
+    # must give the same guarantee, so it is exercised on every interpreter
+    # by deleting the attribute rather than only where it is genuinely absent.
+    monkeypatch.delattr(os, "waitid", raising=False)
+    bundle = _bundle(tmp_path, **{"orphan.py": _SPAWN_AND_EXIT})
+    result = run_script(bundle, _workspace(tmp_path), "scripts/orphan.py", [], _runtime())
+    assert result.timed_out is False
+    assert result.exit_code == 0
+    grandchild = int(result.stdout.strip())
+    assert _gone_within(grandchild, 5), "the orphaned grandchild survived the fallback kill"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="process groups are POSIX; Windows uses taskkill")
+def test_a_timeout_kills_the_sleeper_without_waitid(tmp_path, monkeypatch):
+    # The regression shape: an AttributeError before the kill would leave a
+    # timed-out script running. The fallback must still stop it.
+    monkeypatch.delattr(os, "waitid", raising=False)
+    source = "import os, time; print(os.getpid(), flush=True); time.sleep(300)"
+    bundle = _bundle(tmp_path, **{"sleep.py": source})
+    started = time.monotonic()
+    result = run_script(
+        bundle, _workspace(tmp_path), "scripts/sleep.py", [], _runtime(timeout_seconds=1.0)
+    )
+    assert time.monotonic() - started < 10
+    assert result.timed_out is True
+    assert result.exit_code is None
+    assert _gone_within(int(result.stdout.strip()), 5), "the timed-out script survived"
 
 
 def test_output_past_the_cap_is_cut_with_the_exact_count(tmp_path):
