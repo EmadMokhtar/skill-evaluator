@@ -1,7 +1,9 @@
 import json
+import os
 
 import pytest
 
+from promptly import promptly
 from skill_lens.cases.loader import _ASSERTION_FIELDS
 from skill_lens.evaluators.assertion import (
     ASSERTION_KINDS,
@@ -413,3 +415,77 @@ def test_check_ids_stay_positional_and_zero_based(tmp_path):
     )
     score = AssertionEvaluator().evaluate(case, result)
     assert [check.id for check in score.checks] == ["contains[0]", "file-produced[1]"]
+
+
+# --- what the run put at a well-formed path ---------------------------------
+#
+# The author's path is checked first (an authoring error); what the skill
+# then put there is the skill's doing, and a refusal to read it is a failed
+# check -- never exit 2, which under --concurrency would also cancel every
+# queued case.
+
+posix_only = pytest.mark.skipif(os.name == "nt", reason="FIFOs and symlinks are POSIX features")
+
+
+@posix_only
+@pytest.mark.parametrize("kind", ["contains", "file-produced"])
+def test_a_symlink_the_run_planted_fails_the_check_rather_than_aborting(tmp_path, kind):
+    os.symlink("/etc", tmp_path / "triage.md")
+    result = RunResult(output="", workspace=tmp_path.resolve())
+    spec = (
+        AssertionSpec(kind=kind, file="triage.md")
+        if kind == "file-produced"
+        else AssertionSpec(kind=kind, value="x", file="triage.md")
+    )
+    score = AssertionEvaluator().evaluate(_case(spec), result)
+    assert not score.passed
+    assert not score.errored
+    assert "resolves outside" in score.checks[0].evidence
+
+
+@posix_only
+@pytest.mark.parametrize("kind", ["contains", "file-produced"])
+def test_a_fifo_the_run_planted_fails_the_check_promptly(tmp_path, kind):
+    os.mkfifo(tmp_path / "triage.md")
+    result = RunResult(output="", workspace=tmp_path.resolve())
+    spec = (
+        AssertionSpec(kind=kind, file="triage.md")
+        if kind == "file-produced"
+        else AssertionSpec(kind=kind, value="x", file="triage.md")
+    )
+    score = promptly(lambda: AssertionEvaluator().evaluate(_case(spec), result))
+    assert not score.passed
+    assert not score.errored
+    assert "not a regular file" in score.checks[0].evidence
+
+
+@posix_only
+def test_a_symlink_loop_the_run_planted_fails_the_check(tmp_path):
+    os.symlink("triage.md", tmp_path / "triage.md")
+    result = RunResult(output="", workspace=tmp_path.resolve())
+    case = _case(AssertionSpec(kind="contains", value="x", file="triage.md"))
+    score = AssertionEvaluator().evaluate(case, result)
+    assert not score.passed
+    assert not score.errored
+
+
+def test_a_file_over_the_read_cap_fails_the_check_naming_the_cap(tmp_path):
+    with (tmp_path / "triage.md").open("wb") as handle:
+        handle.seek(2_000_000)
+        handle.write(b"x")
+    result = RunResult(output="", workspace=tmp_path.resolve())
+    case = _case(AssertionSpec(kind="contains", value="x", file="triage.md"))
+    score = AssertionEvaluator().evaluate(case, result)
+    assert not score.passed
+    assert not score.errored
+    assert "max_file_bytes" in score.checks[0].evidence
+
+
+def test_a_file_over_the_read_cap_still_counts_as_produced(tmp_path):
+    # file-produced asks whether the file exists, not whether it is readable.
+    with (tmp_path / "triage.md").open("wb") as handle:
+        handle.seek(2_000_000)
+        handle.write(b"x")
+    result = RunResult(output="", workspace=tmp_path.resolve())
+    case = _case(AssertionSpec(kind="file-produced", file="triage.md"))
+    assert AssertionEvaluator().evaluate(case, result).passed

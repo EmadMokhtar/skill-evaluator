@@ -14,8 +14,10 @@ from pathlib import Path
 
 import pytest
 
+from promptly import promptly
 from skill_lens.bundle import SkillBundle
-from skill_lens.models import WorkspaceSpec
+from skill_lens.evaluators.assertion import AssertionEvaluator
+from skill_lens.models import AssertionSpec, EvalCase, RunResult, WorkspaceSpec
 from skill_lens.scripts import ScriptPolicy, ScriptRuntime, probe_sandbox, run_script
 from skill_lens.workspace import Workspace, create_workspace
 
@@ -131,3 +133,28 @@ def test_a_real_workspace_survives_the_temp_dir_deny(tmp_path):
         assert workspace.read("inside.txt") == "from the real workspace"
     finally:
         workspace.cleanup()
+
+
+def test_what_a_script_plants_in_the_workspace_is_a_failed_check_not_an_abort(tmp_path):
+    # The whole-branch review's C1/I2 scenario, end to end under the real
+    # backend: a symlink out of the workspace and a FIFO are both writes the
+    # sandbox allows (they land inside the workspace), and the evaluator must
+    # score them as failures rather than block on one or exit 2 on the other.
+    source = "import os\nos.symlink('/etc', 'triage.md')\nos.mkfifo('pipe.md')\nprint('planted')\n"
+    workspace, out, _, code = _run(tmp_path, source)
+    assert out.strip() == "planted" and code == 0
+    result = RunResult(output="", workspace=workspace.root)
+    case = EvalCase(
+        name="planted",
+        task="t",
+        workspace=WorkspaceSpec(),
+        assertions=[
+            AssertionSpec(kind="file-produced", file="triage.md"),
+            AssertionSpec(kind="contains", value="x", file="pipe.md"),
+        ],
+    )
+    score = promptly(lambda: AssertionEvaluator().evaluate(case, result))
+    assert not score.passed
+    assert not score.errored
+    assert "resolves outside" in score.checks[0].evidence
+    assert "not a regular file" in score.checks[1].evidence
