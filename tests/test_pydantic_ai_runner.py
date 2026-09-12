@@ -16,7 +16,7 @@ from skill_lens.runners.pydantic_ai import (
     PydanticAIRunner,
     _instructions,
 )
-from skill_lens.runners.tools import BUILTIN_TOOL_NAMES, skill_tool_name
+from skill_lens.runners.tools import BUILTIN_TOOL_NAMES, WORKSPACE_TOOL_NAMES, skill_tool_name
 from skill_lens.workspace import Workspace
 
 SKILL = Skill(
@@ -541,7 +541,7 @@ def test_the_builtin_tools_are_registered_when_a_workspace_is_given(tmp_path):
     runner = PydanticAIRunner(model=FunctionModel(reply))
     workspace = Workspace(root=tmp_path.resolve())
     runner.run(SKILL, case(), workspace=workspace)
-    assert set(BUILTIN_TOOL_NAMES) <= set(seen["tools"])
+    assert set(WORKSPACE_TOOL_NAMES) <= set(seen["tools"])
 
 
 def test_no_builtin_tools_without_a_workspace():

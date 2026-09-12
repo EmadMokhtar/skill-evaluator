@@ -292,7 +292,8 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
         for name in names:
             if name not in declared:
                 hint = (
-                    " Built-in file tools only exist in a case with a 'workspace:' block."
+                    " Built-in workspace and bundle tools only exist in a case with a "
+                    "'workspace:' block."
                     if name in BUILTIN_TOOL_NAMES
                     else ""
                 )
