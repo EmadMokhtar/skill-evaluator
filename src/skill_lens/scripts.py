@@ -30,12 +30,16 @@ import signal  # noqa: F401 - used by Task 6
 import subprocess
 import tempfile  # noqa: F401 - used by Task 6
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field  # noqa: F401 - used by Task 6
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from skill_lens.bundle import SkillBundle, script_extension  # noqa: F401 - used by Task 6
-from skill_lens.models import SandboxBackend, SandboxMode, Skill  # noqa: F401 - used by Task 6
+from skill_lens.models import (  # noqa: F401 - Skill is used by Task 6
+    SandboxBackend,
+    SandboxMode,
+    Skill,
+)
 from skill_lens.workspace import PathRefused, Workspace  # noqa: F401 - used by Task 6
 
 DEFAULT_INTERPRETERS: Mapping[str, tuple[str, ...]] = {"py": ("python3",), "sh": ("bash",)}
