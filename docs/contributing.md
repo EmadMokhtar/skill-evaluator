@@ -13,7 +13,9 @@ uv run skill-lens list ./examples
 
 `.python-version` pins the interpreter to 3.13, so `uv sync` uses the same one CI does — no
 per-job setup step, and no drift between your machine and the pipeline. The package itself
-still supports `>=3.11` (`requires-python`); CI does not currently exercise that floor.
+still supports `>=3.11.4` (`requires-python` — the patch matters, because `tarfile`'s
+`filter=` keyword, which `--baseline previous` uses to extract a previous bundle safely,
+only exists from 3.11.4); CI does not currently exercise that floor.
 
 Tests marked `integration` hit real provider APIs and are deselected by default; run them with
 `uv run pytest -m integration`. Tests marked `cassette` replay recorded provider traffic —

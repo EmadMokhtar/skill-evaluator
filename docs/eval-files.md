@@ -46,15 +46,23 @@ With the block present, the agent also gets three built-in tools:
 | `read_file` | Read a text file. `path` is relative to the working directory |
 | `write_file` | Create or replace a text file |
 
-A case's own `tools:` may not declare a name that collides with one of these three — that
-is an authoring error. A `trajectory:` block may name the built-ins like any other tool:
+A skill that ships `scripts/`, `references/` or `assets/` beside `SKILL.md` also gets
+`list_skill_files`, `read_skill_file` and — only when the run enables it with
+`allow_scripts` or `--allow-scripts` — `run_script`. See
+[Bundled files and scripts](runners.md#bundled-files-and-scripts). All six names are
+reserved in any case with a `workspace:` block, whether or not the skill has a bundle, so a
+case's own `tools:` may not declare a name that collides with one of these six — that is an
+authoring error. A `trajectory:` block may name any of them like any other tool:
 
 ```yaml
     trajectory:
-      called: [read_file, write_file]
+      called: [run_script, write_file]
 ```
 
-Like the offered-skill tool below, a call to one of these three lands in the trajectory
+Naming a built-in in a case with no `workspace:` block is an authoring error too: the
+bundle tools exist only where the workspace does.
+
+Like the offered-skill tool below, a call to one of these six lands in the trajectory
 like any other tool call, so it counts toward `max_calls` and any `budget:` ceilings too.
 
 See [The workspace](runners.md#the-workspace) for containment and the size caps, and

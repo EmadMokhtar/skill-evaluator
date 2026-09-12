@@ -5,7 +5,7 @@
 
 [![CI](https://github.com/EmadMokhtar/skill-evaluator/actions/workflows/ci.yml/badge.svg)](https://github.com/EmadMokhtar/skill-evaluator/actions/workflows/ci.yml)
 [![Docs](https://github.com/EmadMokhtar/skill-evaluator/actions/workflows/docs.yml/badge.svg)](https://emadmokhtar.github.io/skill-evaluator/)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11.4+](https://img.shields.io/badge/python-3.11.4%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/EmadMokhtar/skill-evaluator/blob/main/LICENSE)
 
 **📖 Full documentation: <https://emadmokhtar.github.io/skill-evaluator/>**
@@ -63,7 +63,7 @@ development environment, and prefix the commands below with `uv run` — you can
 `uv tool install` above.
 
 A skill is any directory containing `SKILL.md`. Its eval cases live beside it — this
-repository ships three:
+repository ships four:
 
 ```
 examples/
@@ -73,6 +73,11 @@ examples/
   greeting/
     SKILL.md
     greeting.eval.yaml
+  log-triage/
+    SKILL.md
+    log-triage.eval.yaml
+    references/report-format.md
+    scripts/count_levels.py
   order-support/
     SKILL.md
     order-support.eval.yaml
@@ -87,6 +92,7 @@ skill-lens list ./examples
 ```
 csv-report	1 case(s)	examples/csv-report
 greeting	1 case(s)	examples/greeting
+log-triage	1 case(s)	examples/log-triage
 order-support	5 case(s)	examples/order-support
 ```
 

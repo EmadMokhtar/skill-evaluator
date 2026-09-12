@@ -23,7 +23,13 @@ The design rests on three protocols. Everything else is plumbing around them.
 class Runner(Protocol):
     name: str
 
-    def run(self, skill: Skill, case: EvalCase) -> RunResult: ...
+    def run(
+        self,
+        skill: Skill,
+        case: EvalCase,
+        workspace: Workspace | None = None,
+        scripts: ScriptRuntime | None = None,
+    ) -> RunResult: ...
 ```
 
 ```python
@@ -57,19 +63,21 @@ problem (errored) from a low score (failed).
 | --- | --- |
 | `models.py` | Every Pydantic model in the project. No other module defines a data shape. |
 | `cli.py` | Typer entry point. Wires config → loaders → runner → orchestrator → reporters → gate, and owns the exit-code contract. |
-| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. |
+| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. `RunOptions` bundles the per-run settings (kept workspaces, the workspace caps, the script policy); when scripts are on it runs `scripts.preflight` once between discovery and execution, and `_BaselineStore` owns the directory previous bundles are extracted into, deleted in a `finally`. |
 | `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. |
 | `config.py` | Loads `skill-lens.toml` by explicit path or upward discovery. Never reads secrets. |
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
-| `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
+| `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`, and extracts that same commit's bundle (`git archive`, `tarfile` with the `data` filter) so the old instructions are paired with the old scripts. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
 | `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models. |
 | `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. `scaffold_target` decides where `init` writes. |
 | `workspace.py` | The per-case temporary directory: creation, seeding, path containment, and cleanup. Framework-neutral, like every other top-level module. Its methods **raise** (`PathRefused`, `WorkspaceError`) for `cases/loader.py` and the evaluators to catch as authoring or infra errors; `runners/tools.py`'s built-in tools catch those same exceptions and turn them into ordinary tool-result strings instead. |
-| `runners/base.py` | The `Runner` protocol. |
+| `bundle.py` | A read-only view of the three Agent Skills directories beside `SKILL.md` (`scripts/`, `references/`, `assets/`) and nothing else — an eval file beside `SKILL.md` is never readable by the agent. Same "methods raise, tools catch" split as `workspace.py`. |
+| `scripts.py` | Runs a bundled script: the policy, the once-per-run preflight (interpreters on `PATH`, the sandbox probe), the allowlisted environment, the scratch directory, the process-group timeout, capped output read through the harness's own descriptors, and the `sandbox-exec` / `bwrap` wrapping. Never raises for a script that will not run; raises `ScriptSetupError` only from preflight. |
+| `runners/base.py` | The `Runner` protocol. `run` takes optional `workspace=` and `scripts=` keywords, both additive with a default, so a runner written against an earlier milestone keeps working. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of only two modules that import an agent framework.** |
-| `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block, and the built-in workspace tools. |
+| `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block, the built-in workspace tools, and the bundle tools (`list_skill_files`, `read_skill_file`, and `run_script` when the bundle has scripts and the run enabled them). Owns the six-name `BUILTIN_TOOL_NAMES` the case loader reads. |
 | `runners/preflight.py` | Verifies the provider API key is present before any spend. |
 | `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
 | `evaluators/base.py` | The `Evaluator` protocol. |
@@ -92,9 +100,10 @@ problem (errored) from a low score (failed).
 
 ```
 path
-  └─ skills/loader (walk for SKILL.md) ──────────────► [Skill]
-        └─ per skill: skills/baseline (once, if --baseline) ──► baseline Skill | note
+  └─ skills/loader (walk for SKILL.md) ──────────────► [Skill] (bundle_root if scripts/, references/ or assets/ exists)
+        └─ per skill: skills/baseline (once, if --baseline) ──► baseline Skill (+ its own bundle) | note
         └─ per skill: cases/loader (evals/ dir or *.eval.yaml) ──► [EvalCase]
+  └─ scripts.preflight (once, only if allow_scripts) ──► ScriptRuntime | ScriptSetupError (exit 2)
 
 matrix: for each (skill × case × arm × repeat × runner)
     Runner.run ──► RunResult ──► each Evaluator ──► [EvalScore]
@@ -115,14 +124,16 @@ All live in `models.py`.
 
 | Model | Carries |
 | --- | --- |
-| `Skill` | name, description, instructions, `version` (declared frontmatter version, `""` if absent), path, `variant` (`"candidate"` or `"baseline"`) |
+| `Skill` | name, description, instructions, `version` (declared frontmatter version, `""` if absent), path, `variant` (`"candidate"` or `"baseline"`), `bundle_root` (the directory whose `scripts/`, `references/` and `assets/` the agent may read; `None` when the skill ships none) |
 | `EvalCase` | name, task, `tools`, `assertions`, `trajectory`, `budget`, `tags` |
 | `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, model, `error` |
 | `CheckResult` | one check's `id`, `passed`, `evidence` — emitted by the judge and, since M4, by assertion/trajectory/budget too |
 | `EvalScore` | one evaluator's `passed` / `score` / `detail`, plus its `checks: list[CheckResult]` |
 | `BaselineNote` | why a skill or case has no baseline arm: `kind` (`"unavailable"` or `"skipped"`) plus a reason |
 | `CaseOutcome` | one (skill, case, runner, arm, repetition) combination: status plus its scores and result |
-| `RunReport` | every outcome, skipped and tag-filtered skills, `baseline_kind`, `repeat`, `baseline_notes` |
+| `ScriptStatus` | the once-per-run sandbox decision: `sandbox` (`"sandbox-exec"`, `"bwrap"` or `"none"`) and the probe's `detail` |
+| `ScriptNote` | a skill that bundles scripts while execution is off: `skill_name`, `script_count` |
+| `RunReport` | every outcome, skipped and tag-filtered skills, `baseline_kind`, `repeat`, `baseline_notes`, `scripts` (`None` when execution was off), `script_notes` |
 
 Two fields are **derived, not stored**: `RunResult.tokens` (the input/output split summed)
 and `RunResult.errored` (`error is not None`). Aggregates on `RunReport` — `total`,
@@ -520,6 +531,113 @@ non-null `workspace`, regardless of whether `--keep-workspace` or the config fil
 a persistent setting that produced no visible output would fill a disk with nothing on
 screen to explain why.
 
+### Bundled scripts (M6 part 2)
+
+**Script execution is off unless the run turned it on.** `allow_scripts` /
+`--allow-scripts` is the only switch; nothing in an eval file or a `SKILL.md` can enable
+it. A `SKILL.md` under evaluation is, by construction, code nobody has vetted, and the
+person who writes the eval is usually the person who wrote the skill. Reading the bundle
+needs no opt-in: reading a file the repository already contains changes nothing.
+
+**The bundle is `scripts/`, `references/`, `assets/` and nothing else.** `SkillBundle`
+refuses any other first path component, so `*.eval.yaml` and `evals/` — the expected
+answers — are never readable by the agent. `listing()` also leaves out a symbolic link
+whose target resolves outside the root, so it never advertises a file `read` would refuse.
+
+**`Skill.bundle_root` defaults to `None`, and only the loader and the baseline resolver
+set it.** Keying the bundle tools on `Skill.path` would leak the candidate's scripts into
+the `--baseline none` arm, since every `Skill` has a path; a `Skill` built by hand in a
+test has no bundle for the same reason.
+
+**A script's environment is built from an allowlist, never inherited.** `PATH`, `HOME`,
+`LANG`, `LC_ALL`, `LC_CTYPE`, `TZ` (plus what Python needs to start on Windows), then
+`TMPDIR`/`TMP`/`TEMP`, `PYTHONDONTWRITEBYTECODE` and `PYTHONIOENCODING`. The key that pays
+for the run is absent by construction, not by remembering to delete it.
+
+**A script runs with `shell=False`, its arguments as argv, always.** Nothing the model
+sends is joined into a command line; a NUL byte in an argument is refused by `Popen`
+before anything is spawned, and that refusal is text the model reads.
+
+**A timeout kills the process group, not just the child.** `start_new_session=True` on
+POSIX (`CREATE_NEW_PROCESS_GROUP` + `taskkill /T` on Windows), so a script that starts
+`sleep 1000` and exits leaves nothing behind. One honest limit: a script that calls
+`os.setsid()` leaves the group and survives the kill on macOS; under `bwrap`,
+`--unshare-pid` and `--die-with-parent` still take it down with the sandbox.
+
+**Script output is read from files, capped, and a cut is never silent.** Captured into
+memory, a script printing gigabytes inside the timeout would take the harness down. The
+capture files are read back through the descriptors the harness opened *before* the
+process started — `Popen` shares the open-file description with the child, so the inode
+is fixed at spawn time — never by re-opening the path, because the script owns the scratch
+directory and could put a symlink (to smuggle in another file's content) or a FIFO (whose
+open would block forever) at that path.
+
+**`run_script` never raises, and an unrunnable script is never `RunResult.error`.** A
+missing script, a path outside `scripts/`, an unmapped extension, an interpreter that is
+not on `PATH` or will not start — each is text the model reads; that reading is the eval
+signal. Every refusal carries what the model needs for its next call to be right: the
+bundled scripts when the name was wrong, the allowed extensions when the interpreter was.
+
+**The sandbox decision is made once per run and appears on the report.** `preflight`
+runs in `run_evals` after discovery and before any case: `required` without a backend,
+and a missing interpreter for a discovered script, raise `ScriptSetupError` (exit 2)
+before any money is spent. The backend is *executed*, not merely found on `PATH`. Preflight
+and the "bundles N scripts; execution is off" notes both iterate every *discovered* skill,
+including one `--tag` or `--case` filters out or that has no cases — a fail-closed check
+that quietly skipped some skills would not be one. Baseline bundles are not preflighted;
+an interpreter is looked up again at call time, and a miss there is a refusal, not an
+error. The probe also fails closed on a temporary-directory path containing a double
+quote, which a `sandbox-exec` profile cannot express safely.
+
+**The sandbox hides other skill-lens temporary directories, and re-allows the bundle
+explicitly.** The macOS profile allows by default, denies `network*` and `file-write*`,
+re-allows writes under the workspace and scratch (and `file-write-data` on `/dev/null`),
+denies `file-read*` under the resolved system temporary directory, then re-allows reads
+under the workspace, scratch and the bundle; `bwrap` mounts an empty `tmpfs` over the
+temporary directory and binds the same three back in (the bundle read-only). The bundle
+must be re-allowed because a `--baseline previous` bundle is extracted *under* the
+temporary directory. The temp-dir denial is a `subpath`, not a regex: an escaped path in a
+regex literal would silently stop matching on any metacharacter — a fail-open the blanket
+`subpath` cannot have. Reads elsewhere are allowed; the docs say so rather than pretend
+otherwise.
+
+**A previous baseline carries its own bundle**, extracted with `git archive <sha> -- .`
+from the skill directory (verified: that form gives subtree-relative paths; `<sha>:./`
+gives an empty archive), filtered to the three directories, with `tarfile`'s `data` filter
+— which is why `requires-python` is `>=3.11.4`, the release that added `filter=`. The
+commit is the one that last edited `SKILL.md` at the previous version — the version is the
+authority — so a bundle-only commit after it is invisible, and a very large historical
+`assets/` can hit the 10-second git timeout, which comes back as `BaselineUnavailable`
+(`cannot archive commit …`), a note, never an error. A commit with no bundle gives
+`bundle_root=None` — never the candidate's.
+
+**Baseline bundle directories are deleted when the run ends, however it ends.**
+`_BaselineStore.cleanup()` runs in a `finally` around execution. `--keep-workspace` does
+not keep them: they are an input, and the commit they came from is in the report already.
+
+**Bundle tools require a `workspace:` block, and their names are reserved in every
+workspace case.** The workspace is the script's working directory and the sandbox's only
+writable area; a name that is sometimes free is a name nobody can rely on. The tools are
+registered in `mode: offered` too — an agent that declines the skill has no reason to call
+them, and one that triggers it needs them exactly as a `loaded` case does.
+
+**The workspace preamble is unchanged** — byte-identical in both arms, naming no skill.
+The bundle tools describe themselves; "run `scripts/count.py`" comes from `SKILL.md`,
+which is the thing under measurement.
+
+**A script's temporary files never enter the workspace.** `TMPDIR` points at a per-call
+scratch directory outside it, deleted afterwards, so `list_files`, `file-produced` and the
+judge's artifacts see only what the agent and the script deliberately produced. A script
+writes to disk directly, so the workspace caps cannot refuse it beforehand: the directory
+is measured after the call, an overrun becomes a `warning:` line on the tool result, and
+every later `write_file` is refused by the existing projection. The timeout is the real
+bound on what one script can write.
+
+**`scripts=` reaches a runner only when execution is on.** `_run_one` passes the keyword
+only when the runtime is set, so a third-party runner written against M6 part 1 keeps
+working until the day someone turns scripts on — at which point a `TypeError` names the
+runner that cannot take them, rather than the scripts silently never running.
+
 ### Developer experience (M7)
 
 **Output is expanded only under non-passing candidate outcomes.** `failure_context` returns
@@ -602,11 +720,13 @@ costs nothing extra there and cannot be blamed on a bad connection.
 
 **Ruff's `S` rules are on, and a false positive is suppressed at the site with its reason.**
 The `flake8-bandit` family rides on the existing `ruff check`, so it runs everywhere lint does
-with no extra step to forget. Two `src/` sites trip it and both are deliberate: `baseline.py`
+with no extra step to forget. Three `src/` sites trip it and all are deliberate: `baseline.py`
 starts `git` by name because an absolute path is wrong on most machines and a missing git must
 come back as `BaselineUnavailable`, never a crash; `yaml_loading.py` passes `StrictBoolLoader`
-to `yaml.load`, and ruff cannot see that the loader subclasses `SafeLoader`. Each carries an
-inline `noqa` with that reason. `tests/**` and `scripts/**` have per-directory ignores for
+to `yaml.load`, and ruff cannot see that the loader subclasses `SafeLoader`; `scripts.py`
+starts the sandbox probe, the interpreter and (on Windows) `taskkill` from an argv list with
+no shell — the module's whole point — and finds `taskkill` on `PATH` by name for the same
+reason `baseline.py` finds `git`. Each carries an inline `noqa` with that reason. `tests/**` and `scripts/**` have per-directory ignores for
 `assert`, subprocess-with-fixed-argv, XML parsing and literal `/tmp` strings used as fake path
 values. A rule is never switched off for `src/`
 because one site trips it.

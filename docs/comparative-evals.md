@@ -68,9 +68,18 @@ honest.
      from the working copy's;
    - if it declares none, the first commit whose **content** differs from the working copy's.
 
+5. Extract that same commit's `scripts/`, `references/` and `assets/` (`git archive`, then
+   `tarfile` with its `data` filter) into a temporary directory that is deleted when the run
+   ends, so the previous instructions are paired with the previous bundle — never with the
+   candidate's scripts. A commit with none of the three directories gives the baseline no
+   bundle tools. See [Bundled files and scripts](runners.md#bundled-files-and-scripts).
+
 A declared `version:` is the stronger signal — an edit that did not bump it is still
 considered *this* version, however much prose changed underneath it. Without a declared
-version, differing content is the best evidence available.
+version, differing content is the best evidence available. The version is also the
+authority for the bundle: it comes from the commit that last edited `SKILL.md` at the
+previous version, so a commit that changed only `scripts/` after that edit is invisible to
+the baseline.
 
 The comparison is against the **working copy**, not `HEAD` — so uncommitted edits to
 `SKILL.md` are what run as the candidate. This matters for local iteration: you do not need
@@ -92,6 +101,8 @@ discipline runners follow for provider failures:
 | `SKILL.md` is not tracked by git | The file exists but was never committed |
 | cannot read the working copy's `SKILL.md` | Filesystem error (file missing, permission denied) or character encoding issue |
 | no earlier version found within the searched history | Every commit in the last 50 has the same version (or, unversioned, the same content) |
+| cannot archive commit `<sha>` | `git archive` failed or exceeded the 10-second timeout — a very large historical `assets/` can do that |
+| cannot extract the bundle at commit `<sha>` | The archive would not parse, or a member failed the safe-extraction filter, or the extraction hit a filesystem error; a half-extracted directory is removed |
 
 **An unresolvable baseline is reported, never assumed to be "no change".** Treating "we
 couldn't check" as "nothing changed" would let a repository pass `--min-delta` forever by

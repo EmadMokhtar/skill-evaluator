@@ -108,7 +108,11 @@ excerpt, so they can never disagree on what was shown.
 `--json-output report.json` writes a machine-readable report alongside the console output:
 a `summary` block (counts, overall and per-skill pass rates, token/cost/latency totals),
 `skipped_skills`, `tag_filtered_skills`, `case_filtered_skills`, a per-case `outcomes` list,
-a top-level `delta` block, `baseline_notes`, and the `gate` decision with its reasons.
+a top-level `delta` block, `baseline_notes`, `scripts` (`null` when script execution was
+off, else `{sandbox, detail}` saying which OS sandbox the run's scripts ran under and why —
+`sandbox` is `"sandbox-exec"`, `"bwrap"` or `"none"`), `script_notes` (skills that bundle
+scripts which did not run because execution was off, each as `{skill_name, script_count}`),
+and the `gate` decision with its reasons.
 
 Comparative evals changed this document additively, not by rewriting what was already there:
 every M3 field means what it always meant, and M4 only adds fields alongside them — `arm` and
@@ -160,3 +164,11 @@ skill working.
 A run with no eval cases emits a single `<testcase>` carrying an `<error>` that repeats the
 gate's reasons. An empty `tests="0"` file renders green in most CI UIs, which would contradict
 the exit code of 1.
+
+When scripts were enabled, every skill's `<testsuite>` carries `<properties>` with
+`skill-lens.scripts.sandbox` and `skill-lens.scripts.detail` — properties are where JUnit
+puts run-level facts, and a testcase is the wrong place for something true of the whole
+run. The console and Markdown reports print the same fact as one line (`scripts: on,
+sandbox: <backend>` on the console, with the probe's detail in parentheses when the backend
+is `none`) and name every skill whose bundled scripts did not run because execution was
+off.

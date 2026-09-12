@@ -6,7 +6,9 @@ skill-lens; everything below is enforced by a test or a CI job, not by intent.
 
 The checks cover skill-lens's own code and its dependencies. They say nothing about the
 skills you evaluate *with* it — a skill under test is an input, and it gets no more
-trust than any other input.
+trust than any other input. The one place skill-lens runs a skill's own code, its bundled
+scripts, is off by default; [Running bundled scripts](#running-bundled-scripts) below says
+what turning it on means.
 
 ## Reporting a vulnerability
 
@@ -52,7 +54,7 @@ hard-coded credentials, weak hashes, `assert` used as a runtime check, and so on
 it rides on the existing lint step it runs everywhere lint does — every pull request,
 the release gate, and your terminal — with nothing extra to remember.
 
-Two sites in `src/` are suppressed, each with the reason on the line itself:
+Three sites in `src/` are suppressed, each with the reason on the line itself:
 
 - `skills/baseline.py` starts `git` by name rather than by absolute path. That is
   deliberate: a machine without git must produce `BaselineUnavailable`, not a crash, and
@@ -60,6 +62,10 @@ Two sites in `src/` are suppressed, each with the reason on the line itself:
 - `yaml_loading.py` uses `yaml.load` with `StrictBoolLoader`, which ruff cannot see is a
   `SafeLoader` subclass. Every YAML file skill-lens reads goes through that loader; it is
   what stops YAML 1.1 from turning a bare `yes` or `no` into a boolean.
+- `scripts.py` starts subprocesses — the sandbox probe, the bundled script under its
+  interpreter, and `taskkill` on Windows — from an argv list with no shell, which is the
+  whole point of that module; ruff flags every subprocess call regardless. `taskkill` is
+  found on `PATH` by name for the same reason `git` is.
 
 `tests/` may use `assert`, run `git`, parse the JUnit XML it just wrote, and use literal
 `/tmp/...` strings as fake path values in fixtures; `scripts/`
@@ -168,6 +174,37 @@ order of jobs and how a failed step is recovered.
   that can write to the repository. The one job that can write releases, `github-release`,
   installs nothing and checks nothing out: it downloads artifacts that earlier jobs built and
   verified, and runs `gh`.
+
+## Running bundled scripts
+
+A skill may ship code under `scripts/`. skill-lens can execute it — that is what M6 part 2
+adds — and the trust model is:
+
+- **Off by default, on only by the operator's decision.** `allow_scripts = true` in
+  `skill-lens.toml` or `--allow-scripts`. Nothing in an eval file or a `SKILL.md` can turn
+  it on. A `SKILL.md` under evaluation is unvetted code, and skill-lens runs in CI.
+- **Portable guards always apply:** an environment rebuilt from an allowlist (no provider
+  key, no inherited secret — absent by construction, not by deletion), a scratch directory
+  for temporary files, no shell, a timeout that kills the process group, output read from
+  files and capped with a visible cut.
+- **An OS sandbox applies where one exists** — `sandbox-exec` on macOS, `bwrap` on Linux.
+  Under it a script cannot open a network connection, cannot write outside the workspace
+  and its scratch directory, and cannot read anything under the system temporary directory
+  except the workspace, the scratch directory and the skill's own bundle — so other
+  arms' and other cases' workspaces are hidden from it. The backend is executed once per
+  run before any case, not merely found on `PATH`; `script_sandbox = "required"` makes its
+  absence exit 2, and the report always says which backend applied. `sandbox-exec` is
+  marked deprecated in Apple's documentation and remains present and working on current
+  macOS; Bazel, Chromium and Claude Code rely on it, and the probe is what turns "present"
+  into "works".
+- **What no layer prevents:** a script can read every other file the CI user can read, and
+  print it, and that output reaches the model and the run report. Treat enabling scripts
+  as running the skill's code yourself, because it is. Do not enable scripts for a skill
+  you would not run by hand.
+
+Details and the per-platform table are in
+[Running bundled scripts](runners.md#running-bundled-scripts); enabling it in the GitHub
+Action is covered in [CI integration](ci.md#the-composite-action).
 
 ## Why these rules
 

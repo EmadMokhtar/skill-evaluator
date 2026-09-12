@@ -9,7 +9,8 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M7 (complete)**: the pipeline runs real agents through `PydanticAIRunner`
+Currently at **M6 part 2 (complete)**, shipped after M7: the pipeline runs real
+agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
 remains the default and the backbone of the zero-cost test tier. M3 adds a
@@ -31,13 +32,20 @@ assertions, a `file:` modifier and `judge: artifacts:`. M7 makes a failing
 case explain itself (output and tool calls in every reporter, `--full-output`),
 adds `--case`, brings `init` up to M6 with a workspace case and a batch mode,
 and ships a versioned comparative example, an annotated config and an
-end-to-end quickstart. Milestones are defined in
+end-to-end quickstart. M6 part 2 lets the agent read the files a skill ships
+beside `SKILL.md` (`scripts/`, `references/`, `assets/`) through
+`list_skill_files`/`read_skill_file`, and — only under `allow_scripts` /
+`--allow-scripts` — run a bundled script through `run_script`, under portable
+guards everywhere and an OS sandbox where one exists (`sandbox-exec` on macOS,
+`bwrap` on Linux), with the report saying which applied; `--baseline previous`
+pairs the previous `SKILL.md` with its own bundle. Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
 is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
 design is in `docs/superpowers/specs/2026-08-03-skill-eval-m4-design.md`, the
 M5 design is in `docs/superpowers/specs/2026-08-05-skill-eval-m5-design.md`,
-the M6 design is in `docs/superpowers/specs/2026-09-10-skill-lens-m6-design.md`,
+the M6 part 1 design is in `docs/superpowers/specs/2026-09-10-skill-lens-m6-design.md`,
+the M6 part 2 design is in `docs/superpowers/specs/2026-09-12-skill-lens-m6-part2-design.md`,
 and the M7 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m7-design.md`.
 
 ## Commands
@@ -285,6 +293,35 @@ form, that file is the explanation.
 - **The unfilled-scaffold scan covers mapping keys as well as values.**
 - **`examples/greeting` stays at `1.1.0` or later.** The bump is what makes `--baseline
   previous` resolvable from a checkout; `tests/test_examples.py` pins it.
+- **Script execution is off unless the run turned it on** (`allow_scripts` /
+  `--allow-scripts`); nothing in an eval file or a `SKILL.md` can enable it. Reading the
+  bundle needs no opt-in.
+- **The bundle is `scripts/`, `references/`, `assets/` and nothing else** — an eval file
+  beside `SKILL.md` is never readable by the agent.
+- **`Skill.bundle_root` defaults to `None`; only the loader and the baseline resolver set
+  it**, so the `--baseline none` skill never carries the candidate's scripts.
+- **A script's environment is an allowlist, never `os.environ` minus keys**; `shell=False`
+  always; a timeout kills the process group (a script that calls `os.setsid()` escapes it on
+  macOS; `bwrap` still covers it on Linux); output is read from files through the
+  descriptors the harness opened before the process started — never by re-opening the path
+  — capped, and a cut is never silent.
+- **`run_script` never raises, and an unrunnable script is never `RunResult.error`.**
+- **The sandbox decision is made once per run, in preflight, and appears on every report.**
+  `required` without a backend and a missing interpreter abort with exit 2 before any case
+  runs; the backend is executed, not merely found. Preflight and the "execution is off"
+  notes cover every *discovered* skill, including ones `--tag`/`--case` filter out or that
+  have no cases. The probe fails closed on a temp-dir path holding a double quote.
+- **The sandbox denies reads under the system temp directory, then re-allows the workspace,
+  the scratch directory and the bundle** — the bundle explicitly, because a `--baseline
+  previous` bundle is extracted under the temp dir. Reads elsewhere are allowed; say so.
+- **A previous baseline carries its own bundle** from the commit that last edited `SKILL.md`
+  at the previous version (`git archive <sha> -- .` from the skill directory — `<sha>:./`
+  yields an empty archive; `tarfile`'s `data` filter, hence `requires-python >= 3.11.4`), or
+  none. A bundle-only commit after that edit is invisible; a giant `assets/` hitting the
+  10 s git timeout is a `BaselineNote`, not an error. Baseline bundle directories are deleted
+  in a `finally`, and `--keep-workspace` does not keep them.
+- **Bundle tools require a `workspace:` block; all six built-in names are reserved in
+  every workspace case; the workspace preamble is unchanged.**
 - **The dependency audit is one command, spelled identically in three places, and its
   exceptions live in one table.** `uv audit --preview-features audit --locked` runs in
   `security.yml` (every PR, every push to `main`, weekly on a schedule, and on demand), in
@@ -302,9 +339,11 @@ form, that file is the explanation.
 - **Ruff's `S` rules are on, and a false positive is suppressed at the site with its reason.**
   Never by switching a rule off for `src/`. `tests/**` and `scripts/**` carry per-directory
   ignores for `assert`, subprocess-with-fixed-argv, XML parsing and literal `/tmp` strings used
-  as fake path values; the two `src/` sites
+  as fake path values; the three `src/` sites
   (`git` found on `PATH` in `baseline.py`; `StrictBoolLoader` in `yaml_loading.py`, which
-  *is* a `SafeLoader` subclass ruff cannot see) each carry an inline `noqa` with the reason.
+  *is* a `SafeLoader` subclass ruff cannot see; the shell-free subprocess calls in
+  `scripts.py` — the probe, the interpreter, and `taskkill` found on `PATH` in its Windows
+  branch) each carry an inline `noqa` with the reason.
 - **Every action is pinned to a commit SHA with a `# vX.Y.Z` comment, and nothing grants
   write access at the workflow level.** A tag can be moved; a commit cannot.
   `tests/test_supply_chain.py` fails any `uses:` that is not `./` or a 40-hex SHA with the
@@ -335,6 +374,7 @@ Documentation ships **with** the change, never as a follow-up. Two CI jobs enfor
 | A `Config` field | `docs/configuration.md` |
 | An `EvalCase` field or assertion kind | `docs/eval-files.md` |
 | Runner behavior, tools, budgets, pricing | `docs/runners.md` |
+| Bundled files, `run_script`, the sandbox or its guarantees | `docs/runners.md` and `docs/security.md` |
 | Gate rules, exit codes, the JSON report | `docs/gating.md` |
 | A protocol, an invariant, or the module map | `ARCHITECTURE.md` |
 | CI integration, the action, example workflows | `docs/ci.md` |

@@ -621,6 +621,8 @@ Documentation ships with the change; the `docs` and `docs-freshness` jobs enforc
 
 ## 16. Part 2 — running a bundled skill script (sketch)
 
+> Superseded by `2026-09-12-skill-lens-m6-part2-design.md`, which answers the three questions below.
+
 The shape: the skill loader learns to find files bundled beside `SKILL.md` (it ignores them
 entirely today), a `run_script` tool executes one as a subprocess with the workspace as its
 working directory, and stdout, stderr and exit code come back to the model as text — capped

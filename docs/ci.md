@@ -61,6 +61,15 @@ Every `skill-lens run` flag is available as a kebab-cased input (`--min-pass-rat
 
 Outputs: `exit-code`, `passed`, `pass-rate`, `json-report`, `junit-report`, `markdown-report`.
 
+`allow-scripts: true` mirrors `keep-workspace`: it passes `--allow-scripts`, so the skill's
+bundled scripts run on the job's runner. Enabling it in CI runs unvetted code with the job's
+filesystem readable — the environment is rebuilt from an allowlist, so `GITHUB_TOKEN` and
+every other secret in `env` never reach the script, but files on disk (the checkout, the
+runner's tools) do, and an OS sandbox applies only where the runner has a working one — a
+stock `ubuntu-latest` runner does not, and the report's `scripts: on, sandbox: ...` line says
+what applied. Turn it on only for skills you would run by hand. See
+[Running bundled scripts](security.md#running-bundled-scripts).
+
 `json-output`, `junit-output` and `markdown-output` default to real paths rather than being
 unset, because the action reads the JSON back to produce `passed` and `pass-rate`.
 
