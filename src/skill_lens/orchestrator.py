@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from collections.abc import Callable
 from concurrent.futures import CancelledError, Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -58,6 +60,28 @@ class RunOptions:
 
 
 DEFAULT_OPTIONS = RunOptions()
+
+
+class _BaselineStore:
+    """The per-run directory previous bundles are extracted into.
+
+    Made on first use so a run without `--baseline previous` never creates
+    it; deleted by `run_evals` in a `finally`, however the run ended. Not
+    kept by `--keep-workspace`: a baseline bundle is an input, not an output,
+    and the commit it came from is in the report already.
+    """
+
+    def __init__(self) -> None:
+        self.root: Path | None = None
+
+    def directory(self) -> Path:
+        if self.root is None:
+            self.root = Path(tempfile.mkdtemp(prefix="skill-lens-baselines-")).resolve()
+        return self.root
+
+    def cleanup(self) -> None:
+        if self.root is not None:
+            shutil.rmtree(self.root, ignore_errors=True)
 
 
 def _run_one(
@@ -158,7 +182,9 @@ def _run_one(
     return outcome(status=status, scores=scores, result=result)
 
 
-def _baseline_skill(skill: Skill, kind: BaselineKind, notes: list[BaselineNote]) -> Skill | None:
+def _baseline_skill(
+    skill: Skill, kind: BaselineKind, notes: list[BaselineNote], store: _BaselineStore
+) -> Skill | None:
     """The skill the baseline arm runs, or None with a note explaining why not."""
     if kind == "none":
         # Empty description *and* empty instructions is what makes the runner
@@ -172,7 +198,7 @@ def _baseline_skill(skill: Skill, kind: BaselineKind, notes: list[BaselineNote])
             path=skill.path,
             variant="baseline",
         )
-    resolved = resolve_previous(skill)
+    resolved = resolve_previous(skill, into=store.directory())
     if isinstance(resolved, BaselineUnavailable):
         notes.append(
             BaselineNote(skill_name=resolved.skill_name, kind="unavailable", reason=resolved.reason)
@@ -245,6 +271,7 @@ def _plan_work(
     case_filter: str | None,
     baseline: BaselineKind | None,
     repeat: int,
+    store: _BaselineStore,
 ) -> _Plan:
     """Discovery, filtering and baseline resolution -- always sequential.
 
@@ -272,7 +299,9 @@ def _plan_work(
             if not cases:
                 plan.case_filtered.append(skill.name)
                 continue
-        baseline_skill = None if baseline is None else _baseline_skill(skill, baseline, plan.notes)
+        baseline_skill = (
+            None if baseline is None else _baseline_skill(skill, baseline, plan.notes, store)
+        )
         for case in cases:
             for arm, arm_skill in _arms(case, skill, baseline_skill, baseline, plan.notes):
                 for runner in runners:
@@ -480,21 +509,27 @@ def run_evals(
         ]
     )
     options = options if options is not None else DEFAULT_OPTIONS
-    plan = _plan_work(skills, runners, evals_path, tag, case_filter, baseline, repeat)
-    runtime: ScriptRuntime | None = None
-    status: ScriptStatus | None = None
-    notes: list[ScriptNote] = []
-    if options.scripts is not None:
-        runtime = preflight(skills, options.scripts)
-        status = ScriptStatus(sandbox=runtime.sandbox.backend, detail=runtime.sandbox.detail)
-    else:
-        for skill in skills:
-            if skill.bundle_root is None:
-                continue
-            count = len(SkillBundle(skill.bundle_root).scripts())
-            if count:
-                notes.append(ScriptNote(skill_name=skill.name, script_count=count))
-    outcomes = _execute(plan.items, evaluators, concurrency, executor_factory, options, runtime)
+    store = _BaselineStore()
+    try:
+        plan = _plan_work(skills, runners, evals_path, tag, case_filter, baseline, repeat, store)
+        runtime: ScriptRuntime | None = None
+        status: ScriptStatus | None = None
+        notes: list[ScriptNote] = []
+        if options.scripts is not None:
+            runtime = preflight(skills, options.scripts)
+            status = ScriptStatus(sandbox=runtime.sandbox.backend, detail=runtime.sandbox.detail)
+        else:
+            for skill in skills:
+                if skill.bundle_root is None:
+                    continue
+                count = len(SkillBundle(skill.bundle_root).scripts())
+                if count:
+                    notes.append(ScriptNote(skill_name=skill.name, script_count=count))
+        outcomes = _execute(plan.items, evaluators, concurrency, executor_factory, options, runtime)
+    finally:
+        # However the run ended -- an authoring error out of an evaluator
+        # included -- the previous bundles go.
+        store.cleanup()
     return RunReport(
         outcomes=outcomes,
         skipped_skills=plan.skipped,

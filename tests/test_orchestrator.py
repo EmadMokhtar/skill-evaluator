@@ -1,4 +1,6 @@
+import subprocess
 import sys
+import tempfile
 import threading
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from pathlib import Path
@@ -968,3 +970,71 @@ def test_a_setup_error_aborts_before_any_case_runs(tmp_path):
             options=RunOptions(scripts=policy),
         )
     assert runner.runtimes == []
+
+
+def _git_skill_with_history(tmp_path) -> Skill:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    for version, body in (("1.0.0", "old"), ("1.1.0", "new")):
+        (repo / "SKILL.md").write_text(
+            f'---\nname: s\nversion: "{version}"\n---\n{body}\n', encoding="utf-8"
+        )
+        (repo / "scripts").mkdir(exist_ok=True)
+        (repo / "scripts" / "a.py").write_text(f"print('{body}')", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", f"feat: {version}"], cwd=repo, check=True)
+    from skill_lens.skills.loader import parse_skill_file
+
+    return parse_skill_file(repo / "SKILL.md")
+
+
+def test_baseline_bundle_directories_are_deleted_when_the_run_ends(tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    runner = _ScriptAwareRunner()
+    skill = _git_skill_with_history(tmp_path)
+    run_evals(
+        [skill],
+        [runner],
+        evals_path=_evals(tmp_path, _case(workspace=WorkspaceSpec())),
+        baseline="previous",
+    )
+    assert not list(tmp_path.glob("skill-lens-baselines-*"))
+
+
+def test_baseline_bundle_directories_are_deleted_even_when_a_case_errors(tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    skill = _git_skill_with_history(tmp_path)
+
+    class _Exploding:
+        name = "assertion"
+
+        def evaluate(self, case, result):
+            raise InvalidAssertionValue("boom")
+
+    with pytest.raises(InvalidAssertionValue):
+        run_evals(
+            [skill],
+            [_RecordingRunner()],
+            evals_path=_evals(tmp_path, _case()),
+            evaluators=[_Exploding()],
+            baseline="previous",
+        )
+    assert not list(tmp_path.glob("skill-lens-baselines-*"))
+
+
+def test_the_baseline_arm_sees_the_previous_bundle_and_the_candidate_the_current_one(tmp_path):
+    runner = _ScriptAwareRunner()
+    skill = _git_skill_with_history(tmp_path)
+    seen: dict[str, str] = {}
+
+    class _Peeking(_ScriptAwareRunner):
+        def run(self, s, case, workspace=None, scripts=None):
+            seen[s.variant] = (s.bundle_root / "scripts" / "a.py").read_text(encoding="utf-8")
+            return super().run(s, case, workspace=workspace, scripts=scripts)
+
+    runner = _Peeking()
+    run_evals([skill], [runner], evals_path=_evals(tmp_path, _case()), baseline="previous")
+    assert seen == {"candidate": "print('new')", "baseline": "print('old')"}
