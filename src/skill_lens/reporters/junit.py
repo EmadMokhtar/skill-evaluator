@@ -174,6 +174,22 @@ def render_junit(
 
     for skill_name, outcomes in _by_skill(report.candidate_outcomes).items():
         suite = SubElement(root, "testsuite", name=_xml_safe(skill_name))
+        if report.scripts is not None:
+            # Properties are where JUnit puts run-level facts; a testcase is
+            # the wrong place for something true of the whole run.
+            properties = SubElement(suite, "properties")
+            SubElement(
+                properties,
+                "property",
+                name="skill-lens.scripts.sandbox",
+                value=_xml_safe(report.scripts.sandbox),
+            )
+            SubElement(
+                properties,
+                "property",
+                name="skill-lens.scripts.detail",
+                value=_xml_safe(report.scripts.detail),
+            )
         suite_failures = suite_errors = 0
         suite_time = 0.0
         for outcome in outcomes:

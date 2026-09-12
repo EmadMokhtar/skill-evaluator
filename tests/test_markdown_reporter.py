@@ -17,6 +17,8 @@ from skill_lens.models import (
     EvalScore,
     RunReport,
     RunResult,
+    ScriptNote,
+    ScriptStatus,
     ToolCall,
 )
 from skill_lens.reporters.markdown import render_markdown
@@ -550,3 +552,28 @@ def test_an_output_that_is_only_a_newline_is_stated_as_empty():
         ]
     )
     assert "```\n(empty)\n```" in render_markdown(report)
+
+
+def test_the_scripts_block_states_the_sandbox_and_the_notes():
+    report = _mixed_report().model_copy(
+        update={
+            "scripts": ScriptStatus(sandbox="none", detail="no sandbox backend on Windows"),
+            "script_notes": [ScriptNote(skill_name="pdf", script_count=3)],
+        }
+    )
+    text = render_markdown(report)
+    assert "Scripts: on, sandbox: none (no sandbox backend on Windows)" in text
+    assert "`pdf` bundles 3 scripts; execution is off" in text
+
+
+def test_the_scripts_block_is_optional_and_dropped_under_truncation():
+    report = _mixed_report().model_copy(
+        update={"scripts": ScriptStatus(sandbox="bwrap", detail="bwrap probe succeeded")}
+    )
+    full = render_markdown(report)
+    assert "Scripts: on" in full
+    # A budget that holds the verdict and summary but not every optional block
+    # drops blocks from the end; the scripts line is one of them.
+    trimmed = render_markdown(report, max_chars=len(full) - 1)
+    assert len(trimmed) <= len(full) - 1
+    assert "Scripts: on" not in trimmed

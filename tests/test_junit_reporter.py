@@ -10,7 +10,15 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 
 from skill_lens.gating import evaluate_gate
-from skill_lens.models import CaseOutcome, CheckResult, EvalScore, RunReport, RunResult, ToolCall
+from skill_lens.models import (
+    CaseOutcome,
+    CheckResult,
+    EvalScore,
+    RunReport,
+    RunResult,
+    ScriptStatus,
+    ToolCall,
+)
 from skill_lens.reporters.junit import render_junit
 
 
@@ -316,3 +324,21 @@ def test_case_filtered_skills_become_skipped_suites():
     skipped = root.find("testsuite[@name='xlsx']/testcase/skipped")
     assert skipped is not None
     assert "--case" in skipped.get("message")
+
+
+def test_the_sandbox_is_a_suite_property_when_scripts_ran():
+    report = RunReport(
+        outcomes=[_outcome()],
+        scripts=ScriptStatus(sandbox="sandbox-exec", detail="sandbox-exec probe succeeded"),
+    )
+    root = _parse(report)
+    suite = root.find("testsuite")
+    prop = suite.find("properties/property")
+    assert prop is not None
+    assert prop.get("name") == "skill-lens.scripts.sandbox"
+    assert prop.get("value") == "sandbox-exec"
+
+
+def test_no_properties_element_when_scripts_are_off():
+    root = _parse(RunReport(outcomes=[_outcome()]))
+    assert root.find("testsuite/properties") is None

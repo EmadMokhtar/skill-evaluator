@@ -64,6 +64,8 @@ def render_json(
     }
     payload["delta"] = delta.model_dump() if delta is not None else None
     payload["baseline_notes"] = [note.model_dump() for note in report.baseline_notes]
+    payload["scripts"] = report.scripts.model_dump() if report.scripts is not None else None
+    payload["script_notes"] = [note.model_dump() for note in report.script_notes]
     if gate is not None:
         payload["gate"] = gate.model_dump()
     return json.dumps(payload, indent=2)
