@@ -28,9 +28,10 @@ from skill_lens.reporters.failure_context import OUTPUT_LIMIT
 from skill_lens.reporters.json_reporter import render_json
 from skill_lens.reporters.junit import render_junit
 from skill_lens.reporters.markdown import render_markdown
+from skill_lens.runners.base import RunnerDependencyError
 from skill_lens.runners.fake import FakeRunner
 from skill_lens.runners.preflight import MissingAPIKey, check_api_key
-from skill_lens.runners.pydantic_ai import PydanticAIRunner, RunnerDependencyError
+from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.scaffold import render_scaffold, scaffold_target
 from skill_lens.skills.loader import SKILL_FILENAME, SkillParseError, load_skills, parse_skill_file
 from skill_lens.workspace import WorkspaceLimits

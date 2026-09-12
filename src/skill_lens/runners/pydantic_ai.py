@@ -13,8 +13,10 @@ from collections.abc import Callable
 from typing import Any
 
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
+from skill_lens.runners.base import RunnerDependencyError
 from skill_lens.runners.pricing import calculate_cost, provider_of
 from skill_lens.runners.prompting import instructions
+from skill_lens.runners.retry import run_with_retries, transient_status
 from skill_lens.runners.tools import (
     build_mock_tool,
     build_skill_tool,
@@ -24,14 +26,6 @@ from skill_lens.runners.tools import (
 from skill_lens.workspace import Workspace
 
 DEFAULT_MODEL = "openai:gpt-4o-mini"
-
-# Statuses worth another attempt: rate limits, request timeouts, conflicts and
-# anything the provider blames on itself. A 401 or 404 will never fix itself.
-_TRANSIENT_STATUSES = {408, 409, 429}
-
-
-class RunnerDependencyError(Exception):
-    """Raised when the optional extra providing this runner is not installed."""
 
 
 def _require_pydantic_ai() -> None:
@@ -100,7 +94,7 @@ def _is_transient(exc: Exception) -> bool:
     from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 
     if isinstance(exc, ModelHTTPError):
-        return exc.status_code in _TRANSIENT_STATUSES or exc.status_code >= 500
+        return transient_status(exc.status_code)
     if isinstance(exc, ModelAPIError):
         return True
     return isinstance(exc, (TimeoutError, ConnectionError))
@@ -159,17 +153,13 @@ class PydanticAIRunner:
 
     def _run_with_retries(self, agent: Any, task: str) -> Any:
         settings = self._model_settings()
-        delay = self._retry_backoff_seconds
-        attempt = 0
-        while True:
-            try:
-                return agent.run_sync(task, model_settings=settings)
-            except Exception as exc:
-                if attempt >= self._retries or not _is_transient(exc):
-                    raise
-                self._sleep(delay)
-                delay *= 2
-                attempt += 1
+        return run_with_retries(
+            lambda: agent.run_sync(task, model_settings=settings),
+            _is_transient,
+            self._retries,
+            self._retry_backoff_seconds,
+            self._sleep,
+        )
 
     def run(self, skill: Skill, case: EvalCase, workspace: Workspace | None = None) -> RunResult:
         _require_pydantic_ai()
