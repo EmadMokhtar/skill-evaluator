@@ -225,10 +225,14 @@ Steps, in order:
    else skill-lens holds — `OPENAI_API_KEY` first among them — is absent by construction.
 4. argv = interpreter prefix + script path + `[str(a) for a in args]`. `shell=False`,
    always; nothing the model sends is ever joined into a command line. Under a sandbox,
-   argv is wrapped (§6).
+   argv is wrapped (§6) with the workspace, the scratch directory, the temporary directory
+   and the bundle root.
 5. `cwd` = the workspace root. stdout and stderr go to two files in the scratch
-   directory, opened by the harness — **not** captured into memory: a script printing
-   gigabytes inside the timeout must not take the harness down with it.
+   directory, opened by the harness `w+b` **before** the process starts and read back
+   through those same descriptors — never re-opened by path, because the script owns
+   that directory and could put a symlink or a FIFO at the path — and **not** captured
+   into memory: a script printing gigabytes inside the timeout must not take the harness
+   down with it.
 6. `Popen(..., start_new_session=True)` on POSIX, so the child leads its own process
    group; `creationflags=CREATE_NEW_PROCESS_GROUP` on Windows. `wait(timeout)`. On
    expiry: `os.killpg(pgid, SIGKILL)` on POSIX, `taskkill /T /F /PID` on Windows, then
@@ -246,8 +250,10 @@ Steps, in order:
    The timeout is the real bound on what one script can write, and `docs/runners.md`
    says so.
 
-**`run_script` never raises.** `OSError` from `Popen` (an interpreter that exists but will
-not execute) becomes `refused: cannot start python3: <error>`. Nothing about a script
+**`run_script` never raises.** `OSError` or `ValueError` from `Popen` (an interpreter that
+exists but will not execute; a NUL byte in a model-supplied argument) becomes
+`refused: cannot start python3: <error>`, and a capture file that cannot be created is
+`refused: cannot create the capture files: <error>`. Nothing about a script
 belongs in `RunResult.error`: an unrunnable script is a fact about the skill's bundle,
 and the model reading that fact is the eval signal.
 
@@ -256,9 +262,12 @@ and the model reading that fact is the eval signal.
 ### What the sandbox guarantees, and what it does not
 
 With a backend active, a script **cannot**: open a network connection; write anywhere but
-the workspace and its scratch directory; read any *other* skill-lens temporary directory
-(so under `--concurrency N` a script cannot read the baseline arm's workspace or another
-case's scratch).
+the workspace and its scratch directory; read anything under the system temporary
+directory except the workspace, the scratch directory and the skill's own bundle (so under
+`--concurrency N` a script cannot read the baseline arm's workspace or another case's
+scratch). The bundle is re-allowed explicitly because a `--baseline previous` bundle is
+extracted *under* the temporary directory (§12) — without that allowance the baseline
+arm's own scripts would be unreadable.
 
 A script **can** still read every other file the CI user can read — the interpreter and its
 libraries live there, and §1 defers closing that. What it reads it can print, and what it
@@ -284,13 +293,16 @@ places the script must reach. Later rules win.
 (allow file-write* (subpath "<workspace>") (subpath "<scratch>"))
 (allow file-write-data (literal "/dev/null"))
 (deny file-read* (subpath "<tempdir>"))
-(allow file-read* (subpath "<workspace>") (subpath "<scratch>"))
+(allow file-read* (subpath "<workspace>") (subpath "<scratch>") (subpath "<bundle>"))
 ```
 
 `<tempdir>` is `tempfile.gettempdir()`, resolved — on macOS that is under
 `/private/var/folders/...`, where every workspace and scratch directory lives. Paths are
-embedded resolved and quoted; a `"` in a temp path is impossible on macOS but the builder
-escapes anyway, because a profile is a string and a string is where injection lives.
+embedded resolved and quoted; a `"` in the temporary directory's own path cannot be
+expressed safely, so the probe reports `none` with a detail naming it — fail-closed and
+visible, and `required` then exits 2. A `subpath` denial, not a regex: a regex literal in
+a profile is a raw string, and an escaped temp path would silently stop matching for any
+path containing a regex metacharacter — a fail-open the blanket `subpath` cannot have.
 
 `sandbox-exec` is marked deprecated in Apple's documentation and remains present and
 functional on current macOS; Bazel, Chromium and Claude Code rely on it. The probe in §5
@@ -302,12 +314,14 @@ is what turns "present" into "works"; the docs note the deprecation.
 bwrap --ro-bind / / --dev /dev --proc /proc
       --tmpfs <tempdir>
       --bind <workspace> <workspace> --bind <scratch> <scratch>
+      --ro-bind <bundle> <bundle>
       --unshare-net --unshare-pid --die-with-parent --new-session
       -- <argv>
 ```
 
 The whole filesystem read-only, the temp directory replaced by an empty `tmpfs` so sibling
-workspaces vanish, the two writable directories bound back in, no network namespace, and
+workspaces vanish, the two writable directories bound back in, the bundle bound back
+read-only (it may live under the temp directory — §12), no network namespace, and
 `--die-with-parent` so a killed harness takes the script with it. `bwrap` needs
 unprivileged user namespaces or a setuid install; the probe reports which is missing.
 
