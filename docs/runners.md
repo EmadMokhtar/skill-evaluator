@@ -23,10 +23,11 @@ From a checkout instead, the extra comes from `uv sync --extra pydantic-ai` (or
 
 Both runners receive the same inputs — the same system prompt built by one shared
 function, the same mock tools, the same offered-mode skill tool, the same workspace
-tools — and produce the same `RunResult`, so a case passing under one and failing under
-the other says something about the skill's instructions, not about the harness. The
-judge is chosen separately (`judge = "pydantic-ai"` or `"langchain"`), and one judge grades
-every runner's output.
+tools, and the same [bundle tools](#bundled-files-and-scripts) (`list_skill_files`,
+`read_skill_file`, and `run_script` under `allow_scripts`) — and produce the same
+`RunResult`, so a case passing under one and failing under the other says something about
+the skill's instructions, not about the harness. The judge is chosen separately
+(`judge = "pydantic-ai"` or `"langchain"`), and one judge grades every runner's output.
 
 `--model` is passed to each framework unchanged. `openai:` and `anthropic:` are spelled
 the same in both; other providers differ (PydanticAI `google-gla:`, LangChain

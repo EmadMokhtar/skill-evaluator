@@ -1,5 +1,6 @@
 """The second real adapter, exercised offline with a scripted model."""
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,13 @@ from skill_lens.models import EvalCase, Skill, ToolSpec
 from skill_lens.runners.base import Runner
 from skill_lens.runners.langchain import LangChainRunner
 from skill_lens.runners.prompting import BASELINE_PREAMBLE, OFFERED_PREAMBLE, WORKSPACE_PREAMBLE
-from skill_lens.runners.tools import BUILTIN_TOOL_NAMES, skill_tool_name
+from skill_lens.runners.tools import (
+    BUILTIN_TOOL_NAMES,
+    BUNDLE_TOOL_NAMES,
+    WORKSPACE_TOOL_NAMES,
+    skill_tool_name,
+)
+from skill_lens.scripts import SandboxStatus, ScriptPolicy, ScriptRuntime
 from skill_lens.workspace import Workspace
 
 SKILL = Skill(
@@ -422,7 +429,7 @@ def test_the_builtin_tools_are_registered_only_when_a_workspace_is_given(tmp_pat
     LangChainRunner(model=with_workspace).run(
         SKILL, case(), workspace=Workspace(root=tmp_path.resolve())
     )
-    assert set(BUILTIN_TOOL_NAMES) <= set(with_workspace.bound_tools[0])
+    assert set(WORKSPACE_TOOL_NAMES) <= set(with_workspace.bound_tools[0])
 
     without = scripted(text("done"))
     LangChainRunner(model=without).run(SKILL, case())
@@ -460,3 +467,90 @@ def test_a_model_writing_outside_the_root_is_refused_not_errored(tmp_path):
     result = runner.run(SKILL, case(), workspace=workspace)
     assert result.error is None
     assert workspace.listing() == []
+
+
+# --- bundle tools ----------------------------------------------------------
+
+RUNTIME = ScriptRuntime(
+    policy=ScriptPolicy(sandbox="off", interpreters={"py": (sys.executable,)}),
+    sandbox=SandboxStatus(backend="none", detail="test"),
+)
+
+
+def _bundled_skill(tmp_path):
+    root = tmp_path / "skill"
+    (root / "scripts").mkdir(parents=True)
+    (root / "scripts" / "hello.py").write_text("print('hi from script')", encoding="utf-8")
+    return SKILL.model_copy(update={"path": root, "bundle_root": root.resolve()})
+
+
+def _seen_tools(skill, workspace, scripts, **case_kwargs):
+    model = scripted(text("done"))
+    LangChainRunner(model=model).run(
+        skill, case(**case_kwargs), workspace=workspace, scripts=scripts
+    )
+    # With no tools at all create_agent never binds, so flatten rather than index.
+    return {name for group in model.bound_tools for name in group}
+
+
+def test_bundle_tools_are_registered_with_a_bundle_and_a_workspace(tmp_path):
+    workspace = Workspace(root=(tmp_path / "ws").resolve())
+    workspace.root.mkdir()
+    tools = _seen_tools(_bundled_skill(tmp_path), workspace, RUNTIME)
+    assert set(BUNDLE_TOOL_NAMES) <= tools
+
+
+def test_no_run_script_without_a_runtime(tmp_path):
+    workspace = Workspace(root=(tmp_path / "ws").resolve())
+    workspace.root.mkdir()
+    tools = _seen_tools(_bundled_skill(tmp_path), workspace, None)
+    assert {"list_skill_files", "read_skill_file"} <= tools
+    assert "run_script" not in tools
+
+
+def test_no_bundle_tools_without_a_workspace(tmp_path):
+    tools = _seen_tools(_bundled_skill(tmp_path), None, RUNTIME)
+    assert not set(BUNDLE_TOOL_NAMES) & tools
+
+
+def test_no_bundle_tools_for_a_skill_without_a_bundle(tmp_path):
+    workspace = Workspace(root=(tmp_path / "ws").resolve())
+    workspace.root.mkdir()
+    tools = _seen_tools(SKILL, workspace, RUNTIME)
+    assert not set(BUNDLE_TOOL_NAMES) & tools
+
+
+def test_bundle_tools_are_registered_in_offered_mode_too(tmp_path):
+    # An agent that triggers the skill needs the bundle exactly as a loaded
+    # case does; registering the tools says nothing about what the skill is,
+    # so the trigger rate still measures the skill's description.
+    workspace = Workspace(root=(tmp_path / "ws").resolve())
+    workspace.root.mkdir()
+    tools = _seen_tools(_bundled_skill(tmp_path), workspace, RUNTIME, mode="offered")
+    assert set(BUNDLE_TOOL_NAMES) <= tools
+    assert skill_tool_name(SKILL.name) in tools
+
+
+def test_a_model_running_a_script_gets_its_output_back(tmp_path):
+    model = scripted(tool_call("run_script", {"path": "scripts/hello.py"}), text("done"))
+    workspace = Workspace(root=(tmp_path / "ws").resolve())
+    workspace.root.mkdir()
+    result = LangChainRunner(model=model).run(
+        _bundled_skill(tmp_path), case(), workspace=workspace, scripts=RUNTIME
+    )
+    assert result.error is None
+    assert result.tool_calls[0].name == "run_script"
+    assert "hi from script" in tool_results(model.turns[1])["run_script"]
+
+
+def test_a_model_running_a_missing_script_is_refused_not_errored(tmp_path):
+    # run_script never raises: a bad path comes back as a tool result the
+    # model reads, never an exception that would mark the whole run errored.
+    model = scripted(tool_call("run_script", {"path": "scripts/nope.py"}), text("done"))
+    workspace = Workspace(root=(tmp_path / "ws").resolve())
+    workspace.root.mkdir()
+    result = LangChainRunner(model=model).run(
+        _bundled_skill(tmp_path), case(), workspace=workspace, scripts=RUNTIME
+    )
+    assert result.error is None
+    assert "refused" in tool_results(model.turns[1])["run_script"]

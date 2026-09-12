@@ -575,7 +575,7 @@ def _bundled_skill(tmp_path):
     return SKILL.model_copy(update={"path": root, "bundle_root": root.resolve()})
 
 
-def _seen_tools(skill, workspace, scripts):
+def _seen_tools(skill, workspace, scripts, **case_kwargs):
     seen: dict[str, list[str]] = {}
 
     def reply(messages, info: AgentInfo):
@@ -583,7 +583,7 @@ def _seen_tools(skill, workspace, scripts):
         return text("done")
 
     PydanticAIRunner(model=FunctionModel(reply)).run(
-        skill, case(), workspace=workspace, scripts=scripts
+        skill, case(**case_kwargs), workspace=workspace, scripts=scripts
     )
     return set(seen["tools"])
 
@@ -613,6 +613,17 @@ def test_no_bundle_tools_for_a_skill_without_a_bundle(tmp_path):
     workspace.root.mkdir()
     tools = _seen_tools(SKILL, workspace, RUNTIME)
     assert not set(BUNDLE_TOOL_NAMES) & tools
+
+
+def test_bundle_tools_are_registered_in_offered_mode_too(tmp_path):
+    # An agent that triggers the skill needs the bundle exactly as a loaded
+    # case does; registering the tools says nothing about what the skill is,
+    # so the trigger rate still measures the skill's description.
+    workspace = Workspace(root=(tmp_path / "ws").resolve())
+    workspace.root.mkdir()
+    tools = _seen_tools(_bundled_skill(tmp_path), workspace, RUNTIME, mode="offered")
+    assert set(BUNDLE_TOOL_NAMES) <= tools
+    assert skill_tool_name(SKILL.name) in tools
 
 
 def test_a_model_running_a_script_gets_its_output_back(tmp_path):
