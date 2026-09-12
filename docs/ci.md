@@ -63,11 +63,30 @@ Outputs: `exit-code`, `passed`, `pass-rate`, `json-report`, `junit-report`, `mar
 
 `allow-scripts: true` mirrors `keep-workspace`: it passes `--allow-scripts`, so the skill's
 bundled scripts run on the job's runner. Enabling it in CI runs unvetted code with the job's
-filesystem readable — the environment is rebuilt from an allowlist, so `GITHUB_TOKEN` and
-every other secret in `env` never reach the script, but files on disk (the checkout, the
-runner's tools) do, and an OS sandbox applies only where the runner has a working one — a
-stock `ubuntu-latest` runner does not, and the report's `scripts: on, sandbox: ...` line says
-what applied. Turn it on only for skills you would run by hand. See
+filesystem readable. The script's environment is rebuilt from an allowlist, so `GITHUB_TOKEN`
+and every other secret in `env` are not *inherited* — but that is the only layer between a
+script and the token. `actions/checkout` persists the job token on disk by default
+(`persist-credentials: true`, in `.git/config` of the checkout), readable by the same user the
+script runs as; and on a stock `ubuntu-latest` runner no OS sandbox applies (the report's
+`scripts: on, sandbox: none (...)` line says so), so the network is open and nothing stops a
+script reading the token and sending it out. If you enable scripts, tell the checkout not to
+persist the token, and give the job only the permissions the run needs:
+
+```yaml
+permissions:
+  contents: read
+steps:
+  - uses: actions/checkout@v4
+    with:
+      persist-credentials: false
+  - uses: EmadMokhtar/skill-evaluator@v0.3.0
+    with:
+      path: ./skills
+      allow-scripts: true
+```
+
+Files on disk (the checkout, the runner's tools) stay readable either way. Turn scripts on
+only for skills you would run by hand. See
 [Running bundled scripts](security.md#running-bundled-scripts).
 
 `json-output`, `junit-output` and `markdown-output` default to real paths rather than being

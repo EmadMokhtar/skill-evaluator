@@ -301,8 +301,9 @@ form, that file is the explanation.
 - **`Skill.bundle_root` defaults to `None`; only the loader and the baseline resolver set
   it**, so the `--baseline none` skill never carries the candidate's scripts.
 - **A script's environment is an allowlist, never `os.environ` minus keys**; `shell=False`
-  always; a timeout kills the process group (a script that calls `os.setsid()` escapes it on
-  macOS; `bwrap` still covers it on Linux); output is read from files through the
+  always; a timeout kills the process group (a script that calls `os.setsid()` escapes
+  `os.killpg` on every POSIX platform; only the `bwrap` backend closes that); output is
+  read from files through the
   descriptors the harness opened before the process started — never by re-opening the path
   — capped, and a cut is never silent.
 - **`run_script` never raises, and an unrunnable script is never `RunResult.error`.**

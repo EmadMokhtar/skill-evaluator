@@ -560,9 +560,10 @@ before anything is spawned, and that refusal is text the model reads.
 
 **A timeout kills the process group, not just the child.** `start_new_session=True` on
 POSIX (`CREATE_NEW_PROCESS_GROUP` + `taskkill /T` on Windows), so a script that starts
-`sleep 1000` and exits leaves nothing behind. One honest limit: a script that calls
-`os.setsid()` leaves the group and survives the kill on macOS; under `bwrap`,
-`--unshare-pid` and `--die-with-parent` still take it down with the sandbox.
+`sleep 1000` and exits leaves nothing behind. One honest limit: the kill is `os.killpg`, so
+a script that calls `os.setsid()` leaves the group and survives it on every POSIX platform;
+only under `bwrap` do `--unshare-pid` and `--die-with-parent` still take it down with the
+sandbox, and the stock Ubuntu runner has no working `bwrap`.
 
 **Script output is read from files, capped, and a cut is never silent.** Captured into
 memory, a script printing gigabytes inside the timeout would take the harness down. The
@@ -616,10 +617,11 @@ authority — so a bundle-only commit after it is invisible, and a very large hi
 not keep them: they are an input, and the commit they came from is in the report already.
 
 **Bundle tools require a `workspace:` block, and their names are reserved in every
-workspace case.** The workspace is the script's working directory and the sandbox's only
-writable area; a name that is sometimes free is a name nobody can rely on. The tools are
-registered in `mode: offered` too — an agent that declines the skill has no reason to call
-them, and one that triggers it needs them exactly as a `loaded` case does.
+workspace case.** The workspace is the script's working directory and, with its scratch
+directory, the only host area the sandbox lets it write to; a name that is sometimes free is
+a name nobody can rely on. The tools are registered in `mode: offered` too — an agent that
+declines the skill has no reason to call them, and one that triggers it needs them exactly
+as a `loaded` case does.
 
 **The workspace preamble is unchanged** — byte-identical in both arms, naming no skill.
 The bundle tools describe themselves; "run `scripts/count.py`" comes from `SKILL.md`,

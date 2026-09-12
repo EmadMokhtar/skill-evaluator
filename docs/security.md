@@ -188,10 +188,12 @@ adds — and the trust model is:
   for temporary files, no shell, a timeout that kills the process group, output read from
   files and capped with a visible cut.
 - **An OS sandbox applies where one exists** — `sandbox-exec` on macOS, `bwrap` on Linux.
-  Under it a script cannot open a network connection, cannot write outside the workspace
-  and its scratch directory, and cannot read anything under the system temporary directory
-  except the workspace, the scratch directory and the skill's own bundle — so other
-  arms' and other cases' workspaces are hidden from it. The backend is executed once per
+  Under it a script cannot open a network connection, cannot write to the host filesystem
+  outside the workspace and its scratch directory (under `bwrap`, writes under the
+  temporary directory and `/dev/shm` land in an in-memory mount discarded when the script
+  exits), and cannot read anything under the system temporary directory except the
+  workspace, the scratch directory and the skill's own bundle — so other arms' and other
+  cases' workspaces are hidden from it. The backend is executed once per
   run before any case, not merely found on `PATH`; `script_sandbox = "required"` makes its
   absence exit 2, and the report always says which backend applied. `sandbox-exec` is
   marked deprecated in Apple's documentation and remains present and working on current

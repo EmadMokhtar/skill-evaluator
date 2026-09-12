@@ -121,12 +121,12 @@ the instruction to run `scripts/count.py` comes from `SKILL.md`, which is what i
 measurement, and the workspace preamble is unchanged and still identical in both arms.
 
 The bundle tools need the `workspace:` block because the workspace is the script's working
-directory and the sandbox's only writable area. A case without one gets no bundle tools,
-and a `trajectory:` naming one there is the same authoring error the workspace tools
-already raise. The tools are registered in `mode: offered` cases too — an agent that
-declines the skill has no reason to call them, and one that triggers it needs them exactly
-as a `loaded` case does. All six built-in names are reserved in every workspace case; see
-[Workspaces](eval-files.md#workspaces).
+directory and, with its scratch directory, the only host area the sandbox lets it write
+to. A case without one gets no bundle tools, and a `trajectory:` naming one there is the
+same authoring error the workspace tools already raise. The tools are registered in
+`mode: offered` cases too — an agent that declines the skill has no reason to call them,
+and one that triggers it needs them exactly as a `loaded` case does. All six built-in
+names are reserved in every workspace case; see [Workspaces](eval-files.md#workspaces).
 
 `examples/log-triage` is a skill that can only pass by running its script: the counts its
 case asserts are what `scripts/count_levels.py` prints for the seeded log, and a model that
@@ -180,9 +180,10 @@ reading that fact is the eval signal. `run_script` never raises. Standard input 
   joined into a command line.
 - A wall-clock timeout (`script_timeout_seconds`) kills the whole process group, not only
   the direct child, so a script that starts `sleep 1000` and exits leaves nothing behind.
-  One honest limit: a script that calls `os.setsid()` leaves that group and survives the
-  kill on macOS; on Linux, `bwrap`'s `--unshare-pid` and `--die-with-parent` still take it
-  down with the sandbox.
+  One honest limit: the kill is `os.killpg`, so a script that calls `os.setsid()` leaves
+  that group and survives it on every POSIX platform; only the `bwrap` backend closes that
+  gap (`--unshare-pid` puts the script in its own PID namespace and `--die-with-parent`
+  takes it down with the sandbox) — and the stock Ubuntu runner has no working `bwrap`.
 - stdout and stderr are written to files in the scratch directory, not held in memory, and
   read back capped at `max_script_output_bytes` each; a cut ends with `... [truncated, N
   bytes omitted]` stating the exact count. The harness reads them through the descriptors
@@ -196,12 +197,14 @@ reading that fact is the eval signal. `run_script` never raises. Standard input 
 
 **The OS sandbox**, where one exists (`script_sandbox = "auto"`, the default), is a second
 layer on top. Under either backend a script cannot open a network connection; cannot write
-anywhere but the workspace and its scratch directory; and cannot read anything under the
-system temporary directory except the workspace, the scratch directory and the skill's own
-bundle — so under `--concurrency N` a script cannot read the baseline arm's workspace or
-another case's scratch directory. The bundle is allowed back explicitly because a
-`--baseline previous` bundle is extracted under that temporary directory. Reads anywhere
-else are allowed (see below).
+to the host filesystem outside the workspace and its scratch directory (under `bwrap`,
+writes under the temporary directory and `/dev/shm` land in an in-memory mount that is
+discarded when the script exits — bounded, like output, only by the timeout); and cannot
+read anything under the system temporary directory except the workspace, the scratch
+directory and the skill's own bundle — so under `--concurrency N` a script cannot read the
+baseline arm's workspace or another case's scratch directory. The bundle is allowed back
+explicitly because a `--baseline previous` bundle is extracted under that temporary
+directory. Reads anywhere else are allowed (see below).
 
 | | Backend | How |
 | --- | --- | --- |
