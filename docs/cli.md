@@ -26,7 +26,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--evals <path>` | discovery | An explicit eval file or directory, overriding discovery |
-| `--runner <name>` | `fake` | `fake` or `pydantic-ai` — see [Runners](runners.md) |
+| `--runner <name>` | `fake` | `fake`, `pydantic-ai` or `langchain` — see [Runners](runners.md) |
 | `--model <name>` | `openai:gpt-4o-mini` | Model id, passed to runners that use one |
 | `--judge-model <name>` | falls back to `--model` | Model id for the LLM judge |
 | `--tag <tag>` | none | Only run cases carrying this tag |

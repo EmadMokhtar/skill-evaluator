@@ -96,6 +96,9 @@ whether it arrives from `model`, `judge_model`, or the matching flag.
 `judge` selects the judge the same way `default_runner` selects the runner, and defaults to
 `"fake"` for the same reason: **upgrading must never start spending money on its own.**
 
+`judge = "pydantic-ai"` and `judge = "langchain"` each need their extra installed; a
+repository that installs only `skill-lens[langchain]` can both run and grade.
+
 ```toml
 judge = "pydantic-ai"
 judge_model = ""             # empty falls back to `model`

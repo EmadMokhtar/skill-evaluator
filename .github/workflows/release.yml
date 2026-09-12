@@ -181,7 +181,7 @@ jobs:
 
       - name: Export the SBOM
         # A CycloneDX Software Bill of Materials for what an installer gets:
-        # the runtime dependencies plus the optional `pydantic-ai` extra, and
+        # the runtime dependencies plus every optional extra, and
         # not the dev or docs tooling, which ships to nobody. `--frozen` reads
         # uv.lock exactly as `verify` audited it, with no re-resolution.
         #
