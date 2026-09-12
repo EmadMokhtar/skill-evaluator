@@ -772,3 +772,21 @@ def test_the_run_plan_counts_only_cases_the_case_filter_keeps(tmp_path, monkeypa
     _make_skill(tmp_path, cases=TWO_CASES_YAML)
     result = runner.invoke(app, ["run", str(tmp_path), "--runner", "pydantic-ai", "--case", "also"])
     assert "1 case(s) = 1 runs" in plain(result.stdout)
+
+
+def test_allow_scripts_flags_override_the_config_in_both_directions(tmp_path):
+    # Three states, like --keep-workspace: with allow_scripts = true committed
+    # there must still be a way to get a scripts-off run without editing the
+    # file. The scripts line is printed only when execution is on.
+    skill_dir = _make_skill(tmp_path, cases=WORKSPACE_CASES_YAML)
+    config = tmp_path / "skill-lens.toml"
+    config.write_text('allow_scripts = true\nscript_sandbox = "off"\n', encoding="utf-8")
+
+    on = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
+    assert "scripts: on, sandbox: none" in on.stdout
+
+    off = runner.invoke(app, ["run", str(skill_dir), "--config", str(config), "--no-allow-scripts"])
+    assert "scripts: on" not in off.stdout
+
+    flag_on = runner.invoke(app, ["run", str(skill_dir), "--allow-scripts"])
+    assert "scripts: on, sandbox:" in flag_on.stdout

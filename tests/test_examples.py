@@ -45,6 +45,8 @@ def test_the_example_config_parses_and_sets_what_it_claims():
     assert config.concurrency == 4
     assert config.min_pass_rate == 1.0
     assert config.per_skill_min == {"order-support": 1.0}
+    assert config.allow_scripts is True
+    assert config.script_sandbox == "auto"
 
 
 def test_the_example_config_mentions_every_key():

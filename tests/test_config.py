@@ -239,3 +239,66 @@ def test_full_output_defaults_off_and_loads_from_the_file(tmp_path):
     path = tmp_path / "skill-lens.toml"
     path.write_text("full_output = true\n", encoding="utf-8")
     assert load_config(path=path).full_output is True
+
+
+def test_script_defaults_are_off_auto_and_the_documented_numbers(tmp_path):
+    config = load_config(start=tmp_path)
+    assert config.allow_scripts is False
+    assert config.script_sandbox == "auto"
+    assert config.script_timeout_seconds == 30.0
+    assert config.max_script_output_bytes == 20_000
+    assert config.script_interpreters == {"py": ["python3"], "sh": ["bash"]}
+
+
+def test_script_keys_load_from_toml(tmp_path):
+    path = tmp_path / "skill-lens.toml"
+    path.write_text(
+        'allow_scripts = true\nscript_sandbox = "required"\nscript_timeout_seconds = 5\n'
+        "max_script_output_bytes = 100\n\n[script_interpreters]\n"
+        'py = ["python3", "-X", "utf8"]\nrb = ["ruby"]\n',
+        encoding="utf-8",
+    )
+    config = load_config(path=path)
+    assert config.allow_scripts is True
+    assert config.script_sandbox == "required"
+    assert config.script_timeout_seconds == 5.0
+    assert config.max_script_output_bytes == 100
+    # A partial table replaces the default, like any TOML table would.
+    assert config.script_interpreters == {"py": ["python3", "-X", "utf8"], "rb": ["ruby"]}
+
+
+def test_interpreter_keys_are_normalised_to_a_bare_lower_case_extension(tmp_path):
+    path = tmp_path / "skill-lens.toml"
+    path.write_text('[script_interpreters]\n".PY" = ["python3"]\n', encoding="utf-8")
+    assert load_config(path=path).script_interpreters == {"py": ["python3"]}
+
+
+@pytest.mark.parametrize(
+    "toml",
+    [
+        "[script_interpreters]\npy = []\n",
+        '[script_interpreters]\n"" = ["python3"]\n',
+        'script_sandbox = "firejail"\n',
+        "script_timeout_seconds = 0\n",
+        "max_script_output_bytes = -1\n",
+    ],
+)
+def test_invalid_script_settings_are_config_errors(tmp_path, toml):
+    path = tmp_path / "skill-lens.toml"
+    path.write_text(toml, encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(path=path)
+
+
+def test_script_policy_carries_every_setting_as_tuples(tmp_path):
+    path = tmp_path / "skill-lens.toml"
+    path.write_text(
+        'script_sandbox = "off"\nscript_timeout_seconds = 2\nmax_script_output_bytes = 9\n'
+        '[script_interpreters]\npy = ["python3", "-B"]\n',
+        encoding="utf-8",
+    )
+    policy = load_config(path=path).script_policy()
+    assert policy.sandbox == "off"
+    assert policy.timeout_seconds == 2.0
+    assert policy.max_output_bytes == 9
+    assert policy.interpreters == {"py": ("python3", "-B")}

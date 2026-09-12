@@ -6,8 +6,15 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from skill_lens.models import SandboxMode
+from skill_lens.scripts import (
+    DEFAULT_INTERPRETERS,
+    DEFAULT_MAX_OUTPUT_BYTES,
+    DEFAULT_TIMEOUT_SECONDS,
+    ScriptPolicy,
+)
 from skill_lens.workspace import DEFAULT_LIMITS
 
 CONFIG_FILENAME = "skill-lens.toml"
@@ -76,6 +83,15 @@ class Config(BaseModel):
     because, with no flag, there is only one entry point to validate --
     unlike `repeat` and `concurrency`, whose checks sit in the CLI so a flag
     and a config value are checked identically.
+
+    `allow_scripts` is the trust switch for M6 part 2: a `SKILL.md` under
+    evaluation is unvetted code, and running the scripts bundled with it is a
+    decision the operator of the run states, never something an eval file can
+    turn on. `--allow-scripts` / `--no-allow-scripts` override it in either
+    direction. The four `script_*` keys are repository policy with no per-run
+    reason to vary -- config-only, validated here, like the workspace caps.
+    Setting them while `allow_scripts` is false is the normal state of a
+    repository that turns execution on only in one CI job.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -100,6 +116,47 @@ class Config(BaseModel):
     max_file_bytes: int = Field(default=DEFAULT_LIMITS.max_file_bytes, gt=0)
     max_files: int = Field(default=DEFAULT_LIMITS.max_files, gt=0)
     max_total_bytes: int = Field(default=DEFAULT_LIMITS.max_total_bytes, gt=0)
+    allow_scripts: bool = False
+    script_sandbox: SandboxMode = "auto"
+    script_timeout_seconds: float = Field(default=DEFAULT_TIMEOUT_SECONDS, gt=0)
+    max_script_output_bytes: int = Field(default=DEFAULT_MAX_OUTPUT_BYTES, gt=0)
+    script_interpreters: dict[str, list[str]] = Field(
+        default_factory=lambda: {ext: list(argv) for ext, argv in DEFAULT_INTERPRETERS.items()}
+    )
+
+    @field_validator("script_interpreters")
+    @classmethod
+    def _normalise_interpreters(cls, value: dict[str, list[str]]) -> dict[str, list[str]]:
+        """Keys become a bare lower-case extension; every argv must be non-empty.
+
+        `SkillBundle.script` looks up the lower-cased extension without its
+        dot, so `".PY"` and `"py"` have to be the same key or an author's
+        spelling would silently never match.
+        """
+        normalised: dict[str, list[str]] = {}
+        for key, argv in value.items():
+            extension = key.strip().lstrip(".").lower()
+            if not extension:
+                raise ValueError(f"script_interpreters has an empty extension key {key!r}")
+            if not argv:
+                raise ValueError(
+                    f'script_interpreters.{key} is empty; name an interpreter, e.g. ["python3"]'
+                )
+            normalised[extension] = list(argv)
+        return normalised
+
+    def script_policy(self) -> ScriptPolicy:
+        """The script settings as the orchestrator consumes them.
+
+        Does not look at `allow_scripts`: the CLI resolves that against its
+        flag and decides whether to pass the policy at all.
+        """
+        return ScriptPolicy(
+            sandbox=self.script_sandbox,
+            timeout_seconds=self.script_timeout_seconds,
+            max_output_bytes=self.max_script_output_bytes,
+            interpreters={ext: tuple(argv) for ext, argv in self.script_interpreters.items()},
+        )
 
 
 def find_config_file(start: Path) -> Path | None:

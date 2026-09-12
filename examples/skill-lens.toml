@@ -67,6 +67,27 @@ concurrency = 4
 # max_files = 200
 # max_total_bytes = 5000000
 
+# Run the scripts a skill bundles under scripts/. Off by default: a SKILL.md
+# under evaluation is unvetted code, and skill-lens runs in CI. On here so
+# that examples/log-triage can run its counting script.
+allow_scripts = true
+
+# "auto": use sandbox-exec (macOS) or bwrap (Linux) when the probe succeeds,
+# otherwise the portable guards alone; "required" refuses to run without one;
+# "off" never probes. The report says which applied on every run.
+# script_sandbox = "auto"
+
+# Wall clock per script call; the whole process tree is killed at expiry.
+# script_timeout_seconds = 30.0
+
+# Per stream; anything beyond is cut with a visible marker.
+# max_script_output_bytes = 20000
+
+# Interpreter per file extension, looked up on PATH. Anything else is refused.
+# [script_interpreters]
+# py = ["python3"]
+# sh = ["bash"]
+
 # A stricter floor for one skill, by name. Must stay the last section: in
 # TOML every key after a [table] header belongs to that table.
 [per_skill_min]

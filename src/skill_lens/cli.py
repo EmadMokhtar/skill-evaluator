@@ -151,6 +151,13 @@ def run(
             help="Print a failing case's whole output instead of the first 500 characters.",
         ),
     ] = None,
+    allow_scripts: Annotated[
+        bool | None,
+        typer.Option(
+            "--allow-scripts/--no-allow-scripts",
+            help="Run scripts bundled under the skill's scripts/ directory (off by default).",
+        ),
+    ] = None,
 ) -> None:
     """Discover skills, run their eval cases, and gate on the results."""
     try:
@@ -169,6 +176,9 @@ def run(
             keep_workspace if keep_workspace is not None else settings.keep_workspace
         )
         resolved_full_output = full_output if full_output is not None else settings.full_output
+        resolved_allow_scripts = (  # noqa: F841 - wired in the next commit
+            allow_scripts if allow_scripts is not None else settings.allow_scripts
+        )
         # None means "no cap" to every reporter.
         output_limit = None if resolved_full_output else OUTPUT_LIMIT
         workspace_limits = WorkspaceLimits(
