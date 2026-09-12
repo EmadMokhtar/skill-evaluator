@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import signal
 import subprocess
@@ -109,23 +110,55 @@ class ScriptResult:
     workspace_warning: str | None = None
 
 
-def _quoted(path: Path) -> str:
-    """A path as a sandbox-profile string literal.
+_REGEX_METACHARS = re.compile(r"([.^$|?*+()\[\]{}\\])")
 
-    A profile is a string, and a string is where injection lives: a `"` in a
-    temp path is impossible on macOS, but the builder escapes anyway.
+
+def _profile_string_body(text: str) -> str:
+    """Escape backslash and quote for a profile string body.
+
+    Shared by the plain `"..."` literal and the regex `#"..."` literal: both
+    are the same quoted-string syntax, just read differently by the rule that
+    follows. A `"` in a temp path is impossible on macOS, but the builder
+    escapes anyway.
     """
-    return '"' + str(path).replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _quoted(path: Path) -> str:
+    """A path as a sandbox-profile string literal."""
+    return '"' + _profile_string_body(str(path)) + '"'
+
+
+def _regex_literal(pattern: str) -> str:
+    """A regex source string as a sandbox-profile `#"..."` literal."""
+    return '#"' + _profile_string_body(pattern) + '"'
+
+
+def _skill_lens_siblings_pattern(tempdir: Path) -> str:
+    """A regex matching any `skill-lens-*` directory directly under `tempdir`.
+
+    Metacharacters in `tempdir` are escaped first, so a literal `.` or `+`
+    somewhere in a username does not turn into a wildcard.
+    """
+    escaped = _REGEX_METACHARS.sub(r"\\\1", str(tempdir))
+    return f"^{escaped}/skill-lens-"
 
 
 def macos_profile(workspace: Path, scratch: Path, tempdir: Path) -> str:
     """The `sandbox-exec` profile: allow by default, deny the two things that
     matter, then re-allow the places the script must reach. Later rules win.
 
-    The read denial on the temp directory is what stops a script reading the
-    baseline arm's workspace under --concurrency: every workspace and scratch
-    directory lives there, and only our own two are allowed back.
+    The read denial targets `skill-lens-*` siblings under the temp directory
+    by regex rather than denying the whole temp directory: the bundle (the
+    script file itself) is *also* under the temp directory -- under pytest,
+    `tmp_path` lives at `.../T/pytest-of-<user>/...`, and in a real run the
+    skill's checkout can too -- so a blanket deny would make the interpreter
+    unable to read the very script it was asked to run. Denying only our own
+    sibling prefix keeps the property that matters (another workspace or
+    scratch directory, which always starts with `skill-lens-`, is unreadable)
+    without blocking reads of anything else already under the temp root.
     """
+    deny_siblings = _regex_literal(_skill_lens_siblings_pattern(tempdir))
     return "\n".join(
         [
             "(version 1)",
@@ -134,7 +167,7 @@ def macos_profile(workspace: Path, scratch: Path, tempdir: Path) -> str:
             "(deny file-write*)",
             f"(allow file-write* (subpath {_quoted(workspace)}) (subpath {_quoted(scratch)}))",
             '(allow file-write-data (literal "/dev/null"))',
-            f"(deny file-read* (subpath {_quoted(tempdir)}))",
+            f"(deny file-read* (regex {deny_siblings}))",
             f"(allow file-read* (subpath {_quoted(workspace)}) (subpath {_quoted(scratch)}))",
         ]
     )

@@ -61,8 +61,10 @@ def test_the_macos_profile_denies_network_and_writes_then_reallows_the_two_direc
     assert "(deny file-write*)" in lines
     assert f'(allow file-write* (subpath "{WS}") (subpath "{SCRATCH}"))' in lines
     assert '(allow file-write-data (literal "/dev/null"))' in lines
-    # Sibling workspaces vanish: deny the whole temp dir, re-allow our two.
-    assert lines.index(f'(deny file-read* (subpath "{TEMPDIR}"))') < lines.index(
+    # Sibling workspaces vanish: deny every other skill-lens-* directory under
+    # the temp root by regex (not the whole temp dir -- the bundle itself can
+    # live there too, e.g. under pytest's tmp_path), then re-allow our two.
+    assert lines.index(f'(deny file-read* (regex #"^{TEMPDIR}/skill-lens-"))') < lines.index(
         f'(allow file-read* (subpath "{WS}") (subpath "{SCRATCH}"))'
     )
 
