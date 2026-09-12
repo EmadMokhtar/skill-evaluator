@@ -16,6 +16,8 @@ from skill_lens.models import (
     RubricCheck,
     RunReport,
     RunResult,
+    ScriptNote,
+    ScriptStatus,
     Skill,
     ToolCall,
     ToolSpec,
@@ -380,3 +382,30 @@ def test_run_result_still_forbids_extra_fields():
 def test_judge_request_carries_artifacts():
     assert JudgeRequest(task="t").artifacts == {}
     assert JudgeRequest(task="t", artifacts={"r.md": "body"}).artifacts == {"r.md": "body"}
+
+
+def test_a_skill_has_no_bundle_unless_one_is_set():
+    # None is the safe default: a Skill built by hand in a test, and the
+    # --baseline none skill the orchestrator builds, must never carry the
+    # candidate's scripts.
+    skill = Skill(name="pdf", path=Path("/tmp/pdf"))
+    assert skill.bundle_root is None
+
+
+def test_script_status_records_the_backend_and_why():
+    status = ScriptStatus(sandbox="none", detail="bwrap not found on PATH")
+    assert status.sandbox == "none"
+    with pytest.raises(ValidationError):
+        ScriptStatus(sandbox="firejail", detail="")
+
+
+def test_a_run_report_defaults_to_scripts_off():
+    report = RunReport()
+    assert report.scripts is None
+    assert report.script_notes == []
+    report = RunReport(
+        scripts=ScriptStatus(sandbox="bwrap", detail="bwrap probe succeeded"),
+        script_notes=[ScriptNote(skill_name="pdf", script_count=2)],
+    )
+    assert report.scripts.sandbox == "bwrap"
+    assert report.script_notes[0].script_count == 2
