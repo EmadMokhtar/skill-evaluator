@@ -8,22 +8,35 @@ tests/test_sandbox_live.py, skipped where absent.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
 
+from skill_lens.bundle import SkillBundle
+from skill_lens.models import Skill
 from skill_lens.scripts import (
     DEFAULT_INTERPRETERS,
     DEFAULT_MAX_OUTPUT_BYTES,
     DEFAULT_TIMEOUT_SECONDS,
+    SCRATCH_PREFIX,
     SandboxStatus,
     ScriptPolicy,
+    ScriptResult,
+    ScriptRuntime,
+    ScriptSetupError,
     bwrap_argv,
     macos_profile,
+    preflight,
     probe_sandbox,
+    run_script,
+    script_environment,
     wrap,
 )
+from skill_lens.workspace import Workspace, WorkspaceLimits
 
 WS = Path("/private/var/folders/ab/T/skill-lens-x")
 SCRATCH = Path("/private/var/folders/ab/T/skill-lens-scratch-y")
@@ -157,3 +170,249 @@ def test_required_and_auto_probe_the_same_way(mode):
     # The difference between them is preflight's decision, not the probe's.
     status = probe_sandbox(mode, system="Darwin", which=lambda _n: None, run=None)
     assert status.backend == "none"
+
+
+NO_SANDBOX = SandboxStatus(backend="none", detail="test")
+
+
+def _policy(**overrides) -> ScriptPolicy:
+    # sys.executable, so no test depends on a python3 on PATH.
+    settings = {"interpreters": {"py": (sys.executable,)}, "sandbox": "off"}
+    settings.update(overrides)
+    return ScriptPolicy(**settings)
+
+
+def _runtime(**overrides) -> ScriptRuntime:
+    return ScriptRuntime(policy=_policy(**overrides), sandbox=NO_SANDBOX)
+
+
+def _bundle(tmp_path, **scripts: str) -> SkillBundle:
+    root = tmp_path / "skill"
+    (root / "scripts").mkdir(parents=True)
+    for name, source in scripts.items():
+        (root / "scripts" / name).write_text(source, encoding="utf-8")
+    return SkillBundle(root.resolve())
+
+
+def _workspace(tmp_path, **limits) -> Workspace:
+    root = tmp_path / "ws"
+    root.mkdir()
+    return Workspace(root=root.resolve(), limits=WorkspaceLimits(**limits))
+
+
+# --- environment -------------------------------------------------------------
+
+
+def test_the_environment_is_an_allowlist_not_a_denylist(tmp_path):
+    parent = {
+        "PATH": "/usr/bin",
+        "HOME": "/home/x",
+        "LANG": "C.UTF-8",
+        "OPENAI_API_KEY": "sk-secret",
+        "AWS_SECRET_ACCESS_KEY": "also-secret",
+        "TMPDIR": "/somewhere/else",
+    }
+    env = script_environment(tmp_path, parent=parent, windows=False)
+    assert env["PATH"] == "/usr/bin"
+    assert env["HOME"] == "/home/x"
+    assert "OPENAI_API_KEY" not in env
+    assert "AWS_SECRET_ACCESS_KEY" not in env
+    assert env["TMPDIR"] == env["TMP"] == env["TEMP"] == str(tmp_path)
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert env["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_windows_keeps_what_python_needs_to_start(tmp_path):
+    parent = {"PATH": "C:\\x", "SystemRoot": "C:\\Windows", "COMSPEC": "cmd.exe"}
+    assert script_environment(tmp_path, parent=parent, windows=True)["SystemRoot"] == "C:\\Windows"
+    assert "SystemRoot" not in script_environment(tmp_path, parent=parent, windows=False)
+
+
+# --- preflight ---------------------------------------------------------------
+
+
+def _skill(tmp_path, *scripts: str) -> Skill:
+    root = tmp_path / "skill"
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    for name in scripts:
+        (root / "scripts" / name).write_text("", encoding="utf-8")
+    return Skill(name="pdf", path=root, bundle_root=root.resolve())
+
+
+def test_preflight_rejects_a_missing_interpreter_naming_the_script(tmp_path):
+    skill = _skill(tmp_path, "count.py")
+    policy = ScriptPolicy(sandbox="off", interpreters={"py": ("python3",)})
+    with pytest.raises(ScriptSetupError, match=r"count\.py needs python3, which is not on PATH"):
+        preflight([skill], policy, which=lambda _n: None)
+
+
+def test_preflight_ignores_files_with_no_mapped_extension(tmp_path):
+    skill = _skill(tmp_path, "data.json", "notes.txt")
+    runtime = preflight([skill], ScriptPolicy(sandbox="off"), which=lambda _n: None)
+    assert runtime.sandbox.backend == "none"
+
+
+def test_preflight_skips_skills_without_a_bundle(tmp_path):
+    skill = Skill(name="bare", path=tmp_path)
+    runtime = preflight([skill], ScriptPolicy(sandbox="off", interpreters={"py": ("nope",)}))
+    assert runtime.policy.sandbox == "off"
+
+
+def test_preflight_required_without_a_backend_is_a_setup_error(tmp_path):
+    policy = ScriptPolicy(sandbox="required")
+    with pytest.raises(ScriptSetupError, match='script_sandbox = "required" but no sandbox'):
+        preflight([], policy, system="Windows")
+
+
+def test_preflight_auto_without_a_backend_records_the_reason(tmp_path):
+    runtime = preflight([], ScriptPolicy(sandbox="auto"), system="Windows")
+    assert runtime.sandbox == SandboxStatus(backend="none", detail="no sandbox backend on Windows")
+
+
+# --- run_script --------------------------------------------------------------
+
+PRINTS = "import sys\nprint('out', *sys.argv[1:])\nprint('err', file=sys.stderr)\nsys.exit(3)\n"
+
+
+def test_exit_code_stdout_stderr_and_args_round_trip(tmp_path):
+    bundle = _bundle(tmp_path, **{"count.py": PRINTS})
+    result = run_script(bundle, _workspace(tmp_path), "scripts/count.py", ["a", 2], _runtime())
+    assert result.refused is None
+    assert result.exit_code == 3
+    assert result.timed_out is False
+    assert result.stdout.strip() == "out a 2"
+    assert result.stderr.strip() == "err"
+    assert result.workspace_warning is None
+
+
+def test_the_working_directory_is_the_workspace(tmp_path):
+    bundle = _bundle(tmp_path, **{"cwd.py": "import os; print(os.getcwd())"})
+    workspace = _workspace(tmp_path)
+    result = run_script(bundle, workspace, "scripts/cwd.py", [], _runtime())
+    assert Path(result.stdout.strip()).resolve() == workspace.root
+
+
+def test_a_script_can_write_into_the_workspace(tmp_path):
+    bundle = _bundle(tmp_path, **{"w.py": "open('out.txt', 'w').write('hello')"})
+    workspace = _workspace(tmp_path)
+    run_script(bundle, workspace, "scripts/w.py", [], _runtime())
+    assert workspace.read("out.txt") == "hello"
+
+
+def test_tmpdir_points_at_a_scratch_directory_that_is_gone_afterwards(tmp_path):
+    bundle = _bundle(tmp_path, **{"t.py": "import os, tempfile; print(tempfile.gettempdir())"})
+    workspace = _workspace(tmp_path)
+    result = run_script(bundle, workspace, "scripts/t.py", [], _runtime())
+    scratch = Path(result.stdout.strip())
+    assert scratch.name.startswith(SCRATCH_PREFIX)
+    assert not scratch.is_relative_to(workspace.root)
+    assert not scratch.exists()
+
+
+def test_the_provider_key_never_reaches_a_script(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-planted")
+    bundle = _bundle(tmp_path, **{"env.py": "import os; print(sorted(os.environ))"})
+    result = run_script(bundle, _workspace(tmp_path), "scripts/env.py", [], _runtime())
+    assert "OPENAI_API_KEY" not in result.stdout
+    assert "PATH" in result.stdout
+
+
+def test_a_script_that_outlives_the_timeout_is_stopped_and_reported(tmp_path):
+    source = "import time; print('start', flush=True); time.sleep(30)"
+    bundle = _bundle(tmp_path, **{"sleep.py": source})
+    started = time.monotonic()
+    result = run_script(
+        bundle, _workspace(tmp_path), "scripts/sleep.py", [], _runtime(timeout_seconds=0.5)
+    )
+    assert time.monotonic() - started < 10
+    assert result.timed_out is True
+    assert result.exit_code is None
+    assert result.stdout.strip() == "start"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="process groups are POSIX; Windows uses taskkill")
+def test_a_timeout_kills_the_grandchild_too(tmp_path):
+    # The script starts a sleeper and waits on it. Killing only the direct
+    # child would leave the sleeper running until its own timer expired.
+    source = (
+        "import subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "print(child.pid, flush=True)\n"
+        "child.wait()\n"
+    )
+    bundle = _bundle(tmp_path, **{"spawn.py": source})
+    result = run_script(
+        bundle, _workspace(tmp_path), "scripts/spawn.py", [], _runtime(timeout_seconds=0.5)
+    )
+    assert result.timed_out is True
+    grandchild = int(result.stdout.strip())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(grandchild, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        os.kill(grandchild, 9)
+        pytest.fail("the grandchild survived the group kill")
+
+
+def test_output_past_the_cap_is_cut_with_the_exact_count(tmp_path):
+    bundle = _bundle(tmp_path, **{"big.py": "import sys; sys.stdout.write('x' * 1000)"})
+    result = run_script(
+        bundle, _workspace(tmp_path), "scripts/big.py", [], _runtime(max_output_bytes=100)
+    )
+    assert result.stdout == "x" * 100 + "\n... [truncated, 900 bytes omitted]"
+
+
+def test_output_within_the_cap_carries_no_marker(tmp_path):
+    bundle = _bundle(tmp_path, **{"small.py": "import sys; sys.stdout.write('x' * 100)"})
+    result = run_script(
+        bundle, _workspace(tmp_path), "scripts/small.py", [], _runtime(max_output_bytes=100)
+    )
+    assert result.stdout == "x" * 100
+
+
+def test_a_script_writing_past_a_workspace_cap_yields_a_warning(tmp_path):
+    bundle = _bundle(tmp_path, **{"fill.py": "open('big.txt', 'w').write('x' * 50)"})
+    workspace = _workspace(tmp_path, max_total_bytes=10)
+    result = run_script(bundle, workspace, "scripts/fill.py", [], _runtime())
+    assert result.workspace_warning == (
+        "warning: the working directory now holds 50 bytes; max_total_bytes is 10"
+    )
+
+
+def test_a_refused_path_is_returned_not_raised(tmp_path):
+    bundle = _bundle(tmp_path, **{"count.py": PRINTS})
+    result = run_script(bundle, _workspace(tmp_path), "scripts/nope.py", [], _runtime())
+    assert result == ScriptResult(
+        refused="refused: no such script 'scripts/nope.py'; bundled scripts: scripts/count.py"
+    )
+
+
+def test_an_interpreter_missing_at_call_time_is_a_refusal(tmp_path, monkeypatch):
+    # Baseline bundles are not preflighted, so this can happen after preflight.
+    bundle = _bundle(tmp_path, **{"x.sh": "echo hi"})
+    monkeypatch.setattr("skill_lens.scripts.shutil.which", lambda _n: None)
+    runtime = _runtime(interpreters={"sh": ("definitely-not-a-shell",)})
+    result = run_script(bundle, _workspace(tmp_path), "scripts/x.sh", [], runtime)
+    assert result.refused == (
+        "refused: scripts/x.sh needs definitely-not-a-shell, which is not on PATH"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="shutil.which needs a PATHEXT suffix on Windows")
+def test_an_interpreter_that_will_not_start_is_a_refusal(tmp_path):
+    # Executable bit set (or shutil.which would return None and the refusal
+    # would be "not on PATH"), but not a real binary: exec fails.
+    bundle = _bundle(tmp_path, **{"x.py": "print(1)"})
+    broken = tmp_path / "broken"
+    broken.write_text("not executable", encoding="utf-8")
+    broken.chmod(0o755)
+    runtime = ScriptRuntime(
+        policy=ScriptPolicy(sandbox="off", interpreters={"py": (str(broken),)}), sandbox=NO_SANDBOX
+    )
+    result = run_script(bundle, _workspace(tmp_path), "scripts/x.py", [], runtime)
+    assert result.refused is not None
+    assert result.refused.startswith(f"refused: cannot start {broken}")

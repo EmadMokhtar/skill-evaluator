@@ -23,24 +23,20 @@ decision.
 
 from __future__ import annotations
 
-import os  # noqa: F401 - used by Task 6
+import os
 import platform
 import shutil
-import signal  # noqa: F401 - used by Task 6
+import signal
 import subprocess
-import tempfile  # noqa: F401 - used by Task 6
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from skill_lens.bundle import SkillBundle, script_extension  # noqa: F401 - used by Task 6
-from skill_lens.models import (  # noqa: F401 - Skill is used by Task 6
-    SandboxBackend,
-    SandboxMode,
-    Skill,
-)
-from skill_lens.workspace import PathRefused, Workspace  # noqa: F401 - used by Task 6
+from skill_lens.bundle import SkillBundle, script_extension
+from skill_lens.models import SandboxBackend, SandboxMode, Skill
+from skill_lens.workspace import PathRefused, Workspace
 
 DEFAULT_INTERPRETERS: Mapping[str, tuple[str, ...]] = {"py": ("python3",), "sh": ("bash",)}
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -223,3 +219,174 @@ def probe_sandbox(
             return SandboxStatus("none", "bwrap not found on PATH")
         return _probe("bwrap", _bwrap_probe_argv(), run)
     return SandboxStatus("none", f"no sandbox backend on {system}")
+
+
+def script_environment(
+    scratch: Path, *, parent: Mapping[str, str] | None = None, windows: bool | None = None
+) -> dict[str, str]:
+    """The environment a script runs in: rebuilt from an allowlist.
+
+    `parent` and `windows` are injectable for tests; the defaults are the real
+    process environment and platform.
+    """
+    parent = os.environ if parent is None else parent
+    windows = os.name == "nt" if windows is None else windows
+    keys = _KEPT_ENV + (_KEPT_ENV_WINDOWS if windows else ())
+    env = {key: parent[key] for key in keys if key in parent}
+    env.update(
+        TMPDIR=str(scratch),
+        TMP=str(scratch),
+        TEMP=str(scratch),
+        # The bundle is read-only under the sandbox; without this every import
+        # would fill stderr with __pycache__ write errors.
+        PYTHONDONTWRITEBYTECODE="1",
+        PYTHONIOENCODING="utf-8",
+    )
+    return env
+
+
+def preflight(
+    skills: Sequence[Skill],
+    policy: ScriptPolicy,
+    *,
+    system: str | None = None,
+    which: Callable[[str], str | None] = shutil.which,
+    run: Callable[..., Any] = subprocess.run,
+) -> ScriptRuntime:
+    """Once per run, after discovery, before any case: can scripts run here?
+
+    Every candidate script whose extension is mapped needs its interpreter on
+    PATH; `required` needs a backend. Both fail before any money is spent. A
+    file under `scripts/` with an unmapped extension is not an error -- it is
+    simply not runnable. Baseline bundles are resolved later, per case, so
+    `run_script` looks an interpreter up again at call time and refuses (not
+    raises) if it is gone.
+    """
+    for skill in skills:
+        if skill.bundle_root is None:
+            continue
+        bundle = SkillBundle(skill.bundle_root)
+        for relative in bundle.scripts():
+            argv = policy.interpreters.get(script_extension(relative))
+            if argv is None:
+                continue
+            if which(argv[0]) is None:
+                raise ScriptSetupError(
+                    f"{skill.bundle_root / relative} needs {argv[0]}, which is not on PATH"
+                )
+    status = probe_sandbox(policy.sandbox, system=system, which=which, run=run)
+    if policy.sandbox == "required" and status.backend == "none":
+        raise ScriptSetupError(
+            f'script_sandbox = "required" but no sandbox is available: {status.detail}'
+        )
+    return ScriptRuntime(policy=policy, sandbox=status)
+
+
+def _group_kwargs() -> dict[str, Any]:
+    """Make the child lead its own process group, so a timeout can kill the tree."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _kill_tree(process: subprocess.Popen[bytes]) -> None:
+    """Kill the child and everything it started. Never raises."""
+    if os.name == "nt":
+        subprocess.run(  # noqa: S603 - fixed argv, no shell
+            # S607: taskkill is found on PATH on purpose; it lives in System32
+            # on every Windows install and an absolute path would be wrong.
+            ["taskkill", "/T", "/F", "/PID", str(process.pid)],  # noqa: S607
+            capture_output=True,
+            check=False,
+        )
+    else:
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:  # pragma: no cover - SIGKILL cannot be ignored
+        pass
+
+
+def _read_capped(path: Path, budget: int) -> str:
+    """The first `budget` bytes of a captured stream, plus an honest marker."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            data = handle.read(budget)
+    except OSError as exc:
+        return f"(unreadable: {exc})"
+    text = data.decode("utf-8", errors="replace")
+    if size > budget:
+        text += f"\n... [truncated, {size - budget:,} bytes omitted]"
+    return text
+
+
+def run_script(
+    bundle: SkillBundle,
+    workspace: Workspace,
+    candidate: str,
+    args: Sequence[object],
+    runtime: ScriptRuntime,
+) -> ScriptResult:
+    """Run one bundled script with the workspace as its working directory.
+
+    Never raises: every outcome, including an interpreter that will not start,
+    is a `ScriptResult`. Output goes to files in the scratch directory, not
+    into memory -- a script printing gigabytes inside the timeout must not
+    take the harness down with it -- and is read back capped.
+    """
+    policy = runtime.policy
+    try:
+        target = bundle.script(candidate, policy.interpreters)
+    except PathRefused as exc:
+        return ScriptResult(refused=str(exc))
+    prefix = policy.interpreters[script_extension(candidate)]
+    interpreter = shutil.which(prefix[0])
+    if interpreter is None:
+        return ScriptResult(
+            refused=f"refused: {candidate.strip()} needs {prefix[0]}, which is not on PATH"
+        )
+    argv = [interpreter, *prefix[1:], str(target), *(str(argument) for argument in args)]
+
+    try:
+        scratch = Path(tempfile.mkdtemp(prefix=SCRATCH_PREFIX)).resolve()
+    except OSError as exc:
+        return ScriptResult(refused=f"refused: cannot create a scratch directory: {exc}")
+    try:
+        tempdir = Path(tempfile.gettempdir()).resolve()
+        wrapped = wrap(runtime.sandbox.backend, argv, workspace.root, scratch, tempdir)
+        stdout_path = scratch / "stdout"
+        stderr_path = scratch / "stderr"
+        with stdout_path.open("wb") as out, stderr_path.open("wb") as err:
+            try:
+                process = subprocess.Popen(  # noqa: S603 - argv list, shell=False, nothing joined
+                    wrapped,
+                    cwd=workspace.root,
+                    env=script_environment(scratch),
+                    stdin=subprocess.DEVNULL,
+                    stdout=out,
+                    stderr=err,
+                    **_group_kwargs(),
+                )
+            except OSError as exc:
+                return ScriptResult(refused=f"refused: cannot start {prefix[0]}: {exc}")
+            timed_out = False
+            exit_code: int | None
+            try:
+                exit_code = process.wait(timeout=policy.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                exit_code = None
+                _kill_tree(process)
+        return ScriptResult(
+            exit_code=exit_code,
+            timed_out=timed_out,
+            stdout=_read_capped(stdout_path, policy.max_output_bytes),
+            stderr=_read_capped(stderr_path, policy.max_output_bytes),
+            workspace_warning=workspace.over_limit(),
+        )
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
