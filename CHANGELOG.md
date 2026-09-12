@@ -1,3 +1,9 @@
+## v0.4.0 (2026-09-11)
+
+### Feat
+
+- show why a case failed, rerun one case, and scaffold file-producing skills (#21)
+
 ## v0.3.0 (2026-09-11)
 
 ### Feat
