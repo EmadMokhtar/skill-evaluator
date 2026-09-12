@@ -15,8 +15,9 @@ from pathlib import Path
 import pytest
 
 from skill_lens.bundle import SkillBundle
+from skill_lens.models import WorkspaceSpec
 from skill_lens.scripts import ScriptPolicy, ScriptRuntime, probe_sandbox, run_script
-from skill_lens.workspace import Workspace
+from skill_lens.workspace import Workspace, create_workspace
 
 STATUS = probe_sandbox("auto")
 pytestmark = pytest.mark.skipif(
@@ -102,3 +103,31 @@ def test_the_bundle_is_read_only(tmp_path):
     )
     _, out, _, _ = _run(tmp_path, source)
     assert out.strip() == "refused"
+
+
+def test_a_real_workspace_survives_the_temp_dir_deny(tmp_path):
+    """The other tests' workspaces live under `tmp_path`, one level below the
+    temp root. A production workspace does not: `create_workspace` makes a
+    `skill-lens-<label>-*` directory directly under the temp root, which is
+    exactly what the profile's allow line is written against. This is the
+    layout the deny/allow pair must get right, not an artifact of the test
+    harness's own nesting.
+    """
+    root = tmp_path / "skill"
+    (root / "scripts").mkdir(parents=True)
+    (root / "scripts" / "probe.py").write_text(
+        "import pathlib\n"
+        "pathlib.Path('inside.txt').write_text('from the real workspace')\n"
+        "print(pathlib.Path('inside.txt').read_text())\n",
+        encoding="utf-8",
+    )
+    workspace = create_workspace(WorkspaceSpec(), label="live")
+    try:
+        result = run_script(
+            SkillBundle(root.resolve()), workspace, "scripts/probe.py", [], _runtime()
+        )
+        assert result.refused is None, result.refused
+        assert result.stdout.strip() == "from the real workspace"
+        assert workspace.read("inside.txt") == "from the real workspace"
+    finally:
+        workspace.cleanup()
