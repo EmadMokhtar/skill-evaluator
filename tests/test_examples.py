@@ -5,6 +5,8 @@ behaviour now, so the zero-cost check is that discovery and schema validation
 work on real files. The full run path is covered by the cassette tier.
 """
 
+import subprocess
+import sys
 from pathlib import Path
 
 from skill_lens.cases.loader import load_cases_for_skill
@@ -16,7 +18,7 @@ EXAMPLES = Path(__file__).parent.parent / "examples"
 
 def test_every_example_skill_is_discovered():
     names = [skill.name for skill in load_skills(EXAMPLES)]
-    assert names == ["csv-report", "greeting", "order-support"]
+    assert names == ["csv-report", "greeting", "log-triage", "order-support"]
 
 
 def test_every_example_skill_has_at_least_one_case():
@@ -55,3 +57,32 @@ def test_the_example_config_mentions_every_key():
     text = (EXAMPLES / "skill-lens.toml").read_text(encoding="utf-8")
     for field in Config.model_fields:
         assert field in text, f"{field} is missing from examples/skill-lens.toml"
+
+
+def test_log_triage_bundles_a_script_and_a_reference():
+    skill = next(s for s in load_skills(EXAMPLES) if s.name == "log-triage")
+    assert skill.bundle_root == (EXAMPLES / "log-triage").resolve()
+    from skill_lens.bundle import SkillBundle
+
+    assert SkillBundle(skill.bundle_root).listing() == [
+        "references/report-format.md",
+        "scripts/count_levels.py",
+    ]
+
+
+def test_the_log_triage_script_counts_levels_with_the_standard_library_only(tmp_path):
+    # The eval's expected counts are computed by this script; if it drifts,
+    # the recorded cassette and the assertions drift with it.
+    (tmp_path / "app.log").write_text(
+        "2026-01-01 INFO start\n2026-01-01 ERROR db down\n2026-01-01 WARN slow\n"
+        "2026-01-01 ERROR db down again\n2026-01-01 INFO done\n",
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(EXAMPLES / "log-triage" / "scripts" / "count_levels.py"), "app.log"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert completed.stdout == "ERROR: 2\nINFO: 2\nWARN: 1\n"
