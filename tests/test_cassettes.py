@@ -14,10 +14,12 @@ stale/mismatched cassette before you suspect your network.
 """
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
+from skill_lens.cases.loader import load_cases_for_skill
 from skill_lens.evaluators.assertion import AssertionEvaluator
 from skill_lens.evaluators.budget import BudgetEvaluator
 from skill_lens.evaluators.judge import JudgeEvaluator
@@ -34,6 +36,9 @@ from skill_lens.models import (
     TrajectorySpec,
 )
 from skill_lens.runners.pydantic_ai import BASELINE_PREAMBLE, PydanticAIRunner
+from skill_lens.scripts import SandboxStatus, ScriptPolicy, ScriptRuntime
+from skill_lens.skills.loader import load_skills
+from skill_lens.workspace import create_workspace
 
 
 def _request_body(request) -> str:
@@ -221,3 +226,33 @@ def test_a_baseline_run_reaches_the_provider_without_the_skill_name(replay, vcr,
     # Not just absent from `instructions`: the skill's name must appear nowhere
     # in the request at all -- not in a tool definition, not in the input.
     assert "order-support" not in json.dumps(sent)
+
+
+EXAMPLES = Path(__file__).parent.parent / "examples"
+
+
+@pytest.mark.cassette
+@pytest.mark.vcr
+@pytest.mark.skipif(shutil.which("python3") is None, reason="the example maps .py to python3")
+def test_a_real_agent_runs_a_bundled_script(replay):
+    # Replay runs the script locally, so the recording stays deterministic:
+    # the provider traffic is the cassette, the subprocess is real. The
+    # sandbox is off here so the recording does not depend on the recording
+    # machine's backend.
+    skill = next(s for s in load_skills(EXAMPLES / "log-triage"))
+    (case,) = load_cases_for_skill(skill)
+    runtime = ScriptRuntime(
+        policy=ScriptPolicy(sandbox="off", interpreters={"py": ("python3",)}),
+        sandbox=SandboxStatus(backend="none", detail='script_sandbox = "off"'),
+    )
+    workspace = create_workspace(case.workspace, label="cassette-log-triage")
+    try:
+        result = PydanticAIRunner(model="openai:gpt-4o-mini", retries=0).run(
+            skill, case, workspace=workspace, scripts=runtime
+        )
+        assert result.errored is False, result.error
+        assert "run_script" in [call.name for call in result.tool_calls]
+        assert AssertionEvaluator().evaluate(case, result).passed is True
+        assert TrajectoryEvaluator().evaluate(case, result).passed is True
+    finally:
+        workspace.cleanup()
