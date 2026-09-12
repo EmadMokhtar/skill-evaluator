@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from skill_lens.bundle import has_bundle
 from skill_lens.models import Skill
 from skill_lens.yaml_loading import safe_load
 
@@ -81,17 +82,26 @@ def parse_skill_text(text: str, *, name_fallback: str, path: Path, source: str) 
 
 
 def parse_skill_file(skill_md: Path) -> Skill:
-    """Parse one SKILL.md into a Skill, falling back to the dir name."""
+    """Parse one SKILL.md into a Skill, falling back to the dir name.
+
+    `bundle_root` is set here and only here (plus the baseline resolver, which
+    extracts a previous bundle from git): the text parser cannot know about a
+    directory, and a Skill built anywhere else must default to "no bundle".
+    """
     try:
         text = skill_md.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise SkillParseError(f"cannot read {skill_md}: {exc}") from exc
-    return parse_skill_text(
+    directory = skill_md.parent
+    skill = parse_skill_text(
         text,
-        name_fallback=skill_md.parent.name,
-        path=skill_md.parent,
+        name_fallback=directory.name,
+        path=directory,
         source=str(skill_md),
     )
+    if has_bundle(directory):
+        skill = skill.model_copy(update={"bundle_root": directory.resolve()})
+    return skill
 
 
 def load_skills(path: Path) -> list[Skill]:
