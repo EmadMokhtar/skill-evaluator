@@ -20,6 +20,7 @@ from skill_lens.config import ConfigError, load_config
 from skill_lens.evaluators.assertion import InvalidAssertionValue, UnknownAssertionKind
 from skill_lens.gating import EXIT_OK, evaluate_gate
 from skill_lens.judges.fake import FakeJudge
+from skill_lens.judges.langchain import LangChainJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.models import Skill
 from skill_lens.orchestrator import RunOptions, run_evals
@@ -28,9 +29,11 @@ from skill_lens.reporters.failure_context import OUTPUT_LIMIT
 from skill_lens.reporters.json_reporter import render_json
 from skill_lens.reporters.junit import render_junit
 from skill_lens.reporters.markdown import render_markdown
+from skill_lens.runners.base import RunnerDependencyError
 from skill_lens.runners.fake import FakeRunner
+from skill_lens.runners.langchain import LangChainRunner
 from skill_lens.runners.preflight import MissingAPIKey, check_api_key
-from skill_lens.runners.pydantic_ai import PydanticAIRunner, RunnerDependencyError
+from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.scaffold import render_scaffold, scaffold_target
 from skill_lens.scripts import ScriptSetupError
 from skill_lens.skills.loader import SKILL_FILENAME, SkillParseError, load_skills, parse_skill_file
@@ -38,8 +41,8 @@ from skill_lens.workspace import WorkspaceLimits
 
 app = typer.Typer(help="Run evaluations on Agent Skills (SKILL.md).", no_args_is_help=True)
 
-_RUNNERS = {"fake": FakeRunner, "pydantic-ai": PydanticAIRunner}
-_JUDGES = {"fake": FakeJudge, "pydantic-ai": PydanticAIJudge}
+_RUNNERS = {"fake": FakeRunner, "pydantic-ai": PydanticAIRunner, "langchain": LangChainRunner}
+_JUDGES = {"fake": FakeJudge, "pydantic-ai": PydanticAIJudge, "langchain": LangChainJudge}
 
 # Authoring errors: bad skill/case/config files, or a malformed assertion in an
 # eval YAML (Tasks 6/7 decided the latter aborts the whole run rather than

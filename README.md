@@ -45,8 +45,8 @@ without embedding it.
 uv tool install "skill-lens[pydantic-ai]"
 ```
 
-(`pip install "skill-lens[pydantic-ai]"` works too. Drop the extra for the offline default
-runner alone.)
+(`pip install "skill-lens[pydantic-ai]"` works too; `skill-lens[langchain]` gives you the
+LangChain runner instead, or as well. Drop the extra for the offline default runner alone.)
 
 That puts `skill-lens` on your `PATH`, so the commands below run as written.
 
@@ -173,7 +173,7 @@ above is what supplies it (from a checkout: `uv sync --extra pydantic-ai`). See
 ## Gate your pull requests
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v0.3.0
+- uses: EmadMokhtar/skill-evaluator@v0.4.0
   with:
     path: ./skills
     runner: pydantic-ai

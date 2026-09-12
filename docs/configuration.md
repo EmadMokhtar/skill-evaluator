@@ -81,7 +81,8 @@ artifact, so they only bind when a case is genuinely stuck (writing the same fil
 or writing many small ones) rather than when it legitimately produces something large.
 
 `model`, `retries`, and `retry_backoff_seconds` only matter to components that reach a
-provider (`pydantic-ai`, as a runner or a judge); `FakeRunner` and `FakeJudge` ignore them.
+provider (`pydantic-ai` or `langchain`, as a runner or a judge); `FakeRunner` and `FakeJudge`
+ignore them.
 `temperature` accepts a float or the literal string `"unset"`, for reasoning models that
 reject any explicit temperature:
 
@@ -153,6 +154,9 @@ a repository that turns execution on only in one CI job.
 
 `judge` selects the judge the same way `default_runner` selects the runner, and defaults to
 `"fake"` for the same reason: **upgrading must never start spending money on its own.**
+
+`judge = "pydantic-ai"` and `judge = "langchain"` each need their extra installed; a
+repository that installs only `skill-lens[langchain]` can both run and grade.
 
 ```toml
 judge = "pydantic-ai"

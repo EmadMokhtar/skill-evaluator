@@ -1,4 +1,4 @@
-"""No agent-framework type may appear outside the two adapter modules.
+"""No agent-framework type may appear outside the adapter modules.
 
 The rule is about *importing the framework*, not about the string
 `pydantic_ai` appearing in a file: `cli.py` legitimately writes
@@ -15,12 +15,17 @@ SRC = Path(__file__).resolve().parent.parent / "src" / "skill_lens"
 ALLOWED = {
     Path("runners/pydantic_ai.py"),
     Path("judges/pydantic_ai.py"),
+    Path("runners/langchain.py"),
+    Path("judges/langchain.py"),
 }
 
-FRAMEWORK_IMPORT = re.compile(r"^\s*(?:from|import)\s+pydantic_ai\b", re.MULTILINE)
+# `pydantic_ai`; `langchain`, `langchain_core`, `langchain_openai`, ...; `langgraph`.
+FRAMEWORK_IMPORT = re.compile(
+    r"^\s*(?:from|import)\s+(?:pydantic_ai|langchain(?:_\w+)?|langgraph)\b", re.MULTILINE
+)
 
 
-def test_only_the_two_adapters_import_the_agent_framework():
+def test_only_the_adapters_import_an_agent_framework():
     offenders = sorted(
         str(path.relative_to(SRC))
         for path in SRC.rglob("*.py")
@@ -30,7 +35,7 @@ def test_only_the_two_adapters_import_the_agent_framework():
     assert offenders == []
 
 
-def test_both_allowed_adapters_actually_exist():
+def test_every_allowed_adapter_actually_exists():
     # Guards against the allowlist quietly outliving the modules it names,
     # which would turn this test into a permanent vacuous pass.
     for relative in ALLOWED:

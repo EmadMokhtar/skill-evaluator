@@ -235,6 +235,19 @@ def test_the_real_runner_is_registered(tmp_path):
     assert "OPENAI_API_KEY" in result.output
 
 
+def test_the_langchain_runner_is_registered(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(
+        app,
+        ["run", str(skill_dir), "--runner", "langchain", "--model", "openai:gpt-4o-mini"],
+        env={"OPENAI_API_KEY": ""},
+    )
+    # No key, so preflight stops it before any spend -- the same contract as
+    # the PydanticAI runner.
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+
+
 def test_preflight_names_the_missing_variable(tmp_path, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     skill_dir = _make_skill(tmp_path)
@@ -301,6 +314,17 @@ def test_a_real_judge_without_its_api_key_fails_preflight(tmp_path, monkeypatch)
     (tmp_path / "skill-lens.toml").write_text(
         'judge = "pydantic-ai"\njudge_model = "openai:gpt-4o-mini"\n', encoding="utf-8"
     )
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-lens.toml")]
+    )
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+
+
+def test_the_langchain_judge_is_registered(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-lens.toml").write_text('judge = "langchain"\n', encoding="utf-8")
     result = runner.invoke(
         app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-lens.toml")]
     )

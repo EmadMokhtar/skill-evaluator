@@ -21,7 +21,7 @@ pull request's green check: an advisory can be published between the merge and t
 nothing publishes that `verify` did not pass. See [Security](security.md).
 
 `release` also exports a CycloneDX SBOM from the lockfile `verify` audited —
-`skill-lens-X.Y.Z.cdx.json`, for the runtime dependencies and the `pydantic-ai` extra, not
+`skill-lens-X.Y.Z.cdx.json`, for the runtime dependencies and every optional extra (`pydantic-ai`, `langchain`), not
 the dev or docs groups — and uploads it as its own `sbom` artifact, apart from `dist`:
 `publish` sends every file in `dist` to PyPI, which would reject an SBOM, and a rejected
 file fails the upload after the tag is already pushed. `github-release` then attaches it to

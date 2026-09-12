@@ -32,7 +32,7 @@ to hold even the verdict) that falls back to a hard character cut.
 ## The composite action
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v0.3.0
+- uses: EmadMokhtar/skill-evaluator@v0.4.0
   with:
     path: ./skills
     runner: pydantic-ai
@@ -55,7 +55,7 @@ Every `skill-lens run` flag is available as a kebab-cased input (`--min-pass-rat
 
 | Input | Default | Purpose |
 | --- | --- | --- |
-| `install-spec` | `skill-lens[pydantic-ai]==0.3.0` | Passed verbatim to `uv tool install`. Accepts a PyPI name, a pinned version, a git ref, or a local path. |
+| `install-spec` | `skill-lens[pydantic-ai]==0.4.0` | Passed verbatim to `uv tool install`. Accepts a PyPI name, a pinned version, a git ref, or a local path. Use `skill-lens[pydantic-ai,langchain]==…` when a job runs the LangChain runner. |
 | `working-directory` | `.` | Directory to run in. |
 | `step-summary` | `true` | Append the Markdown summary to `$GITHUB_STEP_SUMMARY`. |
 

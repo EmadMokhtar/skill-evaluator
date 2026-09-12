@@ -24,6 +24,7 @@ from skill_lens.evaluators.assertion import AssertionEvaluator
 from skill_lens.evaluators.budget import BudgetEvaluator
 from skill_lens.evaluators.judge import JudgeEvaluator
 from skill_lens.evaluators.trajectory import TrajectoryEvaluator
+from skill_lens.judges.langchain import LangChainJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.models import (
     BudgetSpec,
@@ -35,7 +36,9 @@ from skill_lens.models import (
     ToolSpec,
     TrajectorySpec,
 )
-from skill_lens.runners.pydantic_ai import BASELINE_PREAMBLE, PydanticAIRunner
+from skill_lens.runners.langchain import LangChainRunner
+from skill_lens.runners.prompting import BASELINE_PREAMBLE
+from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.scripts import SandboxStatus, ScriptPolicy, ScriptRuntime
 from skill_lens.skills.loader import load_skills
 from skill_lens.workspace import create_workspace
@@ -226,6 +229,59 @@ def test_a_baseline_run_reaches_the_provider_without_the_skill_name(replay, vcr,
     # Not just absent from `instructions`: the skill's name must appear nowhere
     # in the request at all -- not in a tool definition, not in the input.
     assert "order-support" not in json.dumps(sent)
+
+
+@pytest.mark.cassette
+@pytest.mark.vcr
+def test_langchain_traffic_drives_the_whole_loop(replay):
+    # Same request, second framework. Only real traffic can show that the
+    # message list LangChain hands back -- usage per turn, model_name in the
+    # response metadata, tool-call args as a dict -- reads the way the
+    # adapter expects; the scripted model is shaped by construction.
+    result = LangChainRunner(model="openai:gpt-4o-mini", retries=0).run(SKILL, CASE)
+
+    assert result.errored is False
+    assert result.output != ""
+    assert [call.name for call in result.tool_calls] == ["lookup_order"]
+    assert result.tool_calls[0].arguments == {"order_id": "1234"}
+    assert result.input_tokens > 0
+    assert result.output_tokens > 0
+    assert result.cost_usd > 0
+    assert result.cost_note == ""
+    assert result.model.startswith("gpt-4o-mini")
+
+    assert TrajectoryEvaluator().evaluate(CASE, result).passed is True
+    assert BudgetEvaluator().evaluate(CASE, result).passed is True
+    assert AssertionEvaluator().evaluate(CASE, result).passed is True
+
+
+@pytest.mark.cassette
+@pytest.mark.vcr
+def test_a_langchain_judge_grades_a_rubric_with_evidence(replay):
+    request = JudgeRequest(
+        task=JUDGED_CASE.task,
+        output="Order 1234 was delivered 45 days ago, so the 30-day return window has closed.",
+        expected=JUDGED_CASE.judge.expected,
+        checks=[
+            RubricCheck(id="r1", text=JUDGED_CASE.judge.rubric[0]),
+            RubricCheck(id="r2", text=JUDGED_CASE.judge.rubric[1]),
+        ],
+    )
+    verdict = LangChainJudge(model="openai:gpt-4o-mini", retries=0).judge(request)
+
+    assert verdict.errored is False
+    assert sorted(check.id for check in verdict.checks) == ["r1", "r2"]
+    assert all(check.evidence for check in verdict.checks)
+    assert verdict.cost_usd > 0
+
+
+@pytest.mark.cassette
+@pytest.mark.vcr
+def test_a_langchain_agent_reaches_for_an_offered_skill(replay):
+    result = LangChainRunner(model="openai:gpt-4o-mini", retries=0).run(SKILL, OFFERED_POSITIVE)
+    assert result.errored is False
+    assert result.skill_triggered is True
+    assert TrajectoryEvaluator().evaluate(OFFERED_POSITIVE, result).passed is True
 
 
 EXAMPLES = Path(__file__).parent.parent / "examples"

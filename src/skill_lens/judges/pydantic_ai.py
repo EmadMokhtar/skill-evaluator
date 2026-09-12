@@ -4,10 +4,10 @@ Everything the core sees is a plain `JudgeVerdict`. Provider failures are
 reported through `JudgeVerdict.error`, never raised, so `JudgeEvaluator` can
 tell an infra problem (errored) apart from a low score (failed).
 
-The transient-retry, dependency-check and model-name helpers are imported from
-the runner adapter rather than duplicated: both modules are already inside the
-framework boundary, and a second copy of the retry policy would be a second
-thing to keep in step.
+The transient rule, dependency check and model-name helpers are imported from
+the runner adapter rather than duplicated, and the retry loop itself comes from
+`runners/retry.py`: both modules are already inside the framework boundary, and
+a second copy of the policy would be a second thing to keep in step.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from skill_lens.runners.pydantic_ai import (
     _model_name,
     _require_pydantic_ai,
 )
+from skill_lens.runners.retry import run_with_retries
 
 
 class PydanticAIJudge:
@@ -62,17 +63,13 @@ class PydanticAIJudge:
 
     def _run_with_retries(self, agent: Any, prompt: str) -> Any:
         settings = self._model_settings()
-        delay = self._retry_backoff_seconds
-        attempt = 0
-        while True:
-            try:
-                return agent.run_sync(prompt, model_settings=settings)
-            except Exception as exc:
-                if attempt >= self._retries or not _is_transient(exc):
-                    raise
-                self._sleep(delay)
-                delay *= 2
-                attempt += 1
+        return run_with_retries(
+            lambda: agent.run_sync(prompt, model_settings=settings),
+            _is_transient,
+            self._retries,
+            self._retry_backoff_seconds,
+            self._sleep,
+        )
 
     def judge(self, request: JudgeRequest) -> JudgeVerdict:
         _require_pydantic_ai()

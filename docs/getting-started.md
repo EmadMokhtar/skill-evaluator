@@ -10,7 +10,8 @@ uv tool install "skill-lens[pydantic-ai]"
 ```
 
 `pip install "skill-lens[pydantic-ai]"` works the same way. The extra supplies the
-real-agent runner; drop it if you only want the offline default. From a checkout of this
+real-agent runner; drop it if you only want the offline default. A `langchain` extra provides
+the second real-agent runner — see [Runners](runners.md). From a checkout of this
 repository, `uv sync --extra pydantic-ai` and prefix every command below with `uv run`.
 
 ## 2. Scaffold a suite
@@ -169,7 +170,7 @@ come from the environment only.
 ## 8. Gate pull requests
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v0.3.0
+- uses: EmadMokhtar/skill-evaluator@v0.4.0
   with:
     path: ./skills
     runner: pydantic-ai

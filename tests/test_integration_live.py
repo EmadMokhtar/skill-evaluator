@@ -26,8 +26,10 @@ from pathlib import Path
 
 import pytest
 
+from skill_lens.judges.langchain import LangChainJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.orchestrator import run_evals
+from skill_lens.runners.langchain import LangChainRunner
 from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.skills.loader import load_skills
 
@@ -47,6 +49,21 @@ def test_the_examples_pass_against_a_real_provider():
         load_skills(EXAMPLES),
         [PydanticAIRunner(model="openai:gpt-4o-mini")],
         judge=PydanticAIJudge(model="openai:gpt-4o-mini"),
+    )
+    assert report.total == 7  # greeting (1) + order-support (5) + csv-report (1)
+    assert report.errored == 0, [o.result.error for o in report.outcomes if o.result.errored]
+    assert report.pass_rate == 1.0, [
+        (o.case_name, [s.detail for s in o.scores if not s.passed])
+        for o in report.outcomes
+        if o.status == "failed"
+    ]
+
+
+def test_the_examples_pass_against_a_real_provider_through_langchain():
+    report = run_evals(
+        load_skills(EXAMPLES),
+        [LangChainRunner(model="openai:gpt-4o-mini")],
+        judge=LangChainJudge(model="openai:gpt-4o-mini"),
     )
     assert report.total == 7  # greeting (1) + order-support (5) + csv-report (1)
     assert report.errored == 0, [o.result.error for o in report.outcomes if o.result.errored]

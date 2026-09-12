@@ -47,3 +47,12 @@ class Runner(Protocol):
         a default, so a runner written against Part 1 keeps working.
         """
         ...
+
+
+class RunnerDependencyError(Exception):
+    """Raised when the optional extra providing a runner or judge is not installed.
+
+    A setup error, not a provider failure: `cli.py` turns it into a clean exit
+    2 with the install hint, so an adapter must let it propagate rather than
+    swallow it into `RunResult.error`.
+    """
