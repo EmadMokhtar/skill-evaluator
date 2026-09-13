@@ -1,3 +1,10 @@
+## v0.5.0 (2026-09-13)
+
+### Feat
+
+- run the scripts a skill bundles, under an opt-in and a sandbox (#34)
+- run cases and grade rubrics through LangChain (#32)
+
 ## v0.4.0 (2026-09-11)
 
 ### Feat
