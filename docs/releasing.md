@@ -80,9 +80,24 @@ Commitizen reads it from the command line only, never from `[tool.commitizen]`, 
 lives in the workflow rather than in `pyproject.toml`.
 
 You should not normally see it fire. The same property is asserted on every pull request by
-`tests/test_release_config.py`, which checks that each `version_files` entry still matches a
-line carrying the current version — so a reformatted pin fails review rather than costing a
-release. `--check-consistency` is the backstop for whatever reaches `main` anyway.
+`tests/test_release_config.py`, which replays the bump in memory the way Commitizen runs it —
+every `(file, pattern)` pair in sorted order, the file rewritten in place after each — and
+requires each pair to change at least one line. So a reformatted pin fails review rather than
+costing a release. `--check-consistency` is the backstop for whatever reaches `main` anyway.
+
+Replaying the rewrite, rather than checking each pattern against the original file, is what
+catches a line that spells two versions. Commitizen writes the file back after every pattern,
+so a line matched by two patterns has one version to give: the first pattern replaces it, and
+the second finds the line already bumped. If that second pattern has no other line of its own,
+the release aborts with exit `17` even though every pattern matched something. **Every version
+spelling gets a line of its own.**
+
+A third test requires every spelled version to *be* the current version. A branch cut before a
+release and merged after it still spells the version it was cut from on the lines it added —
+the bump on `main` rewrote only the lines that existed then — and `cz bump` would leave those
+lines stale forever, because the pattern still matches the current lines beside them. That
+test cannot run on the merged tree until the merge exists, so it fails in `verify` on `main`
+rather than on the pull request; rebase a long-lived branch after a release to catch it earlier.
 
 ## One-time setup
 

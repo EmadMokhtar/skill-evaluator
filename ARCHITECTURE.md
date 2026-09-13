@@ -409,7 +409,13 @@ all, and `cz bump --check-consistency` aborts before writing anything if a file 
 Commitizen reads it only from the CLI and never from `pyproject.toml`. That abort is the last
 line rather than the first: `tests/test_release_config.py` asserts the same property on every
 pull request, so a reformatted pin is caught where it is cheap to fix instead of costing a
-release on `main`.
+release on `main`. It asserts it by replaying Commitizen's own algorithm — each `(file,
+pattern)` pair in sorted order, the file rewritten in place after every pair — because
+Commitizen writes the file back between patterns, and a line that spells two versions has only
+one to give: the first pattern takes it, the second finds the line already bumped, and the
+release aborts if that pattern has no other line. Every version spelling gets a line of its
+own. A further test requires every spelled version to be the current one, so a line a
+long-lived branch added at an older version cannot ride along untouched release after release.
 
 The tag the lookup builds is checked against `tag_format` rather than trusted. The workflow
 hardcodes the `v` prefix that `[tool.commitizen] tag_format` configures — two copies of one

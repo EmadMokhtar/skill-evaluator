@@ -237,11 +237,17 @@ form, that file is the explanation.
   loudly if the tag is missing.
 - **The version in `action.yml` always equals the package version**, and the pairing between a
   version spelling and a `version_files` pattern is guarded in *both* directions — every
-  spelling has a pattern that rewrites it, and every pattern still matches a line carrying the
-  current version. All three live in `tests/test_release_config.py`. The second direction is
+  spelling has a pattern that rewrites it, and every pattern still rewrites a line carrying the
+  current version. All of it lives in `tests/test_release_config.py`. The second direction is
   what stops a reformatted pin from becoming a no-op rewrite, and it fails on the pull request
   rather than at release time, where `cz bump --check-consistency` would abort the release
-  instead.
+  instead. It is checked by *replaying* the bump — every `(file, pattern)` pair in Commitizen's
+  sorted order, the file rewritten in place after each — because Commitizen writes the file back
+  between patterns: a line spelling two versions has one to give, the first pattern takes it,
+  and the second aborts the release if it has no other line. **Every version spelling gets a
+  line of its own.** A further test requires every spelled version to *be* the current one;
+  a branch cut before a release and merged after it adds lines at the old version that
+  `cz bump` would otherwise leave stale forever.
 - **The tag prefix is derived, not duplicated.** `release.yml` reconstructs the tag to look it
   up after pushing, and `tests/test_release_workflow.py` requires that spelling to match
   `[tool.commitizen] tag_format`. Changing the format alone would leave the release correctly
