@@ -280,6 +280,10 @@ def test_interpreter_keys_are_normalised_to_a_bare_lower_case_extension(tmp_path
         '[script_interpreters]\n"" = ["python3"]\n',
         'script_sandbox = "firejail"\n',
         "script_timeout_seconds = 0\n",
+        # TOML spells infinity and not-a-number as bare words, and `gt=0`
+        # alone lets `inf` through; a `wait(timeout=inf)` never expires.
+        "script_timeout_seconds = inf\n",
+        "script_timeout_seconds = nan\n",
         "max_script_output_bytes = -1\n",
     ],
 )

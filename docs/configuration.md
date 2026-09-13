@@ -132,7 +132,8 @@ The four `script_*` keys are repository policy, config-only:
   `"off"` never probes. See [Running bundled scripts](runners.md#running-bundled-scripts)
   for what each guarantees.
 - `script_timeout_seconds` — wall clock per call; the whole process group is killed at
-  expiry and the model is told the script was stopped.
+  expiry and the model is told the script was stopped. Must be a finite number greater
+  than zero: TOML accepts a bare `inf`, and a timeout of infinity would be no timeout.
 - `max_script_output_bytes` — per stream (stdout, stderr); anything beyond is cut with a
   marker stating exactly how many bytes were omitted. Equal to the judge's per-artifact
   cap on purpose: one number for how much untrusted output reaches a model.

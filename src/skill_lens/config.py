@@ -90,6 +90,9 @@ class Config(BaseModel):
     turn on. `--allow-scripts` / `--no-allow-scripts` override it in either
     direction. The four `script_*` keys are repository policy with no per-run
     reason to vary -- config-only, validated here, like the workspace caps.
+    `script_timeout_seconds` must be finite as well as positive: TOML
+    spells infinity as a bare `inf`, `gt=0` accepts it, and a timeout of
+    infinity is no timeout at all.
     Setting them while `allow_scripts` is false is the normal state of a
     repository that turns execution on only in one CI job.
     """
@@ -118,7 +121,11 @@ class Config(BaseModel):
     max_total_bytes: int = Field(default=DEFAULT_LIMITS.max_total_bytes, gt=0)
     allow_scripts: bool = False
     script_sandbox: SandboxMode = "auto"
-    script_timeout_seconds: float = Field(default=DEFAULT_TIMEOUT_SECONDS, gt=0)
+    # allow_inf_nan=False: TOML has a bare `inf`, `gt=0` accepts it, and a
+    # `wait(timeout=inf)` never expires -- the timeout would be off.
+    script_timeout_seconds: float = Field(
+        default=DEFAULT_TIMEOUT_SECONDS, gt=0, allow_inf_nan=False
+    )
     max_script_output_bytes: int = Field(default=DEFAULT_MAX_OUTPUT_BYTES, gt=0)
     script_interpreters: dict[str, list[str]] = Field(
         default_factory=lambda: {ext: list(argv) for ext, argv in DEFAULT_INTERPRETERS.items()}
