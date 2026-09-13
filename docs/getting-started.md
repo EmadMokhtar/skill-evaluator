@@ -138,7 +138,7 @@ skill-lens run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
 Before spending anything the CLI prints its ceiling:
 
 ```
-Plan: up to 1 arm(s) x 1 repeat(s) x 2 case(s) = 2 runs
+Plan: up to 1 arm(s) x 1 repeat(s) x 1 runner(s) x 2 case(s) = 2 runs
 ```
 
 Rerun one case by any distinctive part of its name:

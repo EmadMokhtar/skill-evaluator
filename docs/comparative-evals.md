@@ -233,7 +233,7 @@ plain run: 5 repetitions x 2 arms. Before starting, when the selected runner nee
 the CLI prints a run plan:
 
 ```
-Plan: up to 2 arm(s) x 3 repeat(s) x 4 case(s) = 24 runs
+Plan: up to 2 arm(s) x 3 repeat(s) x 1 runner(s) x 4 case(s) = 24 runs
 ```
 
 This is deliberately a **ceiling, not a forecast** — "up to", not "exactly". It applies the

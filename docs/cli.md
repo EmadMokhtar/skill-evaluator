@@ -1,7 +1,7 @@
 # CLI
 
 ```
-skill-lens run <path> [--evals <path>] [--runner <name>] [--model <name>]
+skill-lens run <path> [--evals <path>] [--runner <name>]... [--model <name>]
                       [--judge-model <name>] [--tag <tag>] [--case <text>]
                       [--min-pass-rate <float>]
                       [--json-output <path>] [--junit-output <path>]
@@ -27,7 +27,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--evals <path>` | discovery | An explicit eval file or directory, overriding discovery |
-| `--runner <name>` | `fake` | `fake`, `pydantic-ai` or `langchain` — see [Runners](runners.md) |
+| `--runner <name>` | `fake` | `fake`, `pydantic-ai` or `langchain`; repeat the flag to run every case through more than one — see [Runners](runners.md) |
 | `--model <name>` | `openai:gpt-4o-mini` | Model id, passed to runners that use one |
 | `--judge-model <name>` | falls back to `--model` | Model id for the LLM judge |
 | `--tag <tag>` | none | Only run cases carrying this tag |
@@ -50,6 +50,12 @@ Each flag overrides the corresponding key in [configuration](configuration.md).
 Exit codes are documented in [Gating](gating.md). `--baseline`, `--repeat` and `--min-delta`
 are covered in full in [Comparative evals](comparative-evals.md).
 
+`--runner` may be given more than once. Every case then runs through every runner named,
+each `(skill, case, runner)` is its own outcome, and the same name twice is a user error
+(exit 2) — an outcome must never count twice. The flag replaces a `default_runner` list in
+`skill-lens.toml`; it never appends to it. A two-runner run spends twice: the `Plan:` line
+printed before the first request includes the runner factor.
+
 A non-passing case prints what the agent actually did — its output, and every tool it
 called — under the evaluator detail, in the console and in the JUnit and Markdown reports
 alike. The output is cut at 500 characters by default; a cut is never silent (`… (1,842 more
@@ -61,7 +67,7 @@ cases as a plain run (5 repetitions x 2 arms). Before a run on a runner that nee
 the CLI prints a run plan:
 
 ```
-Plan: up to 2 arm(s) x 3 repeat(s) x 4 case(s) = 24 runs
+Plan: up to 2 arm(s) x 3 repeat(s) x 1 runner(s) x 4 case(s) = 24 runs
 ```
 
 This is deliberately a **ceiling, not a forecast** — "up to", not "exactly". It applies the

@@ -50,6 +50,13 @@ zero-cases check never see them — a strong baseline means the skill was unnece
 CI should go red. With no baseline, candidate and baseline are the same (empty) set, so none
 of these numbers move from what they were before comparative evals existed.
 
+## More than one runner
+
+When a run names several runners, every candidate `(skill, case, runner)` outcome counts
+toward the pass rate: a case that fails under one framework fails the gate, whatever it
+did under the other. `per_skill_min` is per skill across runners, and `--min-delta` is
+measured over the whole matrix. There is no per-runner threshold.
+
 ## Gating on the delta (`--min-delta`)
 
 `--min-delta <float>` adds three more gate rules, all evaluated against the
