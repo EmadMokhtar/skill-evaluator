@@ -387,6 +387,13 @@ def _kill_tree_windows(process: subprocess.Popen[bytes]) -> None:
     exited on its own it finds nothing to walk -- a script that starts a
     background process and exits normally leaves that process running on
     Windows. The timeout path, where the parent is still alive, is covered.
+
+    The trailing `Popen.kill` is for a `taskkill` that is missing or refused;
+    it must not leave a timed-out child alive. It is skipped once the child
+    has been seen to exit, and an `OSError` from it is swallowed: the child
+    can exit between the poll and the kill, and the never-raises contract
+    must not depend on CPython's `TerminateProcess` wrapper tolerating that
+    race (today it does, by checking `GetExitCodeProcess` first).
     """
     try:
         subprocess.run(  # noqa: S603 - fixed argv, no shell
@@ -398,8 +405,11 @@ def _kill_tree_windows(process: subprocess.Popen[bytes]) -> None:
         )
     except OSError:
         pass
-    # taskkill missing or refused must not leave a timed-out child alive.
-    process.kill()
+    if process.poll() is None:
+        try:
+            process.kill()
+        except OSError:
+            pass
 
 
 def _reap_and_kill_group(
