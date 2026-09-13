@@ -11,7 +11,9 @@ inputs:
   evals:
     description: Explicit eval file or directory, overriding discovery.
   runner:
-    description: Runner to use — fake or pydantic-ai.
+    description: >-
+      Runner to use — fake, pydantic-ai or langchain. Comma-separate names to run
+      every case through each.
   model:
     description: Model id, e.g. openai:gpt-4o-mini.
   judge-model:
@@ -145,8 +147,19 @@ runs:
             false) args+=("$3") ;;
           esac
         }
+        add_list() {
+          # A comma-separated value becomes one flag per entry, so
+          # `runner: pydantic-ai,langchain` reaches the CLI as
+          # `--runner pydantic-ai --runner langchain`. Blank entries are skipped.
+          local IFS=','
+          local item
+          for item in ${2:-}; do
+            item="${item// /}"
+            if [ -n "$item" ]; then args+=("$1" "$item"); fi
+          done
+        }
         add --evals "$SE_EVALS"
-        add --runner "$SE_RUNNER"
+        add_list --runner "$SE_RUNNER"
         add --model "$SE_MODEL"
         add --judge-model "$SE_JUDGE_MODEL"
         add --tag "$SE_TAG"

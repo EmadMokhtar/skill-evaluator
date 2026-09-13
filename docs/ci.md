@@ -51,7 +51,10 @@ git+https://github.com/EmadMokhtar/skill-evaluator@<commit-sha>`), or reference 
 `uses: ./` from a workflow inside this repository.
 
 Every `skill-lens run` flag is available as a kebab-cased input (`--min-pass-rate` becomes
-`min-pass-rate`), plus three inputs about the environment rather than the run:
+`min-pass-rate`). `runner` takes one name, or a comma-separated list to run every case through
+each (`runner: pydantic-ai,langchain`) — install every framework named:
+`install-spec: skill-lens[pydantic-ai,langchain]==…`. Three more inputs are about the
+environment rather than the run:
 
 | Input | Default | Purpose |
 | --- | --- | --- |
@@ -144,6 +147,30 @@ only a fixture that is *supposed* to go red can catch a regression in how red ge
 ```yaml
 --8<-- "examples/ci/skill-lens.yml"
 ```
+
+## Running the matrix
+
+One job, one report, every case through both frameworks:
+
+```yaml
+      - uses: EmadMokhtar/skill-evaluator@v0.4.0
+        with:
+          path: ./skills
+          install-spec: "skill-lens[pydantic-ai,langchain]==0.4.0"
+          runner: pydantic-ai,langchain
+          model: openai:gpt-4o-mini
+          markdown-output: skill-lens.md
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+A case failing under either framework fails the job, and the summary names the runner on
+every failing line. A two-runner job spends twice.
+
+The alternative is a GitHub `strategy.matrix` over `runner: [pydantic-ai, langchain]`, one
+job per framework with the single-name `runner:` input. It needs no list support and shows
+one check per framework in the pull request, at the cost of one summary and one JUnit
+file per job rather than one for the whole matrix.
 
 ## Without the action
 
