@@ -135,7 +135,7 @@ All live in `models.py`.
 | `EvalScore` | one evaluator's `passed` / `score` / `detail`, plus its `checks: list[CheckResult]` |
 | `BaselineNote` | why a skill or case has no baseline arm: `kind` (`"unavailable"` or `"skipped"`) plus a reason |
 | `CaseOutcome` | one (skill, case, runner, arm, repetition) combination: status plus its scores and result |
-| `ScriptStatus` | the once-per-run sandbox decision: `sandbox` (`"sandbox-exec"`, `"bwrap"` or `"none"`) and the probe's `detail` |
+| `ScriptStatus` | the once-per-run sandbox decision: `sandbox` (`"sandbox-exec"`, `"bwrap"` or `"none"`), the probe's `detail`, and `hardening` — the note when the harness could hide its own environment from same-user processes (Linux, non-root), else `None` |
 | `ScriptNote` | a skill that bundles scripts while execution is off: `skill_name`, `script_count` |
 | `RunReport` | every outcome, skipped and tag-filtered skills, `baseline_kind`, `repeat`, `baseline_notes`, `scripts` (`None` when execution was off), `script_notes` |
 
@@ -568,6 +568,22 @@ test has no bundle for the same reason.
 `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ` (plus what Python needs to start on Windows), then
 `TMPDIR`/`TMP`/`TEMP`, `PYTHONDONTWRITEBYTECODE` and `PYTHONIOENCODING`. The key that pays
 for the run is absent by construction, not by remembering to delete it.
+
+**The allowlist stops inheritance; hiding the harness's own environment is the OS's job,
+and the report says whether it was done.** A same-user process can ask the kernel for the
+harness's exec-time environment. On Linux (`/proc/<pid>/environ`) `scripts.harden_process`
+calls `prctl(PR_SET_DUMPABLE, 0)` from `preflight` — after the interpreter and sandbox
+checks, so a run that stops there never pays the cost (no core dumps, no same-user
+debugger) — and its note travels `ScriptRuntime.hardening` → `ScriptStatus.hardening` →
+the console line, the Markdown line and the JSON report. It is best effort and never
+raises; root ignores the flag; `bwrap` makes it moot by unsharing the PID namespace. On
+macOS the read is the `kern.procargs2` sysctl behind `ps -E`, which `sandbox-exec` does not
+gate at all (a blanket `(deny sysctl-read)` refusing every other sysctl still admits it;
+`process-info*` rules do not touch it; `/bin/ps` merely cannot exec because it is setuid),
+so `harden_process` returns None there and the docs say the key is exposed.
+`tests/test_sandbox_live.py` pins both facts on macOS against a target spawned with the
+secret in its exec-time environment — never `monkeypatch.setenv`, because the kernel serves
+the block it copied at `exec`, and a test that planted the secret afterwards could not fail.
 
 **A script runs with `shell=False`, its arguments as argv, always.** Nothing the model
 sends is joined into a command line; a NUL byte in an argument is refused by `Popen`

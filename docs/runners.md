@@ -219,7 +219,22 @@ reading that fact is the eval signal. `run_script` never raises. Standard input 
   where Python does not start without them — and `PYTHONDONTWRITEBYTECODE=1` and
   `PYTHONIOENCODING=utf-8` are set. Nothing else skill-lens holds reaches the script, the
   provider key first among them: it is absent by construction, not by remembering to delete
-  it.
+  it. What the allowlist prevents is *inheritance*. A script runs as the same user as
+  skill-lens, and an operating system lets a same-user process ask the kernel for another
+  process's environment — the block copied at `exec`, which is where the provider key sits
+  for the whole run. On Linux that is `/proc/<pid>/environ`; when scripts are enabled
+  skill-lens marks itself non-dumpable (`prctl(PR_SET_DUMPABLE, 0)`), which makes its
+  `/proc/<pid>/*` root-owned so a same-user read is refused — root ignores that, and the
+  report says whether it applied (`scripts: on, sandbox: none (bwrap not found on PATH);
+  harness environment hidden from same-user processes (PR_SET_DUMPABLE)`). Under `bwrap`
+  the harness is in another PID namespace and has no `/proc` entry to read. On macOS the
+  read is the `kern.procargs2` sysctl behind `ps -E`, and nothing closes it: `sandbox-exec`
+  cannot execute `/bin/ps` (it is setuid root), but a script can call the sysctl directly,
+  and that read is not gated by the sandbox at all — verified against a blanket `(deny
+  sysctl-read)` that refused every other sysctl in the same process. So on macOS, and on a
+  Linux runner without `bwrap`, a script that goes looking can find the harness's provider
+  key. Set `script_sandbox = "required"` wherever a provider key is present, and treat a
+  macOS run with scripts on as one that exposes that key to the skill under test.
 - `TMPDIR`/`TMP`/`TEMP` point at a scratch directory outside the workspace, deleted after
   the call, so a script's temporary files never appear in `list_files`, `file-produced` or
   the judge's artifacts.

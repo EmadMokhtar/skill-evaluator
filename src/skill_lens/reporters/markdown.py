@@ -338,6 +338,8 @@ def _scripts(report: RunReport) -> str:
         line = f"Scripts: on, sandbox: {_escape(report.scripts.sandbox)}"
         if report.scripts.sandbox == "none":
             line += f" ({_escape(report.scripts.detail)})"
+        if report.scripts.hardening:
+            line += f"; {_escape(report.scripts.hardening)}"
         bits.append(line)
     for note in report.script_notes:
         plural = "" if note.script_count == 1 else "s"

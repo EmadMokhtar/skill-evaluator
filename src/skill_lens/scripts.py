@@ -19,6 +19,14 @@ What the sandbox does not do: hide the rest of the filesystem. A script can
 read what the CI user can read, and what it prints reaches the model and the
 report. The sandbox is defence in depth; the `allow_scripts` opt-in is the
 decision.
+
+The allowlist stops *inheritance*; it does not stop a same-user process
+asking the kernel for the harness's own environment. On Linux that is
+`/proc/<pid>/environ`, which `harden_process` closes by marking the harness
+non-dumpable (root ignores that; `bwrap` also puts the harness in another
+PID namespace). On macOS it is the `kern.procargs2` sysctl behind `ps -E`,
+which `sandbox-exec` does not gate at all -- verified against a blanket
+`(deny sysctl-read)` -- so nothing here can close it.
 """
 
 from __future__ import annotations
@@ -28,6 +36,7 @@ import platform
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -54,6 +63,43 @@ PROBE_TIMEOUT_SECONDS = 10.0
 _KEPT_ENV: tuple[str, ...] = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ")
 # Python does not start on Windows without SystemRoot.
 _KEPT_ENV_WINDOWS: tuple[str, ...] = ("SystemRoot", "COMSPEC", "PATHEXT", "USERPROFILE")
+
+# prctl(2) option numbers, from <sys/prctl.h>.
+_PR_SET_DUMPABLE = 4
+_PR_GET_DUMPABLE = 3
+HARDENING_NOTE = "harness environment hidden from same-user processes (PR_SET_DUMPABLE)"
+
+
+def harden_process() -> str | None:
+    """Hide this process's environment from same-user processes, where the OS can.
+
+    The allowlist keeps the provider key out of a script's *inherited*
+    environment, but on Linux any process with the same uid can read the
+    harness's `/proc/<pid>/environ` -- unless the harness is non-dumpable,
+    which makes its `/proc/<pid>/*` root-owned and refuses a same-user read.
+    `prctl(PR_SET_DUMPABLE, 0)` does that; root (`CAP_SYS_PTRACE`) ignores
+    it, and `bwrap` covers the case anyway by unsharing the PID namespace.
+    The cost is that the harness can no longer be core-dumped or attached
+    to by a same-user debugger, which is why it runs only when scripts are
+    enabled. Best effort and never raises: a missing `ctypes`, a `prctl`
+    that is absent or refuses, all read as "not applied". macOS has no
+    equivalent -- see the module docstring -- so it returns None there.
+
+    Returns the note the report prints, or None when nothing was applied.
+    """
+    if sys.platform != "linux":
+        return None
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+            return None
+        if libc.prctl(_PR_GET_DUMPABLE, 0, 0, 0, 0) != 0:
+            return None
+    except (ImportError, OSError, AttributeError):
+        return None
+    return HARDENING_NOTE
 
 
 class ScriptSetupError(Exception):
@@ -87,10 +133,16 @@ class SandboxStatus:
 
 @dataclass(frozen=True)
 class ScriptRuntime:
-    """What reaches a runner: the policy plus the once-per-run sandbox decision."""
+    """What reaches a runner: the policy plus the once-per-run sandbox decision.
+
+    `hardening` is `harden_process`'s note when it applied, else None; the
+    console prints it after the sandbox detail so an operator can see from
+    the log which protections this run actually had.
+    """
 
     policy: ScriptPolicy
     sandbox: SandboxStatus
+    hardening: str | None = None
 
 
 @dataclass(frozen=True)
@@ -291,7 +343,9 @@ def preflight(
     file under `scripts/` with an unmapped extension is not an error -- it is
     simply not runnable. Baseline bundles are resolved later, per case, so
     `run_script` looks an interpreter up again at call time and refuses (not
-    raises) if it is gone.
+    raises) if it is gone. Last, `harden_process` hides the harness's own
+    environment from same-user processes where the OS allows it, and the
+    runtime records whether that applied.
     """
     for skill in skills:
         if skill.bundle_root is None:
@@ -310,7 +364,10 @@ def preflight(
         raise ScriptSetupError(
             f'script_sandbox = "required" but no sandbox is available: {status.detail}'
         )
-    return ScriptRuntime(policy=policy, sandbox=status)
+    # Only now, once scripts are certain to run: hardening costs the harness
+    # its core dumps and debugger access, so a run that stops here for a
+    # missing sandbox or interpreter never pays it.
+    return ScriptRuntime(policy=policy, sandbox=status, hardening=harden_process())
 
 
 def _group_kwargs() -> dict[str, Any]:

@@ -309,6 +309,17 @@ form, that file is the explanation.
 - **A script's environment is an allowlist, never `os.environ` minus keys**; `shell=False`
   always; output is read from files through the descriptors the harness opened before the
   process started — never by re-opening the path — capped, and a cut is never silent.
+- **The allowlist stops inheritance only; a same-user script can read the harness's
+  environment through the OS unless something hides it, and the report says whether
+  something did.** On Linux `harden_process` (`prctl(PR_SET_DUMPABLE, 0)`, called from
+  `preflight` after the checks that can abort, best effort, never raises; root ignores it;
+  `bwrap` moots it) closes `/proc/<pid>/environ`, and its note rides
+  `ScriptRuntime.hardening` → `ScriptStatus.hardening` → every reporter. On macOS the read
+  is the `kern.procargs2` sysctl behind `ps -E`, and `sandbox-exec` does not gate it —
+  verified against a blanket `(deny sysctl-read)`; do not add a `sysctl-name` rule and call
+  it closed. The docs say the key is exposed there and recommend `script_sandbox =
+  "required"` wherever a key is present. A test of this must spawn its target with the
+  secret in the exec-time environment; `monkeypatch.setenv` can never be seen by the kernel.
 - **The process group is killed after every exit, not only a timeout**, in the order
   observe (`waitid` + `WNOWAIT`), `killpg(process.pid)`, reap — so the leader's pid is
   still held when the kill runs — where `os.waitid` exists (Linux; macOS on 3.13+; CPython

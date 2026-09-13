@@ -9,7 +9,9 @@ targets 127.0.0.1 and must FAIL.
 
 from __future__ import annotations
 
+import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -32,14 +34,18 @@ def _runtime() -> ScriptRuntime:
     return ScriptRuntime(policy=policy, sandbox=STATUS)
 
 
-def _run(tmp_path: Path, source: str) -> tuple[Workspace, str, str, int | None]:
+def _run(
+    tmp_path: Path, source: str, args: list[object] | None = None
+) -> tuple[Workspace, str, str, int | None]:
     root = tmp_path / "skill"
     (root / "scripts").mkdir(parents=True)
     (root / "scripts" / "probe.py").write_text(source, encoding="utf-8")
     ws_root = tmp_path / "ws"
     ws_root.mkdir()
     workspace = Workspace(root=ws_root.resolve())
-    result = run_script(SkillBundle(root.resolve()), workspace, "scripts/probe.py", [], _runtime())
+    result = run_script(
+        SkillBundle(root.resolve()), workspace, "scripts/probe.py", args or [], _runtime()
+    )
     assert result.refused is None, result.refused
     return workspace, result.stdout, result.stderr, result.exit_code
 
@@ -158,3 +164,88 @@ def test_what_a_script_plants_in_the_workspace_is_a_failed_check_not_an_abort(tm
     assert not score.errored
     assert "resolves outside" in score.checks[0].evidence
     assert "not a regular file" in score.checks[1].evidence
+
+
+# --- the harness's own environment ----------------------------------------
+#
+# The allowlist stops a script *inheriting* the provider key. Whether a
+# script can ask the OS for the harness's environment is a separate question,
+# and these two tests pin the answer on macOS. The target is a child spawned
+# with the secret in its exec-time environment, never `monkeypatch.setenv`
+# on this process: the kernel serves the block it copied at exec, and a
+# `setenv` afterwards changes nothing it would show -- a test planting the
+# secret that way could not fail whatever the sandbox did.
+
+
+@pytest.fixture
+def secret_holder() -> Iterator[int]:
+    """A same-user, non-Apple process whose exec-time environment holds a secret.
+
+    Non-Apple matters: the kernel withholds a platform binary's environment
+    from other processes, and `/bin/sleep` would make either test pass for
+    the wrong reason. skill-lens itself is a Python from a venv, like this.
+    """
+    child = subprocess.Popen(  # noqa: S603 - fixed argv, shell=False
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        env={"PATH": "/usr/bin:/bin", "OPENAI_API_KEY": "planted-secret"},
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        yield child.pid
+    finally:
+        child.kill()
+        child.wait()
+
+
+MACOS_ONLY = pytest.mark.skipif(
+    STATUS.backend != "sandbox-exec", reason="pins the macOS backend's behaviour"
+)
+
+
+@MACOS_ONLY
+def test_ps_cannot_be_executed_under_sandbox_exec(tmp_path, secret_holder):
+    # `/bin/ps` is setuid root and sandbox-exec refuses to exec a setuid
+    # binary, so the `ps -E` route to another process's environment is closed
+    # -- as a side effect of the sandbox, not of any rule in the profile.
+    source = (
+        "import subprocess, sys\n"
+        "try:\n"
+        "    out = subprocess.run(['ps', '-Eww', '-p', sys.argv[1]], capture_output=True,"
+        " text=True, check=False)\n"
+        "    print('ran', repr(out.stdout))\n"
+        "except OSError as exc:\n"
+        "    print('refused', exc.errno)\n"
+    )
+    _, out, err, _ = _run(tmp_path, source, [secret_holder])
+    assert out.startswith("refused 1"), out + err
+    assert "planted-secret" not in out
+
+
+@MACOS_ONLY
+def test_the_environment_sysctl_is_a_documented_gap_under_sandbox_exec(tmp_path, secret_holder):
+    # This pins a gap, not a guarantee. `ps -E` is a front end for the
+    # `kern.procargs2` sysctl, and sandbox-exec does not gate that read:
+    # verified against a blanket `(deny sysctl-read)` that refused
+    # `kern.maxproc` in the same process, and against `(sysctl-name
+    # "kern.procargs2")`, `(sysctl-name-prefix ...)` and `process-info*`
+    # rules, none of which changed the result. docs/runners.md and
+    # docs/security.md say so. If this test starts failing, macOS closed
+    # the read, and those paragraphs -- and the recommendation that a key
+    # never sits in the harness environment of an unsandboxed run -- are
+    # due for an update.
+    source = (
+        "import ctypes, ctypes.util, sys\n"
+        "libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)\n"
+        "mib = (ctypes.c_int * 3)(1, 49, int(sys.argv[1]))  # CTL_KERN, KERN_PROCARGS2, pid\n"
+        "size = ctypes.c_size_t(0)\n"
+        "if libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0:\n"
+        "    print('refused', ctypes.get_errno())\n"
+        "else:\n"
+        "    buf = ctypes.create_string_buffer(size.value or 1)\n"
+        "    libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0)\n"
+        "    print('visible' if b'planted-secret' in buf.raw[: size.value] else 'hidden')\n"
+    )
+    _, out, err, _ = _run(tmp_path, source, [secret_holder])
+    assert out.strip() == "visible", out + err

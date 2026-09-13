@@ -321,11 +321,15 @@ class ScriptStatus(BaseModel):
     Set once per run, never per case: the sandbox decision is made in
     preflight before any case runs. `detail` is the probe's reason -- "bwrap
     not found on PATH", the first line of a refusal -- so a report says why
-    the isolation an operator expected was or was not applied.
+    the isolation an operator expected was or was not applied. `hardening`
+    is the note from `scripts.harden_process` when the harness could hide
+    its own environment from same-user processes (Linux, non-root), else
+    None -- the report says which protections applied, never implies one.
     """
 
     sandbox: SandboxBackend
     detail: str
+    hardening: str | None = None
 
 
 class ScriptNote(BaseModel):

@@ -196,6 +196,22 @@ adds — and the trust model is:
   key, no inherited secret — absent by construction, not by deletion), a scratch directory
   for temporary files, no shell, a process group that is killed after every exit (a
   timeout as much as a normal one), output read from files and capped with a visible cut.
+- **The allowlist stops inheritance, not a same-user read of the harness itself.** A
+  script runs as the user skill-lens runs as, and the OS will show a same-user process
+  another process's exec-time environment — where the provider key lives for the whole
+  run. On Linux that is `/proc/<pid>/environ`: when scripts are enabled, skill-lens marks
+  itself non-dumpable (`prctl(PR_SET_DUMPABLE, 0)`) so that read is refused where the
+  kernel honours the flag, which root does not; the report prints `harness environment
+  hidden from same-user processes (PR_SET_DUMPABLE)` when it applied, and under `bwrap`
+  the harness is in a separate PID namespace regardless. On macOS the read is the
+  `kern.procargs2` sysctl behind `ps -E`, and `sandbox-exec` does not gate it: `/bin/ps`
+  itself cannot run in the sandbox (setuid), but the sysctl is one `ctypes` call away and a
+  blanket `(deny sysctl-read)` that refuses every other sysctl still lets it through, so no
+  profile rule closes it. The consequence: a macOS run with scripts on, or a Linux run
+  without a working `bwrap`, exposes the harness's provider key to a script that looks for
+  it. Set `script_sandbox = "required"` on any runner that holds a provider key, and in CI
+  also stop `actions/checkout` persisting the job token (`persist-credentials: false`, see
+  [CI integration](ci.md#the-composite-action)).
 - **What a script leaves behind is read on the harness's terms.** Every reader — the
   agent's `read_file` and `read_skill_file`, a `file:` assertion, a judge artifact —
   refuses a path that is not a regular file or a directory (a FIFO, a device, a symbolic-link

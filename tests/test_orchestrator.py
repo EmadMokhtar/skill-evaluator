@@ -1014,6 +1014,24 @@ def test_scripts_on_runs_preflight_once_and_hands_the_runtime_to_the_runner(tmp_
     assert runtime is not None and runtime.policy is policy
 
 
+def test_the_hardening_note_reaches_the_report(tmp_path, monkeypatch):
+    # Whatever preflight recorded is what the report says -- on Linux the
+    # real note, elsewhere None -- so the console never claims a protection
+    # this run did not have.
+    import skill_lens.scripts as scripts_module
+
+    monkeypatch.setattr(scripts_module, "harden_process", lambda: "hardened (test)")
+    policy = ScriptPolicy(sandbox="off", interpreters={"py": (sys.executable,)})
+    report = run_evals(
+        [_bundled_skill(tmp_path, "a.py")],
+        [_ScriptAwareRunner()],
+        evals_path=_evals(tmp_path, _case()),
+        options=RunOptions(scripts=policy),
+    )
+    assert report.scripts is not None
+    assert report.scripts.hardening == "hardened (test)"
+
+
 def test_scripts_off_passes_no_scripts_keyword_so_part_1_runners_keep_working(tmp_path):
     class _PartOneRunner:
         name = "old"

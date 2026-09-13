@@ -109,8 +109,10 @@ excerpt, so they can never disagree on what was shown.
 a `summary` block (counts, overall and per-skill pass rates, token/cost/latency totals),
 `skipped_skills`, `tag_filtered_skills`, `case_filtered_skills`, a per-case `outcomes` list,
 a top-level `delta` block, `baseline_notes`, `scripts` (`null` when script execution was
-off, else `{sandbox, detail}` saying which OS sandbox the run's scripts ran under and why —
-`sandbox` is `"sandbox-exec"`, `"bwrap"` or `"none"`), `script_notes` (skills that bundle
+off, else `{sandbox, detail, hardening}` saying which OS sandbox the run's scripts ran under
+and why — `sandbox` is `"sandbox-exec"`, `"bwrap"` or `"none"` — and whether the harness
+could hide its own environment from same-user processes: `hardening` is a short note on
+Linux when `prctl(PR_SET_DUMPABLE, 0)` applied, else `null`), `script_notes` (skills that bundle
 scripts which did not run because execution was off, each as `{skill_name, script_count}`),
 and the `gate` decision with its reasons.
 
@@ -170,5 +172,6 @@ When scripts were enabled, every skill's `<testsuite>` carries `<properties>` wi
 puts run-level facts, and a testcase is the wrong place for something true of the whole
 run. The console and Markdown reports print the same fact as one line (`scripts: on,
 sandbox: <backend>` on the console, with the probe's detail in parentheses when the backend
-is `none`) and name every skill whose bundled scripts did not run because execution was
-off.
+is `none`, and `; <hardening note>` appended when the harness could hide its own
+environment — see [Runners](runners.md#running-bundled-scripts)) and name every skill whose
+bundled scripts did not run because execution was off.

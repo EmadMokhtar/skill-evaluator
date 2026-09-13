@@ -23,6 +23,7 @@ from skill_lens.scripts import (
     DEFAULT_INTERPRETERS,
     DEFAULT_MAX_OUTPUT_BYTES,
     DEFAULT_TIMEOUT_SECONDS,
+    HARDENING_NOTE,
     SCRATCH_PREFIX,
     SandboxStatus,
     ScriptPolicy,
@@ -30,6 +31,7 @@ from skill_lens.scripts import (
     ScriptRuntime,
     ScriptSetupError,
     bwrap_argv,
+    harden_process,
     macos_profile,
     preflight,
     probe_sandbox,
@@ -308,6 +310,68 @@ def test_preflight_required_without_a_backend_is_a_setup_error(tmp_path):
 def test_preflight_auto_without_a_backend_records_the_reason(tmp_path):
     runtime = preflight([], ScriptPolicy(sandbox="auto"), system="Windows")
     assert runtime.sandbox == SandboxStatus(backend="none", detail="no sandbox backend on Windows")
+
+
+def test_preflight_records_whether_the_harness_was_hardened(monkeypatch):
+    # The note is what the console prints; a hardening that applied but
+    # never reached the runtime would be a protection the report denies.
+    import skill_lens.scripts as scripts_module
+
+    monkeypatch.setattr(scripts_module, "harden_process", lambda: "hardened (test)")
+    assert preflight([], ScriptPolicy(sandbox="off")).hardening == "hardened (test)"
+    monkeypatch.setattr(scripts_module, "harden_process", lambda: None)
+    assert preflight([], ScriptPolicy(sandbox="off")).hardening is None
+
+
+def test_preflight_does_not_harden_a_run_it_refuses(monkeypatch):
+    # Hardening costs the harness its core dumps and debugger access; a run
+    # that stops for a missing sandbox never pays that.
+    import skill_lens.scripts as scripts_module
+
+    calls: list[bool] = []
+    monkeypatch.setattr(scripts_module, "harden_process", lambda: calls.append(True))
+    with pytest.raises(ScriptSetupError):
+        preflight([], ScriptPolicy(sandbox="required"), system="Windows")
+    assert calls == []
+
+
+# --- harden_process -----------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform == "linux", reason="Linux applies it for real; see below")
+def test_harden_process_is_a_no_op_off_linux():
+    # macOS has no non-dumpable flag and `kern.procargs2` is not gated by
+    # sandbox-exec, so there is nothing to apply and nothing to raise.
+    assert harden_process() is None
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="PR_SET_DUMPABLE is a Linux prctl")
+@pytest.mark.skipif(
+    getattr(os, "geteuid", lambda: 1)() == 0, reason="root ignores the dumpable flag"
+)
+def test_harden_process_hides_proc_environ_from_a_same_user_child():
+    # Once non-dumpable, the harness's /proc/<pid>/* is root-owned, so a
+    # child running as the same user -- exactly what a script is -- gets
+    # EACCES on its environ. Read from a child, not from this process:
+    # a process may always read its own /proc/self, so that would prove nothing.
+    assert harden_process() == HARDENING_NOTE
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os, sys\n"
+            "try:\n"
+            "    open(f'/proc/{os.getppid()}/environ', 'rb').read()\n"
+            "except PermissionError as exc:\n"
+            "    print('refused', exc.errno)\n"
+            "else:\n"
+            "    print('read')\n",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.stdout.strip().startswith("refused"), completed.stdout + completed.stderr
 
 
 # --- run_script --------------------------------------------------------------

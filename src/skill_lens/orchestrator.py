@@ -541,7 +541,11 @@ def run_evals(
         notes: list[ScriptNote] = []
         if options.scripts is not None:
             runtime = preflight(skills, options.scripts)
-            status = ScriptStatus(sandbox=runtime.sandbox.backend, detail=runtime.sandbox.detail)
+            status = ScriptStatus(
+                sandbox=runtime.sandbox.backend,
+                detail=runtime.sandbox.detail,
+                hardening=runtime.hardening,
+            )
         else:
             for skill in skills:
                 if skill.bundle_root is None:

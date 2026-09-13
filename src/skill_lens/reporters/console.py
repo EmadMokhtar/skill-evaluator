@@ -102,6 +102,8 @@ def _script_lines(report: RunReport) -> list[str]:
         line = f"scripts: on, sandbox: {report.scripts.sandbox}"
         if report.scripts.sandbox == "none":
             line += f" ({report.scripts.detail})"
+        if report.scripts.hardening:
+            line += f"; {report.scripts.hardening}"
         lines.append(line)
     for note in report.script_notes:
         plural = "" if note.script_count == 1 else "s"

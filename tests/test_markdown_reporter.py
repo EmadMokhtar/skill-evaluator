@@ -566,6 +566,17 @@ def test_the_scripts_block_states_the_sandbox_and_the_notes():
     assert "`pdf` bundles 3 scripts; execution is off" in text
 
 
+def test_the_scripts_block_prints_the_hardening_note_when_it_applied():
+    report = _mixed_report().model_copy(
+        update={
+            "scripts": ScriptStatus(
+                sandbox="bwrap", detail="bwrap probe succeeded", hardening="env hidden (test)"
+            )
+        }
+    )
+    assert "Scripts: on, sandbox: bwrap; env hidden (test)" in render_markdown(report)
+
+
 def test_the_scripts_block_is_optional_and_dropped_under_truncation():
     report = _mixed_report().model_copy(
         update={"scripts": ScriptStatus(sandbox="bwrap", detail="bwrap probe succeeded")}
