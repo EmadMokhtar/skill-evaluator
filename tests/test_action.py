@@ -135,3 +135,11 @@ def test_a_single_runner_input_is_forwarded_as_before():
 
 def test_an_empty_runner_input_adds_nothing():
     assert _split_by_the_action("") == []
+
+
+def test_a_runner_input_is_never_expanded_as_a_path_pattern(tmp_path):
+    # An unquoted expansion would glob: with a file named `fake` in the
+    # working directory, `runner: *` would select a real runner instead of
+    # reaching the CLI as the unknown name it is.
+    (Path.cwd() / "fake").write_text("", encoding="utf-8")
+    assert _split_by_the_action("*") == ["--runner", "*"]

@@ -151,9 +151,14 @@ runs:
           # A comma-separated value becomes one flag per entry, so
           # `runner: pydantic-ai,langchain` reaches the CLI as
           # `--runner pydantic-ai --runner langchain`. Blank entries are skipped.
-          local IFS=','
+          # `read -a` splits without pathname expansion, so a value like `*`
+          # reaches the CLI as itself rather than as the working directory's
+          # file names; the `${items[@]+...}` form keeps an empty array legal
+          # under `set -u` on bash 3.2.
+          local -a items
+          IFS=',' read -r -a items <<< "${2:-}"
           local item
-          for item in ${2:-}; do
+          for item in "${items[@]+"${items[@]}"}"; do
             item="${item// /}"
             if [ -n "$item" ]; then args+=("$1" "$item"); fi
           done

@@ -19,7 +19,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 ACTION = REPO_ROOT / "action.yml"
 
-VERSION_IN_SPEC = re.compile(r"skill-lens\[pydantic-ai\]==(?P<version>[\w.]+)")
+# Any extras combination counts: a pin spelled `skill-lens[pydantic-ai,langchain]==`
+# goes just as stale as the single-extra one if no pattern rewrites it.
+VERSION_IN_SPEC = re.compile(r"skill-lens\[[\w,-]+\]==(?P<version>[\w.]+)")
 
 # docs/superpowers/ is a historical archive of specs and plans (see
 # tests/test_naming.py, which excludes it for the same reason): a version
@@ -91,7 +93,7 @@ def test_every_file_spelling_a_version_is_bumped_with_it():
     This walks every tracked file (as tests/test_naming.py does) looking for
     the two ways a file spells a version -- an action reference
     (`EmadMokhtar/skill-evaluator@v<version>`) or a pinned install spec
-    (`skill-lens[pydantic-ai]==<version>`) -- rather than checking a fixed
+    (`skill-lens[<extras>]==<version>`) -- rather than checking a fixed
     list of filenames, so a new file that starts spelling a version is caught
     the moment it exists instead of being invisible to this test forever.
 

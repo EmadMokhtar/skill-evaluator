@@ -301,7 +301,7 @@ form, that file is the explanation.
   framework's vote double. An empty `default_runner` list is a config error naming the field.
 - **`--runner` replaces `default_runner` wholesale; it never appends.** Every other flag
   replaces its key, and an appending flag would make "only LangChain, this once" impossible
-  from a repository whose file names both.
+  from a repository whose `skill-lens.toml` lists both runners.
 - **`init` never creates an `evals/` directory beside existing `*.eval.yaml` files**
   (`scaffold_target`), and **batch `init` never overwrites** — a skill with any eval file is
   skipped and `--force` in batch mode is a user error.
