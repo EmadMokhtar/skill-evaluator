@@ -873,13 +873,65 @@ def test_a_skill_emptied_by_the_tag_filter_is_not_also_case_filtered(tmp_path):
 
 def test_case_filter_is_appended_after_every_pre_existing_parameter():
     # `run_evals` is library API. A caller that passed `judge` positionally
-    # before `case_filter` existed must still be binding `judge`, so the new
-    # parameter has to sit after every parameter that predates it.
+    # before `case_filter` existed must still be binding `judge`, so a new
+    # parameter has to sit after every parameter that predates it. `options`
+    # (M6 part 2) is the newest, so it is last; `keep_workspace` and
+    # `workspace_limits` (M6 part 1) keep the positions they were added in.
     import inspect
 
     params = list(inspect.signature(run_evals).parameters)
-    assert params[-1] == "case_filter"
+    assert params[-1] == "options"
+    assert params[-2] == "case_filter"
     assert params.index("judge") == params.index("tag") + 1
+    assert params.index("keep_workspace") == params.index("executor_factory") + 1
+    assert params.index("workspace_limits") == params.index("keep_workspace") + 1
+
+
+def test_the_legacy_keep_workspace_keyword_still_keeps_the_directory(tmp_path):
+    # A caller written against M6 part 1 passes `keep_workspace=` directly.
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    report = run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        keep_workspace=True,
+    )
+    kept = report.outcomes[0].result.workspace
+    try:
+        assert kept is not None and Path(kept).is_dir()
+    finally:
+        if kept is not None:
+            Workspace(root=Path(kept)).cleanup()
+
+
+def test_the_legacy_workspace_limits_keyword_still_reaches_the_workspace(tmp_path):
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        workspace_limits=WorkspaceLimits(max_files=7),
+    )
+    assert runner.seen[0].limits.max_files == 7
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [{"keep_workspace": True}, {"workspace_limits": WorkspaceLimits(max_files=7)}],
+)
+def test_options_together_with_a_legacy_argument_is_rejected(tmp_path, legacy):
+    # Mirrors the `evaluators` + `judge` rejection: two sources for one
+    # setting is a contradictory request, not a preference to guess at.
+    with pytest.raises(ValueError, match="both `options` and the legacy"):
+        run_evals(
+            [_skill(tmp_path)],
+            [_RecordingRunner()],
+            evals_path=_evals(tmp_path, _case()),
+            options=RunOptions(),
+            **legacy,
+        )
 
 
 def _bundled_skill(tmp_path, *scripts: str) -> Skill:
@@ -902,6 +954,20 @@ class _ScriptAwareRunner(_RecordingRunner):
     def run(self, skill, case, workspace=None, scripts=None):
         self.runtimes.append(scripts)
         return super().run(skill, case, workspace=workspace)
+
+
+def test_the_legacy_form_never_enables_scripts(tmp_path):
+    # The legacy parameters predate scripts, so a caller using them cannot
+    # have asked for execution; the runner must see no runtime.
+    runner = _ScriptAwareRunner()
+    run_evals(
+        [_bundled_skill(tmp_path, "count.py")],
+        [runner],
+        evals_path=_evals(tmp_path, _case()),
+        keep_workspace=False,
+        workspace_limits=WorkspaceLimits(max_files=7),
+    )
+    assert runner.runtimes == [None]
 
 
 def test_run_options_defaults_reproduce_the_old_behaviour(tmp_path):

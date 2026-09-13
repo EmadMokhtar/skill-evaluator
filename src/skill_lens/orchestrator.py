@@ -436,8 +436,10 @@ def run_evals(
     repeat: int = 1,
     concurrency: int = 1,
     executor_factory: Callable[[int], Executor] | None = None,
-    options: RunOptions | None = None,
+    keep_workspace: bool | None = None,
+    workspace_limits: WorkspaceLimits | None = None,
     case_filter: str | None = None,
+    options: RunOptions | None = None,
 ) -> RunReport:
     """Run every (skill, case, runner, arm, repetition) and aggregate the results.
 
@@ -485,11 +487,26 @@ def run_evals(
     sandbox decision is recorded on the report. When it is not set, every
     skill that bundles scripts gets a `ScriptNote` so the report can say
     execution was off.
+
+    `keep_workspace` and `workspace_limits` are the M6 part 1 spelling of the
+    first two `options` fields, kept in the positions they were added in so
+    a caller written against that release -- keyword or positional -- still
+    binds what it meant to. `options` is the way forward and sits last, as
+    every parameter added to this signature does. The legacy form can never
+    enable scripts: it predates them, so `scripts` stays None. Passing
+    `options` together with either legacy argument is rejected, like
+    `evaluators` with `judge`: two sources for one setting is a contradictory
+    request, not a preference to guess at.
     """
     if evaluators is not None and judge is not None:
         raise ValueError(
             "run_evals() received both `evaluators` and `judge`; pass an explicit "
             "JudgeEvaluator inside `evaluators` instead of also passing `judge`."
+        )
+    if options is not None and (keep_workspace is not None or workspace_limits is not None):
+        raise ValueError(
+            "run_evals() received both `options` and the legacy "
+            "`keep_workspace`/`workspace_limits` arguments; pass everything through `options`."
         )
     if repeat < 1:
         raise ValueError(f"repeat must be at least 1, got {repeat}")
@@ -508,7 +525,14 @@ def run_evals(
             JudgeEvaluator(judge if judge is not None else FakeJudge()),
         ]
     )
-    options = options if options is not None else DEFAULT_OPTIONS
+    if options is None:
+        if keep_workspace is None and workspace_limits is None:
+            options = DEFAULT_OPTIONS
+        else:
+            options = RunOptions(
+                keep_workspace=bool(keep_workspace),
+                limits=workspace_limits if workspace_limits is not None else DEFAULT_LIMITS,
+            )
     store = _BaselineStore()
     try:
         plan = _plan_work(skills, runners, evals_path, tag, case_filter, baseline, repeat, store)

@@ -525,10 +525,19 @@ suite aborts the whole run before the first case, real or fake, is charged for.
 
 **A configured cap reaches the workspace.** `max_file_bytes`, `max_files` and
 `max_total_bytes` flow from `Config` through `cli.py`'s `WorkspaceLimits` construction,
-through `orchestrator.run_evals`'s `workspace_limits` parameter, into every
+through `orchestrator.run_evals`'s `options` (`RunOptions.limits`), into every
 `create_workspace` call. A limit read from config and then dropped somewhere on that path
 would leave the built-in default silently in force, and the only symptom would be a refusal
 message quoting a number the user never set.
+
+**`run_evals` is library API: a new parameter is appended, never inserted.** A caller that
+bound a parameter positionally before a newer one existed must still bind the same thing.
+M6 part 1's `keep_workspace` and `workspace_limits` therefore keep their positions after
+`executor_factory`, and M6 part 2's `options` sits last. The legacy pair still works
+(`keep_workspace=True` keeps the directory, `workspace_limits=` reaches the workspace) but
+can never enable scripts, which it predates; passing `options` together with either legacy
+argument raises `ValueError`, the same rejection `evaluators` with `judge` gets. The CLI
+passes `options` only. `tests/test_orchestrator.py` pins the order and both forms.
 
 **Every kept directory is printed, however keeping was turned on.** `_kept_workspaces` in
 `reporters/console.py` renders a `Kept workspaces` section whenever *any* outcome carries a
