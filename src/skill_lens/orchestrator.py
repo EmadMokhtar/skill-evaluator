@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from collections.abc import Callable
 from concurrent.futures import CancelledError, Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 
+from skill_lens.bundle import SkillBundle
 from skill_lens.cases.loader import load_cases_for_skill
 from skill_lens.evaluators.assertion import AssertionEvaluator
 from skill_lens.evaluators.base import Evaluator
@@ -26,9 +29,12 @@ from skill_lens.models import (
     EvalScore,
     RunReport,
     RunResult,
+    ScriptNote,
+    ScriptStatus,
     Skill,
 )
 from skill_lens.runners.base import Runner
+from skill_lens.scripts import ScriptPolicy, ScriptRuntime, preflight
 from skill_lens.skills.baseline import BaselineUnavailable, resolve_previous
 from skill_lens.workspace import (
     DEFAULT_LIMITS,
@@ -36,6 +42,46 @@ from skill_lens.workspace import (
     WorkspaceLimits,
     create_workspace,
 )
+
+
+@dataclass(frozen=True)
+class RunOptions:
+    """Per-run settings that are not part of what an eval asserts.
+
+    Part 1 threaded `keep_workspace` and `limits` as two loose parameters and
+    said a bundle could come when there was a third thing. `scripts` is the
+    third: None means execution is off, which is the default so that
+    upgrading never runs unvetted code on its own.
+    """
+
+    keep_workspace: bool = False
+    limits: WorkspaceLimits = DEFAULT_LIMITS
+    scripts: ScriptPolicy | None = None
+
+
+DEFAULT_OPTIONS = RunOptions()
+
+
+class _BaselineStore:
+    """The per-run directory previous bundles are extracted into.
+
+    Made on first use so a run without `--baseline previous` never creates
+    it; deleted by `run_evals` in a `finally`, however the run ended. Not
+    kept by `--keep-workspace`: a baseline bundle is an input, not an output,
+    and the commit it came from is in the report already.
+    """
+
+    def __init__(self) -> None:
+        self.root: Path | None = None
+
+    def directory(self) -> Path:
+        if self.root is None:
+            self.root = Path(tempfile.mkdtemp(prefix="skill-lens-baselines-")).resolve()
+        return self.root
+
+    def cleanup(self) -> None:
+        if self.root is not None:
+            shutil.rmtree(self.root, ignore_errors=True)
 
 
 def _run_one(
@@ -47,8 +93,8 @@ def _run_one(
     arm: Arm = "candidate",
     repeat_index: int = 0,
     report_skill_name: str | None = None,
-    keep_workspace: bool = False,
-    limits: WorkspaceLimits = DEFAULT_LIMITS,
+    options: RunOptions = DEFAULT_OPTIONS,
+    runtime: ScriptRuntime | None = None,
 ) -> CaseOutcome:
     """Run a single combination and score it, keeping errored distinct from failed.
 
@@ -61,6 +107,10 @@ def _run_one(
     than inside the runner because deletion must happen *after* scoring, and
     the runner has returned by then. It is also what guarantees every arm and
     every repetition gets a directory of its own.
+
+    `runtime` is the once-per-run script decision from `preflight`; it is
+    None when `options.scripts` is unset, in which case the runner is never
+    handed a `scripts=` keyword at all (see below).
     """
     name = report_skill_name if report_skill_name is not None else skill.name
     outcome = partial(
@@ -78,7 +128,7 @@ def _run_one(
             workspace = create_workspace(
                 case.workspace,
                 label=f"{name}-{case.name}-{arm}-{repeat_index}",
-                limits=limits,
+                limits=options.limits,
             )
         except WorkspaceError as exc:
             # Infra, not signal: a disk or permissions problem says nothing
@@ -90,7 +140,12 @@ def _run_one(
             )
 
     try:
-        result = runner.run(skill, case, workspace=workspace)
+        # `scripts=` is passed only when execution is on: a runner written
+        # against Part 1 has no such parameter and must keep working until
+        # the day someone turns scripts on, at which point a TypeError names
+        # the runner that cannot take them.
+        extra = {"scripts": runtime} if runtime is not None else {}
+        result = runner.run(skill, case, workspace=workspace, **extra)
         # Stamped here, not echoed by the runner: an adapter that ignores the
         # parameter then fails loudly on the assertion instead of producing a
         # workspace-less result that looks like a skill problem. Written
@@ -116,10 +171,10 @@ def _run_one(
     finally:
         # In a finally so an authoring error raised by an evaluator still
         # cleans up before it propagates.
-        if workspace is not None and not keep_workspace:
+        if workspace is not None and not options.keep_workspace:
             workspace.cleanup()
 
-    if workspace is not None and not keep_workspace:
+    if workspace is not None and not options.keep_workspace:
         # The directory is gone, so the path must go too: a field pointing at
         # a deleted directory would be a lie in the JSON report.
         result = result.model_copy(update={"workspace": None})
@@ -127,7 +182,9 @@ def _run_one(
     return outcome(status=status, scores=scores, result=result)
 
 
-def _baseline_skill(skill: Skill, kind: BaselineKind, notes: list[BaselineNote]) -> Skill | None:
+def _baseline_skill(
+    skill: Skill, kind: BaselineKind, notes: list[BaselineNote], store: _BaselineStore
+) -> Skill | None:
     """The skill the baseline arm runs, or None with a note explaining why not."""
     if kind == "none":
         # Empty description *and* empty instructions is what makes the runner
@@ -141,7 +198,7 @@ def _baseline_skill(skill: Skill, kind: BaselineKind, notes: list[BaselineNote])
             path=skill.path,
             variant="baseline",
         )
-    resolved = resolve_previous(skill)
+    resolved = resolve_previous(skill, into=store.directory())
     if isinstance(resolved, BaselineUnavailable):
         notes.append(
             BaselineNote(skill_name=resolved.skill_name, kind="unavailable", reason=resolved.reason)
@@ -214,6 +271,7 @@ def _plan_work(
     case_filter: str | None,
     baseline: BaselineKind | None,
     repeat: int,
+    store: _BaselineStore,
 ) -> _Plan:
     """Discovery, filtering and baseline resolution -- always sequential.
 
@@ -241,7 +299,9 @@ def _plan_work(
             if not cases:
                 plan.case_filtered.append(skill.name)
                 continue
-        baseline_skill = None if baseline is None else _baseline_skill(skill, baseline, plan.notes)
+        baseline_skill = (
+            None if baseline is None else _baseline_skill(skill, baseline, plan.notes, store)
+        )
         for case in cases:
             for arm, arm_skill in _arms(case, skill, baseline_skill, baseline, plan.notes):
                 for runner in runners:
@@ -262,8 +322,8 @@ def _plan_work(
 def _run_item(
     item: _WorkItem,
     evaluators: list[Evaluator],
-    keep_workspace: bool,
-    limits: WorkspaceLimits,
+    options: RunOptions,
+    runtime: ScriptRuntime | None,
 ) -> CaseOutcome:
     return _run_one(
         item.skill,
@@ -273,8 +333,8 @@ def _run_item(
         arm=item.arm,
         repeat_index=item.repeat_index,
         report_skill_name=item.report_skill_name,
-        keep_workspace=keep_workspace,
-        limits=limits,
+        options=options,
+        runtime=runtime,
     )
 
 
@@ -287,8 +347,8 @@ def _execute(
     evaluators: list[Evaluator],
     concurrency: int,
     executor_factory: Callable[[int], Executor] | None,
-    keep_workspace: bool = False,
-    limits: WorkspaceLimits = DEFAULT_LIMITS,
+    options: RunOptions = DEFAULT_OPTIONS,
+    runtime: ScriptRuntime | None = None,
 ) -> list[CaseOutcome]:
     """Run every work item, reporting them in submission order.
 
@@ -311,7 +371,7 @@ def _execute(
     network-bound and threads release the GIL while waiting on a socket.
     """
     if concurrency == 1:
-        return [_run_item(item, evaluators, keep_workspace, limits) for item in items]
+        return [_run_item(item, evaluators, options, runtime) for item in items]
 
     executor = (executor_factory or _default_executor)(concurrency)
     try:
@@ -319,9 +379,7 @@ def _execute(
         # another OS thread, a broken pool, a custom factory -- and an executor
         # left un-shut-down keeps its workers alive, so the interpreter's exit
         # handler would finish the work this abort exists to abandon.
-        futures = [
-            executor.submit(_run_item, item, evaluators, keep_workspace, limits) for item in items
-        ]
+        futures = [executor.submit(_run_item, item, evaluators, options, runtime) for item in items]
 
         def _cancel_queued_after(index: int, finished: Future) -> None:
             # Runs on the worker thread, before it picks up its next item.
@@ -378,9 +436,10 @@ def run_evals(
     repeat: int = 1,
     concurrency: int = 1,
     executor_factory: Callable[[int], Executor] | None = None,
-    keep_workspace: bool = False,
+    keep_workspace: bool | None = None,
     workspace_limits: WorkspaceLimits | None = None,
     case_filter: str | None = None,
+    options: RunOptions | None = None,
 ) -> RunReport:
     """Run every (skill, case, runner, arm, repetition) and aggregate the results.
 
@@ -420,16 +479,34 @@ def run_evals(
     safe to share across threads: no mutable instance state touched by
     run/evaluate/judge.
 
-    `keep_workspace` skips deleting each case's temporary directory and leaves
-    its path on the `RunResult`, for debugging. `workspace_limits` bounds what
-    a case may write; None means the module defaults. Both are per-run
-    settings rather than per-case ones -- a cap is a runaway guard, not part
-    of what an eval asserts.
+    `options` bundles the per-run settings -- keeping workspaces, the
+    workspace caps, and the script policy; None means every default. When
+    `options.scripts` is set, `preflight` runs once here, after discovery and
+    before any case: a missing interpreter or a required sandbox that is
+    absent raises `ScriptSetupError` before any money is spent, and the
+    sandbox decision is recorded on the report. When it is not set, every
+    skill that bundles scripts gets a `ScriptNote` so the report can say
+    execution was off.
+
+    `keep_workspace` and `workspace_limits` are the M6 part 1 spelling of the
+    first two `options` fields, kept in the positions they were added in so
+    a caller written against that release -- keyword or positional -- still
+    binds what it meant to. `options` is the way forward and sits last, as
+    every parameter added to this signature does. The legacy form can never
+    enable scripts: it predates them, so `scripts` stays None. Passing
+    `options` together with either legacy argument is rejected, like
+    `evaluators` with `judge`: two sources for one setting is a contradictory
+    request, not a preference to guess at.
     """
     if evaluators is not None and judge is not None:
         raise ValueError(
             "run_evals() received both `evaluators` and `judge`; pass an explicit "
             "JudgeEvaluator inside `evaluators` instead of also passing `judge`."
+        )
+    if options is not None and (keep_workspace is not None or workspace_limits is not None):
+        raise ValueError(
+            "run_evals() received both `options` and the legacy "
+            "`keep_workspace`/`workspace_limits` arguments; pass everything through `options`."
         )
     if repeat < 1:
         raise ValueError(f"repeat must be at least 1, got {repeat}")
@@ -448,15 +525,39 @@ def run_evals(
             JudgeEvaluator(judge if judge is not None else FakeJudge()),
         ]
     )
-    plan = _plan_work(skills, runners, evals_path, tag, case_filter, baseline, repeat)
-    outcomes = _execute(
-        plan.items,
-        evaluators,
-        concurrency,
-        executor_factory,
-        keep_workspace,
-        workspace_limits or DEFAULT_LIMITS,
-    )
+    if options is None:
+        if keep_workspace is None and workspace_limits is None:
+            options = DEFAULT_OPTIONS
+        else:
+            options = RunOptions(
+                keep_workspace=bool(keep_workspace),
+                limits=workspace_limits if workspace_limits is not None else DEFAULT_LIMITS,
+            )
+    store = _BaselineStore()
+    try:
+        plan = _plan_work(skills, runners, evals_path, tag, case_filter, baseline, repeat, store)
+        runtime: ScriptRuntime | None = None
+        status: ScriptStatus | None = None
+        notes: list[ScriptNote] = []
+        if options.scripts is not None:
+            runtime = preflight(skills, options.scripts)
+            status = ScriptStatus(
+                sandbox=runtime.sandbox.backend,
+                detail=runtime.sandbox.detail,
+                hardening=runtime.hardening,
+            )
+        else:
+            for skill in skills:
+                if skill.bundle_root is None:
+                    continue
+                count = len(SkillBundle(skill.bundle_root).scripts())
+                if count:
+                    notes.append(ScriptNote(skill_name=skill.name, script_count=count))
+        outcomes = _execute(plan.items, evaluators, concurrency, executor_factory, options, runtime)
+    finally:
+        # However the run ended -- an authoring error out of an evaluator
+        # included -- the previous bundles go.
+        store.cleanup()
     return RunReport(
         outcomes=outcomes,
         skipped_skills=plan.skipped,
@@ -465,4 +566,6 @@ def run_evals(
         baseline_kind=baseline,
         repeat=repeat,
         baseline_notes=plan.notes,
+        scripts=status,
+        script_notes=notes,
     )

@@ -88,6 +88,32 @@ def _no_baseline_block(report: RunReport) -> list[str]:
     return lines
 
 
+def _script_lines(report: RunReport) -> list[str]:
+    """One line saying whether scripts ran and under which sandbox.
+
+    Printed on every run that enabled scripts, so an operator can tell from
+    the log whether the isolation they expected was applied -- `none` says
+    why. A skill whose scripts did not run because execution is off gets a
+    line too, however execution was left off: a bundled script that silently
+    never runs would look like a skill that does not need it.
+    """
+    lines: list[str] = []
+    if report.scripts is not None:
+        line = f"scripts: on, sandbox: {report.scripts.sandbox}"
+        if report.scripts.sandbox == "none":
+            line += f" ({report.scripts.detail})"
+        if report.scripts.hardening:
+            line += f"; {report.scripts.hardening}"
+        lines.append(line)
+    for note in report.script_notes:
+        plural = "" if note.script_count == 1 else "s"
+        lines.append(
+            f"skill {note.skill_name} bundles {note.script_count} script{plural}; "
+            "execution is off (allow_scripts = true or --allow-scripts)"
+        )
+    return lines
+
+
 def _kept_workspaces(report: RunReport) -> list[str]:
     """Every directory still on disk, and which run left it there.
 
@@ -171,7 +197,9 @@ def render_console(
     `output_limit` caps the agent output shown under a non-passing case; None
     prints all of it (`--full-output`).
     """
-    lines: list[str] = []
+    lines: list[str] = _script_lines(report)
+    if lines:
+        lines.append("")
     if delta is None:
         for outcome in report.outcomes:
             mark = _MARKS[outcome.status]

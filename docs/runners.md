@@ -23,10 +23,11 @@ From a checkout instead, the extra comes from `uv sync --extra pydantic-ai` (or
 
 Both runners receive the same inputs — the same system prompt built by one shared
 function, the same mock tools, the same offered-mode skill tool, the same workspace
-tools — and produce the same `RunResult`, so a case passing under one and failing under
-the other says something about the skill's instructions, not about the harness. The
-judge is chosen separately (`judge = "pydantic-ai"` or `"langchain"`), and one judge grades
-every runner's output.
+tools, and the same [bundle tools](#bundled-files-and-scripts) (`list_skill_files`,
+`read_skill_file`, and `run_script` under `allow_scripts`) — and produce the same
+`RunResult`, so a case passing under one and failing under the other says something about
+the skill's instructions, not about the harness. The judge is chosen separately
+(`judge = "pydantic-ai"` or `"langchain"`), and one judge grades every runner's output.
 
 `--model` is passed to each framework unchanged. `openai:` and `anthropic:` are spelled
 the same in both; other providers differ (PydanticAI `google-gla:`, LangChain
@@ -100,6 +101,25 @@ resolved once, at creation — on macOS `/tmp` is a symlink to `/private/tmp`, a
 unresolved root against a resolved candidate path would make every containment check compare
 two spellings of the same directory.
 
+**Regular files only.** A path that exists and is neither a regular file nor a directory —
+a FIFO (a named pipe), a device, a socket — is refused, and so is a symbolic-link loop,
+whichever exception the running Python raises for it. The check is a `stat`, never an
+`open`: opening a FIFO blocks until the other end connects, which no reader in skill-lens
+ever is, so a bundled script that planted one under the name an assertion reads would
+otherwise hang the run. The same rule applies to the skill's bundle, so `read_skill_file`
+cannot block on a FIFO committed to the repository either.
+
+**Reads are capped too.** `read_file`, a `file:` assertion and a judge artifact refuse a
+file larger than `max_file_bytes` before reading a byte of it — `refused: report.md is
+2,000,001 bytes; max_file_bytes is 1,000,000`. `read_file` uses the
+[configured](configuration.md) value; the assertion, the judge and `read_skill_file` use
+the built-in default of 1 MB. A sparse file has whatever apparent size a script gives it at
+almost no cost on disk, so the cap on `st_size` is what bounds what reaches a model or an
+evaluator. A `file:` assertion scores the refusal as a failed check; the judge sees the
+artifact rendered as `(too large to read)` — distinct from `(not produced)`, because the
+file does exist. `file-produced` is unaffected: it asks whether the file exists, not whether
+it is readable.
+
 **The caps.** Three [configured](configuration.md) limits — `max_file_bytes`, `max_files`,
 `max_total_bytes` — bound what one case may write. They default to roughly 100x a realistic
 artifact (a report or a JSON file is kilobytes), so they only bind when a run is genuinely
@@ -119,20 +139,202 @@ exists — and how to use `list_files`, `read_file` and `write_file` — is text
 whatever system prompt the arm already has, byte-for-byte the same whether the skill is
 loaded, replaced by the neutral baseline preamble, or offered as a tool under `mode:
 offered`, and it names no skill. Added to the candidate arm only, that text would itself
-become part of what `--min-delta` measures.
+become part of what `--min-delta` measures. The bundle tools below add nothing to it; they
+describe themselves.
 
 `--keep-workspace` (see [CLI](cli.md)) keeps every case's directory instead of deleting it
 after scoring, for inspecting exactly what a run wrote. Every kept directory is printed,
 however keeping was turned on.
 
-**Files beside `SKILL.md` are not loaded.** A skill directory often carries `references/`
-or `scripts/` alongside `SKILL.md`. Today skill-lens reads only `SKILL.md`: those files
-are not added to the prompt, and the workspace tools cannot reach them — the workspace is
-the case's temporary directory, not the skill's. A `SKILL.md` that says "see
-`references/policy.md`" therefore points the agent at a file it cannot read. Running a
-script bundled with the skill is planned as M6 part 2 (see the [roadmap](roadmap.md)),
-because executing code that shipped with the artifact under evaluation is a different
-trust decision from writing files into a temporary directory.
+## Bundled files and scripts
+
+The Agent Skills layout puts three directories beside `SKILL.md`: `scripts/`,
+`references/` and `assets/`. When at least one of them exists, a case with a `workspace:`
+block also gets:
+
+| Tool | Does | Needs |
+| --- | --- | --- |
+| `list_skill_files` | List the bundled files, one path per line, relative to the skill's directory | a bundle |
+| `read_skill_file` | Read one bundled text file, e.g. `references/style.md` | a bundle |
+| `run_script` | Run a file under `scripts/` with the workspace as its current directory | a file under `scripts/` **and** `allow_scripts` |
+
+Only those three directories are reachable. `SKILL.md` itself, `*.eval.yaml` and `evals/`
+are refused — `refused: 'SKILL.md' is not under scripts/, references/ or assets/; only
+those three directories are readable` — because an eval file holds the expected answers,
+and a tool that could read it would hand the agent its answer key. A binary file under
+`assets/` gets the same `not valid UTF-8 text` message `read_file` gives; copying one into
+the workspace is not supported yet. The tools describe themselves without naming the skill:
+the instruction to run `scripts/count.py` comes from `SKILL.md`, which is what is under
+measurement, and the workspace preamble is unchanged and still identical in both arms.
+
+The bundle tools need the `workspace:` block because the workspace is the script's working
+directory and, with its scratch directory, the only host area the sandbox lets it write
+to. A case without one gets no bundle tools, and a `trajectory:` naming one there is the
+same authoring error the workspace tools already raise. The tools are registered in
+`mode: offered` cases too — an agent that declines the skill has no reason to call them,
+and one that triggers it needs them exactly as a `loaded` case does. All six built-in
+names are reserved in every workspace case; see [Workspaces](eval-files.md#workspaces).
+
+`examples/log-triage` is a skill that can only pass by running its script: the counts its
+case asserts are what `scripts/count_levels.py` prints for the seeded log, and a model that
+guesses gets them wrong. It also reads `references/report-format.md` for the layout of the
+file it writes.
+
+### Running bundled scripts
+
+`run_script(path, args)` runs the interpreter configured for the file's extension
+([`script_interpreters`](configuration.md#bundled-scripts)), with the workspace as the
+current directory and the model's `args` as command-line arguments, and returns:
+
+```
+exit code: 0
+stdout:
+ERROR: 4
+INFO: 3
+WARN: 2
+stderr:
+(empty)
+```
+
+A script that runs past the timeout gets `stopped after 30 s (script_timeout_seconds)` in
+place of the exit line. Every other outcome is text the model reads too:
+
+| What happened | What the model reads |
+| --- | --- |
+| The script exited non-zero | `exit code: 1`, then both streams as above |
+| A path outside `scripts/` | `refused: 'references/x.md' is not under scripts/; only bundled scripts can be run` |
+| No such script | `refused: no such script 'scripts/x.py'; bundled scripts: scripts/count_levels.py` |
+| An extension with no interpreter | `refused: 'scripts/x.rb' has no configured interpreter; script_interpreters allows: py, sh` |
+| The interpreter is not on `PATH` | `refused: scripts/x.py needs python3, which is not on PATH` |
+| The interpreter will not start, or an argument holds a NUL byte | `refused: cannot start python3: <error>` |
+
+None of these is `errored`: an unrunnable script is a fact about the skill, and the model
+reading that fact is the eval signal. `run_script` never raises. Standard input is
+`/dev/null`; a script that needs input takes it as arguments or from a workspace file.
+
+**The portable guards**, on every platform:
+
+- The environment is rebuilt from an allowlist — `PATH`, `HOME`, `LANG`, `LC_ALL`,
+  `LC_CTYPE`, `TZ`, plus `SystemRoot`, `COMSPEC`, `PATHEXT` and `USERPROFILE` on Windows,
+  where Python does not start without them — and `PYTHONDONTWRITEBYTECODE=1` and
+  `PYTHONIOENCODING=utf-8` are set. Nothing else skill-lens holds reaches the script, the
+  provider key first among them: it is absent by construction, not by remembering to delete
+  it. What the allowlist prevents is *inheritance*. A script runs as the same user as
+  skill-lens, and an operating system lets a same-user process ask the kernel for another
+  process's environment — the block copied at `exec`, which is where the provider key sits
+  for the whole run. On Linux that is `/proc/<pid>/environ`; when scripts are enabled
+  skill-lens marks itself non-dumpable (`prctl(PR_SET_DUMPABLE, 0)`), which makes its
+  `/proc/<pid>/*` root-owned so a same-user read is refused — root ignores that, and the
+  report says whether it applied (`scripts: on, sandbox: none (bwrap not found on PATH);
+  harness environment hidden from same-user processes (PR_SET_DUMPABLE)`). Under `bwrap`
+  the harness is in another PID namespace and has no `/proc` entry to read. On macOS the
+  read is the `kern.procargs2` sysctl behind `ps -E`, and nothing closes it: `sandbox-exec`
+  cannot execute `/bin/ps` (it is setuid root), but a script can call the sysctl directly,
+  and that read is not gated by the sandbox at all — verified against a blanket `(deny
+  sysctl-read)` that refused every other sysctl in the same process. So on macOS, and on a
+  Linux runner without `bwrap`, a script that goes looking can find the harness's provider
+  key. Set `script_sandbox = "required"` wherever a provider key is present, and treat a
+  macOS run with scripts on as one that exposes that key to the skill under test.
+- `TMPDIR`/`TMP`/`TEMP` point at a scratch directory outside the workspace, deleted after
+  the call, so a script's temporary files never appear in `list_files`, `file-produced` or
+  the judge's artifacts.
+- A script runs with `shell=False`, its arguments as argv. Nothing the model sends is ever
+  joined into a command line.
+- The script's whole process group is killed after **every** exit — a normal one as much
+  as a wall-clock timeout (`script_timeout_seconds`) — so a script that starts `sleep 1000`
+  and exits at once leaves nothing behind. Where Python provides `os.waitid` — Linux, and
+  macOS from Python 3.13 — the exit is observed before the leader is reaped, the group is
+  killed, and only then is it reaped, so the pid cannot have been handed to an unrelated
+  process by the time the kill runs; elsewhere the child is waited for first and the group
+  killed after, which is still safe because POSIX never hands out a pid while a process
+  group with that id exists. One honest limit: the kill is
+  `os.killpg`, so a script that calls `os.setsid()` leaves that group and survives it on
+  every POSIX platform; only the `bwrap` backend closes that gap (`--unshare-pid` puts the
+  script in its own PID namespace and `--die-with-parent` takes it down with the sandbox)
+  — and a stock Ubuntu runner may not have a working `bwrap`. On Windows the kill is
+  `taskkill /T /F`, which walks the tree from the parent: it covers the timeout, where the
+  parent is still alive, but after the parent has exited on its own it finds no tree, so a
+  background process a script started stays running there.
+- stdout and stderr are written to files in the scratch directory, not held in memory, and
+  read back capped at `max_script_output_bytes` each; a cut ends with `... [truncated, N
+  bytes omitted]` stating the exact count. The harness reads them through the descriptors
+  it opened before the process started, never by re-opening the path, so a script cannot
+  swap a symlink or a FIFO into their place.
+- A script writes to disk directly, so the workspace caps cannot refuse it beforehand.
+  After the call the directory is measured, and if it is over `max_files` or
+  `max_total_bytes` the tool result ends with a `warning:` line (`warning: the working
+  directory now holds 12,345,678 bytes; max_total_bytes is 5,000,000`) and every later
+  `write_file` is refused. Nothing bounds what a script can *leave* on disk — a sparse file
+  has any apparent size at almost no cost — so the bound that matters is on what is read
+  back: every reader refuses a file over `max_file_bytes` before opening it (see
+  [The workspace](#the-workspace)).
+
+**The OS sandbox**, where one exists (`script_sandbox = "auto"`, the default), is a second
+layer on top. Under either backend a script cannot open a network connection; cannot write
+to the host filesystem outside the workspace and its scratch directory (under `bwrap`,
+writes under the temporary directory and `/dev/shm` land in an in-memory mount that is
+discarded when the script exits — bounded, like output, only by the timeout); and cannot
+read anything under the system temporary directory except the workspace, the scratch
+directory and the skill's own bundle — so under `--concurrency N` a script cannot read the
+baseline arm's workspace or another case's scratch directory. One difference between the
+two: `bwrap`'s `--unshare-net` isolates the network stack only, so a Unix-domain socket the
+CI user can reach through the filesystem — `/var/run/docker.sock` is the usual one — is
+still connectable there, whereas macOS's `(deny network*)` covers Unix sockets too. A
+runner whose user can reach the Docker socket should not run scripts you would not run by
+hand. The bundle is allowed back
+explicitly because a `--baseline previous` bundle is extracted under that temporary
+directory. Reads anywhere else are allowed (see below).
+
+| | Backend | How |
+| --- | --- | --- |
+| macOS | `sandbox-exec` | A profile that allows everything, then denies `network*` and `file-write*`, re-allows writes under the workspace and the scratch directory (plus `file-write-data` on `/dev/null`), denies `file-read*` under the temporary directory, then re-allows reads under the workspace, the scratch directory and the bundle. Later rules win. `sandbox-exec` is marked deprecated in Apple's documentation, is present and working on current macOS, and is what Bazel, Chromium and Claude Code use. |
+| Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install. A stock Ubuntu CI image may not ship `bwrap`, or may refuse unprivileged user namespaces; the report's `sandbox:` line says which. `--unshare-net` does not block Unix-domain sockets (see above). |
+| Windows | none | The portable guards only. `"required"` refuses to run. |
+
+The probe runs once per run, after discovery and before any case. The backend is
+*executed* — `sandbox-exec -p '(version 1)(allow default)(deny network*)' /usr/bin/true`, or
+`bwrap --ro-bind / / --dev /dev --proc /proc --unshare-net --unshare-pid --die-with-parent
+-- /bin/true` — not merely found on `PATH`, because present is not the same as working: a
+stock Ubuntu runner may not ship `bwrap` at all, or may refuse unprivileged user namespaces,
+and the first line of that refusal is what the report shows. The result is on every report
+that enabled scripts —
+`scripts: on, sandbox: bwrap`, or `scripts: on, sandbox: none (bwrap not found on PATH)` —
+so you can tell from a log whether the isolation you expected applied. `"required"` turns a
+missing backend into exit 2 before any money is spent. The probe fails closed on one more
+thing: a temporary-directory path containing a double quote cannot be written into a
+`sandbox-exec` profile safely, so it reports `none` with a detail naming that, and
+`"required"` then exits 2.
+
+The same preflight resolves the interpreters. For every discovered skill with a bundle,
+each file under `scripts/` whose extension is in `script_interpreters` must have its
+interpreter on `PATH`, or the run exits 2 naming the script and the interpreter. This covers
+every *discovered* skill — including one that `--tag` or `--case` filters out, or that has
+no cases at all — so a missing interpreter for a skill that would never run still exits 2:
+a fail-closed check that quietly skipped some skills would not be one. A file under
+`scripts/` with an unmapped extension (a `data.json`, a `helper.txt`) is not an error; it
+is simply not runnable. Preflight checks the candidate's bundles only; a baseline script
+whose interpreter is missing is a refusal the model reads, not an error.
+
+**What the sandbox does not do.** It does not hide the rest of the filesystem: a script
+can read whatever the CI user can read (the interpreter and its libraries live there),
+and what it prints reaches the model and the report. The sandbox is defence in depth (a
+second layer that limits damage); the `allow_scripts` opt-in is the decision. Do not enable
+scripts for a skill you would not run by hand. See
+[Security](security.md#running-bundled-scripts).
+
+**Under `--baseline previous`**, the previous version's `scripts/`, `references/` and
+`assets/` come from git too, so the old instructions are never paired with the new scripts.
+They are extracted — `git archive`, then `tarfile` with its `data` filter, which is why
+skill-lens requires Python 3.11.4 or later — from the commit that last edited `SKILL.md` at
+the previous version, into a temporary directory that is deleted when the run ends, however
+it ends; `--keep-workspace` does not keep it, because a baseline bundle is an input, not an
+output. The version is the authority, and that has two consequences: a bundle-only commit
+made after that `SKILL.md` edit is invisible to the baseline, and a very large historical
+`assets/` can hit the 10-second git timeout, which is reported as a baseline note
+(`cannot archive commit <sha>`), never an error. A commit with none of the three
+directories gives the baseline no bundle tools — never the candidate's. `--baseline none`
+has no bundle: there is no skill. See
+[How `previous` is resolved](comparative-evals.md#how-previous-is-resolved).
 
 ## Budget limits and pricing
 

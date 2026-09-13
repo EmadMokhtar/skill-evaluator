@@ -43,7 +43,15 @@ class FakeRunner:
             return self._baseline_writes[case.task]
         return self._writes.get(case.task, {})
 
-    def run(self, skill: Skill, case: EvalCase, workspace: Workspace | None = None) -> RunResult:
+    def run(
+        self,
+        skill: Skill,
+        case: EvalCase,
+        workspace: Workspace | None = None,
+        scripts: object = None,
+    ) -> RunResult:
+        """`scripts` is accepted for protocol symmetry and ignored: a scripted runner runs
+        nothing."""
         if workspace is not None:
             for name, content in self._scripted_writes(skill, case).items():
                 workspace.write(name, content)

@@ -12,8 +12,10 @@ surface it as an infra failure instead.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +33,15 @@ class PathRefused(Exception):
 
     The message is written for the model: a built-in tool catches this and
     returns the text as an ordinary tool result.
+    """
+
+
+class FileTooLarge(PathRefused):
+    """A file that exists but is over `max_file_bytes`, so `read` will not load it.
+
+    A `PathRefused` like any other to the tools and the assertion evaluator;
+    a distinct class so the judge evaluator can render "too large to read"
+    rather than "not produced" without matching on the message text.
     """
 
 
@@ -114,6 +125,46 @@ def check_relative_path(candidate: str) -> None:
         )
 
 
+def resolve_under(base: Path, candidate: str) -> Path:
+    """`base / candidate` with every symlink followed, or raise if the OS cannot.
+
+    Python 3.11 and 3.12 raise `RuntimeError` from `Path.resolve()` on a
+    symlink loop; 3.13 stops resolving instead and leaves the loop in the
+    path, which `stat_regular` below then meets as `ELOOP`. Either way the
+    caller sees one `PathRefused`, so a loop a script planted is a refusal
+    on every supported interpreter rather than a crash on two of them.
+    """
+    try:
+        return (base / candidate.strip()).resolve()
+    except (RuntimeError, OSError) as exc:
+        raise PathRefused(f"refused: {candidate!r} cannot be resolved: {exc}") from exc
+
+
+def stat_regular(target: Path, candidate: str) -> os.stat_result | None:
+    """`target`'s stat if it is a regular file or a directory; None if it is missing.
+
+    Anything else -- a FIFO, a device, a socket, a symlink loop -- raises
+    `PathRefused`. The check is `stat`, not `open`: opening a FIFO blocks
+    until the other end connects, which no reader in the harness ever is, so
+    a FIFO a script planted would otherwise hang the agent loop, an
+    evaluator or the judge forever. Symlinks are already followed by
+    `resolve_under`, so `os.stat` rather than `os.lstat` is the right call.
+
+    A missing target is the caller's business -- `read` raises `OSError` for
+    it and `write` creates it -- and so is `ENOTDIR` (a path component that
+    is a file), which the caller's own open reports as before.
+    """
+    try:
+        result = os.stat(target)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as exc:
+        raise PathRefused(f"refused: {candidate!r} cannot be resolved: {exc}") from exc
+    if not (stat.S_ISREG(result.st_mode) or stat.S_ISDIR(result.st_mode)):
+        raise PathRefused(f"refused: {candidate!r} is not a regular file")
+    return result
+
+
 @dataclass(frozen=True)
 class Workspace:
     """A contained directory the agent may read and write.
@@ -123,23 +174,38 @@ class Workspace:
     check compare two spellings of the same directory.
 
     `limits` defaults so that reconstructing a Workspace from a bare path
-    stays a one-argument call -- which is what `AssertionEvaluator` does. That
-    is safe because limits constrain writes, and nothing but the tools writes.
+    stays a one-argument call -- which is what `AssertionEvaluator` and the
+    judge do. Limits bound reads as well as writes: `max_file_bytes` is also
+    the most `read` will load, because a bundled script can leave a sparse
+    file of any apparent size behind, and a reader that loaded it whole would
+    be the harness running out of memory on the skill's behalf.
+
+    Only regular files and directories are ever resolved. A FIFO, a device
+    or a symlink loop is refused by `resolve` before any open, so every
+    reader and writer built on the workspace inherits the rule.
     """
 
     root: Path
     limits: WorkspaceLimits = DEFAULT_LIMITS
 
-    def resolve(self, candidate: str) -> Path:
-        """The absolute path `candidate` names, or raise if it leaves the root."""
+    def _inspect(self, candidate: str) -> tuple[Path, os.stat_result | None]:
+        """The contained path plus its stat (None when it does not exist yet)."""
         check_relative_path(candidate)
-        target = (self.root / candidate.strip()).resolve()
+        target = resolve_under(self.root, candidate)
         # The backstop for anything the checks above missed. Rejecting the
         # root itself matters because every caller wants a file: without it,
         # "." would pass containment and then fail confusingly on read.
         if target == self.root or not target.is_relative_to(self.root):
             raise PathRefused(f"refused: {candidate!r} resolves outside the working directory")
-        return target
+        return target, stat_regular(target, candidate)
+
+    def resolve(self, candidate: str) -> Path:
+        """The absolute path `candidate` names, or raise if it leaves the root.
+
+        Also raises if the target exists and is not a regular file or a
+        directory, so no caller can open a FIFO by accident.
+        """
+        return self._inspect(candidate)[0]
 
     def listing(self) -> list[str]:
         """Every file, relative to the root, sorted, recursive."""
@@ -155,8 +221,18 @@ class Workspace:
         return len(files), sum(item.stat().st_size for item in files)
 
     def read(self, candidate: str) -> str:
-        """The file's text. Raises OSError if it is missing or is a directory."""
-        return self.resolve(candidate).read_text(encoding="utf-8")
+        """The file's text. Raises OSError if it is missing or is a directory.
+
+        Refuses a file larger than `max_file_bytes` before reading a byte of
+        it, naming the cap the way `write` does.
+        """
+        target, found = self._inspect(candidate)
+        if found is not None and found.st_size > self.limits.max_file_bytes:
+            raise FileTooLarge(
+                f"refused: {candidate} is {found.st_size:,} bytes; "
+                f"max_file_bytes is {self.limits.max_file_bytes:,}"
+            )
+        return target.read_text(encoding="utf-8")
 
     def write(self, candidate: str, content: str) -> int:
         """Create or replace a file, returning the bytes written.
@@ -192,6 +268,27 @@ class Workspace:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         return size
+
+    def over_limit(self) -> str | None:
+        """A warning if the directory already exceeds a cap, else None.
+
+        For what a script wrote: it goes straight to disk, so `write`'s
+        projection never saw it. The message is a warning, not a refusal --
+        the bytes are already there -- and every later `write` is refused by
+        the projection anyway.
+        """
+        count, total = self._totals()
+        if count > self.limits.max_files:
+            return (
+                f"warning: the working directory now holds {count:,} files; "
+                f"max_files is {self.limits.max_files:,}"
+            )
+        if total > self.limits.max_total_bytes:
+            return (
+                f"warning: the working directory now holds {total:,} bytes; "
+                f"max_total_bytes is {self.limits.max_total_bytes:,}"
+            )
+        return None
 
     def cleanup(self) -> None:
         """Delete the directory. Never raises.

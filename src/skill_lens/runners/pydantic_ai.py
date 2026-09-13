@@ -12,17 +12,20 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from skill_lens.bundle import SkillBundle
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
 from skill_lens.runners.base import RunnerDependencyError
 from skill_lens.runners.pricing import calculate_cost, provider_of
 from skill_lens.runners.prompting import instructions
 from skill_lens.runners.retry import run_with_retries, transient_status
 from skill_lens.runners.tools import (
+    build_bundle_tools,
     build_mock_tool,
     build_skill_tool,
     build_workspace_tools,
     skill_tool_name,
 )
+from skill_lens.scripts import ScriptRuntime
 from skill_lens.workspace import Workspace
 
 DEFAULT_MODEL = "openai:gpt-4o-mini"
@@ -128,7 +131,13 @@ class PydanticAIRunner:
             return None
         return ModelSettings(temperature=float(self._temperature))
 
-    def _build_agent(self, skill: Skill, case: EvalCase, workspace: Workspace | None) -> Any:
+    def _build_agent(
+        self,
+        skill: Skill,
+        case: EvalCase,
+        workspace: Workspace | None,
+        scripts: ScriptRuntime | None,
+    ) -> Any:
         from pydantic_ai import Agent, Tool
 
         built = [build_mock_tool(spec) for spec in case.tools]
@@ -136,6 +145,13 @@ class PydanticAIRunner:
             built.append(build_skill_tool(skill))
         if workspace is not None:
             built.extend(build_workspace_tools(workspace))
+            # The bundle tools need the workspace: it is the script's working
+            # directory and the sandbox's only writable area. Registered in
+            # offered mode too -- an agent that declines the skill has no
+            # reason to call them, and one that triggers it needs them exactly
+            # as a loaded case does.
+            if skill.bundle_root is not None:
+                built.extend(build_bundle_tools(SkillBundle(skill.bundle_root), workspace, scripts))
         tools = [
             Tool.from_schema(
                 agent_tool.call,
@@ -161,13 +177,19 @@ class PydanticAIRunner:
             self._sleep,
         )
 
-    def run(self, skill: Skill, case: EvalCase, workspace: Workspace | None = None) -> RunResult:
+    def run(
+        self,
+        skill: Skill,
+        case: EvalCase,
+        workspace: Workspace | None = None,
+        scripts: ScriptRuntime | None = None,
+    ) -> RunResult:
         _require_pydantic_ai()
         configured = self._model if isinstance(self._model, str) else ""
         offered = skill_tool_name(skill.name) if case.mode == "offered" else None
         started = time.monotonic()
         try:
-            agent = self._build_agent(skill, case, workspace)
+            agent = self._build_agent(skill, case, workspace, scripts)
             result = self._run_with_retries(agent, case.task)
             messages = result.all_messages()
             usage = result.usage

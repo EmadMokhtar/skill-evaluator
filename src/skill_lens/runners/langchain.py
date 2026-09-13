@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from skill_lens.bundle import SkillBundle
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
 from skill_lens.runners.base import RunnerDependencyError
 from skill_lens.runners.pricing import calculate_cost, provider_of
@@ -23,11 +24,13 @@ from skill_lens.runners.prompting import instructions
 from skill_lens.runners.retry import run_with_retries, transient_status
 from skill_lens.runners.tools import (
     AgentTool,
+    build_bundle_tools,
     build_mock_tool,
     build_skill_tool,
     build_workspace_tools,
     skill_tool_name,
 )
+from skill_lens.scripts import ScriptRuntime
 from skill_lens.workspace import Workspace
 
 DEFAULT_MODEL = "openai:gpt-4o-mini"
@@ -196,7 +199,13 @@ class LangChainRunner:
         self._retry_backoff_seconds = retry_backoff_seconds
         self._sleep = sleep
 
-    def _build_agent(self, skill: Skill, case: EvalCase, workspace: Workspace | None) -> Any:
+    def _build_agent(
+        self,
+        skill: Skill,
+        case: EvalCase,
+        workspace: Workspace | None,
+        scripts: ScriptRuntime | None,
+    ) -> Any:
         from langchain.agents import create_agent
 
         built = [build_mock_tool(spec) for spec in case.tools]
@@ -204,6 +213,13 @@ class LangChainRunner:
             built.append(build_skill_tool(skill))
         if workspace is not None:
             built.extend(build_workspace_tools(workspace))
+            # The bundle tools need the workspace: it is the script's working
+            # directory and the sandbox's only writable area. Registered in
+            # offered mode too -- an agent that declines the skill has no
+            # reason to call them, and one that triggers it needs them exactly
+            # as a loaded case does.
+            if skill.bundle_root is not None:
+                built.extend(build_bundle_tools(SkillBundle(skill.bundle_root), workspace, scripts))
         return create_agent(
             _chat_model(self._model, self._temperature),
             tools=_structured_tools(built),
@@ -222,13 +238,20 @@ class LangChainRunner:
         )
         return list(state["messages"])
 
-    def run(self, skill: Skill, case: EvalCase, workspace: Workspace | None = None) -> RunResult:
+    def run(
+        self,
+        skill: Skill,
+        case: EvalCase,
+        workspace: Workspace | None = None,
+        scripts: ScriptRuntime | None = None,
+    ) -> RunResult:
         _require_langchain()
         configured = self._model if isinstance(self._model, str) else ""
         offered = skill_tool_name(skill.name) if case.mode == "offered" else None
         started = time.monotonic()
         try:
-            messages = self._invoke(self._build_agent(skill, case, workspace), case.task)
+            agent = self._build_agent(skill, case, workspace, scripts)
+            messages = self._invoke(agent, case.task)
             input_tokens, output_tokens = _usage(messages)
             model_name = _model_name(messages, configured)
             cost_usd, cost_note = _cost(input_tokens, output_tokens, model_name, configured)

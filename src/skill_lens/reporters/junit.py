@@ -127,7 +127,37 @@ def _by_skill(outcomes: list[CaseOutcome]) -> dict[str, list[CaseOutcome]]:
     return groups
 
 
-def _skipped_suite(root: Element, skill_name: str, case_name: str, reason: str) -> None:
+def _script_properties(suite: Element, report: RunReport) -> None:
+    """The run's script facts, as the suite's first child.
+
+    Properties are where JUnit puts run-level facts; a testcase is the wrong
+    place for something true of the whole run. Called for *every* suite the
+    renderer creates -- candidate, skipped, filtered and the zero-case error
+    suite -- because the docs promise every `<testsuite>` carries them, and
+    a CI UI reading one suite in isolation must not conclude scripts were
+    off. First child, because the JUnit schema puts `<properties>` before any
+    `<testcase>`, so it must be called before the cases are appended.
+    """
+    if report.scripts is None:
+        return
+    properties = SubElement(suite, "properties")
+    SubElement(
+        properties,
+        "property",
+        name="skill-lens.scripts.sandbox",
+        value=_xml_safe(report.scripts.sandbox),
+    )
+    SubElement(
+        properties,
+        "property",
+        name="skill-lens.scripts.detail",
+        value=_xml_safe(report.scripts.detail),
+    )
+
+
+def _skipped_suite(
+    root: Element, report: RunReport, skill_name: str, case_name: str, reason: str
+) -> None:
     suite = SubElement(
         root,
         "testsuite",
@@ -138,6 +168,7 @@ def _skipped_suite(root: Element, skill_name: str, case_name: str, reason: str) 
         skipped="1",
         time="0.000",
     )
+    _script_properties(suite, report)
     case = SubElement(
         suite,
         "testcase",
@@ -174,6 +205,7 @@ def render_junit(
 
     for skill_name, outcomes in _by_skill(report.candidate_outcomes).items():
         suite = SubElement(root, "testsuite", name=_xml_safe(skill_name))
+        _script_properties(suite, report)
         suite_failures = suite_errors = 0
         suite_time = 0.0
         for outcome in outcomes:
@@ -207,19 +239,27 @@ def render_junit(
     # A skill with no coverage is exactly what JUnit's <skipped> is for, and it
     # surfaces "nobody is testing this" in every CI UI.
     for skill_name in report.skipped_skills:
-        _skipped_suite(root, skill_name, "(no eval cases)", "no eval cases")
+        _skipped_suite(root, report, skill_name, "(no eval cases)", "no eval cases")
         tests += 1
         skipped += 1
     for skill_name in report.tag_filtered_skills:
         _skipped_suite(
-            root, skill_name, "(no cases matched --tag)", "no cases matched the --tag filter"
+            root,
+            report,
+            skill_name,
+            "(no cases matched --tag)",
+            "no cases matched the --tag filter",
         )
         tests += 1
         skipped += 1
 
     for skill_name in report.case_filtered_skills:
         _skipped_suite(
-            root, skill_name, "(no cases matched --case)", "no cases matched the --case filter"
+            root,
+            report,
+            skill_name,
+            "(no cases matched --case)",
+            "no cases matched the --case filter",
         )
         tests += 1
         skipped += 1
@@ -241,6 +281,7 @@ def render_junit(
             skipped="0",
             time="0.000",
         )
+        _script_properties(suite, report)
         case = SubElement(
             suite, "testcase", classname="skill-lens", name="no eval cases ran", time="0.000"
         )

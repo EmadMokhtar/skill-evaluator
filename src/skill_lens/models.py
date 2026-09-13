@@ -12,6 +12,8 @@ ToolParamType = Literal["string", "integer", "number", "boolean"]
 CaseMode = Literal["loaded", "offered"]
 Arm = Literal["candidate", "baseline"]
 BaselineKind = Literal["none", "previous"]
+SandboxMode = Literal["auto", "required", "off"]
+SandboxBackend = Literal["sandbox-exec", "bwrap", "none"]
 
 
 class Skill(BaseModel):
@@ -21,6 +23,13 @@ class Skill(BaseModel):
     is an identifier, not a number, so `1.20` must not compare equal to `1.2`.
     `variant` says which arm of a comparative run this copy belongs to; the
     orchestrator sets it, and `FakeRunner` scripts against it.
+
+    `bundle_root` is the directory whose `scripts/`, `references/` and `assets/`
+    the agent may read -- None when the skill ships none. Only the skill
+    loader and the baseline resolver ever set it, so a Skill built by hand
+    and the `--baseline none` skill both carry no bundle by default: keying
+    the bundle tools on `path` instead would leak the candidate's scripts into
+    the "no skill" arm, since every Skill has a path.
     """
 
     name: str
@@ -29,6 +38,7 @@ class Skill(BaseModel):
     version: str = ""
     path: Path
     variant: Arm = "candidate"
+    bundle_root: Path | None = None
 
 
 class ToolCall(BaseModel):
@@ -305,6 +315,35 @@ class BaselineNote(BaseModel):
     reason: str
 
 
+class ScriptStatus(BaseModel):
+    """Whether bundled scripts could run this run, and under which sandbox.
+
+    Set once per run, never per case: the sandbox decision is made in
+    preflight before any case runs. `detail` is the probe's reason -- "bwrap
+    not found on PATH", the first line of a refusal -- so a report says why
+    the isolation an operator expected was or was not applied. `hardening`
+    is the note from `scripts.harden_process` when the harness could hide
+    its own environment from same-user processes (Linux, non-root), else
+    None -- the report says which protections applied, never implies one.
+    """
+
+    sandbox: SandboxBackend
+    detail: str
+    hardening: str | None = None
+
+
+class ScriptNote(BaseModel):
+    """A skill bundles scripts, and execution is off.
+
+    On the report rather than printed from the orchestrator so that every
+    notice a run produces goes through the reporters -- they render, they
+    never decide.
+    """
+
+    skill_name: str
+    script_count: int
+
+
 class CaseOutcome(BaseModel):
     """The fully-scored result of one (skill, case, runner) combination.
 
@@ -339,6 +378,8 @@ class RunReport(BaseModel):
     baseline_kind: BaselineKind | None = None
     repeat: int = 1
     baseline_notes: list[BaselineNote] = Field(default_factory=list)
+    scripts: ScriptStatus | None = None
+    script_notes: list[ScriptNote] = Field(default_factory=list)
 
     @property
     def candidate_outcomes(self) -> list[CaseOutcome]:

@@ -684,3 +684,33 @@ def test_a_placeholder_in_a_mapping_key_is_refused_too(tmp_path):
         parse_cases_file(path)
     assert "TODO(skill-lens)" in str(exc.value)
     assert "workspace.files" in str(exc.value)
+
+
+def test_a_case_tool_named_run_script_collides_with_a_built_in(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n    tools:\n"
+        "      - name: run_script\n        description: mine\n",
+    )
+    with pytest.raises(CaseParseError, match="run_script.*collides with a built-in"):
+        parse_cases_file(path)
+
+
+def test_a_trajectory_may_name_run_script_when_a_workspace_exists(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n"
+        "    trajectory:\n      called: [run_script, read_skill_file]\n",
+    )
+    (case,) = parse_cases_file(path)
+    assert case.trajectory is not None
+    assert case.trajectory.called == ["run_script", "read_skill_file"]
+
+
+def test_a_trajectory_naming_run_script_without_a_workspace_is_rejected(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    trajectory:\n      called: [run_script]\n",
+    )
+    with pytest.raises(CaseParseError, match="workspace and bundle tools only exist"):
+        parse_cases_file(path)

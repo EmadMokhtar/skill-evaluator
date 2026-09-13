@@ -10,7 +10,15 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 
 from skill_lens.gating import evaluate_gate
-from skill_lens.models import CaseOutcome, CheckResult, EvalScore, RunReport, RunResult, ToolCall
+from skill_lens.models import (
+    CaseOutcome,
+    CheckResult,
+    EvalScore,
+    RunReport,
+    RunResult,
+    ScriptStatus,
+    ToolCall,
+)
 from skill_lens.reporters.junit import render_junit
 
 
@@ -316,3 +324,71 @@ def test_case_filtered_skills_become_skipped_suites():
     skipped = root.find("testsuite[@name='xlsx']/testcase/skipped")
     assert skipped is not None
     assert "--case" in skipped.get("message")
+
+
+def test_the_sandbox_is_a_suite_property_when_scripts_ran():
+    report = RunReport(
+        outcomes=[_outcome()],
+        scripts=ScriptStatus(sandbox="sandbox-exec", detail="sandbox-exec probe succeeded"),
+    )
+    root = _parse(report)
+    suite = root.find("testsuite")
+    prop = suite.find("properties/property")
+    assert prop is not None
+    assert prop.get("name") == "skill-lens.scripts.sandbox"
+    assert prop.get("value") == "sandbox-exec"
+
+
+def test_no_properties_element_when_scripts_are_off():
+    root = _parse(RunReport(outcomes=[_outcome()]))
+    assert root.find("testsuite/properties") is None
+
+
+_SCRIPTS = ScriptStatus(sandbox="bwrap", detail="bwrap probe succeeded")
+
+
+def _property_names(suite):
+    return [prop.get("name") for prop in suite.findall("properties/property")]
+
+
+def test_every_kind_of_suite_carries_the_script_properties_first():
+    # docs/gating.md promises "every skill's <testsuite>": a skipped, tag-
+    # filtered or case-filtered skill is a suite too, and <properties> must
+    # be its first child -- the JUnit schema puts it before any <testcase>.
+    report = RunReport(
+        outcomes=[_outcome()],
+        skipped_skills=["docx"],
+        tag_filtered_skills=["xlsx"],
+        case_filtered_skills=["pptx"],
+        scripts=_SCRIPTS,
+    )
+    root = _parse(report)
+    suites = root.findall("testsuite")
+    assert [s.get("name") for s in suites] == ["pdf", "docx", "xlsx", "pptx"]
+    for suite in suites:
+        assert suite[0].tag == "properties", suite.get("name")
+        assert _property_names(suite) == [
+            "skill-lens.scripts.sandbox",
+            "skill-lens.scripts.detail",
+        ]
+
+
+def test_the_zero_case_error_suite_carries_the_script_properties_first():
+    # Preflight ran (scripts is set) and then nothing was executed: the one
+    # synthetic suite is still a suite of this run and says so.
+    root = _parse(RunReport(outcomes=[], scripts=_SCRIPTS), gate=evaluate_gate(RunReport()))
+    (suite,) = root.findall("testsuite")
+    assert suite[0].tag == "properties"
+    assert _property_names(suite) == ["skill-lens.scripts.sandbox", "skill-lens.scripts.detail"]
+    assert suite.find("testcase/error") is not None
+
+
+def test_no_suite_of_any_kind_carries_properties_when_scripts_are_off():
+    report = RunReport(
+        outcomes=[_outcome()],
+        skipped_skills=["docx"],
+        tag_filtered_skills=["xlsx"],
+        case_filtered_skills=["pptx"],
+    )
+    assert _parse(report).findall("testsuite/properties") == []
+    assert _parse(RunReport(outcomes=[])).findall("testsuite/properties") == []

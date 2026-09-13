@@ -10,6 +10,7 @@ skill-lens run <path> [--evals <path>] [--runner <name>] [--model <name>]
                       [--repeat <int>] [--min-delta <float>]
                       [--keep-workspace | --no-keep-workspace]
                       [--full-output | --no-full-output]
+                      [--allow-scripts | --no-allow-scripts]
 skill-lens list <path> [--evals <path>]
 skill-lens init <path> [--force]
 skill-lens --version
@@ -43,6 +44,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--concurrency <int>` | `1` | Run this many cases at once. The work is network-bound, so the practical ceiling is your provider's rate limit |
 | `--keep-workspace` / `--no-keep-workspace` | unset | Keep each case's temporary directory instead of deleting it. Overrides the `keep_workspace` config key in either direction; omitting both flags leaves the config file's value in effect. Every kept directory is printed, under a `Kept workspaces` section, whichever of the flag or the config turned keeping on |
 | `--full-output` / `--no-full-output` | unset | Print a failing case's whole output instead of the first 500 characters. Overrides the `full_output` config key in either direction; omitting both flags leaves the config file's value in effect |
+| `--allow-scripts` / `--no-allow-scripts` | unset | Run the scripts a skill bundles under `scripts/`. Off by default: a `SKILL.md` under evaluation is unvetted code. Overrides the `allow_scripts` config key in either direction; omitting both flags leaves the config file's value in effect. Every run that enables scripts prints `scripts: on, sandbox: <backend>` so the log shows whether an OS sandbox applied, and exits 2 before any case runs if a bundled script's interpreter is missing or `script_sandbox = "required"` finds no sandbox. See [Running bundled scripts](runners.md#running-bundled-scripts) |
 
 Each flag overrides the corresponding key in [configuration](configuration.md).
 Exit codes are documented in [Gating](gating.md). `--baseline`, `--repeat` and `--min-delta`
@@ -89,6 +91,7 @@ uv run skill-lens list ./examples
 ```
 csv-report	1 case(s)	examples/csv-report
 greeting	1 case(s)	examples/greeting
+log-triage	1 case(s)	examples/log-triage
 order-support	5 case(s)	examples/order-support
 ```
 

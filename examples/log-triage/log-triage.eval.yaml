@@ -1,0 +1,42 @@
+# The reference eval suite for M6 part 2: a skill that can only pass by running
+# the script it ships with. The counts below are what count_levels.py prints
+# for the seeded log (ERROR: 4, INFO: 3, WARN: 2); a model that guesses gets them wrong.
+#
+# Runs only with `allow_scripts = true` (examples/skill-lens.toml sets it) or
+# `--allow-scripts`; with execution off the agent has no run_script tool, and
+# the trajectory check fails -- which is the honest result.
+cases:
+  - name: triages a short application log
+    task: Triage app.log and write triage.md.
+    workspace:
+      files:
+        app.log: |
+          2026-09-12T10:00:01 INFO service started
+          2026-09-12T10:00:02 INFO listening on :8080
+          2026-09-12T10:01:15 WARN slow query 1.2s
+          2026-09-12T10:02:00 ERROR db connection lost
+          2026-09-12T10:02:01 ERROR retry failed
+          2026-09-12T10:02:05 ERROR retry failed
+          2026-09-12T10:02:09 ERROR retry failed
+          2026-09-12T10:03:00 INFO db reconnected
+          2026-09-12T10:04:00 WARN slow query 1.4s
+    trajectory:
+      called: [run_script, read_skill_file, write_file]
+    assertions:
+      - kind: file-produced
+        file: triage.md
+      - kind: contains
+        value: "ERROR: 4"
+        file: triage.md
+      - kind: contains
+        value: "WARN: 2"
+        file: triage.md
+      - kind: contains
+        value: "INFO: 3"
+        file: triage.md
+      - kind: contains
+        value: "Most frequent: ERROR"
+        file: triage.md
+      - kind: not_contains
+        value: "DEBUG"
+        file: triage.md

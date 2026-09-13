@@ -1,5 +1,10 @@
 """Rubric scoring. The judge is scripted, so every test here is free."""
 
+import os
+
+import pytest
+
+from promptly import promptly
 from skill_lens.evaluators.base import Evaluator
 from skill_lens.evaluators.judge import (
     BUDGET_EXHAUSTED,
@@ -7,6 +12,7 @@ from skill_lens.evaluators.judge import (
     MAX_ARTIFACTS_TOTAL_BYTES,
     NOT_PRODUCED,
     NOT_TEXT,
+    TOO_LARGE,
     JudgeEvaluator,
     _truncate,
     build_request,
@@ -219,7 +225,7 @@ def test_a_repeated_artifact_name_is_read_once(tmp_path):
 def _content_bytes(artifacts: dict[str, str]) -> int:
     """Sum only untrusted, model-produced content bytes.
 
-    Sentinels (NOT_PRODUCED, NOT_TEXT, BUDGET_EXHAUSTED) are fixed,
+    Sentinels (NOT_PRODUCED, NOT_TEXT, BUDGET_EXHAUSTED, TOO_LARGE) are fixed,
     harness-authored text, not model content, so MAX_ARTIFACTS_TOTAL_BYTES
     never bounds them -- they are excluded here by construction, matching
     `_artifacts`, where a sentinel never decrements `remaining`.
@@ -227,7 +233,7 @@ def _content_bytes(artifacts: dict[str, str]) -> int:
     return sum(
         len(value.encode("utf-8"))
         for value in artifacts.values()
-        if value not in {NOT_PRODUCED, NOT_TEXT, BUDGET_EXHAUSTED}
+        if value not in {NOT_PRODUCED, NOT_TEXT, BUDGET_EXHAUSTED, TOO_LARGE}
     )
 
 
@@ -345,3 +351,42 @@ def test_a_surrogate_bearing_artifact_name_is_rendered_not_raised(tmp_path):
     # (PathRefused, OSError)-only catch would let escape.
     request = build_request(_case("a\ud800b.txt"), RunResult(output="o", workspace=tmp_path))
     assert request.artifacts == {"a\ud800b.txt": NOT_PRODUCED}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="FIFOs and symlinks are POSIX features")
+def test_a_fifo_artifact_is_rendered_absent_without_being_opened(tmp_path):
+    # A script can plant a FIFO under the artifact's name; opening it would
+    # block the judge forever. The workspace refuses it from stat(), and the
+    # judge renders the refusal as an absence rather than reading anything.
+    os.mkfifo(tmp_path / "report.md")
+    os.symlink("loop", tmp_path / "loop.md")
+    request = promptly(
+        lambda: build_request(
+            _case("report.md", "loop.md"), RunResult(output="o", workspace=tmp_path)
+        )
+    )
+    assert request.artifacts == {"report.md": NOT_PRODUCED, "loop.md": NOT_PRODUCED}
+
+
+def test_a_sparse_artifact_over_the_read_cap_is_named_too_large_not_absent(tmp_path):
+    # Apparent size is what a sparse file has; loading it whole before the
+    # artifact budget applied is a MemoryError waiting to happen. The file
+    # does exist, though, so telling the judge it was "not produced" would
+    # misdescribe the skill's output: it gets its own sentinel.
+    with (tmp_path / "huge.md").open("wb") as handle:
+        handle.seek(2_000_000)
+        handle.write(b"x")
+    request = build_request(_case("huge.md"), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {"huge.md": TOO_LARGE}
+    assert TOO_LARGE != NOT_PRODUCED
+
+
+def test_the_too_large_sentinel_never_consumes_the_content_budget(tmp_path):
+    # Like the other sentinels: harness-authored text, so it must not
+    # decrement `remaining` -- a real artifact after it is still rendered whole.
+    with (tmp_path / "huge.md").open("wb") as handle:
+        handle.seek(2_000_000)
+        handle.write(b"x")
+    (tmp_path / "tiny.md").write_text("body", encoding="utf-8")
+    request = build_request(_case("huge.md", "tiny.md"), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {"huge.md": TOO_LARGE, "tiny.md": "body"}

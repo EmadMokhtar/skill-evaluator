@@ -37,6 +37,11 @@ greeting = 0.9
 | `max_file_bytes` | `1000000` | — |
 | `max_files` | `200` | — |
 | `max_total_bytes` | `5000000` | — |
+| `allow_scripts` | `false` | `--allow-scripts` / `--no-allow-scripts` |
+| `script_sandbox` | `"auto"` | — |
+| `script_timeout_seconds` | `30.0` | — |
+| `max_script_output_bytes` | `20000` | — |
+| `script_interpreters` | `{ py = ["python3"], sh = ["bash"] }` | — |
 
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
@@ -75,6 +80,13 @@ policy set once per repository rather than a per-run decision. Roughly 100x a re
 artifact, so they only bind when a case is genuinely stuck (writing the same file repeatedly,
 or writing many small ones) rather than when it legitimately produces something large.
 
+`max_file_bytes` also caps what is *read*: the agent's `read_file` refuses a larger file
+before opening it, because a bundled script can leave a sparse file of any apparent size
+behind. The configured value applies to the agent's tools; a `file:` assertion, a judge
+artifact and `read_skill_file` apply the built-in default of `1000000`, so a produced file
+larger than 1 MB is scored as unreadable (a failed check) even where this setting is raised.
+See [The workspace](runners.md#the-workspace).
+
 `model`, `retries`, and `retry_backoff_seconds` only matter to components that reach a
 provider (`pydantic-ai` or `langchain`, as a runner or a judge); `FakeRunner` and `FakeJudge`
 ignore them.
@@ -91,6 +103,60 @@ retry_backoff_seconds = 1.0
 
 A blank model id is rejected as a user error (exit 2) rather than being passed to a provider,
 whether it arrives from `model`, `judge_model`, or the matching flag.
+
+## Bundled scripts
+
+`allow_scripts` is the trust switch. A skill may ship code under `scripts/` beside
+`SKILL.md`; with this key `true` (or `--allow-scripts`) the agent gets a `run_script` tool
+that executes it. It is off by default because a `SKILL.md` under evaluation is, by
+construction, code nobody has vetted, and skill-lens is built to run in CI — running that
+code is a decision the operator of the run states, never something an eval file can turn
+on. Reading the bundle (`references/`, `assets/`, `scripts/`) needs no opt-in.
+
+With execution off, every discovered skill that bundles scripts is named on the report
+(`skill log-triage bundles 1 script; execution is off (allow_scripts = true or
+--allow-scripts)`), so a script that silently never runs cannot look like a skill that does
+not need one. With execution on, a preflight runs once, after discovery and before any
+case: every bundled script's interpreter must be on `PATH`, and `script_sandbox =
+"required"` must find a sandbox, or the run exits 2 before any money is spent. Both the
+preflight and the notes cover every *discovered* skill — including one that `--tag` or
+`--case` filters out, or that has no cases — so a missing interpreter for a skill that
+would never run still exits 2. That is the fail-closed choice: a check that quietly
+skipped some skills would not be one.
+
+The four `script_*` keys are repository policy, config-only:
+
+- `script_sandbox` — `"auto"` uses an OS sandbox when the once-per-run probe finds one
+  (`sandbox-exec` on macOS, `bwrap` on Linux) and the portable guards alone otherwise;
+  `"required"` refuses to run scripts at all without one (exit 2, before any case runs);
+  `"off"` never probes. See [Running bundled scripts](runners.md#running-bundled-scripts)
+  for what each guarantees.
+- `script_timeout_seconds` — wall clock per call; the whole process group is killed at
+  expiry and the model is told the script was stopped. Must be a finite number greater
+  than zero: TOML accepts a bare `inf`, and a timeout of infinity would be no timeout.
+- `max_script_output_bytes` — per stream (stdout, stderr); anything beyond is cut with a
+  marker stating exactly how many bytes were omitted. Equal to the judge's per-artifact
+  cap on purpose: one number for how much untrusted output reaches a model.
+- `script_interpreters` — a table from file extension to the argv prefix that runs it,
+  each looked up on `PATH` (so a `uv tool install` of skill-lens, whose venv has none of
+  the skill's dependencies, is not what runs the script). Keys are normalised to a bare
+  lower-case extension (`".PY"` and `"py"` are the same key); an empty argv is a config
+  error. A script with any other extension is refused with a message that lists the
+  allowed ones. A script's own dependencies are the eval's problem: install them in the
+  CI job.
+
+```toml
+allow_scripts = true
+script_sandbox = "required"      # never run unsandboxed on this runner
+script_timeout_seconds = 10
+
+[script_interpreters]
+py = ["python3", "-X", "utf8"]
+sh = ["bash"]
+```
+
+Setting `script_*` keys while `allow_scripts` is `false` is fine — it is the normal state of
+a repository that turns execution on only in one CI job.
 
 ## Judging
 

@@ -162,3 +162,15 @@ def test_scripted_state_cannot_be_corrupted_by_a_caller(tmp_path):
     result = runner.run(SKILL, EvalCase(name="n", task="t"), workspace=workspace)
     result.output = "mutated"
     assert runner.run(SKILL, EvalCase(name="n", task="t"), workspace=workspace).output == "o"
+
+
+def test_the_fake_runner_accepts_and_ignores_the_scripts_keyword():
+    from skill_lens.scripts import SandboxStatus, ScriptPolicy, ScriptRuntime
+
+    runtime = ScriptRuntime(
+        policy=ScriptPolicy(), sandbox=SandboxStatus(backend="none", detail="test")
+    )
+    runner = FakeRunner(default=RunResult(output="ok"))
+    skill = Skill(name="pdf", path=Path("/tmp/pdf"))
+    case = EvalCase(name="x", task="t")
+    assert runner.run(skill, case, scripts=runtime).output == "ok"

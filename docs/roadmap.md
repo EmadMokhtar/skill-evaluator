@@ -8,7 +8,7 @@
 | M3 | LLM-as-judge evaluator (per-check verdicts), triggering evals with negative controls | shipped |
 | M4 | Comparative evals: `--baseline`/`--repeat`, delta reporting, `--min-delta` gating | shipped |
 | M5 | CI/CD polish: JUnit XML + Markdown reporters, GitHub Action, bounded concurrency | shipped |
-| M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions | Part 1 shipped; Part 2 planned |
+| M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions, bundled files and `run_script` | shipped |
 | M7 | DX: failing cases explain themselves, `--case`, `init` batch mode and workspace case, versioned example, quickstart | shipped |
 | M8 | LangChain runner and judge (`[langchain]` extra); runner matrix | Part 1 shipped; Part 2 planned |
 
@@ -60,11 +60,30 @@ target a produced file instead of the chat output — `file-produced` for existe
 `--keep-workspace` keeps the directories for debugging, and every kept one is printed. Full
 detail is in [Workspaces](eval-files.md#workspaces) and [The workspace](runners.md#the-workspace).
 
-Deferred to part 2: running a script bundled with the skill under test. That is its own
-spec, because executing code that shipped with the artifact under evaluation is a
-different trust decision from writing files into a temporary directory — a `SKILL.md`
-under evaluation is, by construction, code nobody has vetted yet, and `skill-lens` is
-designed to run in CI against repository credentials.
+Running a script bundled with the skill under test was deferred to part 2, because
+executing code that shipped with the artifact under evaluation is a different trust
+decision from writing files into a temporary directory. See
+[What M6 part 2 shipped](#what-m6-part-2-shipped).
+
+## What M6 part 2 shipped
+
+The agent can now read the files a skill ships beside `SKILL.md` — `scripts/`,
+`references/`, `assets/`, and nothing else — through `list_skill_files` and
+`read_skill_file`, and, only when the run says `allow_scripts = true` or
+`--allow-scripts`, run a bundled script through `run_script` with the workspace as its
+working directory. Every script runs under portable guards (an allowlisted environment,
+a scratch directory, a process-group timeout, capped output read from files) and under an
+OS sandbox where one exists (`sandbox-exec` on macOS, `bwrap` on Linux), probed once per
+run; the report says which applied, and `script_sandbox = "required"` makes its absence
+exit 2. `--baseline previous` pairs the previous `SKILL.md` with the bundle from the same
+commit. `examples/log-triage` is a skill whose eval can only pass by running its script —
+and covers the `references/` example M7 deferred. Full detail is in
+[Bundled files and scripts](runners.md#bundled-files-and-scripts) and
+[Security](security.md#running-bundled-scripts).
+
+Deferred: an `init` scaffold case for script-bearing skills, standard input to scripts,
+a per-case timeout, an `unshare`-only Linux fallback, denying reads outside the workspace,
+and copying a binary asset into the workspace (`read_skill_file` returns text only).
 
 ## What M7 shipped
 
@@ -81,7 +100,7 @@ every skill under a directory that has no suite. `examples/greeting` is versione
 `--baseline previous` works from a checkout, `examples/skill-lens.toml` annotates every
 config key, and [Getting started](getting-started.md) is an end-to-end quickstart.
 
-Deferred: a `references/` layout example (bundled files are not loaded until M6 part 2),
+Deferred: a `references/` layout example (shipped with M6 part 2 as `examples/log-triage`),
 a repeatable `--case`, and the gating features carried over from M4 and M5 (per-skill
 `min_delta`, `--baseline-ref`, both-arms-fail flagging).
 

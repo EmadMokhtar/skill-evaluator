@@ -1,3 +1,6 @@
+import subprocess
+import sys
+import tempfile
 import threading
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
 from pathlib import Path
@@ -14,14 +17,16 @@ from skill_lens.models import (
     EvalScore,
     JudgeVerdict,
     RunResult,
+    ScriptNote,
     Skill,
     ToolCall,
     WorkspaceSpec,
 )
-from skill_lens.orchestrator import _execute, _WorkItem, run_evals
+from skill_lens.orchestrator import RunOptions, _execute, _WorkItem, run_evals
 from skill_lens.runners.fake import FakeRunner
+from skill_lens.scripts import ScriptPolicy, ScriptRuntime, ScriptSetupError
 from skill_lens.skills.loader import load_skills
-from skill_lens.workspace import Workspace, WorkspaceLimits
+from skill_lens.workspace import DEFAULT_LIMITS, Workspace, WorkspaceLimits
 
 CASES_YAML = """cases:
   - name: passes
@@ -673,7 +678,7 @@ def test_keep_workspace_leaves_the_directory_and_the_path(tmp_path):
         [_skill(tmp_path)],
         [runner],
         evals_path=_evals(tmp_path, case),
-        keep_workspace=True,
+        options=RunOptions(keep_workspace=True),
     )
     kept = report.outcomes[0].result.workspace
     try:
@@ -725,7 +730,7 @@ def test_configured_limits_reach_the_workspace(tmp_path):
         [_skill(tmp_path)],
         [runner],
         evals_path=_evals(tmp_path, case),
-        workspace_limits=WorkspaceLimits(max_files=7),
+        options=RunOptions(limits=WorkspaceLimits(max_files=7)),
     )
     assert runner.seen[0].limits.max_files == 7
 
@@ -868,10 +873,269 @@ def test_a_skill_emptied_by_the_tag_filter_is_not_also_case_filtered(tmp_path):
 
 def test_case_filter_is_appended_after_every_pre_existing_parameter():
     # `run_evals` is library API. A caller that passed `judge` positionally
-    # before `case_filter` existed must still be binding `judge`, so the new
-    # parameter has to sit after every parameter that predates it.
+    # before `case_filter` existed must still be binding `judge`, so a new
+    # parameter has to sit after every parameter that predates it. `options`
+    # (M6 part 2) is the newest, so it is last; `keep_workspace` and
+    # `workspace_limits` (M6 part 1) keep the positions they were added in.
     import inspect
 
     params = list(inspect.signature(run_evals).parameters)
-    assert params[-1] == "case_filter"
+    assert params[-1] == "options"
+    assert params[-2] == "case_filter"
     assert params.index("judge") == params.index("tag") + 1
+    assert params.index("keep_workspace") == params.index("executor_factory") + 1
+    assert params.index("workspace_limits") == params.index("keep_workspace") + 1
+
+
+def test_the_legacy_keep_workspace_keyword_still_keeps_the_directory(tmp_path):
+    # A caller written against M6 part 1 passes `keep_workspace=` directly.
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    report = run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        keep_workspace=True,
+    )
+    kept = report.outcomes[0].result.workspace
+    try:
+        assert kept is not None and Path(kept).is_dir()
+    finally:
+        if kept is not None:
+            Workspace(root=Path(kept)).cleanup()
+
+
+def test_the_legacy_workspace_limits_keyword_still_reaches_the_workspace(tmp_path):
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    run_evals(
+        [_skill(tmp_path)],
+        [runner],
+        evals_path=_evals(tmp_path, case),
+        workspace_limits=WorkspaceLimits(max_files=7),
+    )
+    assert runner.seen[0].limits.max_files == 7
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [{"keep_workspace": True}, {"workspace_limits": WorkspaceLimits(max_files=7)}],
+)
+def test_options_together_with_a_legacy_argument_is_rejected(tmp_path, legacy):
+    # Mirrors the `evaluators` + `judge` rejection: two sources for one
+    # setting is a contradictory request, not a preference to guess at.
+    with pytest.raises(ValueError, match="both `options` and the legacy"):
+        run_evals(
+            [_skill(tmp_path)],
+            [_RecordingRunner()],
+            evals_path=_evals(tmp_path, _case()),
+            options=RunOptions(),
+            **legacy,
+        )
+
+
+def _bundled_skill(tmp_path, *scripts: str) -> Skill:
+    root = tmp_path / "bundled"
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    for name in scripts:
+        (root / "scripts" / name).write_text("print('x')", encoding="utf-8")
+    return Skill(
+        name="bundled", description="d", instructions="i", path=root, bundle_root=root.resolve()
+    )
+
+
+class _ScriptAwareRunner(_RecordingRunner):
+    """Records the runtime it was handed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.runtimes: list[ScriptRuntime | None] = []
+
+    def run(self, skill, case, workspace=None, scripts=None):
+        self.runtimes.append(scripts)
+        return super().run(skill, case, workspace=workspace)
+
+
+def test_the_legacy_form_never_enables_scripts(tmp_path):
+    # The legacy parameters predate scripts, so a caller using them cannot
+    # have asked for execution; the runner must see no runtime.
+    runner = _ScriptAwareRunner()
+    run_evals(
+        [_bundled_skill(tmp_path, "count.py")],
+        [runner],
+        evals_path=_evals(tmp_path, _case()),
+        keep_workspace=False,
+        workspace_limits=WorkspaceLimits(max_files=7),
+    )
+    assert runner.runtimes == [None]
+
+
+def test_run_options_defaults_reproduce_the_old_behaviour(tmp_path):
+    runner = _RecordingRunner()
+    case = _case(workspace=WorkspaceSpec())
+    report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    assert report.scripts is None
+    assert report.script_notes == []
+    assert report.outcomes[0].result.workspace is None
+    assert runner.seen[0].limits == DEFAULT_LIMITS
+
+
+def test_scripts_off_leaves_a_note_per_skill_that_bundles_scripts(tmp_path):
+    runner = _RecordingRunner()
+    skill = _bundled_skill(tmp_path, "a.py", "b.sh")
+    report = run_evals([skill], [runner], evals_path=_evals(tmp_path, _case()))
+    assert report.scripts is None
+    assert report.script_notes == [ScriptNote(skill_name="bundled", script_count=2)]
+
+
+def test_scripts_off_notes_nothing_for_a_bundle_without_scripts(tmp_path):
+    runner = _RecordingRunner()
+    skill = _bundled_skill(tmp_path)
+    (tmp_path / "bundled" / "scripts").rmdir()
+    (tmp_path / "bundled" / "references").mkdir()
+    report = run_evals([skill], [runner], evals_path=_evals(tmp_path, _case()))
+    assert report.script_notes == []
+
+
+def test_scripts_on_runs_preflight_once_and_hands_the_runtime_to_the_runner(tmp_path):
+    runner = _ScriptAwareRunner()
+    policy = ScriptPolicy(sandbox="off", interpreters={"py": (sys.executable,)})
+    report = run_evals(
+        [_bundled_skill(tmp_path, "a.py")],
+        [runner],
+        evals_path=_evals(tmp_path, _case(workspace=WorkspaceSpec())),
+        options=RunOptions(scripts=policy),
+    )
+    assert report.scripts is not None
+    assert report.scripts.sandbox == "none"
+    assert report.scripts.detail == 'script_sandbox = "off"'
+    assert report.script_notes == []
+    (runtime,) = runner.runtimes
+    assert runtime is not None and runtime.policy is policy
+
+
+def test_the_hardening_note_reaches_the_report(tmp_path, monkeypatch):
+    # Whatever preflight recorded is what the report says -- on Linux the
+    # real note, elsewhere None -- so the console never claims a protection
+    # this run did not have.
+    import skill_lens.scripts as scripts_module
+
+    monkeypatch.setattr(scripts_module, "harden_process", lambda: "hardened (test)")
+    policy = ScriptPolicy(sandbox="off", interpreters={"py": (sys.executable,)})
+    report = run_evals(
+        [_bundled_skill(tmp_path, "a.py")],
+        [_ScriptAwareRunner()],
+        evals_path=_evals(tmp_path, _case()),
+        options=RunOptions(scripts=policy),
+    )
+    assert report.scripts is not None
+    assert report.scripts.hardening == "hardened (test)"
+
+
+def test_scripts_off_passes_no_scripts_keyword_so_part_1_runners_keep_working(tmp_path):
+    class _PartOneRunner:
+        name = "old"
+
+        def run(self, skill, case, workspace=None):
+            return RunResult(output="ok")
+
+    report = run_evals([_skill(tmp_path)], [_PartOneRunner()], evals_path=_evals(tmp_path, _case()))
+    assert report.outcomes[0].status == "passed"
+
+
+def test_a_setup_error_aborts_before_any_case_runs(tmp_path):
+    runner = _ScriptAwareRunner()
+    policy = ScriptPolicy(sandbox="off", interpreters={"py": ("no-such-interpreter-xyz",)})
+    with pytest.raises(ScriptSetupError, match="no-such-interpreter-xyz"):
+        run_evals(
+            [_bundled_skill(tmp_path, "a.py")],
+            [runner],
+            evals_path=_evals(tmp_path, _case()),
+            options=RunOptions(scripts=policy),
+        )
+    assert runner.runtimes == []
+
+
+def _git_skill_with_history(tmp_path) -> Skill:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    for version, body in (("1.0.0", "old"), ("1.1.0", "new")):
+        (repo / "SKILL.md").write_text(
+            f'---\nname: s\nversion: "{version}"\n---\n{body}\n', encoding="utf-8"
+        )
+        (repo / "scripts").mkdir(exist_ok=True)
+        (repo / "scripts" / "a.py").write_text(f"print('{body}')", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", f"feat: {version}"], cwd=repo, check=True)
+    from skill_lens.skills.loader import parse_skill_file
+
+    return parse_skill_file(repo / "SKILL.md")
+
+
+def test_baseline_bundle_directories_are_deleted_when_the_run_ends(tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    runner = _ScriptAwareRunner()
+    skill = _git_skill_with_history(tmp_path)
+    run_evals(
+        [skill],
+        [runner],
+        evals_path=_evals(tmp_path, _case(workspace=WorkspaceSpec())),
+        baseline="previous",
+    )
+    assert not list(tmp_path.glob("skill-lens-baselines-*"))
+
+
+def test_baseline_bundle_directories_are_deleted_even_when_a_case_errors(tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    skill = _git_skill_with_history(tmp_path)
+
+    class _Exploding:
+        name = "assertion"
+
+        def evaluate(self, case, result):
+            raise InvalidAssertionValue("boom")
+
+    with pytest.raises(InvalidAssertionValue):
+        run_evals(
+            [skill],
+            [_RecordingRunner()],
+            evals_path=_evals(tmp_path, _case()),
+            evaluators=[_Exploding()],
+            baseline="previous",
+        )
+    assert not list(tmp_path.glob("skill-lens-baselines-*"))
+
+
+def test_the_baseline_arm_sees_the_previous_bundle_and_the_candidate_the_current_one(tmp_path):
+    runner = _ScriptAwareRunner()
+    skill = _git_skill_with_history(tmp_path)
+    seen: dict[str, str] = {}
+
+    class _Peeking(_ScriptAwareRunner):
+        def run(self, s, case, workspace=None, scripts=None):
+            seen[s.variant] = (s.bundle_root / "scripts" / "a.py").read_text(encoding="utf-8")
+            return super().run(s, case, workspace=workspace, scripts=scripts)
+
+    runner = _Peeking()
+    run_evals([skill], [runner], evals_path=_evals(tmp_path, _case()), baseline="previous")
+    assert seen == {"candidate": "print('new')", "baseline": "print('old')"}
+
+
+def test_baseline_none_arm_gets_no_bundle_even_when_the_candidate_has_one(tmp_path):
+    # Keying the bundle tools on path instead of bundle_root would leak the
+    # candidate's scripts into the "no skill" arm, since --baseline none's
+    # skill shares the candidate's path. bundle_root must stay None instead.
+    skill = _bundled_skill(tmp_path, "a.py")
+    seen: dict[str, Path | None] = {}
+
+    class _Peeking(_ScriptAwareRunner):
+        def run(self, s, case, workspace=None, scripts=None):
+            seen[s.variant] = s.bundle_root
+            return super().run(s, case, workspace=workspace, scripts=scripts)
+
+    run_evals([skill], [_Peeking()], evals_path=_evals(tmp_path, _case()), baseline="none")
+    assert seen["candidate"] == skill.bundle_root
+    assert seen["baseline"] is None

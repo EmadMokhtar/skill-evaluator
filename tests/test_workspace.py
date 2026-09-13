@@ -6,11 +6,15 @@ security boundary, not a nicety.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
+from promptly import promptly
 from skill_lens.models import WorkspaceSpec
 from skill_lens.workspace import (
     DEFAULT_LIMITS,
+    FileTooLarge,
     PathRefused,
     Workspace,
     WorkspaceError,
@@ -275,3 +279,105 @@ def test_two_workspaces_never_share_a_directory():
 )
 def test_sanitise_label(raw, expected):
     assert sanitise_label(raw) == expected
+
+
+def test_over_limit_is_none_inside_the_caps(tmp_path):
+    workspace = Workspace(root=tmp_path.resolve(), limits=WorkspaceLimits(max_files=2))
+    workspace.write("a.txt", "a")
+    assert workspace.over_limit() is None
+
+
+def test_over_limit_names_the_file_cap_a_script_blew_through(tmp_path):
+    # A script writes to disk directly, so Workspace.write's projection never
+    # saw these files. The check after the run is what makes that visible.
+    workspace = Workspace(root=tmp_path.resolve(), limits=WorkspaceLimits(max_files=2))
+    for name in ("a", "b", "c"):
+        (tmp_path / f"{name}.txt").write_text(name, encoding="utf-8")
+    assert workspace.over_limit() == (
+        "warning: the working directory now holds 3 files; max_files is 2"
+    )
+
+
+def test_over_limit_names_the_byte_cap(tmp_path):
+    workspace = Workspace(root=tmp_path.resolve(), limits=WorkspaceLimits(max_total_bytes=10))
+    (tmp_path / "big.txt").write_text("x" * 11, encoding="utf-8")
+    assert workspace.over_limit() == (
+        "warning: the working directory now holds 11 bytes; max_total_bytes is 10"
+    )
+
+
+# --- regular files only ----------------------------------------------------
+#
+# Part 1's only writer was `write`, which creates regular files. A bundled
+# script can create anything -- a FIFO, a symlink loop, a sparse file -- and
+# every reader on top of the workspace has to survive that.
+
+posix_only = pytest.mark.skipif(os.name == "nt", reason="FIFOs and symlinks are POSIX features")
+
+
+@posix_only
+def test_a_fifo_is_refused_before_it_is_opened(tmp_path):
+    # open() on a FIFO blocks until a writer connects, which no reader in the
+    # harness ever is. The refusal has to come from stat(), never from open().
+    ws = _workspace(tmp_path)
+    os.mkfifo(tmp_path / "report.md")
+    with pytest.raises(PathRefused, match="not a regular file"):
+        promptly(lambda: ws.read("report.md"))
+    with pytest.raises(PathRefused, match="not a regular file"):
+        promptly(lambda: ws.write("report.md", "x"))
+    with pytest.raises(PathRefused, match="not a regular file"):
+        ws.resolve("report.md")
+
+
+@posix_only
+def test_a_symlink_loop_is_a_refusal_on_every_python(tmp_path):
+    # Python 3.11 and 3.12 raise RuntimeError from Path.resolve() on a loop;
+    # 3.13 resolves as far as it can and the following stat() raises ELOOP.
+    # Both must arrive as PathRefused, whichever this interpreter does.
+    ws = _workspace(tmp_path)
+    os.symlink("loop", tmp_path / "loop")
+    for candidate in ("loop", "loop/report.md"):
+        with pytest.raises(PathRefused):
+            ws.resolve(candidate)
+        with pytest.raises(PathRefused):
+            ws.read(candidate)
+        with pytest.raises(PathRefused):
+            ws.write(candidate, "x")
+
+
+def test_a_file_over_max_file_bytes_is_refused_on_read_and_names_the_cap(tmp_path):
+    # A sparse file has any apparent size a script likes at almost no cost on
+    # disk, so the cap has to apply to st_size before a byte is read.
+    ws = _workspace(tmp_path, max_file_bytes=1_000_000)
+    with (tmp_path / "huge.txt").open("wb") as handle:
+        handle.seek(2_000_000)
+        handle.write(b"x")
+    expected = r"huge.txt is 2,000,001 bytes; max_file_bytes is 1,000,000"
+    # A distinct subclass, so the judge can name the file as too large rather
+    # than absent without matching on the message text.
+    with pytest.raises(FileTooLarge, match=expected):
+        ws.read("huge.txt")
+    assert issubclass(FileTooLarge, PathRefused)
+
+
+def test_a_file_at_max_file_bytes_is_still_read(tmp_path):
+    ws = _workspace(tmp_path, max_file_bytes=4)
+    (tmp_path / "ok.txt").write_text("abcd", encoding="utf-8")
+    assert ws.read("ok.txt") == "abcd"
+
+
+def test_a_missing_file_still_raises_oserror_from_read(tmp_path):
+    # The evaluators tell "the skill did not produce it" (OSError, a failed
+    # check) apart from "the path is refused" (PathRefused); the stat that
+    # classifies a target must not blur the two.
+    ws = _workspace(tmp_path)
+    with pytest.raises(OSError):
+        ws.read("missing.txt")
+
+
+def test_a_directory_is_still_resolvable_but_not_readable(tmp_path):
+    ws = _workspace(tmp_path)
+    (tmp_path / "sub").mkdir()
+    assert ws.resolve("sub") == tmp_path.resolve() / "sub"
+    with pytest.raises(OSError):
+        ws.read("sub")

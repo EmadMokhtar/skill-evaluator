@@ -10,6 +10,8 @@ from skill_lens.models import (
     EvalScore,
     RunReport,
     RunResult,
+    ScriptNote,
+    ScriptStatus,
     ToolCall,
 )
 from skill_lens.reporters.console import render_console
@@ -652,3 +654,70 @@ def test_crlf_output_renders_without_carriage_returns():
 def test_console_lists_case_filtered_skills():
     report = RunReport(outcomes=[], case_filtered_skills=["pdf"])
     assert "Skipped (no cases matched --case filter): pdf" in render_console(report)
+
+
+def test_console_says_which_sandbox_ran_the_scripts():
+    report = _report().model_copy(
+        update={"scripts": ScriptStatus(sandbox="bwrap", detail="bwrap probe succeeded")}
+    )
+    text = render_console(report)
+    assert text.splitlines()[0] == "scripts: on, sandbox: bwrap"
+
+
+def test_console_explains_a_missing_sandbox():
+    report = _report().model_copy(
+        update={"scripts": ScriptStatus(sandbox="none", detail="bwrap not found on PATH")}
+    )
+    assert render_console(report).splitlines()[0] == (
+        "scripts: on, sandbox: none (bwrap not found on PATH)"
+    )
+
+
+def test_console_prints_the_hardening_note_after_the_sandbox_detail():
+    report = _report().model_copy(
+        update={
+            "scripts": ScriptStatus(
+                sandbox="none", detail="bwrap not found on PATH", hardening="env hidden (test)"
+            )
+        }
+    )
+    assert render_console(report).splitlines()[0] == (
+        "scripts: on, sandbox: none (bwrap not found on PATH); env hidden (test)"
+    )
+
+
+def test_console_is_silent_about_scripts_when_they_are_off_and_nothing_bundles_any():
+    assert "scripts:" not in render_console(_report())
+
+
+def test_console_notes_bundled_scripts_that_did_not_run():
+    report = _report().model_copy(
+        update={"script_notes": [ScriptNote(skill_name="pdf", script_count=2)]}
+    )
+    assert (
+        "skill pdf bundles 2 scripts; execution is off (allow_scripts = true or --allow-scripts)"
+        in render_console(report)
+    )
+    one = _report().model_copy(
+        update={"script_notes": [ScriptNote(skill_name="pdf", script_count=1)]}
+    )
+    assert "bundles 1 script;" in render_console(one)
+
+
+def test_json_carries_the_script_status_and_notes():
+    report = _report().model_copy(
+        update={
+            "scripts": ScriptStatus(sandbox="sandbox-exec", detail="sandbox-exec probe succeeded"),
+            "script_notes": [ScriptNote(skill_name="pdf", script_count=1)],
+        }
+    )
+    payload = json.loads(render_json(report))
+    # `hardening` is always present so a consumer can tell "not applied"
+    # from "this skill-lens predates the key".
+    assert payload["scripts"] == {
+        "sandbox": "sandbox-exec",
+        "detail": "sandbox-exec probe succeeded",
+        "hardening": None,
+    }
+    assert payload["script_notes"] == [{"skill_name": "pdf", "script_count": 1}]
+    assert json.loads(render_json(_report()))["scripts"] is None

@@ -10,7 +10,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from skill_lens.bundle import SkillBundle
 from skill_lens.models import Skill, ToolSpec
+from skill_lens.scripts import ScriptResult, ScriptRuntime, run_script
 from skill_lens.workspace import PathRefused, Workspace
 
 
@@ -126,9 +128,13 @@ def build_skill_tool(skill: Skill) -> AgentTool:
 
 
 # The names the built-in tools are registered under. `cases/loader.py` reads
-# this to reject a case tool that would collide with one, and to accept these
-# names in a trajectory block -- both need the answer without asking a runner.
-BUILTIN_TOOL_NAMES: tuple[str, ...] = ("list_files", "read_file", "write_file")
+# BUILTIN_TOOL_NAMES to reject a case tool that would collide with one, and to
+# accept these names in a trajectory block -- both need the answer without
+# asking a runner. All six are reserved in every workspace case, bundle or
+# not: a name that is sometimes free is a name nobody can rely on.
+WORKSPACE_TOOL_NAMES: tuple[str, ...] = ("list_files", "read_file", "write_file")
+BUNDLE_TOOL_NAMES: tuple[str, ...] = ("list_skill_files", "read_skill_file", "run_script")
+BUILTIN_TOOL_NAMES: tuple[str, ...] = WORKSPACE_TOOL_NAMES + BUNDLE_TOOL_NAMES
 
 
 def _path_schema() -> dict[str, Any]:
@@ -241,3 +247,128 @@ def build_workspace_tools(workspace: Workspace) -> list[AgentTool]:
             call=write_file,
         ),
     ]
+
+
+def _run_script_schema() -> dict[str, Any]:
+    """A fresh schema for run_script. Built per call, like `_path_schema`."""
+    return {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "args": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["path"],
+        "additionalProperties": False,
+    }
+
+
+def render_script_result(result: ScriptResult, timeout_seconds: float) -> str:
+    """What the model reads after a script call.
+
+    A refusal passes through as-is. Otherwise: the exit line, then both
+    streams (each already capped by `run_script`), then a workspace warning
+    if the script wrote past a cap. `(empty)` rather than nothing, so the
+    model can tell "no output" from "the tool broke".
+    """
+    if result.refused is not None:
+        return result.refused
+    head = (
+        f"stopped after {timeout_seconds:g} s (script_timeout_seconds)"
+        if result.timed_out
+        else f"exit code: {result.exit_code}"
+    )
+    lines = [head, "stdout:", result.stdout or "(empty)", "stderr:", result.stderr or "(empty)"]
+    if result.workspace_warning is not None:
+        lines.append(result.workspace_warning)
+    return "\n".join(lines)
+
+
+def build_bundle_tools(
+    bundle: SkillBundle, workspace: Workspace, runtime: ScriptRuntime | None
+) -> list[AgentTool]:
+    """The bundle tools, bound to one skill's bundle and one workspace.
+
+    The two read tools are always built. `run_script` is built only when the
+    bundle actually has something under `scripts/` AND the run enabled
+    execution (`runtime` is not None) -- a tool that could only ever refuse
+    would cost prompt tokens and teach the model nothing.
+
+    Descriptions say what the tools are for without naming the skill or its
+    files: `SKILL.md` is where "run scripts/count.py" comes from, and that is
+    the thing under measurement.
+
+    Every callable catches, like the workspace tools: a model asking for a bad
+    path is an eval signal, and an exception would surface it as an infra
+    error.
+    """
+
+    def list_skill_files(**_extra: Any) -> str:
+        try:
+            entries = bundle.listing()
+        except OSError as exc:  # pragma: no cover - a directory the loader just saw
+            return f"refused: cannot list the skill's files: {exc}"
+        return "\n".join(entries) if entries else "(empty)"
+
+    def read_skill_file(path: Any = "", **_extra: Any) -> str:
+        target = str(path)
+        try:
+            return bundle.read(target)
+        except PathRefused as exc:
+            return str(exc)
+        except UnicodeDecodeError:
+            return f"refused: the content of {target} is not valid UTF-8 text"
+        except UnicodeError:
+            return f"refused: {target} could not be handled as UTF-8 text"
+        except OSError as exc:
+            return f"refused: cannot read {target}: {exc}"
+
+    tools = [
+        AgentTool(
+            name="list_skill_files",
+            description=(
+                "List the files bundled with the loaded skill, one path per line, relative "
+                "to the skill's directory (scripts/, references/, assets/)."
+            ),
+            json_schema=_empty_schema(),
+            call=list_skill_files,
+        ),
+        AgentTool(
+            name="read_skill_file",
+            description=(
+                "Read a file bundled with the loaded skill. `path` is relative to the "
+                "skill's directory, for example `references/style.md`."
+            ),
+            json_schema=_path_schema(),
+            call=read_skill_file,
+        ),
+    ]
+    if runtime is None or not bundle.scripts():
+        return tools
+
+    def run_script_tool(path: Any = "", args: Any = (), **_extra: Any) -> str:
+        # A model may send args as a string, a number, null, or nothing. None
+        # of those may raise: coerce to a list of strings and let the script
+        # see what the model meant.
+        if isinstance(args, (list, tuple)):
+            arguments: list[object] = list(args)
+        elif args in ("", None):
+            arguments = []
+        else:
+            arguments = [args]
+        result = run_script(bundle, workspace, str(path), arguments, runtime)
+        return render_script_result(result, runtime.policy.timeout_seconds)
+
+    tools.append(
+        AgentTool(
+            name="run_script",
+            description=(
+                "Run a script bundled with the loaded skill, with the working directory as "
+                "its current directory. `path` is relative to the skill's directory, for "
+                "example `scripts/count.py`; `args` are passed as command-line arguments. "
+                "Returns the exit code, stdout and stderr."
+            ),
+            json_schema=_run_script_schema(),
+            call=run_script_tool,
+        )
+    )
+    return tools

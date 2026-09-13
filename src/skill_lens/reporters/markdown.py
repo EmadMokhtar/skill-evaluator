@@ -331,6 +331,25 @@ def _skipped(report: RunReport) -> str:
     return "<sub>" + "<br>".join(bits) + "</sub>" if bits else ""
 
 
+def _scripts(report: RunReport) -> str:
+    """The sandbox line and the not-run notes, as one optional block."""
+    bits = []
+    if report.scripts is not None:
+        line = f"Scripts: on, sandbox: {_escape(report.scripts.sandbox)}"
+        if report.scripts.sandbox == "none":
+            line += f" ({_escape(report.scripts.detail)})"
+        if report.scripts.hardening:
+            line += f"; {_escape(report.scripts.hardening)}"
+        bits.append(line)
+    for note in report.script_notes:
+        plural = "" if note.script_count == 1 else "s"
+        bits.append(
+            f"{_code(note.skill_name)} bundles {note.script_count} script{plural}; "
+            "execution is off (`allow_scripts = true` or `--allow-scripts`)"
+        )
+    return "<sub>" + "<br>".join(bits) + "</sub>" if bits else ""
+
+
 def render_markdown(
     report: RunReport,
     gate: GateResult | None = None,
@@ -368,6 +387,7 @@ def render_markdown(
         _low_signal(delta) if delta is not None else "",
         _high_variance(delta) if delta is not None else "",
         _skipped(report),
+        _scripts(report),
     ]
     gated = gate is not None and not gate.passed
 

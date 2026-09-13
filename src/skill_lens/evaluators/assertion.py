@@ -10,7 +10,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as SchemaViolation
 
 from skill_lens.models import AssertionSpec, CheckResult, EvalCase, EvalScore, RunResult
-from skill_lens.workspace import PathRefused, Workspace
+from skill_lens.workspace import PathRefused, Workspace, check_relative_path
 
 
 class UnknownAssertionKind(Exception):
@@ -44,9 +44,12 @@ _LISTING_LIMIT = 20
 def _workspace_of(result: RunResult) -> Workspace:
     """The run's workspace, rebuilt from its path.
 
-    Limits are irrelevant here -- they constrain writes, and an evaluator only
-    reads -- which is why `Workspace` defaults them and this stays a
-    one-argument call.
+    Rebuilt with the default limits, because a `RunResult` carries the path
+    and not the repository's configuration. Limits bound reads as well as
+    writes, so a `file:` assertion refuses a file over the default
+    `max_file_bytes` (1 MB) even where the repository raised it -- the
+    configured value applies to the agent's tools, whose workspace the
+    orchestrator built with it. `docs/configuration.md` says so.
     """
     if result.workspace is None:
         raise InvalidAssertionValue(
@@ -75,38 +78,57 @@ def _describe(spec: AssertionSpec) -> str:
     return f"{spec.kind}({spec.value!r}{target})"
 
 
+def _authored_path(spec: AssertionSpec) -> str:
+    """The `file:` the author wrote, or raise if it could never name a workspace file.
+
+    An empty, absolute or `..`-bearing path is a mistake in the eval file, so
+    it aborts the run as an authoring error. Everything *about the target*
+    -- what the run actually put at a well-formed path -- is judged later,
+    by `Workspace`, and is the skill's doing rather than the author's.
+    """
+    try:
+        check_relative_path(spec.file or "")
+    except PathRefused as exc:
+        raise InvalidAssertionValue(str(exc)) from exc
+    return spec.file or ""
+
+
 def _subject_text(spec: AssertionSpec, result: RunResult) -> tuple[str, str]:
     """The text this assertion looks at, or ('', why it could not be read).
 
     A file that is missing or unreadable makes the assertion **fail**, not
     error: the skill produced something the eval cannot use, which is a fact
-    about the skill. A refused *path*, by contrast, is the author's mistake
-    and raises.
+    about the skill. So does a well-formed path the workspace refuses to
+    read -- a symlink the run planted that points outside, a FIFO, a file
+    over `max_file_bytes` -- because a bundled script can create any of
+    those. Only a malformed *authored* path raises.
     """
     if spec.file is None:
         return result.output, ""
     workspace = _workspace_of(result)
+    file = _authored_path(spec)
     try:
-        return workspace.read(spec.file), ""
+        return workspace.read(file), ""
     except PathRefused as exc:
-        raise InvalidAssertionValue(str(exc)) from exc
+        return "", f"expected {file}; {exc}"
     except UnicodeDecodeError:
-        return "", f"{spec.file} is not valid UTF-8 text"
+        return "", f"{file} is not valid UTF-8 text"
     except OSError:
-        return "", f"expected {spec.file}; {_listing(workspace)}"
+        return "", f"expected {file}; {_listing(workspace)}"
 
 
 def _check(spec: AssertionSpec, result: RunResult) -> tuple[bool, str]:
     """(held, why). `why` is '' when it held, and explains the failure otherwise."""
     if spec.kind == "file-produced":
         workspace = _workspace_of(result)
+        file = _authored_path(spec)
         try:
-            target = workspace.resolve(spec.file or "")
+            target = workspace.resolve(file)
         except PathRefused as exc:
-            raise InvalidAssertionValue(str(exc)) from exc
+            return False, f"expected {file}; {exc}"
         if target.is_file():
             return True, ""
-        return False, f"expected {spec.file}; {_listing(workspace)}"
+        return False, f"expected {file}; {_listing(workspace)}"
 
     text, unreadable = _subject_text(spec, result)
     if unreadable:

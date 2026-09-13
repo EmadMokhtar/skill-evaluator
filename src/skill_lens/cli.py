@@ -23,7 +23,7 @@ from skill_lens.judges.fake import FakeJudge
 from skill_lens.judges.langchain import LangChainJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.models import Skill
-from skill_lens.orchestrator import run_evals
+from skill_lens.orchestrator import RunOptions, run_evals
 from skill_lens.reporters.console import render_console
 from skill_lens.reporters.failure_context import OUTPUT_LIMIT
 from skill_lens.reporters.json_reporter import render_json
@@ -35,6 +35,7 @@ from skill_lens.runners.langchain import LangChainRunner
 from skill_lens.runners.preflight import MissingAPIKey, check_api_key
 from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.scaffold import render_scaffold, scaffold_target
+from skill_lens.scripts import ScriptSetupError
 from skill_lens.skills.loader import SKILL_FILENAME, SkillParseError, load_skills, parse_skill_file
 from skill_lens.workspace import WorkspaceLimits
 
@@ -56,6 +57,9 @@ _AUTHORING_ERRORS = (
     InvalidAssertionValue,
     MissingAPIKey,
     RunnerDependencyError,
+    # scripts enabled but cannot run here: a missing interpreter, or a
+    # required sandbox that is absent
+    ScriptSetupError,
 )
 
 
@@ -154,6 +158,13 @@ def run(
             help="Print a failing case's whole output instead of the first 500 characters.",
         ),
     ] = None,
+    allow_scripts: Annotated[
+        bool | None,
+        typer.Option(
+            "--allow-scripts/--no-allow-scripts",
+            help="Run scripts bundled under the skill's scripts/ directory (off by default).",
+        ),
+    ] = None,
 ) -> None:
     """Discover skills, run their eval cases, and gate on the results."""
     try:
@@ -172,6 +183,9 @@ def run(
             keep_workspace if keep_workspace is not None else settings.keep_workspace
         )
         resolved_full_output = full_output if full_output is not None else settings.full_output
+        resolved_allow_scripts = (
+            allow_scripts if allow_scripts is not None else settings.allow_scripts
+        )
         # None means "no cap" to every reporter.
         output_limit = None if resolved_full_output else OUTPUT_LIMIT
         workspace_limits = WorkspaceLimits(
@@ -261,8 +275,11 @@ def run(
             baseline=baseline_kind or None,
             repeat=resolved_repeat,
             concurrency=resolved_concurrency,
-            keep_workspace=resolved_keep_workspace,
-            workspace_limits=workspace_limits,
+            options=RunOptions(
+                keep_workspace=resolved_keep_workspace,
+                limits=workspace_limits,
+                scripts=settings.script_policy() if resolved_allow_scripts else None,
+            ),
         )
     except _AUTHORING_ERRORS as exc:
         typer.echo(str(exc))

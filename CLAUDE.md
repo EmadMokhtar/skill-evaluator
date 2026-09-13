@@ -9,7 +9,8 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M8 (part 1 complete)**: the pipeline runs real agents through `PydanticAIRunner`
+Currently at **M8 (part 1 complete)**, with **M6 part 2** shipped after M7: the
+pipeline runs real agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
 remains the default and the backbone of the zero-cost test tier. M3 adds a
@@ -33,13 +34,21 @@ adds `--case`, brings `init` up to M6 with a workspace case and a batch mode,
 and ships a versioned comparative example, an annotated config and an
 end-to-end quickstart. M8 part 1 adds a LangChain runner and judge behind the same
 protocols, installable as the `[langchain]` extra, with the prompt rules and retry loop
-extracted into `runners/prompting.py` and `runners/retry.py`. Milestones are defined in
+extracted into `runners/prompting.py` and `runners/retry.py`. M6 part 2 lets the
+agent read the files a skill ships beside `SKILL.md` (`scripts/`, `references/`,
+`assets/`) through `list_skill_files`/`read_skill_file`, and — only under
+`allow_scripts` / `--allow-scripts` — run a bundled script through `run_script`,
+under portable guards everywhere and an OS sandbox where one exists
+(`sandbox-exec` on macOS, `bwrap` on Linux), with the report saying which
+applied; `--baseline previous` pairs the previous `SKILL.md` with its own
+bundle. Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
 is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
 design is in `docs/superpowers/specs/2026-08-03-skill-eval-m4-design.md`, the
 M5 design is in `docs/superpowers/specs/2026-08-05-skill-eval-m5-design.md`,
-the M6 design is in `docs/superpowers/specs/2026-09-10-skill-lens-m6-design.md`,
+the M6 part 1 design is in `docs/superpowers/specs/2026-09-10-skill-lens-m6-design.md`,
+the M6 part 2 design is in `docs/superpowers/specs/2026-09-12-skill-lens-m6-part2-design.md`,
 the M7 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m7-design.md`, and the
 M8 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m8-design.md`.
 
@@ -290,6 +299,73 @@ form, that file is the explanation.
 - **The unfilled-scaffold scan covers mapping keys as well as values.**
 - **`examples/greeting` stays at `1.1.0` or later.** The bump is what makes `--baseline
   previous` resolvable from a checkout; `tests/test_examples.py` pins it.
+- **Script execution is off unless the run turned it on** (`allow_scripts` /
+  `--allow-scripts`); nothing in an eval file or a `SKILL.md` can enable it. Reading the
+  bundle needs no opt-in.
+- **The bundle is `scripts/`, `references/`, `assets/` and nothing else** — an eval file
+  beside `SKILL.md` is never readable by the agent.
+- **`Skill.bundle_root` defaults to `None`; only the loader and the baseline resolver set
+  it**, so the `--baseline none` skill never carries the candidate's scripts.
+- **A script's environment is an allowlist, never `os.environ` minus keys**; `shell=False`
+  always; output is read from files through the descriptors the harness opened before the
+  process started — never by re-opening the path — capped, and a cut is never silent.
+- **The allowlist stops inheritance only; a same-user script can read the harness's
+  environment through the OS unless something hides it, and the report says whether
+  something did.** On Linux `harden_process` (`prctl(PR_SET_DUMPABLE, 0)`, called from
+  `preflight` after the checks that can abort, best effort, never raises; root ignores it;
+  `bwrap` moots it) closes `/proc/<pid>/environ`, and its note rides
+  `ScriptRuntime.hardening` → `ScriptStatus.hardening` → every reporter. On macOS the read
+  is the `kern.procargs2` sysctl behind `ps -E`, and `sandbox-exec` does not gate it —
+  verified against a blanket `(deny sysctl-read)`; do not add a `sysctl-name` rule and call
+  it closed. The docs say the key is exposed there and recommend `script_sandbox =
+  "required"` wherever a key is present. A test of this must spawn its target with the
+  secret in the exec-time environment; `monkeypatch.setenv` can never be seen by the kernel.
+- **The process group is killed after every exit, not only a timeout**, in the order
+  observe (`waitid` + `WNOWAIT`), `killpg(process.pid)`, reap — so the leader's pid is
+  still held when the kill runs — where `os.waitid` exists (Linux; macOS on 3.13+; CPython
+  omits it on older macOS), and `Popen.wait` then `killpg` elsewhere or on `ECHILD`, which
+  is safe because a pid is never reused while a process group with that id exists. Never
+  call `os.waitid` unguarded. `pgid == pid` because of `start_new_session=True`; never
+  `getpgid`, which fails after the reap. A script that calls `os.setsid()` escapes
+  `os.killpg` on every POSIX platform; only the `bwrap` backend closes that. On Windows
+  `taskkill /T` after a normal exit finds no tree; the docs say so.
+- **Only a regular file or a directory is ever resolved, and reads are capped.**
+  `resolve_under` and `stat_regular` in `workspace.py` serve both `Workspace` and
+  `SkillBundle`: a FIFO, a device or a symlink loop (a `RuntimeError` from `resolve()` on
+  3.11/3.12, `ELOOP` from the stat on 3.13) is `PathRefused` from a `stat`, never from an
+  `open` that would block; `read` refuses `st_size > max_file_bytes` before reading a byte,
+  so a sparse file of any apparent size never reaches memory. Every FIFO test runs the read
+  in a thread with a join timeout.
+- **The author's path is an authoring error; the run's target is a failed check.**
+  `AssertionEvaluator` runs `check_relative_path` on the `file:` first and raises for that;
+  a `PathRefused` from `resolve`/`read` afterwards (a script-planted symlink, FIFO, loop or
+  over-size file) is a failed `CheckResult` with the refusal as evidence, never exit 2.
+- **`run_script` never raises, and an unrunnable script is never `RunResult.error`.**
+- **The sandbox decision is made once per run, in preflight, and appears on every report.**
+  `required` without a backend and a missing interpreter abort with exit 2 before any case
+  runs; the backend is executed, not merely found. Preflight and the "execution is off"
+  notes cover every *discovered* skill, including ones `--tag`/`--case` filter out or that
+  have no cases. The probe fails closed on a temp-dir path holding a double quote.
+- **The sandbox denies reads under the system temp directory, then re-allows the workspace,
+  the scratch directory and the bundle** — the bundle explicitly, because a `--baseline
+  previous` bundle is extracted under the temp dir. Reads elsewhere are allowed; say so.
+- **A previous baseline carries its own bundle** from the commit that last edited `SKILL.md`
+  at the previous version (`git archive <sha> -- .` from the skill directory — `<sha>:./`
+  yields an empty archive; `tarfile`'s `data` filter, hence `requires-python >= 3.11.4`), or
+  none. A bundle-only commit after that edit is invisible; a giant `assets/` hitting the
+  10 s git timeout is a `BaselineNote`, not an error. Baseline bundle directories are deleted
+  in a `finally`, and `--keep-workspace` does not keep them.
+- **Bundle tools require a `workspace:` block; all six built-in names are reserved in
+  every workspace case; the workspace preamble is unchanged.** Both bundled adapters
+  (`runners/pydantic_ai.py`, `runners/langchain.py`) take `scripts=` and register the same
+  six tools under the same conditions, offered mode included.
+- **`skill-lens.toml` is inside the trust boundary.** In a `pull_request` workflow the
+  checkout is the PR, so the file can turn scripts on for itself; the action's
+  `allow-scripts` input is unset by default so the file decides, and `pull_request_target`,
+  collaborator-PR and self-hosted workflows should pass `allow-scripts: false` explicitly.
+  Docs-only: `docs/security.md`, `docs/ci.md`.
+- **`bwrap` does not block Unix-domain sockets** (`/var/run/docker.sock`); macOS's
+  `(deny network*)` does. Documented in the Linux row and the guarantee paragraph.
 - **The dependency audit is one command, spelled identically in three places, and its
   exceptions live in one table.** `uv audit --preview-features audit --locked` runs in
   `security.yml` (every PR, every push to `main`, weekly on a schedule, and on demand), in
@@ -307,9 +383,11 @@ form, that file is the explanation.
 - **Ruff's `S` rules are on, and a false positive is suppressed at the site with its reason.**
   Never by switching a rule off for `src/`. `tests/**` and `scripts/**` carry per-directory
   ignores for `assert`, subprocess-with-fixed-argv, XML parsing and literal `/tmp` strings used
-  as fake path values; the two `src/` sites
+  as fake path values; the three `src/` sites
   (`git` found on `PATH` in `baseline.py`; `StrictBoolLoader` in `yaml_loading.py`, which
-  *is* a `SafeLoader` subclass ruff cannot see) each carry an inline `noqa` with the reason.
+  *is* a `SafeLoader` subclass ruff cannot see; the shell-free subprocess calls in
+  `scripts.py` — the probe, the interpreter, and `taskkill` found on `PATH` in its Windows
+  branch) each carry an inline `noqa` with the reason.
 - **Every action is pinned to a commit SHA with a `# vX.Y.Z` comment, and nothing grants
   write access at the workflow level.** A tag can be moved; a commit cannot.
   `tests/test_supply_chain.py` fails any `uses:` that is not `./` or a 40-hex SHA with the
@@ -340,6 +418,7 @@ Documentation ships **with** the change, never as a follow-up. Two CI jobs enfor
 | A `Config` field | `docs/configuration.md` |
 | An `EvalCase` field or assertion kind | `docs/eval-files.md` |
 | Runner behavior, tools, budgets, pricing | `docs/runners.md` |
+| Bundled files, `run_script`, the sandbox or its guarantees | `docs/runners.md` and `docs/security.md` |
 | Gate rules, exit codes, the JSON report | `docs/gating.md` |
 | A protocol, an invariant, or the module map | `ARCHITECTURE.md` |
 | CI integration, the action, example workflows | `docs/ci.md` |

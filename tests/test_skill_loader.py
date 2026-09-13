@@ -208,3 +208,21 @@ def test_malformed_text_names_its_source_not_a_file_path():
             path=Path("/nowhere"),
             source="commit abc1234",
         )
+
+
+def test_bundle_root_is_set_when_a_bundle_directory_exists(tmp_path):
+    skill_dir = _write_skill(tmp_path, "pdf")
+    (skill_dir / "references").mkdir()
+    skill = parse_skill_file(skill_dir / "SKILL.md")
+    assert skill.bundle_root == skill_dir.resolve()
+
+
+def test_bundle_root_is_none_for_a_bare_skill(tmp_path):
+    skill_dir = _write_skill(tmp_path, "pdf")
+    (skill_dir / "evals").mkdir()
+    assert parse_skill_file(skill_dir / "SKILL.md").bundle_root is None
+
+
+def test_parse_skill_text_never_sets_a_bundle_root(tmp_path):
+    skill = parse_skill_text(SKILL_MD, name_fallback="pdf", path=tmp_path, source="x")
+    assert skill.bundle_root is None

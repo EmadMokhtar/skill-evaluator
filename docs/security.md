@@ -6,7 +6,9 @@ skill-lens; everything below is enforced by a test or a CI job, not by intent.
 
 The checks cover skill-lens's own code and its dependencies. They say nothing about the
 skills you evaluate *with* it — a skill under test is an input, and it gets no more
-trust than any other input.
+trust than any other input. The one place skill-lens runs a skill's own code, its bundled
+scripts, is off by default; [Running bundled scripts](#running-bundled-scripts) below says
+what turning it on means.
 
 ## Reporting a vulnerability
 
@@ -52,7 +54,7 @@ hard-coded credentials, weak hashes, `assert` used as a runtime check, and so on
 it rides on the existing lint step it runs everywhere lint does — every pull request,
 the release gate, and your terminal — with nothing extra to remember.
 
-Two sites in `src/` are suppressed, each with the reason on the line itself:
+Three sites in `src/` are suppressed, each with the reason on the line itself:
 
 - `skills/baseline.py` starts `git` by name rather than by absolute path. That is
   deliberate: a machine without git must produce `BaselineUnavailable`, not a crash, and
@@ -60,6 +62,10 @@ Two sites in `src/` are suppressed, each with the reason on the line itself:
 - `yaml_loading.py` uses `yaml.load` with `StrictBoolLoader`, which ruff cannot see is a
   `SafeLoader` subclass. Every YAML file skill-lens reads goes through that loader; it is
   what stops YAML 1.1 from turning a bare `yes` or `no` into a boolean.
+- `scripts.py` starts subprocesses — the sandbox probe, the bundled script under its
+  interpreter, and `taskkill` on Windows — from an argv list with no shell, which is the
+  whole point of that module; ruff flags every subprocess call regardless. `taskkill` is
+  found on `PATH` by name for the same reason `git` is.
 
 `tests/` may use `assert`, run `git`, parse the JUnit XML it just wrote, and use literal
 `/tmp/...` strings as fake path values in fixtures; `scripts/`
@@ -168,6 +174,75 @@ order of jobs and how a failed step is recovered.
   that can write to the repository. The one job that can write releases, `github-release`,
   installs nothing and checks nothing out: it downloads artifacts that earlier jobs built and
   verified, and runs `gh`.
+
+## Running bundled scripts
+
+A skill may ship code under `scripts/`. skill-lens can execute it — that is what M6 part 2
+adds — and the trust model is:
+
+- **Off by default, on only by the operator's decision.** `allow_scripts = true` in
+  `skill-lens.toml` or `--allow-scripts`. Nothing in an eval file or a `SKILL.md` can turn
+  it on. A `SKILL.md` under evaluation is unvetted code, and skill-lens runs in CI.
+- **The config file is inside the trust boundary.** `skill-lens.toml` is read from the
+  checkout, and in a `pull_request` workflow the checkout *is* the pull request: a PR can
+  set `allow_scripts = true` and `script_sandbox = "off"` itself. The action's
+  `allow-scripts` input is unset by default so the file decides, exactly like
+  `keep-workspace`. Under plain `pull_request` a fork gets no secrets, so a real runner
+  stops at the missing API key before any script runs; the exposure is
+  `pull_request_target`, pull requests from collaborators, and self-hosted runners. A
+  workflow in any of those positions should pass `allow-scripts: false` explicitly, which
+  overrides the file whatever it says.
+- **Portable guards always apply:** an environment rebuilt from an allowlist (no provider
+  key, no inherited secret — absent by construction, not by deletion), a scratch directory
+  for temporary files, no shell, a process group that is killed after every exit (a
+  timeout as much as a normal one), output read from files and capped with a visible cut.
+- **The allowlist stops inheritance, not a same-user read of the harness itself.** A
+  script runs as the user skill-lens runs as, and the OS will show a same-user process
+  another process's exec-time environment — where the provider key lives for the whole
+  run. On Linux that is `/proc/<pid>/environ`: when scripts are enabled, skill-lens marks
+  itself non-dumpable (`prctl(PR_SET_DUMPABLE, 0)`) so that read is refused where the
+  kernel honours the flag, which root does not; the report prints `harness environment
+  hidden from same-user processes (PR_SET_DUMPABLE)` when it applied, and under `bwrap`
+  the harness is in a separate PID namespace regardless. On macOS the read is the
+  `kern.procargs2` sysctl behind `ps -E`, and `sandbox-exec` does not gate it: `/bin/ps`
+  itself cannot run in the sandbox (setuid), but the sysctl is one `ctypes` call away and a
+  blanket `(deny sysctl-read)` that refuses every other sysctl still lets it through, so no
+  profile rule closes it. The consequence: a macOS run with scripts on, or a Linux run
+  without a working `bwrap`, exposes the harness's provider key to a script that looks for
+  it. Set `script_sandbox = "required"` on any runner that holds a provider key, and in CI
+  also stop `actions/checkout` persisting the job token (`persist-credentials: false`, see
+  [CI integration](ci.md#the-composite-action)).
+- **What a script leaves behind is read on the harness's terms.** Every reader — the
+  agent's `read_file` and `read_skill_file`, a `file:` assertion, a judge artifact —
+  refuses a path that is not a regular file or a directory (a FIFO, a device, a symbolic-link
+  loop) from a `stat` rather than an `open`, so a planted FIFO cannot block the run, and
+  refuses a file over `max_file_bytes` before reading a byte of it, so a sparse file of any
+  apparent size cannot exhaust memory. A refusal an assertion meets is a **failed** check,
+  never an aborted run.
+- **An OS sandbox applies where one exists** — `sandbox-exec` on macOS, `bwrap` on Linux.
+  Under it a script cannot open a network connection, cannot write to the host filesystem
+  outside the workspace and its scratch directory (under `bwrap`, writes under the
+  temporary directory and `/dev/shm` land in an in-memory mount discarded when the script
+  exits), and cannot read anything under the system temporary directory except the
+  workspace, the scratch directory and the skill's own bundle — so other arms' and other
+  cases' workspaces are hidden from it. One gap to know about: `bwrap`'s `--unshare-net`
+  isolates the network stack only and does not block a Unix-domain socket reachable
+  through the filesystem, so on a runner whose user can reach `/var/run/docker.sock` a
+  script can talk to the Docker daemon — a full escape on that host; macOS's `(deny
+  network*)` covers Unix sockets too. The backend is executed once per
+  run before any case, not merely found on `PATH`; `script_sandbox = "required"` makes its
+  absence exit 2, and the report always says which backend applied. `sandbox-exec` is
+  marked deprecated in Apple's documentation and remains present and working on current
+  macOS; Bazel, Chromium and Claude Code rely on it, and the probe is what turns "present"
+  into "works".
+- **What no layer prevents:** a script can read every other file the CI user can read, and
+  print it, and that output reaches the model and the run report. Treat enabling scripts
+  as running the skill's code yourself, because it is. Do not enable scripts for a skill
+  you would not run by hand.
+
+Details and the per-platform table are in
+[Running bundled scripts](runners.md#running-bundled-scripts); enabling it in the GitHub
+Action is covered in [CI integration](ci.md#the-composite-action).
 
 ## Why these rules
 
