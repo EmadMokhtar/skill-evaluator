@@ -167,10 +167,11 @@ A run with no eval cases emits a single `<testcase>` carrying an `<error>` that 
 gate's reasons. An empty `tests="0"` file renders green in most CI UIs, which would contradict
 the exit code of 1.
 
-When scripts were enabled, every skill's `<testsuite>` carries `<properties>` with
-`skill-lens.scripts.sandbox` and `skill-lens.scripts.detail` — properties are where JUnit
-puts run-level facts, and a testcase is the wrong place for something true of the whole
-run. The console and Markdown reports print the same fact as one line (`scripts: on,
+When scripts were enabled, every `<testsuite>` — a skill that ran, a skipped or filtered
+skill, and the synthetic zero-case error suite alike — carries `<properties>` as its first
+child, with `skill-lens.scripts.sandbox` and `skill-lens.scripts.detail`: properties are
+where JUnit puts run-level facts, and a testcase is the wrong place for something true of
+the whole run. The console and Markdown reports print the same fact as one line (`scripts: on,
 sandbox: <backend>` on the console, with the probe's detail in parentheses when the backend
 is `none`, and `; <hardening note>` appended when the harness could hide its own
 environment — see [Runners](runners.md#running-bundled-scripts)) and name every skill whose
