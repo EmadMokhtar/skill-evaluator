@@ -1,3 +1,13 @@
+## v0.6.0 (2026-09-13)
+
+### Feat
+
+- run every case through more than one runner (#35)
+
+### Fix
+
+- give every version spelling in docs/ci.md a line of its own (#36)
+
 ## v0.5.0 (2026-09-13)
 
 ### Feat
