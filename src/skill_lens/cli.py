@@ -103,11 +103,40 @@ def _write_report(path: Path, text: str, label: str) -> str | None:
     return None
 
 
+def _resolve_runners(flag: list[str] | None, configured: str | list[str]) -> list[str]:
+    """The runner names one invocation uses; the flag replaces the file wholesale.
+
+    A duplicate is refused rather than de-duplicated: the same (skill, case)
+    would enter the pass rate twice, weighting one framework's vote double
+    under --repeat and --baseline. An unknown name is named in the message.
+    """
+    if flag:
+        names = list(flag)
+    else:
+        names = [configured] if isinstance(configured, str) else list(configured)
+    seen: set[str] = set()
+    for name in names:
+        if name not in _RUNNERS:
+            raise typer.BadParameter(f"unknown runner: {name}")
+        if name in seen:
+            raise typer.BadParameter(
+                f"--runner {name} given twice; each runner runs every case once"
+            )
+        seen.add(name)
+    return names
+
+
 @app.command()
 def run(
     path: Annotated[Path, typer.Argument(help="A skill directory, or a directory of skills.")],
     evals: Annotated[Path | None, typer.Option(help="Explicit eval file or directory.")] = None,
-    runner: Annotated[str | None, typer.Option(help="Runner to use.")] = None,
+    runner: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--runner",
+            help="Runner to use; repeat the flag to run every case through more than one.",
+        ),
+    ] = None,
     model: Annotated[str | None, typer.Option(help="Model id, e.g. openai:gpt-4o-mini.")] = None,
     judge_model: Annotated[
         str | None,
@@ -206,22 +235,25 @@ def run(
         # nothing must never report a pass, so this is an error, not a warning.
         if resolved_min_delta is not None and not baseline_kind:
             raise typer.BadParameter("--min-delta requires --baseline none or --baseline previous")
-        runner_name = runner if runner is not None else settings.default_runner
-        if runner_name not in _RUNNERS:
-            raise typer.BadParameter(f"unknown runner: {runner_name}")
-        runner_class = _RUNNERS[runner_name]
+        runner_names = _resolve_runners(runner, settings.default_runner)
+        runner_classes = [_RUNNERS[name] for name in runner_names]
+        needs_key = any(getattr(cls, "needs_api_key", False) for cls in runner_classes)
         model_name = model if model is not None else settings.model
-        if getattr(runner_class, "needs_api_key", False):
+        if needs_key:
+            # Once for the whole matrix: every keyed runner shares one model.
             _require_a_model("--model", model_name)
             check_api_key(model_name, os.environ)
-            active_runner = runner_class(
+        active_runners = [
+            cls(
                 model=model_name,
                 temperature=settings.temperature,
                 retries=settings.retries,
                 retry_backoff_seconds=settings.retry_backoff_seconds,
             )
-        else:
-            active_runner = runner_class()
+            if getattr(cls, "needs_api_key", False)
+            else cls()
+            for cls in runner_classes
+        ]
         judge_name = settings.judge
         if judge_name not in _JUDGES:
             raise typer.BadParameter(f"unknown judge: {judge_name}")
@@ -242,7 +274,7 @@ def run(
             )
         else:
             active_judge = judge_class()
-        if getattr(runner_class, "needs_api_key", False):
+        if needs_key:
             # A ceiling, not a forecast. The tag and case filters are applied
             # here because `run_evals` applies them too and ignoring them can
             # overstate the total wildly -- but the baseline arm is also
@@ -261,13 +293,15 @@ def run(
                     needle = case.casefold()
                     cases = [c for c in cases if needle in c.name.casefold()]
                 case_count += len(cases)
+            runners_count = len(active_runners)
             typer.echo(
                 f"Plan: up to {arms} arm(s) x {resolved_repeat} repeat(s) x "
-                f"{case_count} case(s) = {arms * resolved_repeat * case_count} runs"
+                f"{runners_count} runner(s) x {case_count} case(s) = "
+                f"{arms * resolved_repeat * runners_count * case_count} runs"
             )
         report = run_evals(
             skills,
-            [active_runner],
+            active_runners,
             evals_path=evals,
             tag=tag,
             case_filter=case,

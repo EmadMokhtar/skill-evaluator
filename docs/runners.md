@@ -9,6 +9,7 @@ uv tool install "skill-lens[pydantic-ai]"       # or "skill-lens[langchain]", or
 export OPENAI_API_KEY=...
 skill-lens run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
 skill-lens run ./skills --runner langchain --model openai:gpt-4o-mini
+skill-lens run ./skills --runner pydantic-ai --runner langchain --model openai:gpt-4o-mini
 ```
 
 From a checkout instead, the extra comes from `uv sync --extra pydantic-ai` (or
@@ -28,6 +29,16 @@ tools, and the same [bundle tools](#bundled-files-and-scripts) (`list_skill_file
 `RunResult`, so a case passing under one and failing under the other says something about
 the skill's instructions, not about the harness. The judge is chosen separately
 (`judge = "pydantic-ai"` or `"langchain"`), and one judge grades every runner's output.
+
+Naming both — `--runner` repeated, or `default_runner = ["pydantic-ai", "langchain"]` in
+`skill-lens.toml` — runs every case through each in one invocation and produces one
+report, with one outcome per `(skill, case, runner)` and the runner named on every case
+line. That is the cross-framework measurement: a skill whose instructions hold up under
+two agent loops is more likely to hold up under a third. Every outcome counts toward the
+[gate](gating.md#more-than-one-runner), and the same runner twice is refused so none
+counts double. The `Plan:` line includes the runner factor, because two runners spend
+twice; see [CLI](cli.md) for the flag and [CI](ci.md#running-the-matrix) for a
+matrix job.
 
 `--model` is passed to each framework unchanged. `openai:` and `anthropic:` are spelled
 the same in both; other providers differ (PydanticAI `google-gla:`, LangChain

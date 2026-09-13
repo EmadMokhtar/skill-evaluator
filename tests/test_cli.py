@@ -547,7 +547,7 @@ def test_the_run_plan_is_a_ceiling_not_a_forecast(tmp_path, monkeypatch):
         app,
         ["run", str(tmp_path), "--runner", "pydantic-ai", "--baseline", "none", "--repeat", "2"],
     )
-    assert "Plan: up to 2 arm(s) x 2 repeat(s)" in plain(result.stdout)
+    assert "Plan: up to 2 arm(s) x 2 repeat(s) x 1 runner(s)" in plain(result.stdout)
 
 
 def test_the_run_plan_counts_only_cases_the_tag_filter_keeps(tmp_path, monkeypatch):
@@ -558,7 +558,7 @@ def test_the_run_plan_counts_only_cases_the_tag_filter_keeps(tmp_path, monkeypat
     result = runner.invoke(
         app, ["run", str(tmp_path), "--runner", "pydantic-ai", "--tag", "no-such-tag"]
     )
-    assert "0 case(s) = 0 runs" in plain(result.stdout)
+    assert "x 1 runner(s) x 0 case(s) = 0 runs" in plain(result.stdout)
 
 
 def test_junit_output_writes_parseable_xml(tmp_path):
@@ -814,3 +814,112 @@ def test_allow_scripts_flags_override_the_config_in_both_directions(tmp_path):
 
     flag_on = runner.invoke(app, ["run", str(skill_dir), "--allow-scripts"])
     assert "scripts: on, sandbox:" in flag_on.stdout
+
+
+# --- the runner matrix -------------------------------------------------------
+
+from skill_lens import cli as cli_module  # noqa: E402
+from skill_lens.runners.fake import FakeRunner  # noqa: E402
+
+
+class SecondFake(FakeRunner):
+    """A second offline runner, so a matrix can be exercised with no key."""
+
+    name = "fake-2"
+
+
+def test_the_same_runner_twice_is_a_user_error(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(skill_dir), "--runner", "fake", "--runner", "fake"])
+    assert result.exit_code == 2
+    assert "fake given twice" in plain(result.output)
+
+
+def test_an_unknown_runner_in_a_list_is_named(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(skill_dir), "--runner", "fake", "--runner", "nope"])
+    assert result.exit_code == 2
+    assert "unknown runner: nope" in plain(result.output)
+
+
+def test_a_runner_list_in_config_is_honoured(tmp_path, monkeypatch):
+    # The keyed runner in the list trips preflight, proving the list reached
+    # the CLI and every runner in it is constructed.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    config = tmp_path / "skill-lens.toml"
+    config.write_text('default_runner = ["fake", "pydantic-ai"]\n', encoding="utf-8")
+    result = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
+
+
+def test_the_runner_flag_replaces_the_config_list_rather_than_appending(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    config = tmp_path / "skill-lens.toml"
+    config.write_text('default_runner = ["fake", "pydantic-ai"]\n', encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(config), "--runner", "fake"]
+    )
+    assert result.exit_code in (0, 1)  # a gate verdict, not a preflight refusal
+    assert "OPENAI_API_KEY" not in result.output
+
+
+def test_every_case_runs_through_every_runner_and_each_outcome_names_its_runner(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setitem(cli_module._RUNNERS, "fake-2", SecondFake)
+    skill_dir = _make_skill(tmp_path)
+    out = tmp_path / "report.json"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(skill_dir),
+            "--runner",
+            "fake",
+            "--runner",
+            "fake-2",
+            "--json-output",
+            str(out),
+            "--min-pass-rate",
+            "0",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads(out.read_text(encoding="utf-8"))
+    outcomes = report["outcomes"]
+    assert len(outcomes) == 2  # one case x two runners
+    assert sorted(o["runner"] for o in outcomes) == ["fake", "fake-2"]
+    assert {o["case_name"] for o in outcomes} == {"mentions the skill"}
+
+
+def test_the_run_plan_multiplies_by_the_runner_count(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-parsing")
+    _make_skill(tmp_path, cases=None)
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(tmp_path),
+            "--runner",
+            "pydantic-ai",
+            "--runner",
+            "langchain",
+            "--baseline",
+            "none",
+            "--repeat",
+            "2",
+        ],
+    )
+    assert "Plan: up to 2 arm(s) x 2 repeat(s) x 2 runner(s) x 0 case(s) = 0 runs" in plain(
+        result.stdout
+    )
+
+
+def test_a_single_runner_plan_line_still_states_the_runner_factor(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy-key-for-parsing")
+    _make_skill(tmp_path, cases=None)
+    result = runner.invoke(app, ["run", str(tmp_path), "--runner", "pydantic-ai"])
+    assert "x 1 runner(s) x" in plain(result.stdout)

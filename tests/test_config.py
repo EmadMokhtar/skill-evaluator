@@ -306,3 +306,34 @@ def test_script_policy_carries_every_setting_as_tuples(tmp_path):
     assert policy.timeout_seconds == 2.0
     assert policy.max_output_bytes == 9
     assert policy.interpreters == {"py": ("python3", "-B")}
+
+
+def test_default_runner_accepts_a_list(tmp_path):
+    config = tmp_path / "skill-lens.toml"
+    config.write_text('default_runner = ["fake", "pydantic-ai"]\n', encoding="utf-8")
+    assert load_config(path=config).default_runner == ["fake", "pydantic-ai"]
+
+
+def test_default_runner_still_accepts_a_string(tmp_path):
+    config = tmp_path / "skill-lens.toml"
+    config.write_text('default_runner = "pydantic-ai"\n', encoding="utf-8")
+    assert load_config(path=config).default_runner == "pydantic-ai"
+
+
+def test_an_empty_runner_list_is_a_config_error_naming_the_field(tmp_path):
+    # Zero runners would mean zero cases ran, which the gate fails -- but as
+    # "nothing ran", far from the cause. Catch it where the field is.
+    config = tmp_path / "skill-lens.toml"
+    config.write_text("default_runner = []\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="default_runner") as excinfo:
+        load_config(path=config)
+    assert "names no runner" in str(excinfo.value)
+
+
+def test_a_duplicate_runner_in_the_list_is_a_config_error(tmp_path):
+    # The same (skill, case) would enter the pass rate twice.
+    config = tmp_path / "skill-lens.toml"
+    config.write_text('default_runner = ["fake", "fake"]\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="default_runner") as excinfo:
+        load_config(path=config)
+    assert "'fake' twice" in str(excinfo.value)

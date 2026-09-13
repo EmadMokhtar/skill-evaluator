@@ -17,7 +17,7 @@ greeting = 0.9
 
 | Key | Default | CLI override |
 | --- | --- | --- |
-| `default_runner` | `"fake"` | `--runner` |
+| `default_runner` | `"fake"` (a string, or a list of names) | `--runner` |
 | `model` | `"openai:gpt-4o-mini"` | `--model` |
 | `temperature` | `0.0` | — |
 | `retries` | `2` | — |
@@ -45,6 +45,18 @@ greeting = 0.9
 
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
+
+`default_runner` may be a list, in which case every case runs through each runner named and
+the report shows one outcome per `(skill, case, runner)`:
+
+```toml
+default_runner = ["pydantic-ai", "langchain"]
+```
+
+An empty list, or a name given twice, is a config error (exit 2) naming the field. A
+`--runner` flag on the command line — repeatable — replaces the whole list; it never appends
+to it. See [Runners](runners.md) for what the matrix measures and
+[Gating](gating.md) for how it is gated.
 
 `baseline` is `""` (off), `"none"` (compare against an empty skill) or `"previous"` (compare
 against the prior version resolved from git). `repeat` is how many times each arm is sampled

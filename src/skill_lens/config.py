@@ -28,9 +28,11 @@ class ConfigError(Exception):
 class Config(BaseModel):
     """Run defaults for `skill-lens run`.
 
-    `default_runner` (`--runner`), `model` (`--model`), `judge_model`
-    (`--judge-model`) and `min_pass_rate` (`--min-pass-rate`) can be overridden
-    by a CLI flag; the rest can only be set here. Secrets are never read from
+    `default_runner` (`--runner`, a string or a list of names -- every case
+    runs through each; the flag, repeated, replaces the whole list), `model`
+    (`--model`), `judge_model` (`--judge-model`) and `min_pass_rate`
+    (`--min-pass-rate`) can be overridden by a CLI flag; the rest can only be
+    set here. Secrets are never read from
     this file -- API keys come from the environment only.
 
     `judge` defaults to "fake" for the same reason `default_runner` does:
@@ -99,7 +101,7 @@ class Config(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    default_runner: str = "fake"
+    default_runner: str | list[str] = "fake"
     model: str = DEFAULT_MODEL
     temperature: float | Literal["unset"] = 0.0
     retries: int = 2
@@ -130,6 +132,27 @@ class Config(BaseModel):
     script_interpreters: dict[str, list[str]] = Field(
         default_factory=lambda: {ext: list(argv) for ext, argv in DEFAULT_INTERPRETERS.items()}
     )
+
+    @field_validator("default_runner")
+    @classmethod
+    def _runner_list_is_well_formed(cls, value: str | list[str]) -> str | list[str]:
+        """A list names every runner once and names at least one.
+
+        A duplicate is refused rather than collapsed: the same (skill, case)
+        would enter the pass rate twice, weighting one framework's vote double
+        under --repeat and --baseline. An empty list would run nothing, which
+        the gate fails -- but as "no cases ran", far from the cause.
+        """
+        if isinstance(value, str):
+            return value
+        if not value:
+            raise ValueError("names no runner; give one name or a non-empty list")
+        seen: set[str] = set()
+        for name in value:
+            if name in seen:
+                raise ValueError(f"names {name!r} twice; each runner runs every case once")
+            seen.add(name)
+        return value
 
     @field_validator("script_interpreters")
     @classmethod
