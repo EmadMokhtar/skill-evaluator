@@ -755,6 +755,14 @@ file that permanently narrowed the suite would let a green run measure less than
 repository declares. `full_output` and `keep_workspace` are rendering knobs with no such
 failure mode, which is why they may live in the file.
 
+**Every candidate `(skill, case, runner)` outcome counts toward the gate, and none counts
+twice.** The orchestrator has run a `skill × case × runner` matrix since M1 and every
+reporter has keyed on `CaseOutcome.runner` since M5; M8 part 2 only let the CLI and the
+config name more than one runner. The one new rule is that a name given twice is refused
+rather than collapsed — `cli._resolve_runners` and `Config.default_runner`'s validator both
+enforce it — because under `--repeat` and `--baseline` a duplicate would weight one
+framework's vote double. `--runner` replaces the configured list; it never appends.
+
 **`init` never creates an `evals/` directory beside existing `*.eval.yaml` files.**
 Discovery prefers `evals/` when it exists, so creating it would hide the files already
 there from every later run — silently, with nothing red. `scaffold_target` writes beside

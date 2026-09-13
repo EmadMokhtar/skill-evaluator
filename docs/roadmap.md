@@ -10,7 +10,7 @@
 | M5 | CI/CD polish: JUnit XML + Markdown reporters, GitHub Action, bounded concurrency | shipped |
 | M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions, bundled files and `run_script` | shipped |
 | M7 | DX: failing cases explain themselves, `--case`, `init` batch mode and workspace case, versioned example, quickstart | shipped |
-| M8 | LangChain runner and judge (`[langchain]` extra); runner matrix | Part 1 shipped; Part 2 planned |
+| M8 | LangChain runner and judge (`[langchain]` extra); runner matrix | shipped |
 
 ## What M4 shipped
 
@@ -104,15 +104,20 @@ Deferred: a `references/` layout example (shipped with M6 part 2 as `examples/lo
 a repeatable `--case`, and the gating features carried over from M4 and M5 (per-skill
 `min_delta`, `--baseline-ref`, both-arms-fail flagging).
 
-## What M8 part 1 shipped
+## What M8 shipped
 
 A second agent framework behind the same seams. `--runner langchain` drives LangChain
 1.x's `create_agent` with the same tools, prompt and workspace the PydanticAI runner
 uses, and `judge = "langchain"` grades rubrics with the same prompt and per-check
 verdict contract, so the `[langchain]` extra is self-sufficient. The prompt rules and the
 retry policy were extracted into two framework-neutral modules so both adapters share
-one implementation. Anthropic joined both extras. Part 2 — running every case through
-more than one runner in one invocation — has its own pull request; see the
+one implementation. Anthropic joined both extras.
+
+Part 2 made the matrix a single invocation: `--runner` is repeatable, `default_runner`
+accepts a list, and the action's `runner` input splits on commas. Every `(skill, case,
+runner)` outcome counts toward the gate; a duplicate runner is a user error so no outcome
+counts twice. Deferred: a per-runner gate threshold, a judge list, and normalising
+provider-prefix spellings across frameworks. See the
 [M8 design](https://github.com/EmadMokhtar/skill-evaluator/blob/main/docs/superpowers/specs/2026-09-11-skill-lens-m8-design.md).
 
 ## The rename to skill-lens

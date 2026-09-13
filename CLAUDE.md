@@ -34,7 +34,9 @@ adds `--case`, brings `init` up to M6 with a workspace case and a batch mode,
 and ships a versioned comparative example, an annotated config and an
 end-to-end quickstart. M8 part 1 adds a LangChain runner and judge behind the same
 protocols, installable as the `[langchain]` extra, with the prompt rules and retry loop
-extracted into `runners/prompting.py` and `runners/retry.py`. M6 part 2 lets the
+extracted into `runners/prompting.py` and `runners/retry.py`. M8 part 2 makes
+`--runner` repeatable and `default_runner` a string or list, so one invocation runs every
+case through every named framework. M6 part 2 lets the
 agent read the files a skill ships beside `SKILL.md` (`scripts/`, `references/`,
 `assets/`) through `list_skill_files`/`read_skill_file`, and — only under
 `allow_scripts` / `--allow-scripts` — run a bundled script through `run_script`,
@@ -293,6 +295,13 @@ form, that file is the explanation.
 - **A `--case` matching nothing fails the gate** — the fourth zero-cases cause. `--case` has
   no config key: a filter that lived in the file would let a green run measure less than the
   repository declares.
+- **Every candidate `(skill, case, runner)` outcome counts toward the gate, and none counts
+  twice.** A runner named twice — on the flag or in `default_runner` — is a user error (exit
+  2), not de-duplicated: under `--repeat` and `--baseline` a duplicate would weight one
+  framework's vote double. An empty `default_runner` list is a config error naming the field.
+- **`--runner` replaces `default_runner` wholesale; it never appends.** Every other flag
+  replaces its key, and an appending flag would make "only LangChain, this once" impossible
+  from a repository whose file names both.
 - **`init` never creates an `evals/` directory beside existing `*.eval.yaml` files**
   (`scaffold_target`), and **batch `init` never overwrites** — a skill with any eval file is
   skipped and `--force` in batch mode is a user error.
