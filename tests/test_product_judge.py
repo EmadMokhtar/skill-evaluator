@@ -17,7 +17,7 @@ from skill_lens.judges.product import (
 )
 from skill_lens.judges.prompt import SYSTEM_PROMPT, render_request
 from skill_lens.models import CheckResult, JudgeRequest, RubricCheck
-from skill_lens.runners.product import PRESETS, Product, ProductSetupError
+from skill_lens.runners.product import PRESETS, TRUST_NOTE, Product, ProductSetupError
 from skill_lens.runners.traces import parse_claude_code, parse_copilot
 
 FAKE = Path(__file__).parent / "fake_product.py"
@@ -168,6 +168,27 @@ def test_the_wrong_shape_is_an_invalid_verdict(fake, tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(tmp_path / "bad.jsonl"))
     verdict = ProductJudge(_product()).judge(REQUEST)
     assert verdict.error is not None and verdict.error.startswith("JudgeOutputInvalid:")
+    assert "_RawVerdict" not in verdict.error  # the message names JudgeOutput, not the seam
+
+
+def test_an_empty_object_is_an_invalid_verdict(fake, tmp_path, monkeypatch):
+    # `checks` has no default on the strict copy `ProductJudge` validates
+    # against, so a reply whose only object is `{}` is the wrong shape too --
+    # not a vacuously empty (and vacuously passing) verdict.
+    trace = (
+        '{"type":"system","subtype":"init","cwd":"/judge","session_id":"j3","tools":[],'
+        '"model":"claude-opus-5[1m]","permissionMode":"bypassPermissions","skills":[],'
+        '"claude_code_version":"9.9.9"}\n'
+        '{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"{}",'
+        '"session_id":"j3","total_cost_usd":0.0,"duration_ms":1,"duration_api_ms":1,'
+        '"stop_reason":"end_turn","usage":{"input_tokens":1,"cache_creation_input_tokens":0,'
+        '"cache_read_input_tokens":0,"output_tokens":1}}\n'
+    )
+    (tmp_path / "empty.jsonl").write_text(trace, encoding="utf-8")
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(tmp_path / "empty.jsonl"))
+    verdict = ProductJudge(_product()).judge(REQUEST)
+    assert verdict.error is not None
+    assert verdict.error.startswith("JudgeOutputInvalid:")
 
 
 def test_a_product_failure_is_the_verdicts_error(fake, monkeypatch):
@@ -200,11 +221,19 @@ def test_the_judge_never_raises_for_a_missing_executable(fake):
 def test_preflight_checks_the_executable_and_records_the_product():
     status = ProductJudge(_product()).preflight()
     assert status.name == "claude-code"
+    assert status.executable == sys.executable
     assert status.version == "fake 1.2.3"
+    assert status.trust == TRUST_NOTE
     with pytest.raises(
         ProductSetupError, match=r"judge claude-code: 'no-such-thing' is not on PATH"
     ):
         ProductJudge(_product(argv=("no-such-thing", "{prompt}"), version_command=None)).preflight()
+
+
+def test_the_judges_cwd_is_removed_even_on_failure(fake, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "exit3")
+    ProductJudge(_product()).judge(REQUEST)
+    assert not Path(fake()["cwd"]).exists()
 
 
 def test_the_judge_name_is_the_products():

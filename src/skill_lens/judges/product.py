@@ -3,10 +3,13 @@
 The framework judges ask a model for a structured `JudgeOutput`. A product
 has no structured-output mode, so the same prompt (`judges/prompt.py`) goes
 in as text with one closing line asking for the JSON object only, and the
-first balanced object in the reply is validated as `JudgeOutput`. Everything
-that is not a valid verdict -- prose, a cut-off object, the wrong shape -- is
-`JudgeVerdict.error`, one attempt: an unreadable verdict is an infra signal,
-not a low score.
+first balanced object in the reply is validated against a strict copy of
+`JudgeOutput` (`_RawVerdict`, below). Everything that is not a valid
+verdict -- prose, a cut-off object, the wrong shape -- is
+`JudgeVerdict(error="JudgeOutputInvalid: ...")` naming the actual mismatch,
+one attempt: an unreadable verdict is an infra signal, not a low score, and
+its error should say so rather than surface several layers away as a
+`JudgeEvaluator` complaint about a mismatched id set.
 
 The judge runs in an empty directory with no skill delivered: it grades
 text, and must not discover the skill under test.
@@ -22,7 +25,7 @@ from pathlib import Path
 from pydantic import ConfigDict, ValidationError
 
 from skill_lens.judges.prompt import SYSTEM_PROMPT, render_request
-from skill_lens.models import JudgeOutput, JudgeRequest, JudgeVerdict, ProductStatus
+from skill_lens.models import CheckResult, JudgeOutput, JudgeRequest, JudgeVerdict, ProductStatus
 from skill_lens.runners.product import (
     MAX_PROMPT_BYTES,
     TRUST_NOTE,
@@ -44,13 +47,23 @@ class _RawVerdict(JudgeOutput):
     stays lenient so that path is untouched (a stricter shared model would
     also change the JSON schema pydantic-ai and langchain generate for that
     binding, breaking their recorded cassettes). A product's reply has no
-    such guarantee: without `extra="forbid"` here, an unrelated JSON object
-    a product printed -- a trace event, say -- would parse as a vacuously
-    empty verdict (`checks` defaults to `[]`) instead of the invalid verdict
-    it actually is.
+    such guarantee, so this judge validates it against a strict copy instead.
+
+    This is not about stopping a vacuous pass -- `JudgeEvaluator` already
+    errors a verdict whose check ids do not match the rubric's, so an empty
+    or extra-keyed reply was never going to score as a pass. It is about
+    which error a caller sees: this judge's contract is that a reply of the
+    wrong shape is `JudgeVerdict(error="JudgeOutputInvalid: ...")` naming the
+    real cause, not a `JudgeEvaluator` message about a mismatched id set
+    several layers away from the object that was actually wrong. `checks`
+    has no default here (unlike on `JudgeOutput`) so `{}` is that wrong shape
+    too, and `title="JudgeOutput"` keeps the `ValidationError` text naming
+    the shape callers actually asked for, not this private subclass.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", title="JudgeOutput")
+
+    checks: list[CheckResult]
 
 
 CLOSING_INSTRUCTION = (
