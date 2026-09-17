@@ -167,7 +167,9 @@ own files is wrong. That is the whole contract with your pipeline.
 
 The default runner is scripted and offline, so the pipeline above costs nothing to try. To
 score a real agent, pass `--runner pydantic-ai` — the `[pydantic-ai]` extra in the install
-above is what supplies it (from a checkout: `uv sync --extra pydantic-ai`). See
+above is what supplies it (from a checkout: `uv sync --extra pydantic-ai`) — or pass
+`--runner copilot` / `--runner claude-code` to run the skill through an installed GitHub
+Copilot CLI or Claude Code, with no API key. See
 [Runners](https://emadmokhtar.github.io/skill-evaluator/runners/).
 
 ## Gate your pull requests

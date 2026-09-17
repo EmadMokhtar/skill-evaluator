@@ -9,7 +9,7 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M8 (part 1 complete)**, with **M6 part 2** shipped after M7: the
+Currently at **M9 (part 1 complete)**, with **M6 part 2** shipped after M7: the
 pipeline runs real agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
@@ -36,7 +36,16 @@ end-to-end quickstart. M8 part 1 adds a LangChain runner and judge behind the sa
 protocols, installable as the `[langchain]` extra, with the prompt rules and retry loop
 extracted into `runners/prompting.py` and `runners/retry.py`. M8 part 2 makes
 `--runner` repeatable and `default_runner` a string or list, so one invocation runs every
-case through every named framework. M6 part 2 lets the
+case through every named framework. M9 part 1 adds product runners: `--runner copilot`
+and `--runner claude-code` start GitHub Copilot CLI or Claude Code in non-interactive
+mode with `SKILL.md` and its bundle delivered byte for byte into the product's own skill
+directory, and read output, tool calls, tokens and the skill-load event from the
+product's trace; `--runner cli` does the same for a command a `[runners.cli]` table names,
+with stdout as the output. No provider key is involved. A once-per-run `preflight` hook
+on the `Runner` protocol refuses what the product cannot serve before any quota is spent,
+`RunReport.products` puts the product, its version and its trust sentence on every
+report, `RunResult.usage_note` makes an unmeasurable token limit a failing check, and a
+`--model`/`--judge-model` nothing reads is a user error. M6 part 2 lets the
 agent read the files a skill ships beside `SKILL.md` (`scripts/`, `references/`,
 `assets/`) through `list_skill_files`/`read_skill_file`, and — only under
 `allow_scripts` / `--allow-scripts` — run a bundled script through `run_script`,
@@ -51,8 +60,9 @@ design is in `docs/superpowers/specs/2026-08-03-skill-eval-m4-design.md`, the
 M5 design is in `docs/superpowers/specs/2026-08-05-skill-eval-m5-design.md`,
 the M6 part 1 design is in `docs/superpowers/specs/2026-09-10-skill-lens-m6-design.md`,
 the M6 part 2 design is in `docs/superpowers/specs/2026-09-12-skill-lens-m6-part2-design.md`,
-the M7 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m7-design.md`, and the
-M8 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m8-design.md`.
+the M7 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m7-design.md`, the
+M8 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m8-design.md`, and the M9
+design is in `docs/superpowers/specs/2026-09-17-skill-lens-m9-design.md`.
 
 ## Commands
 
@@ -142,7 +152,10 @@ form, that file is the explanation.
   `runners/pydantic_ai.py`, `judges/pydantic_ai.py`, `runners/langchain.py`,
   `judges/langchain.py`. `runners/tools.py` builds framework-neutral `AgentTool`s (name +
   JSON schema + callable); `runners/prompting.py` and `runners/retry.py` hold the prompt and
-  retry rules both adapters share; the adapters wrap them. `tests/test_framework_isolation.py`
+  retry rules both adapters share; the adapters wrap them. `runners/product.py` and
+  `runners/traces.py` import `subprocess` and `json`, not a framework — a product is an
+  executable and a trace grammar — and `process.py` beneath them imports nothing from the
+  project. `tests/test_framework_isolation.py`
   guards this: it asserts no other module under `src/skill_lens/` imports `pydantic_ai`,
   `langchain*` or `langgraph` at the top level.
 - **`RunResult.tokens` is derived**, not stored — `extra="forbid"` makes writing it a loud
@@ -314,6 +327,39 @@ form, that file is the explanation.
 - **The unfilled-scaffold scan covers mapping keys as well as values.**
 - **`examples/greeting` stays at `1.1.0` or later.** The bump is what makes `--baseline
   previous` resolvable from a checkout; `tests/test_examples.py` pins it.
+- **The product sees `SKILL.md` byte for byte.** `Skill.markdown` is the file; only the loader
+  and the baseline resolver set it; `--baseline none` has none, so no directory is written.
+  Beside it go `scripts/`, `references/` and `assets/` and nothing else.
+- **A product runner's prompt is the task verbatim; the baseline-none arm never sees the
+  skill's name.** `loaded` invokes the skill by the product's own spelling; `offered` sends
+  the bare task and reads the product's load event — a product without one (`cli`) makes
+  `offered` an authoring error, never a silent `false`.
+- **A limit the product cannot measure fails, it never passes.** `RunResult.usage_note` for
+  tokens mirrors `cost_note` for cost in `BudgetEvaluator`: a declared `max_tokens` under a
+  non-empty `usage_note` is a failing *not evaluated* check, excluded from `score`'s divisor.
+- **A truncated product trace is `RunResult.error`, never a partial parse**; a complete
+  trace carrying the product's own error message wins over the exit code.
+- **Naming a product runner is the trust decision, and the report says so.** Prompts
+  disabled, full environment, no sandbox; `allow_scripts` governs only `run_script`.
+  `TRUST_NOTE` lives on `ProductStatus.trust`, on the model, so the three reporters cannot
+  drift.
+- **Product preflight spends nothing**: executable found and executed (`--version`), skill
+  names checked, `tools:` refused under any product and `trajectory:`/`offered` under
+  `cli`, all before the first case; only the candidate-arm cases that will run are
+  inspected, once each.
+- **`ProductRunner.run` never raises for a product failure.** Timeout, non-zero exit,
+  product-reported failure, truncated trace, over-size prompt, missing executable at run
+  time and a delivery `ProductSetupError` are all `RunResult.error`; `ProductSetupError`
+  propagates only from `preflight`, where `cli.py` makes it exit 2.
+- **`--model` / `--judge-model` with nothing that reads them are user errors** (exit 2).
+  `--model` is read by a keyed runner, or by a keyed judge whose `judge_model` is unset;
+  a product's model is set with `[runners.<name>] args`.
+- **`command` replaces the argv; `args` appends; presets forbid `skills_dir` and `invoke`.**
+  `command` holds exactly one `{prompt}` element, never in the executable slot, substituted
+  whole and never through a shell; `args` may not contain it; `[runners.<name>]` holds no
+  token.
+- **`process.py` is the one implementation** of group kill and capped read; `scripts.py`
+  and `runners/product.py` both import it, and it imports nothing from the project.
 - **Script execution is off unless the run turned it on** (`allow_scripts` /
   `--allow-scripts`); nothing in an eval file or a `SKILL.md` can enable it. Reading the
   bundle needs no opt-in.
@@ -398,11 +444,12 @@ form, that file is the explanation.
 - **Ruff's `S` rules are on, and a false positive is suppressed at the site with its reason.**
   Never by switching a rule off for `src/`. `tests/**` and `scripts/**` carry per-directory
   ignores for `assert`, subprocess-with-fixed-argv, XML parsing and literal `/tmp` strings used
-  as fake path values; the three `src/` sites
+  as fake path values; the five `src/` sites
   (`git` found on `PATH` in `baseline.py`; `StrictBoolLoader` in `yaml_loading.py`, which
   *is* a `SafeLoader` subclass ruff cannot see; the shell-free subprocess calls in
-  `scripts.py` — the probe, the interpreter, and `taskkill` found on `PATH` in its Windows
-  branch) each carry an inline `noqa` with the reason.
+  `scripts.py` — the probe and the interpreter; `taskkill` found on `PATH` in
+  `process.py`'s Windows branch; the product and its version probe in
+  `runners/product.py`) each carry an inline `noqa` with the reason.
 - **Every action is pinned to a commit SHA with a `# vX.Y.Z` comment, and nothing grants
   write access at the workflow level.** A tag can be moved; a commit cannot.
   `tests/test_supply_chain.py` fails any `uses:` that is not `./` or a 40-hex SHA with the

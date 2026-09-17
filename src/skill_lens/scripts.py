@@ -411,7 +411,7 @@ def run_script(
         with ExitStack() as stack:
             try:
                 # w+b, not wb: read back through these same handles below,
-                # never by reopening the path -- see _read_capped_handle.
+                # never by reopening the path -- see `process.read_capped_handle`.
                 stdout_handle = stack.enter_context(stdout_path.open("w+b"))
                 stderr_handle = stack.enter_context(stderr_path.open("w+b"))
             except OSError as exc:

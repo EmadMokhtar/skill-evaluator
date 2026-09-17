@@ -42,12 +42,15 @@ greeting = 0.9
 | `script_timeout_seconds` | `30.0` | — |
 | `max_script_output_bytes` | `20000` | — |
 | `script_interpreters` | `{ py = ["python3"], sh = ["bash"] }` | — |
+| `runners` | `{}` | — |
 
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
 
-`default_runner` may be a list, in which case every case runs through each runner named and
-the report shows one outcome per `(skill, case, runner)`:
+`default_runner` names `fake`, a framework runner (`pydantic-ai`, `langchain`) or a
+[product runner](#product-runners) (`copilot`, `claude-code`, `cli`). It may be a list, in
+which case every case runs through each runner named and the report shows one outcome per
+`(skill, case, runner)`:
 
 ```toml
 default_runner = ["pydantic-ai", "langchain"]
@@ -100,8 +103,9 @@ larger than 1 MB is scored as unreadable (a failed check) even where this settin
 See [The workspace](runners.md#the-workspace).
 
 `model`, `retries`, and `retry_backoff_seconds` only matter to components that reach a
-provider (`pydantic-ai` or `langchain`, as a runner or a judge); `FakeRunner` and `FakeJudge`
-ignore them.
+provider (`pydantic-ai` or `langchain`, as a runner or a judge); `FakeRunner`, `FakeJudge`
+and the product runners ignore them — a product's model and timeout live in its own
+[`[runners.<name>]` table](#product-runners).
 `temperature` accepts a float or the literal string `"unset"`, for reasoning models that
 reject any explicit temperature:
 
@@ -115,6 +119,49 @@ retry_backoff_seconds = 1.0
 
 A blank model id is rejected as a user error (exit 2) rather than being passed to a provider,
 whether it arrives from `model`, `judge_model`, or the matching flag.
+
+## Product runners
+
+One `[runners.<name>]` table per product runner — `copilot`, `claude-code`, or `cli`. Each
+table is optional for a preset (the preset supplies the verified argv) and required for
+`cli`, which has no preset:
+
+```toml
+default_runner = ["copilot", "claude-code"]
+
+[runners.copilot]
+args = ["--model", "gpt-5.2"]      # appended to the preset's argv
+timeout_seconds = 900              # default 600; finite and positive
+
+[runners.claude-code]
+# Replaces the preset's argv entirely; keep the output-format flag or the
+# trace cannot be read.
+command = ["claude", "-p", "{prompt}", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"]
+
+[runners.cli]
+command = ["my-agent", "--prompt", "{prompt}"]   # required for cli
+skills_dir = ".agents/skills"                     # default
+invoke = "/{name} {task}"                         # default "{task}"
+max_output_bytes = 8000000                        # default
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `command` | the preset's argv (required for `cli`) | The whole argv. Exactly one element must be `{prompt}`, and it cannot be the first (the executable); the prompt is substituted as that one element, never through a shell. |
+| `args` | `[]` | Appended after `command`. Must not contain `{prompt}`. |
+| `timeout_seconds` | `600.0` | Wall clock per case, finite and positive; the process group is killed at expiry. |
+| `max_output_bytes` | `8000000` | Cap on the trace, positive; a longer one is an errored case naming this key. |
+| `skills_dir` | `".agents/skills"` | `cli` only. Where the skill is written, relative to the working directory; no absolute path and no `..`. |
+| `invoke` | `"{task}"` | `cli` only. The prompt in `mode: loaded`; `{name}` and `{task}` are substituted, and `{task}` must appear. |
+
+Two knobs with two meanings: drop an isolation flag with `command`, add a model with
+`args`. `skills_dir` or `invoke` under a preset, an unknown table name, a `command` without
+exactly one `{prompt}` element, `{prompt}` in `args`, and `cli` named as a runner with no
+`command` are all config errors (exit 2) naming the key. No API key or token belongs here:
+the product reads its own auth. The tables are config-only, with no CLI flag: which product
+a repository evaluates under, and how, is repository policy. See
+[Runners](runners.md#product-runners) for what each product runner measures and
+[Security](security.md#product-runners) for what naming one means.
 
 ## Bundled scripts
 
@@ -186,8 +233,12 @@ judge_temperature = 0.0      # or "unset" for a reasoning judge model
 
 The default `judge = "fake"` does not grade. Rather than passing a rubric it never checked,
 it reports the case as **errored** — nothing was verified, so nothing is reported as
-verified. A consequence worth knowing: `--judge-model` does nothing on its own, because the
-judge is selected by `judge`, not by naming a model.
+verified. A consequence worth knowing: `--judge-model` does not turn judging on, because the
+judge is selected by `judge`, not by naming a model — and since the flag is read only by
+`judge = "pydantic-ai"` or `"langchain"`, passing it under any other judge is a user error
+(exit 2) rather than a flag that silently did nothing. `--model` follows the same rule: a
+run where nothing reads it — `--runner fake`, or only product runners, with no keyed judge
+falling back to it — refuses it; see [CLI](cli.md#run).
 
 `judge_temperature` is deliberately **separate from** `temperature` and defaults to `0`.
 Sampling the skill under test is a normal thing to want; sampling the grader is not, because

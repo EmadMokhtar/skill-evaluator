@@ -51,10 +51,12 @@ git+https://github.com/EmadMokhtar/skill-evaluator@<commit-sha>`), or reference 
 `uses: ./` from a workflow inside this repository.
 
 Every `skill-lens run` flag is available as a kebab-cased input (`--min-pass-rate` becomes
-`min-pass-rate`). `runner` takes one name, or a comma-separated list to run every case through
-each (`runner: pydantic-ai,langchain`) — install every framework named:
-`install-spec: skill-lens[pydantic-ai,langchain]==…`. Three more inputs are about the
-environment rather than the run:
+`min-pass-rate`). `runner` takes one name — `fake`, `pydantic-ai`, `langchain`, `copilot`,
+`claude-code` or `cli` — or a comma-separated list to run every case through each
+(`runner: pydantic-ai,langchain`). Install every framework named:
+`install-spec: skill-lens[pydantic-ai,langchain]==…`; a product runner needs the product
+installed instead, see [Running under a product](#running-under-a-product). Three more
+inputs are about the environment rather than the run:
 
 | Input | Default | Purpose |
 | --- | --- | --- |
@@ -171,6 +173,31 @@ The alternative is a GitHub `strategy.matrix` over `runner: [pydantic-ai, langch
 job per framework with the single-name `runner:` input. It needs no list support and shows
 one check per framework in the pull request, at the cost of one summary and one JUnit
 file per job rather than one for the whole matrix.
+
+## Running under a product
+
+A [product runner](runners.md#product-runners) needs the product installed on the runner
+and its token in the environment; no provider API key and no framework extra. Pin `runner:`
+so a pull request cannot pick the product for itself:
+
+```yaml
+- uses: actions/setup-node@v4
+  with: { node-version: 22 }
+- run: npm install -g @github/copilot
+- uses: EmadMokhtar/skill-evaluator@v0.6.0
+  with:
+    path: ./skills
+    runner: copilot
+  env:
+    COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_TOKEN }}
+```
+
+Each case spends the product's quota; the `Plan:` line prints the ceiling. The product runs
+with its permission prompts disabled and the whole job environment in reach, so give the
+token only to jobs whose checkout you trust — see
+[Security](security.md#product-runners) for why pinning `runner:` alone is not enough. A
+`--model` input is refused (exit 2) when only product runners are named; set the product's
+model with `[runners.<name>] args` in `skill-lens.toml`.
 
 ## Without the action
 

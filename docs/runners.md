@@ -1,8 +1,11 @@
 # Runners
 
 The default runner is `fake` (offline, scripted, free). To evaluate a skill with a
-real agent you need one of the two framework extras, a key in the environment, and a
-model:
+real agent there are three ways: the `pydantic-ai` framework extra, the `langchain`
+framework extra, or an installed agent product (`copilot`, `claude-code`, or a
+command you name as `cli`). A framework extra needs a key in the environment and a
+model; a product needs neither, because it uses its own auth — see
+[Product runners](#product-runners). With a framework extra:
 
 ```bash
 uv tool install "skill-lens[pydantic-ai]"       # or "skill-lens[langchain]", or both
@@ -54,6 +57,87 @@ verdict is an infrastructure signal, not a low score.
 API keys are read from the environment only — never from `skill-lens.toml`.
 `skill-lens` checks for the key before making any request, so a missing key costs
 nothing and exits 2.
+
+## Product runners
+
+A skill written for a named product — GitHub Copilot CLI, Claude Code — is deployed into
+that product's skill directory and loaded by that product's own mechanics. A framework
+runner approximates that; a **product runner** starts the product itself, in its
+non-interactive mode, with the skill placed where the product discovers skills, and reads
+the result from the product's machine-readable trace. No provider API key is involved: the
+product uses its own auth.
+
+```bash
+skill-lens run ./skills --runner copilot
+skill-lens run ./skills --runner claude-code
+skill-lens run ./skills --runner copilot --runner pydantic-ai --model openai:gpt-4o-mini
+```
+
+| Runner | Starts | Skill directory | Trace |
+| --- | --- | --- | --- |
+| `copilot` | `copilot -p <prompt> --allow-all-tools --output-format json --no-custom-instructions --no-auto-update` | `.agents/skills/<name>/` | Copilot's JSONL (one JSON object per line) |
+| `claude-code` | `claude -p <prompt> --output-format stream-json --verbose --dangerously-skip-permissions --setting-sources project --strict-mcp-config --no-session-persistence` | `.claude/skills/<name>/` | Claude Code's `stream-json` |
+| `cli` | the `command` in `[runners.cli]` | `skills_dir` (default `.agents/skills`) | none — stdout is the output |
+
+The flags are the verified minimum: what the product needs to run without a terminal,
+what emits the trace, and what keeps *your* setup out of the eval. `--no-custom-instructions`
+stops a stray `AGENTS.md` or a personal instructions file shaping a Copilot run;
+`--setting-sources project --strict-mcp-config` keeps your own hooks, plugins and MCP
+servers out of a Claude Code run while the project skill is still discovered and
+OAuth auth still works; `--no-session-persistence` writes nothing under `~/.claude`.
+Personal skills and plugins under `~/.copilot` do still load for Copilot — that is the
+product as you have it; for a hermetic run point `COPILOT_HOME` at an empty directory
+and set `COPILOT_GITHUB_TOKEN`. Add flags with `[runners.<name>] args` (a model, say);
+replace the whole argv with `command`. See
+[Configuration](configuration.md#product-runners).
+
+**What the product sees.** The eval's working directory (the case's workspace when it
+declares one, a fresh temporary directory otherwise) holds `SKILL.md` **byte for byte** —
+products honour frontmatter keys skill-lens does not model, such as `allowed-tools` — and
+beside it `scripts/`, `references/` and `assets/`, nothing else. The prompt is the case's
+`task`, verbatim: the product owns its system prompt, and skill-lens adds no preamble.
+`mode: loaded` invokes the skill through the product's own spelling (`/<name> <task>` for
+both presets; `invoke` under `cli`, default `{task}`); `mode: offered` sends the bare task
+and reads the product's skill-load event — the `skill.invoked` event in Copilot, the
+`Skill` tool call in Claude Code — so a negative control is measured, never assumed. Under
+`--baseline none` the baseline arm has no skill directory and gets the bare task in both
+modes; under `--baseline previous` the previous version is delivered with its own bundle.
+
+**What a product runner can measure.**
+
+| | `copilot` | `claude-code` | `cli` |
+| --- | --- | --- | --- |
+| Output text and `assertions:` | yes | yes | yes (stdout) |
+| `trajectory:` (the product's own tool names, e.g. `bash`, `Bash`) | yes | yes | no — an authoring error |
+| `mode: offered` / `skill_triggered` | yes | yes | no — an authoring error |
+| `budget: max_tokens` (input + cache read + cache write, plus output) | when the trace reports usage; otherwise a failing "not evaluated" check | yes | failing "not evaluated" check |
+| `budget: max_cost_usd` | failing "not evaluated" check — Copilot bills per premium request, and the note says how many | yes, at the list price the product reports (`total_cost_usd`) | failing "not evaluated" check |
+| `budget: max_latency_ms` | yes | yes | yes |
+| `tools:` (mock tools) | authoring error under any product runner | | |
+
+Tool calls are what the model *requested* (Copilot's `toolRequests`, Claude Code's
+`tool_use` blocks), not what executed — a refused call was still the model's choice, the
+same rule the framework runners apply. A case the runner cannot serve is an **authoring
+error** (exit 2) found in preflight, before any case runs and before any quota is spent —
+never a vacuous pass. `--model` is not read by a product runner: a flag nothing reads is
+refused as a user error rather than silently ignored; set the product's model in its table.
+
+**Errors.** A timeout (`timeout_seconds`, default 600), a non-zero exit, a product-reported
+failure, a trace cut short by `max_output_bytes`, a prompt over 100 KiB (the prompt travels
+as one argument, and Linux caps one at 128 KiB), and a missing executable at run time are
+all **errored** cases — never raised, never failed. A complete trace carrying the product's
+own error message is reported in preference to the exit code; a cut trace names the cap to
+raise. Preflight checks the executable is on `PATH` and, for the two presets, that it
+actually starts (`--version`); `cli` has no version command, so only the `PATH` lookup
+applies to it. The report names the product, its executable and — where there is one — its
+version on every run.
+
+**Trust.** The product runs with permission prompts disabled and inherits your whole
+environment — it needs its own auth, and cannot run non-interactively otherwise. No
+skill-lens sandbox applies; the skill's bundled scripts are reachable through the product's
+own shell whatever `allow_scripts` says, which governs only skill-lens's `run_script` tool.
+**Naming a product runner is that decision**, and every report says so. See
+[Security](security.md#product-runners).
 
 ## Declaring tools and scoring the trajectory
 
@@ -369,6 +453,12 @@ priced limits all hold still fails the case if it also declares an unpriceable
 does not lower `score` below what the priced checks alone would give it. If you adopt
 `skill-lens` against a provider `genai-prices` cannot price, omit `max_cost_usd` from the
 budget block for that provider rather than expecting it to be silently ignored.
+
+The same rule applies to tokens. A runner that cannot count tokens sets `usage_note`, and
+`max_tokens` is then a failing *not evaluated* check, exactly as `max_cost_usd` is under
+`cost_note`: `0` tokens is not a measurement, and `0 <= max_tokens` would otherwise pass
+every limit. Today that is the `cli` product runner, and `copilot` when its trace reports
+no usage; see [Product runners](#product-runners).
 
 If you are upgrading from a version of `skill-lens` where this budget block previously passed
 some other way, note the change: a repo that runs an unpriced model with a `budget:` block

@@ -12,8 +12,8 @@ inputs:
     description: Explicit eval file or directory, overriding discovery.
   runner:
     description: >-
-      Runner to use — fake, pydantic-ai or langchain. Comma-separate names to run
-      every case through each.
+      Runner to use — fake, pydantic-ai, langchain, copilot, claude-code or cli.
+      Comma-separate names to run every case through each.
   model:
     description: Model id, e.g. openai:gpt-4o-mini.
   judge-model:

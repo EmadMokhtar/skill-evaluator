@@ -161,6 +161,29 @@ Setting `skill_triggered` on a `mode: loaded` case is an authoring error too: a 
 is always in force, so the check could never be false. Running an offered case on a runner
 that does not support the mode is **errored**, never a quiet pass.
 
+Under a [product runner](runners.md#product-runners) there is no offered tool: the skill
+sits in the product's own skill directory, the bare task is sent, and `skill_triggered`
+comes from the product's own load event (Copilot's `skill.invoked`, Claude Code's `Skill`
+tool call). A product with no such event — `cli` — makes `mode: offered` an authoring error
+under that runner, never a silent `false` that would pass every negative control.
+
+## Which runners serve which case features
+
+| Case feature | `fake` | `pydantic-ai` / `langchain` | `copilot` / `claude-code` | `cli` |
+| --- | --- | --- | --- | --- |
+| `assertions:` | yes | yes | yes | yes |
+| `tools:` (mock tools) | yes | yes | authoring error | authoring error |
+| `trajectory:` | yes | yes | yes, the product's tool names | authoring error |
+| `mode: offered` | yes | yes | yes | authoring error |
+| `budget:` | yes | yes | see [Product runners](runners.md#product-runners) | latency only |
+| `workspace:` | yes | yes | yes — the product's working directory | yes |
+| `judge:` | yes | yes | yes | yes |
+
+An authoring error here is found in preflight and exits 2 before any case runs. Under
+`cli`, `budget: max_tokens` and `max_cost_usd` are declared limits the runner cannot
+measure, so each is a failing *not evaluated* check rather than an error; only
+`max_latency_ms` is evaluated.
+
 ## Unfilled scaffolds
 
 `skill-lens init` writes placeholder fields holding the literal `TODO(skill-lens)`.

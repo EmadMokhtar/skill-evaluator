@@ -57,15 +57,22 @@ reporters, or the gate.
 through `RunResult.error` and `JudgeVerdict.error`, so the orchestrator can tell an infra
 problem (errored) from a low score (failed).
 
+`Runner` may also define an optional `preflight(skills, cases_by_skill) -> ProductStatus |
+None`. The orchestrator calls it once per run, after discovery and before any case, with the
+candidate-arm skills and the cases planned for that runner; it raises an authoring error to
+abort the run before anything is spent, and may return a `ProductStatus` for the report.
+The framework runners define none; `ProductRunner` does. The hook is looked up with
+`getattr`, so a runner written against an earlier milestone keeps working.
+
 ## Module map
 
 | Module | Responsibility |
 | --- | --- |
 | `models.py` | Every Pydantic model in the project. No other module defines a data shape. |
 | `cli.py` | Typer entry point. Wires config → loaders → runner → orchestrator → reporters → gate, and owns the exit-code contract. |
-| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. `RunOptions` bundles the per-run settings (kept workspaces, the workspace caps, the script policy); when scripts are on it runs `scripts.preflight` once between discovery and execution, and `_BaselineStore` owns the directory previous bundles are extracted into, deleted in a `finally`. |
+| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. `RunOptions` bundles the per-run settings (kept workspaces, the workspace caps, the script policy); when scripts are on it runs `scripts.preflight` once between discovery and execution; between discovery and execution it also calls every runner's optional `preflight` hook, once each with the candidate-arm cases planned for it, and puts what they return on `RunReport.products`; and `_BaselineStore` owns the directory previous bundles are extracted into, deleted in a `finally`. |
 | `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. |
-| `config.py` | Loads `skill-lens.toml` by explicit path or upward discovery. Never reads secrets. |
+| `config.py` | Loads `skill-lens.toml` by explicit path or upward discovery. Never reads secrets. Owns `ProductSettings` (one `[runners.<name>]` table) and `Config.product`, which turns a preset plus its table into the `Product` a runner starts; `PRODUCT_NAMES` is the list the CLI accepts. |
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
 | `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`, and extracts that same commit's bundle (`git archive`, `tarfile` with the `data` filter) so the old instructions are paired with the old scripts. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
@@ -74,12 +81,15 @@ problem (errored) from a low score (failed).
 | `workspace.py` | The per-case temporary directory: creation, seeding, path containment, and cleanup. Framework-neutral, like every other top-level module. Its methods **raise** (`PathRefused`, `WorkspaceError`) for `cases/loader.py` and the evaluators to catch as authoring or infra errors; `runners/tools.py`'s built-in tools catch those same exceptions and turn them into ordinary tool-result strings instead. |
 | `bundle.py` | A read-only view of the three Agent Skills directories beside `SKILL.md` (`scripts/`, `references/`, `assets/`) and nothing else — an eval file beside `SKILL.md` is never readable by the agent. Same "methods raise, tools catch" split as `workspace.py`. |
 | `scripts.py` | Runs a bundled script: the policy, the once-per-run preflight (interpreters on `PATH`, the sandbox probe), the allowlisted environment, the scratch directory, the process-group timeout, capped output read through the harness's own descriptors, and the `sandbox-exec` / `bwrap` wrapping. Never raises for a script that will not run; raises `ScriptSetupError` only from preflight. |
+| `process.py` | Starts a child in its own process group, waits with a timeout, kills the group after every exit, and reads output through the harness's own handle. Shared by `scripts.py` and `runners/product.py`; imports nothing from the rest of the project. |
 | `runners/base.py` | The `Runner` protocol. `run` takes optional `workspace=` and `scripts=` keywords, both additive with a default, so a runner written against an earlier milestone keeps working. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/prompting.py` | The three preambles and the system-prompt builder every runner calls. Framework-free, so the rules `--min-delta` measures against exist once. |
 | `runners/retry.py` | The transient-retry loop and the HTTP status policy every adapter shares; each adapter supplies its own `is_transient`. |
 | `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of the four modules that import an agent framework.** |
 | `runners/langchain.py` | The LangChain runner adapter. **One of the four modules that import an agent framework.** |
+| `runners/traces.py` | The Copilot JSONL and Claude Code `stream-json` parsers, each producing one `Trace`. Pure functions; a structural problem is `Trace.error`, never a raise. |
+| `runners/product.py` | The product runner: a `Product` value (argv template, skill directory, invocation spelling, trace parser, version command), the two presets, skill delivery into the product's working directory, the subprocess invocation, and the once-per-run `preflight`. Imports no agent framework. |
 | `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block, the built-in workspace tools, and the bundle tools (`list_skill_files`, `read_skill_file`, and `run_script` when the bundle has scripts and the run enabled them). Owns the six-name `BUILTIN_TOOL_NAMES` the case loader reads. |
 | `runners/preflight.py` | Verifies the provider API key is present before any spend. |
 | `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
@@ -128,16 +138,17 @@ All live in `models.py`.
 
 | Model | Carries |
 | --- | --- |
-| `Skill` | name, description, instructions, `version` (declared frontmatter version, `""` if absent), path, `variant` (`"candidate"` or `"baseline"`), `bundle_root` (the directory whose `scripts/`, `references/` and `assets/` the agent may read; `None` when the skill ships none) |
+| `Skill` | name, description, instructions, `version` (declared frontmatter version, `""` if absent), path, `variant` (`"candidate"` or `"baseline"`), `bundle_root` (the directory whose `scripts/`, `references/` and `assets/` the agent may read; `None` when the skill ships none), `markdown` (the `SKILL.md` text byte for byte, for a product runner to deliver; `""` for the `--baseline none` skill, so no directory is written) |
 | `EvalCase` | name, task, `tools`, `assertions`, `trajectory`, `budget`, `tags` |
-| `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, model, `error` |
+| `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, `usage_note` (why the token split is `0` when the runner could not count — a declared `max_tokens` then fails as not evaluated), model, `error` |
 | `CheckResult` | one check's `id`, `passed`, `evidence` — emitted by the judge and, since M4, by assertion/trajectory/budget too |
 | `EvalScore` | one evaluator's `passed` / `score` / `detail`, plus its `checks: list[CheckResult]` |
 | `BaselineNote` | why a skill or case has no baseline arm: `kind` (`"unavailable"` or `"skipped"`) plus a reason |
 | `CaseOutcome` | one (skill, case, runner, arm, repetition) combination: status plus its scores and result |
 | `ScriptStatus` | the once-per-run sandbox decision: `sandbox` (`"sandbox-exec"`, `"bwrap"` or `"none"`), the probe's `detail`, and `hardening` — the note when the harness could hide its own environment from same-user processes (Linux, non-root), else `None` |
 | `ScriptNote` | a skill that bundles scripts while execution is off: `skill_name`, `script_count` |
-| `RunReport` | every outcome, skipped and tag-filtered skills, `baseline_kind`, `repeat`, `baseline_notes`, `scripts` (`None` when execution was off), `script_notes` |
+| `ProductStatus` | one agent product a run executed, as preflight found it: `name`, `executable`, `version`, and `trust` — the fixed sentence about permission prompts, the full environment and the missing sandbox, on the model so the three reporters cannot drift |
+| `RunReport` | every outcome, skipped and tag-filtered skills, `baseline_kind`, `repeat`, `baseline_notes`, `scripts` (`None` when execution was off), `script_notes`, `products` (one `ProductStatus` per product runner the run executed; empty otherwise) |
 
 Two fields are **derived, not stored**: `RunResult.tokens` (the input/output split summed)
 and `RunResult.errored` (`error is not None`). Aggregates on `RunReport` — `total`,
@@ -204,7 +215,10 @@ file is committed; a key must not be.
 `judges/pydantic_ai.py`, `runners/langchain.py` and `judges/langchain.py`. `runners/tools.py`
 builds framework-neutral mock tools and the adapters wrap them. The prompt rules
 (`runners/prompting.py`) and the retry loop (`runners/retry.py`) import no framework, which
-is what lets both adapters share them. `tests/test_framework_isolation.py` scans the whole
+is what lets both adapters share them. The product runner (`runners/product.py`) and its
+trace parsers (`runners/traces.py`) import `subprocess` and `json`, not a framework: a
+product is an executable and a trace grammar, and `process.py` beneath them imports nothing
+from the project at all. `tests/test_framework_isolation.py` scans the whole
 package for top-level framework imports and allows only those four files; it matches import
 *forms*, so `cli.py` importing our own `skill_lens.runners.pydantic_ai` is not a false
 positive. This is what keeps the `Runner` and `Judge` seams real rather than nominal.
@@ -827,13 +841,15 @@ costs nothing extra there and cannot be blamed on a bad connection.
 
 **Ruff's `S` rules are on, and a false positive is suppressed at the site with its reason.**
 The `flake8-bandit` family rides on the existing `ruff check`, so it runs everywhere lint does
-with no extra step to forget. Three `src/` sites trip it and all are deliberate: `baseline.py`
+with no extra step to forget. Five `src/` sites trip it and all are deliberate: `baseline.py`
 starts `git` by name because an absolute path is wrong on most machines and a missing git must
 come back as `BaselineUnavailable`, never a crash; `yaml_loading.py` passes `StrictBoolLoader`
 to `yaml.load`, and ruff cannot see that the loader subclasses `SafeLoader`; `scripts.py`
-starts the sandbox probe, the interpreter and (on Windows) `taskkill` from an argv list with
-no shell — the module's whole point — and finds `taskkill` on `PATH` by name for the same
-reason `baseline.py` finds `git`. Each carries an inline `noqa` with that reason. `tests/**` and `scripts/**` have per-directory ignores for
+starts the sandbox probe and the interpreter from an argv list with no shell — the module's
+whole point; `process.py` runs `taskkill` on Windows the same way and finds it on `PATH` by
+name for the same reason `baseline.py` finds `git`; `runners/product.py` starts the agent
+product and its version probe from an argv list with no shell, the prompt as one element.
+Each carries an inline `noqa` with that reason. `tests/**` and `scripts/**` have per-directory ignores for
 `assert`, subprocess-with-fixed-argv, XML parsing and literal `/tmp` strings used as fake path
 values. A rule is never switched off for `src/`
 because one site trips it.
@@ -870,15 +886,119 @@ a compromised dependency or build hook never executes under the token that can w
 `actions/configure-pages` calls `GET /repos/{owner}/{repo}/pages` and fails the job when that
 call is refused — a tightening that would only have shown up on the next push to `main`.)
 
+### Product runners (M9 part 1)
+
+**The product sees `SKILL.md` byte for byte.** `Skill.markdown` is the file as the author
+wrote it, never a re-rendering from the parsed fields; only the loader and the baseline
+resolver set it. Products honour frontmatter keys skill-lens does not model
+(`allowed-tools`, `disable-model-invocation`, `license`); a re-rendering would change the
+product's behaviour and the eval would measure the re-rendering. `deliver_skill` writes it
+with `newline=""` so no platform's text-mode translation changes a byte on the way out, and
+copies `scripts/`, `references/` and `assets/` beside it — those three and nothing else, so
+an eval file beside `SKILL.md` never reaches the product. The `--baseline none` skill has
+an empty `markdown`, so no directory is written for it: the rule is keyed on emptiness, not
+on which arm is running, the same rule `BASELINE_PREAMBLE` uses, so a runner never has to
+know which arm it is serving.
+
+**The prompt is the task verbatim, and the baseline-none arm never sees the skill's name.**
+The product owns its system prompt; anything skill-lens added would be part of what
+`--min-delta` measures. `mode: loaded` invokes the skill through the product's own
+spelling (`/<name> <task>` for both presets, `invoke` for `cli`); `mode: offered` sends the
+bare task. The baseline arm, having nothing to invoke, gets the bare task in both modes.
+
+**`skill_triggered` comes only from the product's load event.** Copilot's `skill.invoked`
+event, Claude Code's `Skill` tool call. Inferring it from the output would let a model that
+guessed the answer read as a triggered skill. A product with no such event — `cli` — makes
+`mode: offered` an authoring error under that runner, never a silent `false`, which would
+pass every negative control. `ProductRunner.run` still returns `None` rather than `False`
+for a generic product, so the runner never claims what it cannot observe.
+
+**A limit the product cannot measure fails, it never passes.** `RunResult.usage_note` is to
+tokens what `cost_note` is to cost: `0 <= max_tokens` is always true, so `BudgetEvaluator`
+records a `max_tokens` under a non-empty `usage_note` as a failing *not evaluated* check
+carrying the note, exactly as it already did for `max_cost_usd` under `cost_note`, and
+excludes it from `score`'s divisor. Copilot bills per premium request, so its cost is `0.0`
+with a `cost_note` naming the count and `max_cost_usd` fails as not evaluated; Claude Code
+reports a list-price `total_cost_usd`, a real and comparable number, so it has none.
+
+**A truncated trace is `RunResult.error`, never a partial parse.** The final event is the
+last line, and losing it loses the output. `invoke` compares the captured size against
+`max_output_bytes` and `read_trace` turns an over-size capture into an error naming the
+key, so the fix is one config line. The other way round: a complete trace carrying the
+product's own error message (`session.error`, `is_error`) is the best explanation there is
+and wins over the exit code; only an incomplete trace, or one with no error of its own,
+gets the exit code and the stderr tail instead.
+
+**Naming a product runner is the trust decision, and the report says so.** The product
+runs with permission prompts disabled (`--allow-all-tools`,
+`--dangerously-skip-permissions`) because it cannot run non-interactively otherwise, and
+with the full environment (`os.environ.copy()`) because it needs its own auth — the
+opposite of `scripts.script_environment`'s allowlist, on purpose: here the product is the
+harness, not the subject. No skill-lens sandbox applies; bundled scripts are reachable
+through the product's own tools whatever `allow_scripts` says, which governs only
+`run_script` — gating the runner on it would also switch on `run_script` for every
+framework runner in the same matrix. `TRUST_NOTE` is fixed harness text on
+`ProductStatus.trust`, on the model rather than in each reporter, so the three reporters
+cannot drift and the JSON carries the sentence a human reads.
+
+**Preflight spends nothing.** `ProductRunner.preflight` finds the executable on `PATH`
+and *executes* its version command (a `copilot` that cannot start is exit 2 up front, not
+thirty errored cases — the same rule as the sandbox probe), checks every skill name is one
+directory entry, and refuses `tools:` under any product and `trajectory:` or `mode:
+offered` under `cli`, all before the first case. The orchestrator hands it only the
+candidate-arm `(skill, case)` pairs planned for that runner, once each: compatibility is a
+property of `(case, runner)`, so a case `--tag` or `--case` filtered out is not its
+concern, and neither arm nor repeat changes the answer. `deliver_skill` re-checks the
+skill name at run time because under `--baseline previous` it comes from a historical
+`SKILL.md` that never passed preflight; that failure is `RunResult.error` for the arm it
+concerns, never a raise.
+
+**`process.py` is the one implementation** of the process-group start, the timed wait,
+the kill after every exit, and the capped read through the harness's own handle.
+`scripts.py` and `runners/product.py` spawn under opposite trust models but must agree on
+those mechanics, and one implementation is what stops two callers drifting. It imports
+nothing from the rest of the project.
+
+**`--model` with nothing to read it is a user error, and so is `--judge-model`.** Before
+M9, `--runner fake --model x` was silently ignored; with `--runner copilot` that silence
+becomes a trap, because the flag looks honoured while the product runs its own default.
+`cli.py` refuses `--model` unless a keyed runner is named or a keyed judge with no
+`judge_model` of its own will fall back to it, and refuses `--judge-model` unless the judge
+is keyed. A product's model is set with `[runners.<name>] args`, which never reaches the
+wrong runner.
+
+**`tools:` with a product runner is an authoring error**, not a silently emptier run. The
+product cannot be given mock tools yet (an MCP bridge is deferred); ignoring the block
+would make `trajectory: called:` fail for a reason that says nothing about the skill and
+`forbidden:` pass vacuously.
+
+**`ProductRunner.run` never raises for a product failure.** A timeout, a non-zero exit, a
+product-reported failure, a truncated trace, a prompt over `MAX_PROMPT_BYTES`, an
+executable missing at run time and a `ProductSetupError` from delivery are all
+`RunResult.error`. `ProductSetupError` propagates only from `preflight`, where `cli.py`
+turns it into exit 2.
+
+**`command` replaces the argv; `args` appends; presets forbid `skills_dir` and `invoke`.**
+Two knobs with two meanings: drop an isolation flag with `command`, add a model with
+`args`. `command` must contain exactly one element equal to `{prompt}`, not in the
+executable slot, substituted as a whole argv element and never through a shell; `args`
+must not contain it. A preset is the verified spelling for its product; a repository that
+needs a different skill directory or invocation is describing a different product and says
+so with `cli`. `[runners.<name>]` holds no token: the product reads its own.
+
 ## Extension points
 
-**Adding a runner.** Implement `Runner` in a new module under `runners/`, register it in
-`cli._RUNNERS`, and put every framework import inside that module. Set
-`needs_api_key = True` if it spends money — `cli.py` then runs the preflight key check
-before constructing it. Never raise for a provider failure; return a `RunResult` with
-`error` set. Build the system prompt with `runners/prompting.instructions` and wrap provider
-calls in `runners/retry.run_with_retries` rather than writing either again — both adapters
-must measure the same thing.
+**Adding a runner.** Implement `Runner` in a new module under `runners/`, and put every
+framework import inside that module. A keyed adapter (one that takes a model and an API
+key) is registered in `cli._KEYED_RUNNERS`; set `needs_api_key = True` if it spends money —
+`cli.py` then runs the preflight key check before constructing it. A product (an executable
+and a trace grammar) is a `Product` preset in `runners/product.py`, listed through
+`PRODUCT_NAMES` in `config.py`, and needs no new class. Never raise for a provider failure;
+return a `RunResult` with `error` set. Build the system prompt with
+`runners/prompting.instructions` and wrap provider calls in `runners/retry.run_with_retries`
+rather than writing either again — both adapters must measure the same thing. A runner that
+must refuse a run before any case executes defines the optional `preflight` hook and raises
+an authoring error from it.
 
 **Adding an evaluator.** Implement `Evaluator` in a new module under `evaluators/` and add
 it to the evaluator list in `orchestrator.py`. Return `passed=False` for a real failure;

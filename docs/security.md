@@ -54,7 +54,7 @@ hard-coded credentials, weak hashes, `assert` used as a runtime check, and so on
 it rides on the existing lint step it runs everywhere lint does — every pull request,
 the release gate, and your terminal — with nothing extra to remember.
 
-Three sites in `src/` are suppressed, each with the reason on the line itself:
+Five sites in `src/` are suppressed, each with the reason on the line itself:
 
 - `skills/baseline.py` starts `git` by name rather than by absolute path. That is
   deliberate: a machine without git must produce `BaselineUnavailable`, not a crash, and
@@ -62,10 +62,13 @@ Three sites in `src/` are suppressed, each with the reason on the line itself:
 - `yaml_loading.py` uses `yaml.load` with `StrictBoolLoader`, which ruff cannot see is a
   `SafeLoader` subclass. Every YAML file skill-lens reads goes through that loader; it is
   what stops YAML 1.1 from turning a bare `yes` or `no` into a boolean.
-- `scripts.py` starts subprocesses — the sandbox probe, the bundled script under its
-  interpreter, and `taskkill` on Windows — from an argv list with no shell, which is the
-  whole point of that module; ruff flags every subprocess call regardless. `taskkill` is
-  found on `PATH` by name for the same reason `git` is.
+- `scripts.py` starts subprocesses — the sandbox probe and the bundled script under its
+  interpreter — from an argv list with no shell, which is the whole point of that module;
+  ruff flags every subprocess call regardless.
+- `process.py` runs `taskkill` on Windows to end a process tree, from an argv list with
+  no shell; `taskkill` is found on `PATH` by name for the same reason `git` is.
+- `runners/product.py` starts the agent product and its `--version` probe from an argv
+  list with no shell; the prompt travels as one argv element, never joined into a string.
 
 `tests/` may use `assert`, run `git`, parse the JUnit XML it just wrote, and use literal
 `/tmp/...` strings as fake path values in fixtures; `scripts/`
@@ -243,6 +246,42 @@ adds — and the trust model is:
 Details and the per-platform table are in
 [Running bundled scripts](runners.md#running-bundled-scripts); enabling it in the GitHub
 Action is covered in [CI integration](ci.md#the-composite-action).
+
+## Product runners
+
+A product runner (`--runner copilot`, `claude-code`, `cli`) hands the skill to an agent
+product with its **permission prompts disabled** (`--allow-all-tools`,
+`--dangerously-skip-permissions`) — the product cannot run non-interactively otherwise —
+and with the **whole environment inherited**, because the product needs its own auth.
+Everything the product can do, the skill under evaluation can make it do: run shell
+commands as you, read what you can read, and run the skill's own bundled scripts through
+the product's shell, whatever `allow_scripts` says. `allow_scripts` governs only
+skill-lens's `run_script` tool; no skill-lens sandbox applies to a product. This is the
+opposite of the script allowlist above, on purpose: under a product runner the product is
+the harness, not the subject.
+
+**Naming a product runner is the trust decision.** The report states it on every run
+(`product copilot 1.0.37 (/usr/local/bin/copilot): runs with permission prompts disabled
+and the full environment; no skill-lens sandbox applies; bundled scripts are reachable
+through the product's own tools`), and the JSON report's `products` entries and the JUnit
+`skill-lens.products` property carry the same sentence.
+
+`skill-lens.toml` is inside the trust boundary: in a `pull_request` workflow the checkout
+is the pull request, so the file can name a product runner for itself in `default_runner`
+and set its `[runners.<name>]` table — including a `command` that replaces the product's
+argv with any executable on the runner. A workflow that runs untrusted pull requests should
+pin `runner:` explicitly in the action (the flag replaces the file's `default_runner`, so
+the file cannot pick the product) and pass the product's token only to jobs it trusts:
+the pin decides *which* runner, but the checkout's table still decides *how* it starts,
+so the token is what keeps an untrusted checkout from spending your quota or acting as
+you. Under plain `pull_request` a fork gets no secrets, so the product has no token to act
+with and its cases **error** instead of running (preflight checks that the executable
+starts, not that it is signed in); the exposure is `pull_request_target`, pull requests
+from collaborators, and self-hosted runners, the same three as for scripts. For a hermetic
+Copilot run, point `COPILOT_HOME` at an empty directory and provide
+`COPILOT_GITHUB_TOKEN`, so nothing from your personal `~/.copilot` loads. See
+[Product runners](runners.md#product-runners) for what each product runner measures and
+[CI integration](ci.md#running-under-a-product) for the workflow.
 
 ## Why these rules
 

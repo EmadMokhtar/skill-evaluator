@@ -8,12 +8,18 @@ Exit codes are the CI contract:
 | `1` | Gate failed |
 | `2` | User or authoring error (bad path, malformed YAML, unknown assertion kind) |
 
+Exit `2` also covers a [product runner](runners.md#product-runners) that cannot run here —
+its executable not on `PATH`, a preset's `--version` failing, a case with `tools:`, or
+`trajectory:` / `mode: offered` under `cli` — all found in preflight before any case runs,
+and a `--model` or `--judge-model` that nothing in the run reads (see [CLI](cli.md#run)).
+
 A run fails the gate when the overall pass rate is below `min_pass_rate`, when a configured
 per-skill minimum is not met, or when any case **errored**. Two distinctions matter:
 
 - **failed** — the case ran and scored below the bar. An *eval* signal.
 - **errored** — something in the harness blew up rather than the skill scoring badly: the
-  runner (API error, timeout, missing key), or an evaluator (a judge endpoint returning 500,
+  runner (API error, timeout, missing key; a product that exited non-zero, timed out, or
+  reported its own failure), or an evaluator (a judge endpoint returning 500,
   a judge verdict that does not match its rubric, an offered case on a runner that does not
   support the mode). An *infra* signal, and it fails the gate by default so CI never goes
   green on a broken run.
@@ -121,7 +127,10 @@ and why — `sandbox` is `"sandbox-exec"`, `"bwrap"` or `"none"` — and whether
 could hide its own environment from same-user processes: `hardening` is a short note on
 Linux when `prctl(PR_SET_DUMPABLE, 0)` applied, else `null`), `script_notes` (skills that bundle
 scripts which did not run because execution was off, each as `{skill_name, script_count}`),
-and the `gate` decision with its reasons.
+`products` (one entry per product runner the run executed, each as `{name, executable,
+version, trust}` — `trust` is the fixed sentence about permission prompts and the missing
+sandbox, the same one the console prints; empty when no product runner ran), and the
+`gate` decision with its reasons.
 
 Comparative evals changed this document additively, not by rewriting what was already there:
 every M3 field means what it always meant, and M4 only adds fields alongside them — `arm` and
@@ -183,3 +192,9 @@ sandbox: <backend>` on the console, with the probe's detail in parentheses when 
 is `none`, and `; <hardening note>` appended when the harness could hide its own
 environment — see [Runners](runners.md#running-bundled-scripts)) and name every skill whose
 bundled scripts did not run because execution was off.
+
+When a product runner ran, the same `<properties>` element carries `skill-lens.products` on
+every suite: one value naming each product, its version, its executable and its trust
+sentence, joined with `; `. The console prints the same fact as one `product <name>
+<version> (<executable>): <trust>` line per product, and the Markdown summary as a footnote;
+see [Runners](runners.md#product-runners).
