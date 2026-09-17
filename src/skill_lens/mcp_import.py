@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import yaml
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 from pydantic import ValidationError
 
 from skill_lens.cases.loader import UNFILLED_SENTINEL
@@ -114,6 +116,20 @@ def _import_tool(entry: object, index: int, source: str) -> ImportedTool:
         raise McpImportError(
             f"{source}: {label} has no inputSchema object; an MCP tools/list entry "
             f"always carries one"
+        )
+    # The same two checks the case loader makes on a pasted block. Refusing
+    # here says so before the author fills in a placeholder, instead of at
+    # the first `skill-lens run`.
+    try:
+        Draft202012Validator.check_schema(input_schema)
+    except SchemaError as exc:
+        raise McpImportError(
+            f"{source}: {label} has an invalid inputSchema: {exc.message}"
+        ) from exc
+    if input_schema.get("type") != "object":
+        raise McpImportError(
+            f"{source}: {label} input_schema must declare type: object; a tool's "
+            f"arguments are always an object"
         )
     description = entry.get("description")
     if not isinstance(description, str) or not description.strip():

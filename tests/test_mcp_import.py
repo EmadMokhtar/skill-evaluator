@@ -183,6 +183,25 @@ def test_a_tool_without_an_input_schema_is_refused_by_name():
         _parse([entry])
 
 
+@pytest.mark.parametrize(
+    "schema",
+    [{}, {"type": "string"}, {"type": ["object", "null"]}],
+    ids=["empty", "string", "type-list"],
+)
+def test_an_input_schema_that_is_not_an_object_schema_is_refused(schema):
+    # The loader would refuse the pasted block anyway; refusing here says so
+    # before the author has filled in a single placeholder.
+    with pytest.raises(
+        McpImportError, match="tool 'get_pull_request' input_schema must declare type: object"
+    ):
+        _parse([{**PULL_REQUEST, "inputSchema": schema}])
+
+
+def test_a_malformed_input_schema_is_refused():
+    with pytest.raises(McpImportError, match="tool 'get_pull_request' has an invalid inputSchema"):
+        _parse([{**PULL_REQUEST, "inputSchema": {"type": 5}}])
+
+
 def test_a_tool_whose_input_schema_is_not_an_object_is_refused():
     with pytest.raises(McpImportError, match="tool 'get_pull_request' has no inputSchema"):
         _parse([{**PULL_REQUEST, "inputSchema": ["nope"]}])

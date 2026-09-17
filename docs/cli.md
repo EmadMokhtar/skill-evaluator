@@ -210,8 +210,9 @@ error naming the tool, never a rewrite.
 Stdout carries nothing but the block, so `> tools.yaml` captures exactly it; every error
 goes to stderr. The command never touches the network. Exit `0` on success; exit `2` for
 an unreadable file, invalid JSON, a shape that is not a `tools/list` listing, a listing the
-server answered with an error, a tool without an `inputSchema`, a name no provider would
-register, a listing that carries `nextCursor` (one page of several — capture every page),
+server answered with an error, a tool without an `inputSchema` (or one that is not a valid
+JSON Schema of `type: object` — the case loader would refuse it too), a name no provider
+would register, a listing that carries `nextCursor` (one page of several — capture every page),
 or an unknown `--tool`.
 
 ## `--version`
