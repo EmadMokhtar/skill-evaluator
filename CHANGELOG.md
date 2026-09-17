@@ -1,3 +1,9 @@
+## v0.8.0 (2026-09-17)
+
+### Feat
+
+- run cases through an agent product's CLI (#46)
+
 ## v0.7.0 (2026-09-17)
 
 ### Feat

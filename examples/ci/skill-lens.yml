@@ -23,7 +23,7 @@ jobs:
 
       - name: Evaluate the skills
         id: eval
-        uses: EmadMokhtar/skill-evaluator@v0.7.0
+        uses: EmadMokhtar/skill-evaluator@v0.8.0
         continue-on-error: true
         with:
           path: ./skills
