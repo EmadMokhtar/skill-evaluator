@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+import yaml
 from pydantic import ValidationError
 
 from skill_lens.cases.loader import UNFILLED_SENTINEL
@@ -27,10 +29,20 @@ from skill_lens.models import ToolSpec
 DESCRIPTION_PLACEHOLDER = f"{UNFILLED_SENTINEL} what this tool does"
 RETURNS_PLACEHOLDER = f"{UNFILLED_SENTINEL} the JSON this tool returns"
 
+HEADER = (
+    "# Written by `skill-lens mcp-import`. Replace every TODO(skill-lens); until you do,\n"
+    "# skill-lens refuses to run the file rather than pass a case that checks nothing.\n"
+)
+_OUTPUT_SCHEMA_NOTE = "# The server declares this output schema; shape `returns` to match it:"
+
 _ACCEPTED_SHAPES = (
     'a JSON-RPC response ({"result": {"tools": [...]}}), its result ({"tools": [...]}), '
     "or the bare tools array ([...])"
 )
+
+# `yaml.safe_dump` folds long plain scalars at 80 columns by default; a folded
+# description is valid YAML but reads badly in a file meant to be edited.
+_NO_WRAP = 1_000_000
 
 
 class McpImportError(ValueError):
@@ -109,3 +121,54 @@ def _import_tool(entry: object, index: int, source: str) -> ImportedTool:
         spec=spec,
         output_schema=copy.deepcopy(output_schema) if isinstance(output_schema, dict) else None,
     )
+
+
+def render_tool_mocks(tools: Sequence[ImportedTool], *, only: Sequence[str] = ()) -> str:
+    """Render the mocks as a `tools:` block ready to paste under a case.
+
+    `only` keeps the named tools, in the order the listing had them. A name the
+    listing does not carry is refused with every name it does, because the
+    author's next step is to pick from that list.
+    """
+    if only:
+        found = [tool.spec.name for tool in tools]
+        missing = [name for name in only if name not in found]
+        if missing:
+            wanted = ", ".join(repr(name) for name in missing)
+            declared = "\n".join(f"  {name}" for name in sorted(found)) or "  (none)"
+            raise McpImportError(f"no tool named {wanted} in the listing; it declares:\n{declared}")
+        keep = set(only)
+        tools = [tool for tool in tools if tool.spec.name in keep]
+    if not tools:
+        return f"{HEADER}tools: []\n"
+    return HEADER + "tools:\n" + "".join(_render_tool(tool) for tool in tools)
+
+
+def _dump(value: object) -> str:
+    # Insertion order preserved; PyYAML quotes any scalar that would resolve
+    # to another type (`yes`, `on`, `1.20`), so the block survives the strict
+    # loader unchanged.
+    return yaml.safe_dump(
+        value, sort_keys=False, allow_unicode=True, default_flow_style=False, width=_NO_WRAP
+    )
+
+
+def _render_tool(tool: ImportedTool) -> str:
+    """One list item: name, description, schema, the output-schema note, `returns`."""
+    spec = tool.spec
+    lines = _dump(
+        {"name": spec.name, "description": spec.description, "input_schema": spec.input_schema}
+    ).splitlines()
+    if tool.output_schema is not None:
+        lines.append(_OUTPUT_SCHEMA_NOTE)
+        # One line however large, so the note is grep-able and never splits a
+        # schema across comment lines an author might half-delete.
+        lines.append(f"#   {json.dumps(tool.output_schema, sort_keys=True)}")
+    lines.extend(_dump({"returns": spec.returns}).splitlines())
+    out = []
+    for index, line in enumerate(lines):
+        if not line:
+            out.append("\n")  # a blank line inside a quoted multi-line scalar
+            continue
+        out.append(f"{'  - ' if index == 0 else '    '}{line}\n")
+    return "".join(out)

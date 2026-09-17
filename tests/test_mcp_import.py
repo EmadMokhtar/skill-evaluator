@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from skill_lens.cases.loader import UNFILLED_SENTINEL
+from skill_lens.cases.loader import UNFILLED_SENTINEL, load_cases_for_skill
 from skill_lens.mcp_import import (
     DESCRIPTION_PLACEHOLDER,
+    HEADER,
     RETURNS_PLACEHOLDER,
     McpImportError,
     parse_tools_list,
+    render_tool_mocks,
 )
+from skill_lens.models import Skill
+from skill_lens.runners.tools import build_mock_tool
+from skill_lens.yaml_loading import safe_load
 
 PULL_REQUEST = {
     "name": "get_pull_request",
@@ -175,3 +181,135 @@ def test_a_name_no_provider_would_register_is_refused_not_rewritten(name):
     pattern = f"tool {name!r} cannot be a mock: .*tool name must match"
     with pytest.raises(McpImportError, match=pattern):
         _parse([{**PULL_REQUEST, "name": name}])
+
+
+def _render(payload: object, **kwargs) -> str:
+    return render_tool_mocks(_parse(payload), **kwargs)
+
+
+PINNED = (
+    HEADER
+    + """\
+tools:
+  - name: get_pull_request
+    description: Get details of a specific pull request
+    input_schema:
+      type: object
+      properties:
+        owner:
+          type: string
+          description: Repository owner
+        pull_number:
+          type: integer
+      required:
+      - owner
+      - pull_number
+    # The server declares this output schema; shape `returns` to match it:
+    #   {"properties": {"number": {"type": "integer"}}, "type": "object"}
+    returns: TODO(skill-lens) the JSON this tool returns
+"""
+)
+
+
+def test_the_rendered_block_is_pinned():
+    assert _render([PULL_REQUEST]) == PINNED
+
+
+def test_rendering_is_deterministic():
+    assert _render([PULL_REQUEST, ISSUES]) == _render([PULL_REQUEST, ISSUES])
+
+
+def test_the_block_loads_back_to_the_same_schema():
+    loaded = safe_load(_render([PULL_REQUEST, ISSUES]))
+    assert [tool["name"] for tool in loaded["tools"]] == ["get_pull_request", "list-issues"]
+    assert loaded["tools"][0]["input_schema"] == PULL_REQUEST["inputSchema"]
+    assert loaded["tools"][1]["input_schema"] == ISSUES["inputSchema"]
+    assert loaded["tools"][1]["returns"] == RETURNS_PLACEHOLDER
+
+
+def test_no_output_schema_means_no_comment():
+    assert "output schema" not in _render([ISSUES])
+
+
+def test_the_output_schema_comment_is_one_line_however_large():
+    big = {"type": "object", "properties": {f"k{i}": {"type": "string"} for i in range(40)}}
+    text = _render([{**PULL_REQUEST, "outputSchema": big}])
+    comment_lines = [line for line in text.splitlines() if line.lstrip().startswith("#   {")]
+    assert len(comment_lines) == 1
+    assert json.loads(comment_lines[0].split("#   ", 1)[1]) == big
+
+
+def test_a_description_yaml_would_read_as_a_boolean_survives():
+    # PyYAML quotes `yes`; the strict loader would refuse a bare one anyway.
+    text = _render([{**PULL_REQUEST, "description": "yes"}])
+    assert safe_load(text)["tools"][0]["description"] == "yes"
+
+
+def test_a_property_named_on_survives():
+    schema = {"type": "object", "properties": {"on": {"type": "boolean"}}}
+    text = _render([{**PULL_REQUEST, "inputSchema": schema}])
+    assert safe_load(text)["tools"][0]["input_schema"] == schema
+
+
+def test_a_multi_line_description_survives():
+    text = _render([{**PULL_REQUEST, "description": "line one\nline two"}])
+    assert safe_load(text)["tools"][0]["description"] == "line one\nline two"
+
+
+def test_a_missing_description_renders_the_placeholder():
+    entry = {k: v for k, v in PULL_REQUEST.items() if k != "description"}
+    assert f"description: {DESCRIPTION_PLACEHOLDER}" in _render([entry])
+
+
+def test_only_filters_and_keeps_listing_order():
+    text = _render([PULL_REQUEST, ISSUES], only=["list-issues", "get_pull_request"])
+    names = [tool["name"] for tool in safe_load(text)["tools"]]
+    assert names == ["get_pull_request", "list-issues"]
+
+
+def test_only_one_tool():
+    text = _render([PULL_REQUEST, ISSUES], only=["list-issues"])
+    assert [tool["name"] for tool in safe_load(text)["tools"]] == ["list-issues"]
+
+
+def test_an_unknown_only_name_lists_what_the_listing_declares():
+    with pytest.raises(McpImportError) as excinfo:
+        _render([PULL_REQUEST, ISSUES], only=["get_issue"])
+    message = str(excinfo.value)
+    assert "no tool named 'get_issue'" in message
+    assert "  get_pull_request\n  list-issues" in message
+
+
+def test_an_empty_listing_renders_an_empty_tools_list():
+    assert _render({"tools": []}) == HEADER + "tools: []\n"
+
+
+def test_the_block_round_trips_through_the_case_loader_to_the_agent(tmp_path: Path):
+    # The whole point: paste the block, fill the placeholders, and the agent
+    # sees exactly the schema the server declared.
+    skill_dir = tmp_path / "gh"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: gh\ndescription: d\n---\nbody\n", encoding="utf-8"
+    )
+    # The header comment still says TODO(skill-lens); the loader scans parsed
+    # values, not comments, so only the two `returns:` need replacing. Quoted,
+    # like every other JSON `returns:` value in this repo (e.g.
+    # examples/order-support/order-support.eval.yaml) -- unquoted, `{...}`
+    # is YAML flow-mapping syntax, not a string, and the case loader would
+    # reject it (`returns` must be a string).
+    block = _render([PULL_REQUEST, ISSUES]).replace(RETURNS_PLACEHOLDER, "'{\"number\": 1}'")
+    indented = "".join(f"    {line}\n" if line else "\n" for line in block.splitlines())
+    (skill_dir / "gh.eval.yaml").write_text(
+        "cases:\n  - name: n\n    task: t\n"
+        + indented
+        + "    trajectory:\n      called: [list-issues]\n",
+        encoding="utf-8",
+    )
+    skill = Skill(name="gh", description="d", instructions="body", path=skill_dir)
+    (case,) = load_cases_for_skill(skill)
+    pr, issues = (build_mock_tool(tool) for tool in case.tools)
+    assert pr.json_schema == PULL_REQUEST["inputSchema"]
+    assert issues.json_schema == ISSUES["inputSchema"]
+    assert issues.name == "list-issues"
+    assert pr.call(owner="o", pull_number=1) == '{"number": 1}'
