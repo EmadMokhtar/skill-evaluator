@@ -164,8 +164,11 @@ exactly one `{prompt}` element, `{prompt}` in `args`, and `cli` named as a runne
 with no `command` are all config errors (exit 2) naming the key. No API key or token belongs
 here: the product reads its own auth. The tables are config-only, with no CLI flag: which
 product a repository evaluates under, and how, is repository policy. When the product
-judges, `claude-code` gets `--tools ""` appended after `args` so it grades with no tools;
-`copilot` and `cli` get nothing extra. See [Runners](runners.md#product-runners) for what
+judges, `claude-code` gets `--tools ""` and `copilot` gets
+`--available-tools=skill-lens-none` appended after `args`, so each grades with no tools — as
+long as `command` still names the preset's executable: a wrapper is not known to accept the
+flag, so a `command` naming anything else drops it along with the `--version` probe. `cli`
+gets nothing extra. See [Runners](runners.md#product-runners) for what
 each product runner measures, [Judging with a product](runners.md#judging-with-a-product)
 for the judge, and [Security](security.md#product-runners) for what naming one means.
 

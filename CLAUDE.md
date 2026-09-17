@@ -51,7 +51,8 @@ report, `RunResult.usage_note` makes an unmeasurable token limit a failing check
 product named in `[runners.<name>]` (`judges/product.py`), sending the shared judge prompt
 as one text turn closed by a JSON-only line from an empty directory with no skill, reading
 the first balanced JSON object in the reply as the verdict, with `--tools ""` under Claude
-Code; the orchestrator calls the judge's no-argument `preflight()` beside the runners' and
+Code and `--available-tools=skill-lens-none` under Copilot; the orchestrator calls the
+judge's no-argument `preflight()` beside the runners' and
 lists a product serving as both once. M6 part 2 lets the
 agent read the files a skill ships beside `SKILL.md` (`scripts/`, `references/`,
 `assets/`) through `list_skill_files`/`read_skill_file`, and — only under
@@ -397,8 +398,12 @@ form, that file is the explanation.
   `JudgeVerdict(error="JudgeOutputInvalid: ...")`, which `JudgeEvaluator` reports as an
   **errored** case, never a low score; a product failure is `JudgeVerdict.error` through
   `read_trace`; the judge never raises. `Product.judge_args` (`("--tools", "")` for
-  `claude-code`, nothing for `copilot`) is appended after the table's `args` only when the
-  product judges. `ProductJudge.preflight()` takes no arguments; the orchestrator calls it
+  `claude-code`; `("--available-tools=skill-lens-none",)` for `copilot`, whose flag keeps
+  only the tools it names and ignores an empty list, so the list names one tool that does
+  not exist — verified by reading the tool list Copilot sends the model, which is then
+  empty, built-in and MCP alike) is appended after the table's `args` only when the
+  product judges, and only while `command` still names the preset's executable.
+  `ProductJudge.preflight()` takes no arguments; the orchestrator calls it
   after the runners' hooks and lists an equal status once. `needs_api_key = False`.
 - **`process.py` is the one implementation** of group kill and capped read; `scripts.py`
   and `runners/product.py` both import it, and it imports nothing from the project.

@@ -272,16 +272,19 @@ permission prompts disabled and the full environment, to grade a rubric — see
 [Judging with a product](runners.md#judging-with-a-product). Its prompt is the graded
 response and any judge artifacts: text the skill under test produced, and so untrusted. The
 prompt says so, but that is a request to the model, not a guarantee. Claude Code grades
-with `--tools ""`, so a response that reads like an instruction has nothing to act with.
-Copilot has no verified equivalent and keeps its tools (`--allow-all-tools` is what lets it
-run non-interactively), so a Copilot judge that follows an instruction inside a graded
-response can run commands as you; `cli` is whatever `command` names. `[runners.<name>]
-args` serves both seats, so it cannot restrict the judge alone; the Copilot judge keeps
-the product's tools until a verified restriction flag exists
-([#47](https://github.com/EmadMokhtar/skill-evaluator/issues/47)). The judge's working
-directory is empty and holds no skill; that limits what such an instruction can find, not
-what the product can do. The report lists the product once whether it ran, judged, or
-both.
+with `--tools ""` and Copilot with `--available-tools=skill-lens-none`, each verified
+against the product's own CLI to leave the model no tool at all, built-in or MCP, so a
+response that reads like an instruction has nothing to act with (`--allow-all-tools` stays
+on the Copilot argv because `-p` requires it; it governs approval prompts, and there is
+nothing left to approve). The restriction stops the instruction from being *acted on*, not
+from swaying the verdict: a judge is a model reading untrusted text, as every judge is.
+`cli` is whatever `command` names, with whatever tools that command gives its model, and a
+`command` under a preset that names another executable drops the preset's restriction
+along with its version probe, because a wrapper is not known to accept the flag;
+`[runners.<name>] args` serves both seats, so it cannot restrict the judge alone. The
+judge's working directory is empty and holds no skill; that limits what such an
+instruction can find, not what the product can do. The report lists the product once
+whether it ran, judged, or both.
 
 `skill-lens.toml` is inside the trust boundary: in a `pull_request` workflow the checkout
 is the pull request, so the file can name a product runner for itself in `default_runner`

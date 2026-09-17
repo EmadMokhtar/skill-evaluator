@@ -100,7 +100,7 @@ def test_the_presets_are_the_verified_spellings():
     assert copilot.invoke == "/{name} {task}"
     assert copilot.parse is parse_copilot
     assert copilot.version_command == ("copilot", "--version")
-    assert copilot.judge_args == ()
+    assert copilot.judge_args == ("--available-tools=skill-lens-none",)
     claude = PRESETS["claude-code"]
     assert claude.argv == (
         "claude",

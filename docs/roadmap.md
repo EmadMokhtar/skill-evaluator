@@ -160,7 +160,8 @@ configures it as a runner — so with part 1 every kind of eval case runs and gr
 provider API key at all. The shared judge prompt, with the same grading rules, fenced
 response and artifacts the framework judges send, goes in as one text prompt closed by a
 line asking for the JSON verdict and nothing else, in an empty directory with no skill
-delivered and, under Claude Code, with `--tools ""` so the judge cannot act while it
+delivered and with the product's tools switched off (`--tools ""` under Claude Code,
+`--available-tools=skill-lens-none` under Copilot) so the judge cannot act while it
 grades. The verdict is the first balanced JSON object in the reply, validated strictly as
 `JudgeOutput` with one evidenced entry per rubric check; a reply with no readable verdict
 is an **errored** case, never a low score, so an unreadable grader can never pass or fail

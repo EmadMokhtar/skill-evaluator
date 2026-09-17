@@ -1062,9 +1062,13 @@ judge before the product starts, also `JudgeVerdict.error`, but never reaches `r
 The judge's working directory is a fresh empty temporary directory removed in a `finally`,
 and holds no skill:
 the judge grades text and must not discover the skill under test. `Product.judge_args` is
-appended only when the product judges — `("--tools", "")` for `claude-code`, verified to
-disable every tool; nothing for `copilot`, which has no verified equivalent — after the
-table's `args`, so a repository's model flag still applies. `judge_temperature` is not
+appended only when the product judges — `("--tools", "")` for `claude-code` and
+`("--available-tools=skill-lens-none",)` for `copilot`, each verified against the product
+to leave the model no tool, built-in or MCP; Copilot ignores an empty `--available-tools`
+list, so the list names one tool that does not exist, as a single `=` element so the
+variadic option can never swallow what follows it — after the table's `args`, so a
+repository's model flag still applies, and only while `command` still names the preset's
+executable, since a wrapper is not known to accept the flag. `judge_temperature` is not
 consulted: no product exposes it. Tokens, cost, cost note and model come from the trace,
 so `cli` reports none and Copilot reports a per-request note, as under the runner.
 `ProductJudge.preflight()` finds the executable and runs the preset's `--version` with

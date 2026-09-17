@@ -133,7 +133,7 @@ REQUEST = JudgeRequest(
 
 def test_the_presets_grade_with_the_verified_extra_args():
     assert PRESETS["claude-code"].judge_args == ("--tools", "")
-    assert PRESETS["copilot"].judge_args == ()
+    assert PRESETS["copilot"].judge_args == ("--available-tools=skill-lens-none",)
 
 
 def test_a_verdict_is_read_from_the_products_answer(fake):
@@ -155,6 +155,24 @@ def test_the_judge_sends_the_shared_prompt_with_the_extra_args_and_no_skill(fake
     assert seen["argv"][-2:] == ["--tools", ""]
     assert seen["skill_files"] == []
     assert not Path(seen["cwd"]).exists()  # the judge's directory is gone
+
+
+def test_the_copilot_judge_sends_its_tool_restriction_last(fake, monkeypatch):
+    # The preset's own flag, after a repository's `args`: a single `=` element,
+    # so the variadic `--available-tools` can never swallow whatever follows.
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "copilot-verdict.jsonl"))
+    preset = PRESETS["copilot"]
+    product = _product(
+        name="copilot",
+        argv=(sys.executable, str(FAKE), "-p", "{prompt}", "--model", "gpt-5.4"),
+        parse=parse_copilot,
+        judge_args=preset.judge_args,
+    )
+    verdict = ProductJudge(product).judge(REQUEST)
+    assert verdict.error is None
+    seen = fake()
+    assert seen["argv"][-3:] == ["--model", "gpt-5.4", "--available-tools=skill-lens-none"]
+    assert seen["skill_files"] == []
 
 
 def test_a_verdict_inside_prose_and_a_fence_is_still_read(fake, monkeypatch):
