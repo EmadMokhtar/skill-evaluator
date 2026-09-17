@@ -241,8 +241,8 @@ def read_trace(product: Product, invocation: Invocation) -> Trace:
             return Trace(error=_exit_note(exited, invocation.stderr))
         return Trace(
             output=invocation.stdout.removesuffix("\n"),
-            usage_note=f"the {product.name} runner does not report token usage",
-            cost_note=f"the {product.name} runner does not report cost",
+            usage_note=f"the {product.name} product does not report token usage",
+            cost_note=f"the {product.name} product does not report cost",
         )
     trace = product.parse(invocation.stdout)
     if invocation.exit_code != 0 and (trace.error is None or not trace.complete):

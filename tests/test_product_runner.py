@@ -231,8 +231,8 @@ def test_a_generic_product_uses_stdout_and_reports_no_usage(tmp_path, fake, monk
     assert result.output.startswith('{"type":"system"')  # stdout verbatim
     assert not result.output.endswith("\n")
     assert result.tool_calls == []
-    assert result.usage_note == "the cli runner does not report token usage"
-    assert result.cost_note == "the cli runner does not report cost"
+    assert result.usage_note == "the cli product does not report token usage"
+    assert result.cost_note == "the cli product does not report cost"
     assert result.model == ""
     assert fake()["prompt"] == "Please ping."
 
@@ -347,8 +347,8 @@ def test_read_trace_a_generic_products_success_is_stdout_verbatim():
     product = _product(name="cli", parse=None, invoke="{task}", version_command=None)
     trace = read_trace(product, Invocation(stdout="hello\n", exit_code=0))
     assert trace.output == "hello"
-    assert trace.usage_note == "the cli runner does not report token usage"
-    assert trace.cost_note == "the cli runner does not report cost"
+    assert trace.usage_note == "the cli product does not report token usage"
+    assert trace.cost_note == "the cli product does not report cost"
 
 
 def test_invoke_starts_the_executable_preflight_resolved(tmp_path, fake, monkeypatch):

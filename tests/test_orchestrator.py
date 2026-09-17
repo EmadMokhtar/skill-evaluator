@@ -1201,3 +1201,29 @@ def test_a_hook_returning_none_adds_no_status(tmp_path):
 
     report = run_evals([_skill_with_cases(tmp_path)], [Quiet(default=RunResult(output="yes"))])
     assert report.products == []
+
+
+def test_a_judges_preflight_status_joins_the_products(tmp_path):
+    class ProbedJudge(FakeJudge):
+        name = "probed-judge"
+
+        def preflight(self):
+            return ProductStatus(name="probed-judge", executable="/bin/j", version="2", trust="t")
+
+    report = run_evals([_skill_with_cases(tmp_path)], [_runner()], judge=ProbedJudge())
+    assert report.products == [
+        ProductStatus(name="probed-judge", executable="/bin/j", version="2", trust="t")
+    ]
+
+
+def test_the_same_product_as_runner_and_judge_is_listed_once(tmp_path):
+    status = ProductStatus(name="probed", executable="/bin/probed", version="1", trust="t")
+
+    class SameJudge(FakeJudge):
+        name = "probed"
+
+        def preflight(self):
+            return status
+
+    report = run_evals([_skill_with_cases(tmp_path)], [_PreflightRunner()], judge=SameJudge())
+    assert report.products == [status]
