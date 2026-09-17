@@ -146,3 +146,18 @@ def test_an_errored_baseline_run_is_counted_apart_from_errored(tmp_path):
     report = run_evals([_skill(tmp_path)], [runner], baseline="none")
     assert report.errored == 0
     assert report.baseline_errored == 1
+
+
+def test_the_none_baseline_has_no_markdown(tmp_path):
+    from skill_lens.orchestrator import _baseline_skill, _BaselineStore
+
+    skill = Skill(
+        name="pdf",
+        description="d",
+        instructions="i",
+        path=tmp_path,
+        markdown="---\nname: pdf\n---\nbody",
+    )
+    baseline = _baseline_skill(skill, "none", [], _BaselineStore())
+    assert baseline is not None
+    assert baseline.markdown == ""
