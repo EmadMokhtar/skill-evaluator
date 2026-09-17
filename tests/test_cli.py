@@ -972,7 +972,10 @@ def test_a_product_runner_runs_the_case_and_names_the_product(tmp_path, monkeypa
         app, ["run", str(skill_dir), "--runner", "copilot", "--config", str(config)]
     )
     assert result.exit_code == 0, result.output
-    assert "product copilot Python" in result.output  # the fake's argv[0] is the interpreter
+    # `command` names the interpreter, not `copilot`, so the preset's
+    # `--version` probe is skipped and the line carries no version.
+    assert "product copilot (" in result.output
+    assert "product copilot Python" not in result.output
     assert "permission prompts disabled" in result.output
     assert "Plan: up to 1 arm(s) x 1 repeat(s) x 1 runner(s) x 1 case(s) = 1 runs" in result.output
     assert "pdf :: pongs (copilot)" in result.output

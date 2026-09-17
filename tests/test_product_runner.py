@@ -347,3 +347,19 @@ def test_read_trace_a_generic_products_success_is_stdout_verbatim():
     assert trace.output == "hello"
     assert trace.usage_note == "the cli runner does not report token usage"
     assert trace.cost_note == "the cli runner does not report cost"
+
+
+def test_invoke_starts_the_executable_preflight_resolved(tmp_path, fake, monkeypatch):
+    # `shutil.which` honours PATHEXT, `Popen(shell=False)` does not: a Windows
+    # `.cmd` shim that passed preflight must start here too, so argv[0] is
+    # resolved the same way before the process is spawned.
+    import skill_lens.runners.product as product_module
+
+    def which(name):
+        return sys.executable if name == "python-under-another-name" else None
+
+    monkeypatch.setattr(product_module.shutil, "which", which)
+    product = _product(argv=("python-under-another-name", str(FAKE), "-p", "{prompt}"))
+    result = ProductRunner(product).run(_skill(tmp_path), _case())
+    assert result.error is None
+    assert result.output == "PONG-7731"

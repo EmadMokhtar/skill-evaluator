@@ -346,7 +346,15 @@ class Config(BaseModel):
         else:
             base = PRESETS[name]
             if settings.command is not None:
-                base = replace(base, argv=tuple(settings.command))
+                # The preset's `--version` is only known to work on the
+                # preset's executable; a wrapper named in `command` is not
+                # probed, so preflight cannot start it with a stray argument.
+                same_executable = settings.command[0] == base.argv[0]
+                base = replace(
+                    base,
+                    argv=tuple(settings.command),
+                    version_command=base.version_command if same_executable else None,
+                )
         return replace(
             base,
             argv=(*base.argv, *settings.args),

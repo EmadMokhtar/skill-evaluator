@@ -150,7 +150,14 @@ def invoke(product: Product, prompt: str, cwd: Path) -> Invocation:
     handles the harness opened (see `process.read_capped_handle`). The
     process group is killed after every exit, timeout or not.
     """
-    argv = [prompt if element == PROMPT_PLACEHOLDER else element for element in product.argv]
+    # Resolved the way preflight resolved it: `shutil.which` honours PATHEXT,
+    # so a Windows `.cmd` shim that passed preflight also starts here, where
+    # `Popen(shell=False)` alone would look for `.exe` only.
+    executable = shutil.which(product.argv[0]) or product.argv[0]
+    argv = [
+        executable,
+        *(prompt if element == PROMPT_PLACEHOLDER else element for element in product.argv[1:]),
+    ]
     try:
         scratch = Path(tempfile.mkdtemp(prefix=SCRATCH_PREFIX)).resolve()
     except OSError as exc:

@@ -147,7 +147,7 @@ max_output_bytes = 8000000                        # default
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `command` | the preset's argv (required for `cli`) | The whole argv. Exactly one element must be `{prompt}`, and it cannot be the first (the executable); the prompt is substituted as that one element, never through a shell. |
+| `command` | the preset's argv (required for `cli`) | The whole argv. Exactly one element must be `{prompt}`, and it cannot be the first (the executable); the prompt is substituted as that one element, never through a shell. When the first element is not the preset's own executable, preflight skips the `--version` probe (a wrapper might treat `--version` as a prompt). |
 | `args` | `[]` | Appended after `command`. Must not contain `{prompt}`. |
 | `timeout_seconds` | `600.0` | Wall clock per case, finite and positive; the process group is killed at expiry. |
 | `max_output_bytes` | `8000000` | Cap on the trace, positive; a longer one is an errored case naming this key. |

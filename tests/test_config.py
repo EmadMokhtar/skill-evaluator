@@ -478,3 +478,23 @@ def test_invoke_template_using_only_name_and_task_still_loads(tmp_path, template
     )
     product = load_config(tmp_path / "skill-lens.toml").product("cli")
     assert product.invoke == template
+
+
+def test_a_command_naming_another_executable_drops_the_presets_version_probe(tmp_path):
+    # `./run-claude.sh --version` might forward `--version` as a prompt and
+    # start a real session in preflight; the probe is only known to work on
+    # the preset's own executable.
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.claude-code]\ncommand = ["./run-claude.sh", "{prompt}"]\n', encoding="utf-8"
+    )
+    product = load_config(tmp_path / "skill-lens.toml").product("claude-code")
+    assert product.version_command is None
+
+
+def test_a_command_keeping_the_presets_executable_keeps_its_version_probe(tmp_path):
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.claude-code]\ncommand = ["claude", "-p", "{prompt}", "--verbose"]\n',
+        encoding="utf-8",
+    )
+    product = load_config(tmp_path / "skill-lens.toml").product("claude-code")
+    assert product.version_command == ("claude", "--version")
