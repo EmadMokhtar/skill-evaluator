@@ -19,7 +19,7 @@ from skill_lens.models import JudgeRequest
 
 CLOSING_INSTRUCTION = (
     "Reply with one JSON object and nothing else -- no prose before or after it, "
-    'no code fence: {"checks": [{"id": "<check id>", "passed": true, '
+    'no code fence: {"checks": [{"id": "<check id>", "passed": <true or false>, '
     '"evidence": "<the words from the response that decide it>"}, ...]}, '
     "one entry per check id, `passed` true or false."
 )
@@ -40,31 +40,38 @@ def extract_json_object(text: str) -> str | None:
     A product answers in prose, often around a code fence; the verdict is
     the object inside. Braces inside JSON strings are skipped by tracking
     string state and escapes, so evidence quoting a `}` does not end the
-    object early. An unbalanced run from one `{` is abandoned and the scan
-    restarts at the next.
+    object early.
+
+    One pass over `text`, not one scan per candidate `{`: a stack holds the
+    positions of unmatched `{` seen outside a string. Each `}` outside a
+    string pops the most recent one, completing an object that runs from
+    the popped position to the current index -- a `}` with nothing to pop
+    is stray and ignored. Every completion is a candidate; the one with the
+    earliest start wins, because an outer object (pushed first, so popped
+    last) can complete after an inner one already has, and "first balanced
+    object" means the earliest-opening brace, not the first to close.
     """
-    start = text.find("{")
-    while start != -1:
-        depth = 0
-        in_string = False
-        escaped = False
-        for index in range(start, len(text)):
-            char = text[index]
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == '"':
-                    in_string = False
-                continue
-            if char == '"':
-                in_string = True
-            elif char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[start : index + 1]
-        start = text.find("{", start + 1)
-    return None
+    stack: list[int] = []
+    best: tuple[int, int] | None = None
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            stack.append(index)
+        elif char == "}" and stack:
+            start = stack.pop()
+            if best is None or start < best[0]:
+                best = (start, index)
+    if best is None:
+        return None
+    return text[best[0] : best[1] + 1]

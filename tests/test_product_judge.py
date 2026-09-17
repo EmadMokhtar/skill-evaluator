@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from skill_lens.judges.product import CLOSING_INSTRUCTION, extract_json_object, judge_prompt
@@ -22,11 +24,26 @@ from skill_lens.models import JudgeRequest, RubricCheck
         ("prose only", None),
         ("", None),
         ('{"unbalanced": 1', None),
-        ('{ broken { "ok": 1 }', '{ "ok": 1 }'),  # retries from the next opening brace
+        ('{ broken { "ok": 1 }', '{ "ok": 1 }'),  # only the inner object ever closes
     ],
 )
 def test_extract_json_object_finds_the_first_balanced_object(text, expected):
     assert extract_json_object(text) == expected
+
+
+def test_extract_json_object_is_linear_on_a_run_of_stray_braces():
+    unmatched = "{" * 20_000
+    start = time.perf_counter()
+    result = extract_json_object(unmatched)
+    elapsed = time.perf_counter() - start
+    assert result is None
+    assert elapsed < 1
+
+    start = time.perf_counter()
+    result = extract_json_object(unmatched + "}")
+    elapsed = time.perf_counter() - start
+    assert result == "{}"
+    assert elapsed < 1
 
 
 # --- judge_prompt ---
