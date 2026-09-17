@@ -31,13 +31,15 @@ class Skill(BaseModel):
     the bundle tools on `path` instead would leak the candidate's scripts into
     the "no skill" arm, since every Skill has a path.
 
-    `markdown` is the `SKILL.md` text verbatim -- what a product runner writes
-    into the product's skill directory. Products honour frontmatter keys
-    skill-lens does not model (`allowed-tools`, `disable-model-invocation`),
-    so a re-rendering from the parsed fields would change the product's
-    behaviour and the eval would measure the re-rendering. Empty when there is
-    no file: a Skill built by hand, and the `--baseline none` skill, which is
-    how a product runner knows to write no directory at all.
+    `markdown` is the `SKILL.md` text verbatim -- its text as written, though
+    line endings are normalised, since the loader reads it in text mode --
+    what a product runner writes into the product's skill directory. Products
+    honour frontmatter keys skill-lens does not model (`allowed-tools`,
+    `disable-model-invocation`), so a re-rendering from the parsed fields
+    would change the product's behaviour and the eval would measure the
+    re-rendering. Empty when there is no file: a Skill built by hand, and the
+    `--baseline none` skill, which is how a product runner knows to write no
+    directory at all.
     """
 
     name: str

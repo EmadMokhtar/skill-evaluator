@@ -243,12 +243,14 @@ def read_trace(product: Product, invocation: Invocation) -> Trace:
 def deliver_skill(skill: Skill, cwd: Path, skills_dir: str) -> bool:
     """Write the skill where the product discovers it. False when there is nothing to write.
 
-    `SKILL.md` is `skill.markdown` byte for byte -- `newline=""` so no
-    platform's text-mode translation turns a `\\n` into a `\\r\\n` on the way
-    out; beside it go `scripts/`, `references/` and `assets/` from the bundle
-    -- those three and nothing else, so an eval file beside `SKILL.md` never
-    reaches the product. Symlinks are copied as symlinks, as `git archive`
-    preserved them.
+    `SKILL.md` is `skill.markdown` verbatim -- its text as written, though line
+    endings are normalised (the loader reads the file in text mode, so a
+    `\\r\\n` in the source is already a bare `\\n` by the time it reaches here)
+    -- `newline=""` so no platform's text-mode translation turns that `\\n`
+    back into a `\\r\\n` on the way out; beside it go `scripts/`, `references/`
+    and `assets/` from the bundle -- those three and nothing else, so an eval
+    file beside `SKILL.md` never reaches the product. Symlinks are copied as
+    symlinks, as `git archive` preserved them.
 
     `skill.name` is checked here, not trusted from the caller: under
     `--baseline previous` it comes from a historical `SKILL.md`'s

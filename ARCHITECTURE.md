@@ -138,7 +138,7 @@ All live in `models.py`.
 
 | Model | Carries |
 | --- | --- |
-| `Skill` | name, description, instructions, `version` (declared frontmatter version, `""` if absent), path, `variant` (`"candidate"` or `"baseline"`), `bundle_root` (the directory whose `scripts/`, `references/` and `assets/` the agent may read; `None` when the skill ships none), `markdown` (the `SKILL.md` text byte for byte, for a product runner to deliver; `""` for the `--baseline none` skill, so no directory is written) |
+| `Skill` | name, description, instructions, `version` (declared frontmatter version, `""` if absent), path, `variant` (`"candidate"` or `"baseline"`), `bundle_root` (the directory whose `scripts/`, `references/` and `assets/` the agent may read; `None` when the skill ships none), `markdown` (the `SKILL.md` text verbatim — its text as written, though line endings are normalised — for a product runner to deliver; `""` for the `--baseline none` skill, so no directory is written) |
 | `EvalCase` | name, task, `tools`, `assertions`, `trajectory`, `budget`, `tags` |
 | `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, `usage_note` (why the token split is `0` when the runner could not count — a declared `max_tokens` then fails as not evaluated), model, `error` |
 | `CheckResult` | one check's `id`, `passed`, `evidence` — emitted by the judge and, since M4, by assertion/trajectory/budget too |
@@ -888,12 +888,17 @@ call is refused — a tightening that would only have shown up on the next push 
 
 ### Product runners (M9 part 1)
 
-**The product sees `SKILL.md` byte for byte.** `Skill.markdown` is the file as the author
+**The product sees `SKILL.md` verbatim (its text as written; line endings are normalised).**
+`Skill.markdown` is the file as the author
 wrote it, never a re-rendering from the parsed fields; only the loader and the baseline
-resolver set it. Products honour frontmatter keys skill-lens does not model
+resolver set it. The loader reads it with `read_text(encoding="utf-8")`, which is text
+mode: a `\r\n` in the file becomes `\n` in `Skill.markdown`, so the delivered file is the
+file's text verbatim, not its bytes -- a newline-preserving read would push `\r\n` into the
+framework runners' system prompts too, so the loader stays as it is. Products honour
+frontmatter keys skill-lens does not model
 (`allowed-tools`, `disable-model-invocation`, `license`); a re-rendering would change the
 product's behaviour and the eval would measure the re-rendering. `deliver_skill` writes it
-with `newline=""` so no platform's text-mode translation changes a byte on the way out, and
+with `newline=""` so no further translation changes a byte on the way out, and
 copies `scripts/`, `references/` and `assets/` beside it — those three and nothing else, so
 an eval file beside `SKILL.md` never reaches the product. The `--baseline none` skill has
 an empty `markdown`, so no directory is written for it: the rule is keyed on emptiness, not

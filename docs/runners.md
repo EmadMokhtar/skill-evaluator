@@ -93,7 +93,8 @@ See
 [Configuration](configuration.md#product-runners).
 
 **What the product sees.** The eval's working directory (the case's workspace when it
-declares one, a fresh temporary directory otherwise) holds `SKILL.md` **byte for byte** —
+declares one, a fresh temporary directory otherwise) holds `SKILL.md` **verbatim (its
+text as written; line endings are normalised)** —
 products honour frontmatter keys skill-lens does not model, such as `allowed-tools` — and
 beside it `scripts/`, `references/` and `assets/`, nothing else. The prompt is the case's
 `task`, verbatim: the product owns its system prompt, and skill-lens adds no preamble.

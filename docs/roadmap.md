@@ -125,7 +125,8 @@ provider-prefix spellings across frameworks. See the
 
 A skill written for a named product is now measured under that product. `--runner
 copilot` and `--runner claude-code` start GitHub Copilot CLI or Claude Code in its
-non-interactive mode, with `SKILL.md` and its bundle placed byte for byte where the
+non-interactive mode, with `SKILL.md` and its bundle placed verbatim (its text as
+written; line endings are normalised) where the
 product discovers skills, and read the output, tool calls, tokens and the skill-load event
 back from the product's own trace; `--runner cli` does the same for any command a
 `[runners.cli]` table names, with stdout as the output. No provider API key is involved:

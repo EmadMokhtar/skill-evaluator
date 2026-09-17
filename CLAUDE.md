@@ -38,8 +38,9 @@ extracted into `runners/prompting.py` and `runners/retry.py`. M8 part 2 makes
 `--runner` repeatable and `default_runner` a string or list, so one invocation runs every
 case through every named framework. M9 part 1 adds product runners: `--runner copilot`
 and `--runner claude-code` start GitHub Copilot CLI or Claude Code in non-interactive
-mode with `SKILL.md` and its bundle delivered byte for byte into the product's own skill
-directory, and read output, tool calls, tokens and the skill-load event from the
+mode with `SKILL.md` and its bundle delivered verbatim (its text as written; line endings
+are normalised) into the product's own skill directory, and read output, tool calls,
+tokens and the skill-load event from the
 product's trace; `--runner cli` does the same for a command a `[runners.cli]` table names,
 with stdout as the output. No provider key is involved. A once-per-run `preflight` hook
 on the `Runner` protocol refuses what the product cannot serve before any quota is spent,
@@ -327,7 +328,8 @@ form, that file is the explanation.
 - **The unfilled-scaffold scan covers mapping keys as well as values.**
 - **`examples/greeting` stays at `1.1.0` or later.** The bump is what makes `--baseline
   previous` resolvable from a checkout; `tests/test_examples.py` pins it.
-- **The product sees `SKILL.md` byte for byte.** `Skill.markdown` is the file; only the loader
+- **The product sees `SKILL.md` verbatim (its text as written; line endings are
+  normalised).** `Skill.markdown` is the file; only the loader
   and the baseline resolver set it; `--baseline none` has none, so no directory is written.
   Beside it go `scripts/`, `references/` and `assets/` and nothing else.
 - **A product runner's prompt is the task verbatim; the baseline-none arm never sees the
