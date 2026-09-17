@@ -116,6 +116,11 @@ modes; under `--baseline previous` the previous version is delivered with its ow
 | `budget: max_latency_ms` | yes | yes | yes |
 | `tools:` (mock tools) | authoring error | authoring error | authoring error |
 
+Token counts under a product runner include the product's own system prompt and tool
+definitions — tens of thousands of tokens for a one-line answer under Claude Code. A
+`max_tokens` budget written for a framework runner will not transfer to a product runner;
+set a separate budget, or run budget cases through the framework runners only.
+
 Tool calls are what the model *requested* (Copilot's `toolRequests`, Claude Code's
 `tool_use` blocks), not what executed — a refused call was still the model's choice, the
 same rule the framework runners apply. A case the runner cannot serve is an **authoring

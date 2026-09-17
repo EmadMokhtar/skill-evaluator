@@ -77,33 +77,54 @@ def test_the_examples_pass_against_a_real_provider_through_langchain():
     ]
 
 
+def _assert_only_the_token_budget_failed(report):
+    """Every outcome must pass outright, except a budget score whose only
+    failing check is `max_tokens` -- see the comment above each call site.
+
+    A product's own token count is expected to blow past a budget written
+    for a framework runner, so that one check is tolerated; nothing else is.
+    """
+    failing_outcomes = [o for o in report.outcomes if o.status == "failed"]
+    for outcome in failing_outcomes:
+        non_passing = [s for s in outcome.scores if not s.passed]
+        for score in non_passing:
+            assert score.evaluator == "budget", (outcome.case_name, score.evaluator, score.detail)
+            failing_check_ids = [c.id for c in score.checks if not c.passed]
+            assert failing_check_ids == ["max_tokens"], (outcome.case_name, failing_check_ids)
+        other_scores = [
+            s for s in outcome.scores if s.evaluator in ("assertion", "trajectory", "judge")
+        ]
+        assert all(s.passed for s in other_scores), (
+            outcome.case_name,
+            [(s.evaluator, s.detail) for s in other_scores if not s.passed],
+        )
+
+
+# A product's token count includes its own system prompt and tool
+# definitions (Claude Code: ~27k tokens for a one-line answer), so the
+# example's `max_tokens: 500`, written for a framework runner, is expected
+# to fail here; everything else must pass.
 @pytest.mark.skipif(shutil.which("claude") is None, reason="needs the claude executable")
 def test_the_greeting_example_passes_under_claude_code():
     report = run_evals(load_skills(EXAMPLES / "greeting"), [ProductRunner(PRESETS["claude-code"])])
     assert report.errored == 0, [o.result.error for o in report.outcomes if o.result.errored]
-    assert report.pass_rate == 1.0, [
-        (o.case_name, [s.detail for s in o.scores if not s.passed])
-        for o in report.outcomes
-        if o.status == "failed"
-    ]
+    _assert_only_the_token_budget_failed(report)
 
 
 # Copilot quota was exhausted when this was last run, so this test has never
-# executed against the real `copilot` binary yet. Its first real run must
+# executed against the real `copilot` binary yet. Its first real run should
 # confirm whether the `-p --output-format json` stream carries a
-# `session.shutdown` event (token usage): `examples/greeting` declares
-# `budget: max_tokens: 500`, and `BudgetEvaluator` records an unmeasured
-# `max_tokens` limit as a failing check (see the "Cost lookup degrades, never
-# raises" invariant), which would fail `report.pass_rate == 1.0` below even
-# though the skill behaved correctly. If that happens, this assertion should
-# change to expect exactly that one budget failure rather than a clean pass --
-# do not loosen `examples/greeting` itself to work around it.
+# `session.shutdown` event (token usage): if not, `BudgetEvaluator` reports
+# the `max_tokens` limit as "not evaluated" rather than "exceeded" -- still a
+# single failing `max_tokens` check, which the assertion below already
+# tolerates either way.
+#
+# A product's token count includes its own system prompt and tool
+# definitions (Claude Code: ~27k tokens for a one-line answer), so the
+# example's `max_tokens: 500`, written for a framework runner, is expected
+# to fail here; everything else must pass.
 @pytest.mark.skipif(shutil.which("copilot") is None, reason="needs the copilot executable")
 def test_the_greeting_example_passes_under_copilot():
     report = run_evals(load_skills(EXAMPLES / "greeting"), [ProductRunner(PRESETS["copilot"])])
     assert report.errored == 0, [o.result.error for o in report.outcomes if o.result.errored]
-    assert report.pass_rate == 1.0, [
-        (o.case_name, [s.detail for s in o.scores if not s.passed])
-        for o in report.outcomes
-        if o.status == "failed"
-    ]
+    _assert_only_the_token_budget_failed(report)
