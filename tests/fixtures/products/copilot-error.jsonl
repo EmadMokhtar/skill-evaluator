@@ -1,0 +1,6 @@
+{"type":"session.tools_updated","data":{"model":"gpt-4.1"},"id":"e1","timestamp":"2026-09-17T10:30:01.084Z","ephemeral":true}
+{"type":"user.message","data":{"content":"Please ping.","attachments":[]},"id":"e2","timestamp":"2026-09-17T10:30:01.085Z"}
+{"type":"assistant.turn_start","data":{"turnId":"0"},"id":"e3","timestamp":"2026-09-17T10:30:01.139Z"}
+{"type":"assistant.turn_end","data":{"turnId":"0"},"id":"e4","timestamp":"2026-09-17T10:30:01.940Z"}
+{"type":"session.error","data":{"errorType":"quota","message":"402 You have exceeded your monthly quota (Request ID: REDACTED)","statusCode":402},"id":"e5","timestamp":"2026-09-17T10:30:01.941Z"}
+{"type":"result","timestamp":"2026-09-17T10:30:01.969Z","sessionId":"s9","exitCode":1,"usage":{"premiumRequests":0,"totalApiDurationMs":0,"sessionDurationMs":2888,"codeChanges":{"linesAdded":0,"linesRemoved":0,"filesModified":[]}}}
