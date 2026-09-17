@@ -189,8 +189,23 @@ def invoke(product: Product, prompt: str, cwd: Path) -> Invocation:
 
 
 def _stderr_tail(stderr: str) -> str:
+    """The last few lines of stderr, joined and capped. A cut is never silent:
+    when the joined text is longer than the cap, the kept part is prefixed
+    with `"... "` so a reader cannot mistake it for the whole thing."""
     text = " ".join(stderr.strip().splitlines()[-5:]).strip()
-    return text[-STDERR_TAIL_CHARS:]
+    if len(text) > STDERR_TAIL_CHARS:
+        return "... " + text[-STDERR_TAIL_CHARS:]
+    return text
+
+
+def _exit_note(exited: str, stderr: str) -> str:
+    """`exited` plus the stderr tail, or `exited` alone when there is no tail.
+
+    Not `f"{exited}: {tail}".rstrip(": ")`: that also strips a trailing colon
+    that belonged to the product's own message (`"...Error:"` -> `"...Error"`).
+    """
+    tail = _stderr_tail(stderr)
+    return f"{exited}: {tail}" if tail else exited
 
 
 def read_trace(product: Product, invocation: Invocation) -> Trace:
@@ -210,7 +225,7 @@ def read_trace(product: Product, invocation: Invocation) -> Trace:
     exited = f"{product.name} exited with code {invocation.exit_code}"
     if product.parse is None:
         if invocation.exit_code != 0:
-            return Trace(error=f"{exited}: {_stderr_tail(invocation.stderr)}".rstrip(": "))
+            return Trace(error=_exit_note(exited, invocation.stderr))
         return Trace(
             output=invocation.stdout.removesuffix("\n"),
             usage_note=f"the {product.name} runner does not report token usage",
@@ -220,23 +235,32 @@ def read_trace(product: Product, invocation: Invocation) -> Trace:
     if invocation.exit_code != 0 and (trace.error is None or not trace.complete):
         # A complete trace carrying the product's own error message is the
         # best explanation there is; otherwise the exit code and stderr are.
-        return replace(trace, error=f"{exited}: {_stderr_tail(invocation.stderr)}".rstrip(": "))
+        return replace(trace, error=_exit_note(exited, invocation.stderr))
     return trace
 
 
 def deliver_skill(skill: Skill, cwd: Path, skills_dir: str) -> bool:
     """Write the skill where the product discovers it. False when there is nothing to write.
 
-    `SKILL.md` is `skill.markdown` byte for byte; beside it go `scripts/`,
-    `references/` and `assets/` from the bundle -- those three and nothing
-    else, so an eval file beside `SKILL.md` never reaches the product.
-    Symlinks are copied as symlinks, as `git archive` preserved them.
+    `SKILL.md` is `skill.markdown` byte for byte -- `newline=""` so no
+    platform's text-mode translation turns a `\\n` into a `\\r\\n` on the way
+    out; beside it go `scripts/`, `references/` and `assets/` from the bundle
+    -- those three and nothing else, so an eval file beside `SKILL.md` never
+    reaches the product. Symlinks are copied as symlinks, as `git archive`
+    preserved them.
+
+    `skill.name` is checked here, not trusted from the caller: under
+    `--baseline previous` it comes from a historical `SKILL.md`'s
+    frontmatter, which never passes the once-per-run preflight a candidate
+    skill's name does. Raises `ProductSetupError` before writing anything
+    when the name cannot be one directory entry.
     """
     if not skill.markdown:
         return False
+    _check_skill_name(skill.name)
     target = cwd / skills_dir / skill.name
     target.mkdir(parents=True, exist_ok=True)
-    (target / SKILL_FILENAME).write_text(skill.markdown, encoding="utf-8")
+    (target / SKILL_FILENAME).write_text(skill.markdown, encoding="utf-8", newline="")
     if skill.bundle_root is not None:
         for name in BUNDLE_DIRS:
             source = skill.bundle_root / name
@@ -290,6 +314,22 @@ class ProductRunner:
         def elapsed() -> int:
             return int((time.monotonic() - started) * 1000)
 
+        # The size refusal is checked before anything is created, so an
+        # oversized task never spends a directory, a delivery or a process.
+        delivered = bool(skill.markdown)
+        prompt = case.task
+        if delivered and case.mode == "loaded":
+            prompt = product.invoke.format(name=skill.name, task=case.task)
+        size = len(prompt.encode("utf-8"))
+        if size > MAX_PROMPT_BYTES:
+            return RunResult(
+                error=(
+                    f"prompt is {size} bytes; a product runner sends at most "
+                    f"{MAX_PROMPT_BYTES} bytes as one argument"
+                ),
+                latency_ms=elapsed(),
+            )
+
         private: Path | None = None
         try:
             if workspace is not None:
@@ -297,20 +337,10 @@ class ProductRunner:
             else:
                 private = Path(tempfile.mkdtemp(prefix=PRIVATE_PREFIX)).resolve()
                 cwd = private
-            delivered = deliver_skill(skill, cwd, product.skills_dir)
-            prompt = case.task
-            if delivered and case.mode == "loaded":
-                prompt = product.invoke.format(name=skill.name, task=case.task)
-            size = len(prompt.encode("utf-8"))
-            if size > MAX_PROMPT_BYTES:
-                return RunResult(
-                    error=(
-                        f"prompt is {size} bytes; a product runner sends at most "
-                        f"{MAX_PROMPT_BYTES} bytes as one argument"
-                    ),
-                    latency_ms=elapsed(),
-                )
+            deliver_skill(skill, cwd, product.skills_dir)
             trace = read_trace(product, invoke(product, prompt, cwd))
+        except ProductSetupError as exc:
+            return RunResult(error=str(exc), latency_ms=elapsed())
         except OSError as exc:
             return RunResult(error=f"{type(exc).__name__}: {exc}", latency_ms=elapsed())
         finally:
@@ -330,7 +360,12 @@ class ProductRunner:
             cost_note=trace.cost_note,
             usage_note=trace.usage_note,
             model=trace.model,
+            # None, not False, for a generic product: with no parser,
+            # `trace.invoked_skills` is always empty, so "the skill did not
+            # fire" would be a claim the runner has no way to back up.
             skill_triggered=(
-                (skill.name in trace.invoked_skills) if case.mode == "offered" else None
+                (skill.name in trace.invoked_skills)
+                if case.mode == "offered" and product.parse is not None
+                else None
             ),
         )

@@ -11,12 +11,14 @@ import pytest
 from skill_lens.models import EvalCase, Skill, WorkspaceSpec
 from skill_lens.runners.product import (
     PRESETS,
+    Invocation,
     Product,
     ProductRunner,
     deliver_skill,
+    read_trace,
 )
 from skill_lens.runners.traces import parse_claude_code, parse_copilot
-from skill_lens.workspace import create_workspace
+from skill_lens.workspace import Workspace, create_workspace
 
 FAKE = Path(__file__).parent / "fake_product.py"
 FIXTURES = Path(__file__).parent / "fixtures" / "products"
@@ -181,6 +183,15 @@ def test_offered_mode_negative_control_is_false(tmp_path, fake, monkeypatch):
     assert result.skill_triggered is False
 
 
+def test_offered_mode_on_a_generic_product_is_unknown_not_false(tmp_path, fake):
+    # A generic product has no parser, so `invoked_skills` is always empty --
+    # reporting False there would claim "the skill did not fire" when the
+    # runner never looked.
+    product = _product(name="cli", parse=None, invoke="{task}", version_command=None)
+    result = ProductRunner(product).run(_skill(tmp_path), _case(mode="offered"))
+    assert result.skill_triggered is None
+
+
 def test_the_baseline_none_skill_gets_no_directory_and_the_bare_task(tmp_path, fake):
     baseline = Skill(
         name="ping", description="", instructions="", path=tmp_path, variant="baseline"
@@ -273,6 +284,21 @@ def test_a_missing_executable_is_an_error_not_a_raise(tmp_path, fake):
     assert result.error.startswith("cannot start /nonexistent/product:")
 
 
+def test_an_unsafe_skill_name_is_refused_before_writing_anything(tmp_path):
+    # A `--baseline previous` skill's name comes from a historical SKILL.md's
+    # frontmatter, which never passes the once-per-run preflight a candidate
+    # skill's name does -- so deliver_skill must guard it itself.
+    ws_root = tmp_path / "ws"
+    ws_root.mkdir()
+    workspace = Workspace(root=ws_root)
+    skill = Skill(name="../escape", description="d", instructions="i", path=tmp_path, markdown="m")
+    result = ProductRunner(_product()).run(skill, _case(), workspace=workspace)
+    assert result.error is not None
+    assert result.error.startswith("skill name '../escape' cannot be a directory name")
+    assert list(ws_root.rglob("*")) == []  # nothing was written
+    assert not any(p.name == "escape" for p in tmp_path.iterdir())
+
+
 def test_an_oversized_prompt_is_refused_before_anything_starts(tmp_path, fake):
     task = "x" * (100 * 1024 + 1)
     result = ProductRunner(_product()).run(_skill(tmp_path), _case(task=task))
@@ -286,3 +312,38 @@ def test_the_private_cwd_is_removed_even_on_failure(tmp_path, fake, monkeypatch)
     monkeypatch.setenv("FAKE_PRODUCT_MODE", "exit3")
     ProductRunner(_product()).run(_skill(tmp_path), _case())
     assert not Path(fake()["cwd"]).exists()
+
+
+# --- read_trace: the exit-code-vs-trace-error precedence rule ---
+
+
+def test_read_trace_prefers_the_products_own_error_to_the_exit_code():
+    stdout = (FIXTURES / "copilot-error.jsonl").read_text(encoding="utf-8")
+    trace = read_trace(
+        _product(name="copilot", parse=parse_copilot), Invocation(stdout=stdout, exit_code=1)
+    )
+    assert trace.error == (
+        "copilot: 402 You have exceeded your monthly quota (Request ID: REDACTED)"
+    )
+
+
+def test_read_trace_falls_back_to_the_exit_code_when_the_trace_has_no_error():
+    stdout = (FIXTURES / "claude-code-negative.jsonl").read_text(encoding="utf-8")
+    trace = read_trace(
+        _product(), Invocation(stdout=stdout, stderr="something broke\n", exit_code=2)
+    )
+    assert trace.error == "claude-code exited with code 2: something broke"
+
+
+def test_read_trace_a_generic_products_non_zero_exit_is_an_error():
+    product = _product(name="cli", parse=None, invoke="{task}", version_command=None)
+    trace = read_trace(product, Invocation(stdout="", stderr="boom", exit_code=3))
+    assert trace.error == "cli exited with code 3: boom"
+
+
+def test_read_trace_a_generic_products_success_is_stdout_verbatim():
+    product = _product(name="cli", parse=None, invoke="{task}", version_command=None)
+    trace = read_trace(product, Invocation(stdout="hello\n", exit_code=0))
+    assert trace.output == "hello"
+    assert trace.usage_note == "the cli runner does not report token usage"
+    assert trace.cost_note == "the cli runner does not report cost"
