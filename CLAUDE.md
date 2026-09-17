@@ -43,7 +43,10 @@ agent read the files a skill ships beside `SKILL.md` (`scripts/`, `references/`,
 under portable guards everywhere and an OS sandbox where one exists
 (`sandbox-exec` on macOS, `bwrap` on Linux), with the report saying which
 applied; `--baseline previous` pairs the previous `SKILL.md` with its own
-bundle. Milestones are defined in
+bundle. `mcp-import` (issue #43) turns a saved MCP `tools/list` response into a pasteable `tools:`
+block carrying the server's schema verbatim in the new `ToolSpec.input_schema`, and
+`ToolSpec.name` now accepts what providers accept (`^[A-Za-z0-9_-]{1,64}$`). Its design is
+in `docs/superpowers/specs/2026-09-17-skill-lens-mcp-import-design.md`. Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
 is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
@@ -314,6 +317,18 @@ form, that file is the explanation.
 - **The unfilled-scaffold scan covers mapping keys as well as values.**
 - **`examples/greeting` stays at `1.1.0` or later.** The bump is what makes `--baseline
   previous` resolvable from a checkout; `tests/test_examples.py` pins it.
+- **An imported mock is the server's schema verbatim, and `returns` is never invented.**
+  `mcp-import` copies `name` and `inputSchema` into `input_schema:` byte-for-byte and writes
+  the `TODO(skill-lens)` sentinel for `returns` (and a missing `description`); a pasted block
+  cannot run until the author fills it. `outputSchema` rides along as a comment only.
+- **`parameters` and `input_schema` are exclusive, and `input_schema` is validated at load
+  time** (`check_schema`, top-level `type: object`) — exit 2 before any case runs.
+- **The shorthand is closed; a declared schema is open.** `build_mock_tool` injects
+  `additionalProperties: false` only for `parameters:`; an `input_schema` is deep copied
+  and passed as written.
+- **A tool name is `^[A-Za-z0-9_-]{1,64}$`** — what providers accept — never rewritten.
+  `skill_tool_name` (the offered-skill tool) still normalises to an identifier.
+- **`mcp-import` never touches the network.** `SOURCE` is a file or `-`.
 - **Script execution is off unless the run turned it on** (`allow_scripts` /
   `--allow-scripts`); nothing in an eval file or a `SKILL.md` can enable it. Reading the
   bundle needs no opt-in.

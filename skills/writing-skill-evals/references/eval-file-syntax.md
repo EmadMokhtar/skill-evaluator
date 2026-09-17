@@ -82,12 +82,26 @@ accept any arguments — a hallucinated argument must not surface as an infra er
 
 ```yaml
     tools:
-      - name: lookup_order          # must be a valid identifier
+      - name: lookup_order          # ^[A-Za-z0-9_-]{1,64}$ (what providers accept)
         description: Look up an order by its id
         parameters:
           order_id: string          # string | integer | number | boolean
         returns: '{"id": "1234", "status": "delivered"}'
+      - name: get-pull-request      # a real MCP tool: keep the server's name
+        description: Get details of a specific pull request
+        input_schema:               # the server's JSON Schema, verbatim; never with parameters
+          type: object
+          properties:
+            owner: {type: string}
+            pull_number: {type: integer}
+          required: [owner, pull_number]
+        returns: '{"number": 1}'
 ```
+
+`parameters:` is closed (every key required, no extras); `input_schema:` is passed as
+written and must be a valid JSON Schema of `type: object`. For a tool a real MCP server
+exposes, `skill-lens mcp-import tools.json` writes the `input_schema:` block from the
+server's `tools/list` listing — `returns:` still has to be filled in by hand.
 
 ## Trajectory
 
