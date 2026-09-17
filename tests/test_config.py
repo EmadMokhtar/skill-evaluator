@@ -489,6 +489,8 @@ def test_a_command_naming_another_executable_drops_the_presets_version_probe(tmp
     )
     product = load_config(tmp_path / "skill-lens.toml").product("claude-code")
     assert product.version_command is None
+    # a wrapper is not known to accept the preset's judge-only flag either
+    assert product.judge_args == ()
 
 
 def test_a_command_keeping_the_presets_executable_keeps_its_version_probe(tmp_path):
@@ -498,3 +500,4 @@ def test_a_command_keeping_the_presets_executable_keeps_its_version_probe(tmp_pa
     )
     product = load_config(tmp_path / "skill-lens.toml").product("claude-code")
     assert product.version_command == ("claude", "--version")
+    assert product.judge_args == ("--tools", "")

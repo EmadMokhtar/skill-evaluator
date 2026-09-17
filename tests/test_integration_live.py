@@ -151,6 +151,7 @@ def test_order_support_rubrics_pass_under_claude_code():
         for o in report.outcomes
         if o.status == "errored"
     ]
+    assert [p.name for p in report.products] == ["claude-code"]
     _assert_only_the_token_budget_failed(report)
     [outcome] = report.outcomes
     [judge_score] = [s for s in outcome.scores if s.evaluator == "judge"]
