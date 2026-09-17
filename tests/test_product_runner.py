@@ -100,6 +100,7 @@ def test_the_presets_are_the_verified_spellings():
     assert copilot.invoke == "/{name} {task}"
     assert copilot.parse is parse_copilot
     assert copilot.version_command == ("copilot", "--version")
+    assert copilot.judge_args == ()
     claude = PRESETS["claude-code"]
     assert claude.argv == (
         "claude",
@@ -117,6 +118,7 @@ def test_the_presets_are_the_verified_spellings():
     assert claude.skills_dir == ".claude/skills"
     assert claude.parse is parse_claude_code
     assert claude.version_command == ("claude", "--version")
+    assert claude.judge_args == ("--tools", "")
     assert set(PRESETS) == {"copilot", "claude-code"}
     for preset in PRESETS.values():
         assert preset.timeout_seconds == 600.0

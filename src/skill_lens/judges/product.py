@@ -14,8 +14,44 @@ text, and must not discover the skill under test.
 
 from __future__ import annotations
 
+import shutil
+import tempfile
+from dataclasses import replace
+from pathlib import Path
+
+from pydantic import ConfigDict, ValidationError
+
 from skill_lens.judges.prompt import SYSTEM_PROMPT, render_request
-from skill_lens.models import JudgeRequest
+from skill_lens.models import JudgeOutput, JudgeRequest, JudgeVerdict, ProductStatus
+from skill_lens.runners.product import (
+    MAX_PROMPT_BYTES,
+    TRUST_NOTE,
+    Product,
+    find_executable,
+    invoke,
+    probe_version,
+    read_trace,
+)
+
+JUDGE_PREFIX = "skill-lens-judge-"
+
+
+class _RawVerdict(JudgeOutput):
+    """`JudgeOutput`, strict, for reading a product's free-text reply only.
+
+    The framework judges bind `JudgeOutput` as the model's own structured
+    output, which a provider enforces server-side -- `JudgeOutput` itself
+    stays lenient so that path is untouched (a stricter shared model would
+    also change the JSON schema pydantic-ai and langchain generate for that
+    binding, breaking their recorded cassettes). A product's reply has no
+    such guarantee: without `extra="forbid"` here, an unrelated JSON object
+    a product printed -- a trace event, say -- would parse as a vacuously
+    empty verdict (`checks` defaults to `[]`) instead of the invalid verdict
+    it actually is.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
 
 CLOSING_INSTRUCTION = (
     "Reply with one JSON object and nothing else -- no prose before or after it, "
@@ -75,3 +111,63 @@ def extract_json_object(text: str) -> str | None:
     if best is None:
         return None
     return text[best[0] : best[1] + 1]
+
+
+class ProductJudge:
+    """Grades a rubric with a product, behind the framework-agnostic protocol."""
+
+    needs_api_key = False
+
+    def __init__(self, product: Product) -> None:
+        self._product = replace(product, argv=(*product.argv, *product.judge_args))
+        self.name = product.name
+
+    def judge(self, request: JudgeRequest) -> JudgeVerdict:
+        product = self._product
+        prompt = judge_prompt(request)
+        size = len(prompt.encode("utf-8"))
+        if size > MAX_PROMPT_BYTES:
+            return JudgeVerdict(
+                error=(
+                    f"prompt is {size} bytes; a product judge sends at most "
+                    f"{MAX_PROMPT_BYTES} bytes as one argument"
+                )
+            )
+        try:
+            cwd = Path(tempfile.mkdtemp(prefix=JUDGE_PREFIX)).resolve()
+        except OSError as exc:
+            return JudgeVerdict(error=f"{type(exc).__name__}: {exc}")
+        try:
+            trace = read_trace(product, invoke(product, prompt, cwd))
+        finally:
+            shutil.rmtree(cwd, ignore_errors=True)
+        spend = {
+            "input_tokens": trace.input_tokens,
+            "output_tokens": trace.output_tokens,
+            "cost_usd": trace.cost_usd,
+            "cost_note": trace.cost_note,
+            "model": trace.model,
+        }
+        if trace.error is not None:
+            return JudgeVerdict(error=trace.error, model=trace.model)
+        raw = extract_json_object(trace.output)
+        if raw is None:
+            return JudgeVerdict(error="JudgeOutputInvalid: no JSON object in the response", **spend)
+        try:
+            output = _RawVerdict.model_validate_json(raw)
+        except ValidationError as exc:
+            return JudgeVerdict(error=f"JudgeOutputInvalid: {exc}", **spend)
+        return JudgeVerdict(checks=list(output.checks), **spend)
+
+    def preflight(self) -> ProductStatus:
+        """The executable is on PATH and starts, before any case runs.
+
+        A judge has no cases to inspect; the orchestrator calls this with no
+        arguments and puts the status beside the runners'.
+        """
+        product = self._product
+        executable = find_executable(product, "judge")
+        version = probe_version(product, executable, "judge")
+        return ProductStatus(
+            name=product.name, executable=executable, version=version, trust=TRUST_NOTE
+        )
