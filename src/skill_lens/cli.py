@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -22,6 +23,7 @@ from skill_lens.gating import EXIT_OK, evaluate_gate
 from skill_lens.judges.fake import FakeJudge
 from skill_lens.judges.langchain import LangChainJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
+from skill_lens.mcp_import import McpImportError, parse_tools_list, render_tool_mocks
 from skill_lens.models import Skill
 from skill_lens.orchestrator import RunOptions, run_evals
 from skill_lens.reporters.console import render_console
@@ -462,3 +464,37 @@ def init(
         typer.echo("--force applies to one skill; point init at that skill's directory")
         raise typer.Exit(code=2)
     _init_many(path)
+
+
+@app.command("mcp-import")
+def mcp_import(
+    source: Annotated[
+        Path, typer.Argument(help="A saved tools/list JSON response, or - for stdin.")
+    ],
+    tool: Annotated[
+        list[str] | None,
+        typer.Option("--tool", help="Import only this tool; repeat the flag for several."),
+    ] = None,
+) -> None:
+    """Print mock-tool YAML for the tools an MCP server's tools/list listing declares.
+
+    Offline: the listing is whatever an MCP client saved. Stdout carries
+    nothing but the block, so `> tools.yaml` captures exactly it; every error
+    goes to stderr.
+    """
+    if str(source) == "-":
+        text = sys.stdin.read()
+        label = "<stdin>"
+    else:
+        label = str(source)
+        try:
+            text = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            typer.echo(f"cannot read {source}: {exc}", err=True)
+            raise typer.Exit(code=2) from exc
+    try:
+        rendered = render_tool_mocks(parse_tools_list(text, source=label), only=tool or ())
+    except McpImportError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    typer.echo(rendered, nl=False)
