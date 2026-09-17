@@ -79,6 +79,10 @@ class Product:
     version_command: tuple[str, ...] | None
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
+    # Appended only when the product grades a rubric: what keeps it from
+    # acting while it judges. Verified for claude-code (`--tools ""` disables
+    # every tool); Copilot has no verified equivalent and gets none.
+    judge_args: tuple[str, ...] = ()
 
 
 PRESETS: dict[str, Product] = {
@@ -127,6 +131,7 @@ PRESETS: dict[str, Product] = {
         invoke="/{name} {task}",
         parse=parse_claude_code,
         version_command=("claude", "--version"),
+        judge_args=("--tools", ""),
     ),
 }
 
@@ -236,8 +241,8 @@ def read_trace(product: Product, invocation: Invocation) -> Trace:
             return Trace(error=_exit_note(exited, invocation.stderr))
         return Trace(
             output=invocation.stdout.removesuffix("\n"),
-            usage_note=f"the {product.name} runner does not report token usage",
-            cost_note=f"the {product.name} runner does not report cost",
+            usage_note=f"the {product.name} product does not report token usage",
+            cost_note=f"the {product.name} product does not report cost",
         )
     trace = product.parse(invocation.stdout)
     if invocation.exit_code != 0 and (trace.error is None or not trace.complete):
@@ -300,6 +305,16 @@ def _install_hint(product: Product) -> str:
     if product.name == "cli":
         return "set [runners.cli] command in skill-lens.toml to a command on PATH"
     return f"install the product, or set [runners.{product.name}] command in skill-lens.toml"
+
+
+def find_executable(product: Product, role: str) -> str:
+    """`shutil.which` on the product's executable, or `ProductSetupError` naming `role`."""
+    executable = shutil.which(product.argv[0])
+    if executable is None:
+        raise ProductSetupError(
+            f"{role} {product.name}: {product.argv[0]!r} is not on PATH; {_install_hint(product)}"
+        )
+    return executable
 
 
 def probe_version(product: Product, executable: str, role: str = "runner") -> str:
@@ -430,12 +445,7 @@ class ProductRunner:
         carries.
         """
         product = self._product
-        executable = shutil.which(product.argv[0])
-        if executable is None:
-            raise ProductSetupError(
-                f"runner {product.name}: {product.argv[0]!r} is not on PATH; "
-                f"{_install_hint(product)}"
-            )
+        executable = find_executable(product, "runner")
         version = probe_version(product, executable)
         for skill in skills:
             _check_skill_name(skill.name)

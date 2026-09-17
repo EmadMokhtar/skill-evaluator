@@ -11,7 +11,7 @@
 | M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions, bundled files and `run_script` | shipped |
 | M7 | DX: failing cases explain themselves, `--case`, `init` batch mode and workspace case, versioned example, quickstart | shipped |
 | M8 | LangChain runner and judge (`[langchain]` extra); runner matrix | shipped |
-| M9 | Product runners: `copilot`, `claude-code`, a configured `cli`; product judge | in progress |
+| M9 | Product runners: `copilot`, `claude-code`, a configured `cli`; product judge | shipped |
 
 ## What M4 shipped
 
@@ -145,12 +145,29 @@ mechanics (process-group kill, capped read through the harness's own handle) mov
 [Product runners](runners.md#product-runners), [Configuration](configuration.md#product-runners)
 and [Security](security.md#product-runners).
 
-Part 2 — `judge = "copilot"`, `"claude-code"` or `"cli"`, grading rubrics through the same
-product — is next. Deferred: mock tools under a product through an MCP bridge, a per-case
-timeout, an automated hermetic Copilot run (one that loads nothing from the user's personal
-setup), and tool-name normalisation across products.
+Part 2 grades rubrics through the same product; see
+[What M9 part 2 shipped](#what-m9-part-2-shipped). Deferred: mock tools under a product
+through an MCP bridge, a per-case timeout, an automated hermetic Copilot run (one that
+loads nothing from the user's personal setup), and tool-name normalisation across products.
 See the
 [M9 design](https://github.com/EmadMokhtar/skill-evaluator/blob/main/docs/superpowers/specs/2026-09-17-skill-lens-m9-design.md).
+
+## What M9 part 2 shipped
+
+The product judge: `judge = "copilot"`, `"claude-code"` or `"cli"` grades every `judge:`
+block through the product named in its `[runners.<name>]` table — the same table that
+configures it as a runner — so with part 1 every kind of eval case runs and grades with no
+provider API key at all. The shared judge prompt, with the same grading rules, fenced
+response and artifacts the framework judges send, goes in as one text prompt closed by a
+line asking for the JSON verdict and nothing else, in an empty directory with no skill
+delivered and, under Claude Code, with `--tools ""` so the judge cannot act while it
+grades. The verdict is the first balanced JSON object in the reply, validated strictly as
+`JudgeOutput` with one evidenced entry per rubric check; a reply with no readable verdict
+is an **errored** case, never a low score, so an unreadable grader can never pass or fail
+a skill. `judge_model` and `judge_temperature` are not read by a product judge, and
+`--judge-model` with one is a user error. Full detail is in
+[Judging with a product](runners.md#judging-with-a-product),
+[Configuration](configuration.md#judging) and [Security](security.md#product-runners).
 
 ## The rename to skill-lens
 

@@ -104,8 +104,8 @@ See [The workspace](runners.md#the-workspace).
 
 `model`, `retries`, and `retry_backoff_seconds` only matter to components that reach a
 provider (`pydantic-ai` or `langchain`, as a runner or a judge); `FakeRunner`, `FakeJudge`
-and the product runners ignore them — a product's model and timeout live in its own
-[`[runners.<name>]` table](#product-runners).
+and the product runners and judges ignore them — a product's model and timeout live in its
+own [`[runners.<name>]` table](#product-runners).
 `temperature` accepts a float or the literal string `"unset"`, for reasoning models that
 reject any explicit temperature:
 
@@ -122,9 +122,13 @@ whether it arrives from `model`, `judge_model`, or the matching flag.
 
 ## Product runners
 
-One `[runners.<name>]` table per product runner — `copilot`, `claude-code`, or `cli`. Each
-table is optional for a preset (the preset supplies the verified argv) and required for
-`cli`, which has no preset:
+One `[runners.<name>]` table per product — `copilot`, `claude-code`, or `cli` — whether the
+product runs cases, grades rubrics as the [judge](#judging), or both: the same table serves
+the judge. `args` in particular reaches both seats at once: a flag added there, such as a
+hypothetical `--deny-tool`, changes what the product can do as the runner and as the
+judge — there is no separate key to restrict one without the other. Each table is optional
+for a preset (the preset supplies the verified argv) and required for `cli`, which has no
+preset:
 
 ```toml
 default_runner = ["copilot", "claude-code"]
@@ -149,19 +153,21 @@ max_output_bytes = 8000000                        # default
 | --- | --- | --- |
 | `command` | the preset's argv (required for `cli`) | The whole argv. Exactly one element must be `{prompt}`, and it cannot be the first (the executable); the prompt is substituted as that one element, never through a shell. When the first element is not the preset's own executable, preflight skips the `--version` probe (a wrapper might treat `--version` as a prompt). |
 | `args` | `[]` | Appended after `command`. Must not contain `{prompt}`. |
-| `timeout_seconds` | `600.0` | Wall clock per case, finite and positive; the process group is killed at expiry. |
+| `timeout_seconds` | `600.0` | Wall clock per case (per judge call, for the judge), finite and positive; the process group is killed at expiry. |
 | `max_output_bytes` | `8000000` | Cap on the trace, positive; a longer one is an errored case naming this key. |
-| `skills_dir` | `".agents/skills"` | `cli` only. Where the skill is written, relative to the working directory; no absolute path and no `..`. |
-| `invoke` | `"{task}"` | `cli` only. The prompt in `mode: loaded`; only `{name}` and `{task}` may appear (no other field name, no conversion, no format spec), and `{task}` must appear. |
+| `skills_dir` | `".agents/skills"` | `cli` only. Where the skill is written, relative to the working directory; no absolute path and no `..`. Not read by the judge, which delivers no skill. |
+| `invoke` | `"{task}"` | `cli` only. The prompt in `mode: loaded`; only `{name}` and `{task}` may appear (no other field name, no conversion, no format spec), and `{task}` must appear. Not read by the judge. |
 
 Two keys with two meanings: drop an isolation flag with `command`, add a model with
 `args`. `skills_dir` or `invoke` under a preset, an unknown table name, a `command` without
-exactly one `{prompt}` element, `{prompt}` in `args`, and `cli` named as a runner with no
-`command` are all config errors (exit 2) naming the key. No API key or token belongs here:
-the product reads its own auth. The tables are config-only, with no CLI flag: which product
-a repository evaluates under, and how, is repository policy. See
-[Runners](runners.md#product-runners) for what each product runner measures and
-[Security](security.md#product-runners) for what naming one means.
+exactly one `{prompt}` element, `{prompt}` in `args`, and `cli` named as a runner or judge
+with no `command` are all config errors (exit 2) naming the key. No API key or token belongs
+here: the product reads its own auth. The tables are config-only, with no CLI flag: which
+product a repository evaluates under, and how, is repository policy. When the product
+judges, `claude-code` gets `--tools ""` appended after `args` so it grades with no tools;
+`copilot` and `cli` get nothing extra. See [Runners](runners.md#product-runners) for what
+each product runner measures, [Judging with a product](runners.md#judging-with-a-product)
+for the judge, and [Security](security.md#product-runners) for what naming one means.
 
 ## Bundled scripts
 
@@ -231,14 +237,28 @@ judge_model = ""             # empty falls back to `model`
 judge_temperature = 0.0      # or "unset" for a reasoning judge model
 ```
 
+`judge` also accepts `copilot`, `claude-code` and `cli`: the rubric is then graded through
+that product, started from its [`[runners.<name>]` table](#product-runners) — the same table
+that configures it as a runner — with no API key. `judge_model` and `judge_temperature` are
+then not read (a product's model is set with `[runners.<name>] args`, and no product
+exposes a temperature), and `--judge-model` is a user error (exit 2). See
+[Judging with a product](runners.md#judging-with-a-product) for how the verdict is read.
+
+```toml
+judge = "claude-code"        # grades with no tools; copilot keeps its tools
+
+[runners.claude-code]
+args = ["--model", "sonnet"]  # the judge's model, and the runner's if it runs here too
+```
+
 The default `judge = "fake"` does not grade. Rather than passing a rubric it never checked,
 it reports the case as **errored** — nothing was verified, so nothing is reported as
 verified. A consequence worth knowing: `--judge-model` does not turn judging on, because the
 judge is selected by `judge`, not by naming a model — and since the flag is read only by
-`judge = "pydantic-ai"` or `"langchain"`, passing it under any other judge is a user error
-(exit 2) rather than a flag that silently did nothing. `--model` follows the same rule: a
-run where nothing reads it — `--runner fake`, or only product runners, with no keyed judge
-falling back to it — refuses it; see [CLI](cli.md#run).
+`judge = "pydantic-ai"` or `"langchain"`, passing it under any other judge (`"fake"` or a
+product) is a user error (exit 2) rather than a flag that silently did nothing. `--model`
+follows the same rule: a run where nothing reads it — `--runner fake`, or only product
+runners, with no keyed judge falling back to it — refuses it; see [CLI](cli.md#run).
 
 `judge_temperature` is deliberately **separate from** `temperature` and defaults to `0`.
 Sampling the skill under test is a normal thing to want; sampling the grader is not, because

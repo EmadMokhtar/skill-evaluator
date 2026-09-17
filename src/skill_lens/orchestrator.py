@@ -426,15 +426,18 @@ def _execute(
     return outcomes
 
 
-def _preflight_runners(plan: _Plan, runners: list[Runner]) -> list[ProductStatus]:
-    """Give every runner that defines `preflight` one look at what it will run.
+def _preflight_hooks(
+    plan: _Plan, runners: list[Runner], judge: Judge | None
+) -> list[ProductStatus]:
+    """Give every runner that defines `preflight` one look at what it will run,
+    and call the judge's `preflight()`, which takes no arguments.
 
-    Called after discovery and before execution, so a runner can refuse the
-    run -- by raising an authoring error -- before any quota is spent. Each
-    runner sees the candidate-arm (skill, case) pairs planned for it, once
-    each: compatibility is a property of (case, runner), so a case `--tag`
-    or `--case` filtered out is not its concern, and neither arm nor repeat
-    changes the answer.
+    Called after discovery and before execution, so a runner (or the judge)
+    can refuse the run -- by raising an authoring error -- before any quota
+    is spent. Each runner sees the candidate-arm (skill, case) pairs planned
+    for it, once each: compatibility is a property of (case, runner), so a
+    case `--tag` or `--case` filtered out is not its concern, and neither arm
+    nor repeat changes the answer.
     """
     statuses: list[ProductStatus] = []
     for runner in runners:
@@ -457,6 +460,12 @@ def _preflight_runners(plan: _Plan, runners: list[Runner]) -> list[ProductStatus
             cases_by_skill[item.skill.name].append(item.case)
         status = hook(skills, cases_by_skill)
         if status is not None:
+            statuses.append(status)
+    hook = getattr(judge, "preflight", None) if judge is not None else None
+    if hook is not None:
+        status = hook()
+        if status is not None and status not in statuses:
+            # The same product serving as runner and judge is one product.
             statuses.append(status)
     return statuses
 
@@ -524,8 +533,9 @@ def run_evals(
     skill that bundles scripts gets a `ScriptNote` so the report can say
     execution was off. Every runner that defines a
     `preflight(skills, cases_by_skill)` hook is called once here too, with
-    the candidate-arm cases planned for it; a status it returns lands on
-    `RunReport.products`.
+    the candidate-arm cases planned for it, and so is the judge's
+    `preflight()`, which takes no arguments; a status either returns lands on
+    `RunReport.products`, with the same product serving as both listed once.
 
     `keep_workspace` and `workspace_limits` are the M6 part 1 spelling of the
     first two `options` fields, kept in the positions they were added in so
@@ -594,7 +604,7 @@ def run_evals(
                     notes.append(ScriptNote(skill_name=skill.name, script_count=count))
         # After the script preflight, so a ScriptSetupError and a
         # ProductSetupError cannot race for the exit.
-        products = _preflight_runners(plan, runners)
+        products = _preflight_hooks(plan, runners, judge)
         outcomes = _execute(plan.items, evaluators, concurrency, executor_factory, options, runtime)
     finally:
         # However the run ended -- an authoring error out of an evaluator

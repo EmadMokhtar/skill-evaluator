@@ -1,0 +1,6 @@
+{"type":"session.tools_updated","data":{"model":"gpt-5.4"},"id":"e1","timestamp":"2026-09-17T11:00:00.000Z","ephemeral":true}
+{"type":"user.message","data":{"content":"...","attachments":[]},"id":"e2","timestamp":"2026-09-17T11:00:00.100Z"}
+{"type":"assistant.turn_start","data":{"turnId":"0"},"id":"e3","timestamp":"2026-09-17T11:00:00.200Z"}
+{"type":"assistant.message","data":{"messageId":"m1","content":"Here is the verdict:\n```json\n{\"checks\": [{\"id\": \"c1\", \"passed\": true, \"evidence\": \"Hello, Ada.\"}]}\n```","toolRequests":[]},"id":"e4","timestamp":"2026-09-17T11:00:02.000Z"}
+{"type":"assistant.turn_end","data":{"turnId":"0"},"id":"e5","timestamp":"2026-09-17T11:00:02.100Z"}
+{"type":"result","timestamp":"2026-09-17T11:00:02.300Z","sessionId":"j2","exitCode":0,"usage":{"premiumRequests":1,"totalApiDurationMs":1800,"sessionDurationMs":2300,"codeChanges":{"linesAdded":0,"linesRemoved":0,"filesModified":[]}}}

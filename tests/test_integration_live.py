@@ -28,8 +28,11 @@ from pathlib import Path
 import pytest
 
 from skill_lens.judges.langchain import LangChainJudge
+from skill_lens.judges.product import ProductJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
+from skill_lens.models import RunResult
 from skill_lens.orchestrator import run_evals
+from skill_lens.runners.fake import FakeRunner
 from skill_lens.runners.langchain import LangChainRunner
 from skill_lens.runners.product import PRESETS, ProductRunner
 from skill_lens.runners.pydantic_ai import PydanticAIRunner
@@ -109,6 +112,52 @@ def test_the_greeting_example_passes_under_claude_code():
     report = run_evals(load_skills(EXAMPLES / "greeting"), [ProductRunner(PRESETS["claude-code"])])
     assert report.errored == 0, [o.result.error for o in report.outcomes if o.result.errored]
     _assert_only_the_token_budget_failed(report)
+
+
+# The scripted answer the product judge grades below: it satisfies all three
+# rubric lines of the example's rubric case (names the order, says the
+# window has closed, promises no refund), so a failing check is the judge's
+# verdict, not the answer's.
+ORDER_1234_REFUSAL = (
+    "I'm sorry, but I can't refund order 1234. It was delivered 45 days ago, "
+    "and our return window is 30 days, so the window for this order has closed."
+)
+
+
+# The product judge, live. The runner is a scripted `FakeRunner`, not a
+# product runner: `examples/order-support`'s rubric case declares `tools:` (a
+# mock `lookup_order`), which every product runner refuses in preflight as an
+# authoring error, and the example is not edited to suit this test. What runs
+# live is the judge -- the example's own rubric graded through Claude Code
+# with `--tools ""`, end to end through `run_evals`. `case_filter` narrows the
+# run to that one case; the other four need real tool calls a scripted runner
+# cannot make. The case has no `budget:`, so the shared helper tolerates
+# nothing here: every check must pass on the judge's verdict.
+@pytest.mark.skipif(shutil.which("claude") is None, reason="needs the claude executable")
+def test_order_support_rubrics_pass_under_claude_code():
+    report = run_evals(
+        load_skills(EXAMPLES / "order-support"),
+        [
+            FakeRunner(
+                responses={"I want a refund for order 1234": RunResult(output=ORDER_1234_REFUSAL)}
+            )
+        ],
+        judge=ProductJudge(PRESETS["claude-code"]),
+        case_filter="explains the refusal",
+    )
+    assert report.total == 1, [o.case_name for o in report.outcomes]
+    assert report.errored == 0, [
+        (o.case_name, o.result.error, [s.detail for s in o.scores if s.errored])
+        for o in report.outcomes
+        if o.status == "errored"
+    ]
+    assert [p.name for p in report.products] == ["claude-code"]
+    _assert_only_the_token_budget_failed(report)
+    [outcome] = report.outcomes
+    [judge_score] = [s for s in outcome.scores if s.evaluator == "judge"]
+    assert judge_score.passed, [(c.id, c.passed, c.evidence) for c in judge_score.checks]
+    assert [c.id for c in judge_score.checks] == ["r1", "r2", "r3"]
+    assert all(c.evidence.strip() for c in judge_score.checks)
 
 
 # Copilot quota was exhausted when this was last run, so this test has never

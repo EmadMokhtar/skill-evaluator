@@ -332,7 +332,7 @@ class Config(BaseModel):
         if name == "cli":
             if settings.command is None:
                 raise ConfigError(
-                    "runner cli needs [runners.cli] command in skill-lens.toml, "
+                    "[runners.cli] command is required to use cli as a runner or judge; "
                     'e.g. command = ["my-agent", "--prompt", "{prompt}"]'
                 )
             base = Product(
@@ -349,11 +349,14 @@ class Config(BaseModel):
                 # The preset's `--version` is only known to work on the
                 # preset's executable; a wrapper named in `command` is not
                 # probed, so preflight cannot start it with a stray argument.
+                # `judge_args` is a verified flag for the preset's own
+                # executable too -- a wrapper is not known to accept it.
                 same_executable = settings.command[0] == base.argv[0]
                 base = replace(
                     base,
                     argv=tuple(settings.command),
                     version_command=base.version_command if same_executable else None,
+                    judge_args=base.judge_args if same_executable else (),
                 )
         return replace(
             base,

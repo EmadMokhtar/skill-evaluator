@@ -62,7 +62,12 @@ None`. The orchestrator calls it once per run, after discovery and before any ca
 candidate-arm skills and the cases planned for that runner; it raises an authoring error to
 abort the run before anything is spent, and may return a `ProductStatus` for the report.
 The framework runners define none; `ProductRunner` does. The hook is looked up with
-`getattr`, so a runner written against an earlier milestone keeps working.
+`getattr`, so a runner written against an earlier milestone keeps working. `Judge` may
+likewise define an optional `preflight() -> ProductStatus | None`, taking no arguments — a
+judge has no cases to inspect — called in the same pass, right after the runners' hooks;
+`ProductJudge` defines it, the framework judges and `FakeJudge` do not. A status equal to
+one a runner already returned is not added again, so a product serving as both runner and
+judge is one entry on `RunReport.products`.
 
 ## Module map
 
@@ -70,7 +75,7 @@ The framework runners define none; `ProductRunner` does. The hook is looked up w
 | --- | --- |
 | `models.py` | Every Pydantic model in the project. No other module defines a data shape. |
 | `cli.py` | Typer entry point. Wires config → loaders → runner → orchestrator → reporters → gate, and owns the exit-code contract. |
-| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. `RunOptions` bundles the per-run settings (kept workspaces, the workspace caps, the script policy); when scripts are on it runs `scripts.preflight` once between discovery and execution; between discovery and execution it also calls every runner's optional `preflight` hook, once each with the candidate-arm cases planned for it, and puts what they return on `RunReport.products`; and `_BaselineStore` owns the directory previous bundles are extracted into, deleted in a `finally`. |
+| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. `RunOptions` bundles the per-run settings (kept workspaces, the workspace caps, the script policy); when scripts are on it runs `scripts.preflight` once between discovery and execution; between discovery and execution it also calls every runner's optional `preflight` hook, once each with the candidate-arm cases planned for it, then the judge's optional `preflight()` (no arguments), and puts what they return on `RunReport.products`, a status already present listed once; and `_BaselineStore` owns the directory previous bundles are extracted into, deleted in a `finally`. |
 | `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. |
 | `config.py` | Loads `skill-lens.toml` by explicit path or upward discovery. Never reads secrets. Owns `ProductSettings` (one `[runners.<name>]` table) and `Config.product`, which turns a preset plus its table into the `Product` a runner starts; `PRODUCT_NAMES` is the list the CLI accepts. |
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
@@ -105,6 +110,7 @@ The framework runners define none; `ProductRunner` does. The hook is looked up w
 | `judges/fake.py` | A scripted, offline judge. The default — and unscripted it *errors* rather than passing, so an unjudged rubric is never a quiet green. |
 | `judges/pydantic_ai.py` | The PydanticAI judge adapter. **Another of the four.** |
 | `judges/langchain.py` | The LangChain judge adapter. **The last of the four.** |
+| `judges/product.py` | The product judge: the shared judge prompt as one text turn closed by a JSON-only line, sent through `runners/product.py`'s `invoke`/`read_trace` from an empty directory with no skill; the first balanced JSON object in the reply validated as `JudgeOutput`, everything else `JudgeVerdict.error`. Defines the judge's `preflight()`. Imports no agent framework. |
 | `reporters/console.py` | Human-readable run summary. |
 | `reporters/failure_context.py` | The excerpt a non-passing case shows — output, cut count, tool-call lines. One helper for all three reporters; no markup. |
 | `reporters/json_reporter.py` | Machine-readable run report. |
@@ -119,6 +125,7 @@ path
         └─ per skill: skills/baseline (once, if --baseline) ──► baseline Skill (+ its own bundle) | note
         └─ per skill: cases/loader (evals/ dir or *.eval.yaml) ──► [EvalCase]
   └─ scripts.preflight (once, only if allow_scripts) ──► ScriptRuntime | ScriptSetupError (exit 2)
+  └─ each Runner.preflight(skills, cases_by_skill), then Judge.preflight() (once, where defined) ──► [ProductStatus] | ProductSetupError (exit 2)
 
 matrix: for each (skill × case × arm × repeat × runner)
     Runner.run ──► RunResult ──► each Evaluator ──► [EvalScore]
@@ -148,8 +155,8 @@ All live in `models.py`.
 | `CaseOutcome` | one (skill, case, runner, arm, repetition) combination: status plus its scores and result |
 | `ScriptStatus` | the once-per-run sandbox decision: `sandbox` (`"sandbox-exec"`, `"bwrap"` or `"none"`), the probe's `detail`, and `hardening` — the note when the harness could hide its own environment from same-user processes (Linux, non-root), else `None` |
 | `ScriptNote` | a skill that bundles scripts while execution is off: `skill_name`, `script_count` |
-| `ProductStatus` | one agent product a run executed, as preflight found it: `name`, `executable`, `version`, and `trust` — the fixed sentence about permission prompts, the full environment and the missing sandbox, on the model so the three reporters cannot drift |
-| `RunReport` | every outcome, skipped and tag-filtered skills, `baseline_kind`, `repeat`, `baseline_notes`, `scripts` (`None` when execution was off), `script_notes`, `products` (one `ProductStatus` per product runner the run executed; empty otherwise) |
+| `ProductStatus` | one agent product a run executed, as a runner or as the judge, as preflight found it: `name`, `executable`, `version`, and `trust` — the fixed sentence about permission prompts, the full environment and the missing sandbox, on the model so the three reporters cannot drift; equal statuses collapse to one entry, so a product in both seats is listed once |
+| `RunReport` | every outcome, skipped and tag-filtered skills, `baseline_kind`, `repeat`, `baseline_notes`, `scripts` (`None` when execution was off), `script_notes`, `products` (one `ProductStatus` per product the run executed, as a runner or as the judge, a product in both seats once; empty otherwise) |
 
 Two fields are **derived, not stored**: `RunResult.tokens` (the input/output split summed)
 and `RunResult.errored` (`error is not None`). Aggregates on `RunReport` — `total`,
@@ -216,10 +223,11 @@ file is committed; a key must not be.
 `judges/pydantic_ai.py`, `runners/langchain.py` and `judges/langchain.py`. `runners/tools.py`
 builds framework-neutral mock tools and the adapters wrap them. The prompt rules
 (`runners/prompting.py`) and the retry loop (`runners/retry.py`) import no framework, which
-is what lets both adapters share them. The product runner (`runners/product.py`) and its
-trace parsers (`runners/traces.py`) import `subprocess` and `json`, not a framework: a
-product is an executable and a trace grammar, and `process.py` beneath them imports nothing
-from the project at all. `tests/test_framework_isolation.py` scans the whole
+is what lets both adapters share them. The product runner (`runners/product.py`), the
+product judge (`judges/product.py`) and the trace parsers (`runners/traces.py`) import
+`subprocess` and `json`, not a framework: a product is an executable and a trace grammar,
+and `process.py` beneath them imports nothing from the project at all.
+`tests/test_framework_isolation.py` scans the whole
 package for top-level framework imports and allows only those four files; it matches import
 *forms*, so `cli.py` importing our own `skill_lens.runners.pydantic_ai` is not a false
 positive. This is what keeps the `Runner` and `Judge` seams real rather than nominal.
@@ -1029,6 +1037,41 @@ must not contain it. A preset is the verified spelling for its product; a reposi
 needs a different skill directory or invocation is describing a different product and says
 so with `cli`. `[runners.<name>]` holds no token: the product reads its own.
 
+### The product judge (M9 part 2)
+
+**A product judge's verdict is the first balanced JSON object in the reply, validated as
+`JudgeOutput`; anything else is `JudgeVerdict.error`.** A product has no structured-output
+mode, so `judges/product.py` sends the shared prompt (`judges/prompt.py`'s rules and
+request, the same text the framework judges send) as one user turn closed by a line asking
+for one JSON object and nothing else, then reads the reply with `extract_json_object`: one
+pass over the text, a stack of unmatched `{` positions outside JSON strings, the earliest
+opening brace that closes wins — so an outer object beats an inner one that closed first,
+and a `}` inside quoted evidence never ends the object early. The object is validated by
+`_RawVerdict`, a strict local view of `JudgeOutput` (`extra="forbid"`, `checks` required,
+`title="JudgeOutput"` so the error names the shape callers asked for) — local so that the
+shared `JudgeOutput` the framework judges bind as structured output stays lenient and its
+generated JSON schema, and the cassettes recorded against it, are unchanged. No object,
+a cut-off object, the wrong shape, an empty object or a key beside `checks` is
+`JudgeVerdict(error="JudgeOutputInvalid: ...")` naming the actual mismatch, one attempt,
+which `JudgeEvaluator` reports as an **errored** case: an unreadable verdict is an infra
+signal, not a low score, and the error says so here rather than surfacing several layers
+away as a mismatched id set. A product failure — timeout, non-zero exit, truncated output,
+an executable gone since preflight — is `JudgeVerdict.error` the same way, through the
+runner's own `read_trace`; the judge never raises. An over-size prompt is checked in the
+judge before the product starts, also `JudgeVerdict.error`, but never reaches `read_trace`.
+The judge's working directory is a fresh empty temporary directory removed in a `finally`,
+and holds no skill:
+the judge grades text and must not discover the skill under test. `Product.judge_args` is
+appended only when the product judges — `("--tools", "")` for `claude-code`, verified to
+disable every tool; nothing for `copilot`, which has no verified equivalent — after the
+table's `args`, so a repository's model flag still applies. `judge_temperature` is not
+consulted: no product exposes it. Tokens, cost, cost note and model come from the trace,
+so `cli` reports none and Copilot reports a per-request note, as under the runner.
+`ProductJudge.preflight()` finds the executable and runs the preset's `--version` with
+`role="judge"` in the message. `cli.py` demands a key and a `judge_model` only for the two
+keyed judges in `_KEYED_JUDGES`; a product judge is built from its table with neither, and
+`--judge-model` with a product judge is refused as a user error.
+
 ## Extension points
 
 **Adding a runner.** Implement `Runner` in a new module under `runners/`, and put every
@@ -1042,6 +1085,16 @@ return a `RunResult` with `error` set. Build the system prompt with
 rather than writing either again — both adapters must measure the same thing. A runner that
 must refuse a run before any case executes defines the optional `preflight` hook and raises
 an authoring error from it.
+
+**Adding a judge.** The same shape under `judges/`: a keyed adapter is registered in
+`cli._KEYED_JUDGES` and receives the shared model, `judge_temperature` and the retry
+settings; a product needs no new class — `ProductJudge` wraps whichever `Product` the
+name resolves to, so a new preset in `runners/product.py` (with its `judge_args`, if the
+product has a verified way to grade without tools) serves as runner and judge at once.
+Render the prompt with `judges/prompt.py`, never raise for a provider failure — set
+`JudgeVerdict.error` — and return per-check verdicts only; `JudgeEvaluator` derives
+`passed` and `score`. A judge that must refuse a run before any case executes defines the
+optional no-argument `preflight()` hook.
 
 **Adding an evaluator.** Implement `Evaluator` in a new module under `evaluators/` and add
 it to the evaluator list in `orchestrator.py`. Return `passed=False` for a real failure;

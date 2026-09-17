@@ -20,8 +20,10 @@ from skill_lens.comparison import build_delta
 from skill_lens.config import PRODUCT_NAMES, Config, ConfigError, load_config
 from skill_lens.evaluators.assertion import InvalidAssertionValue, UnknownAssertionKind
 from skill_lens.gating import EXIT_OK, evaluate_gate
+from skill_lens.judges.base import Judge
 from skill_lens.judges.fake import FakeJudge
 from skill_lens.judges.langchain import LangChainJudge
+from skill_lens.judges.product import ProductJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.mcp_import import McpImportError, parse_tools_list, render_tool_mocks
 from skill_lens.models import Skill
@@ -48,7 +50,9 @@ app = typer.Typer(help="Run evaluations on Agent Skills (SKILL.md).", no_args_is
 # from their [runners.<name>] table; `fake` takes nothing.
 _KEYED_RUNNERS = {"pydantic-ai": PydanticAIRunner, "langchain": LangChainRunner}
 _RUNNER_NAMES: tuple[str, ...] = ("fake", *_KEYED_RUNNERS, *PRODUCT_NAMES)
-_JUDGES = {"fake": FakeJudge, "pydantic-ai": PydanticAIJudge, "langchain": LangChainJudge}
+# The same three kinds -- fake, keyed, product -- apply to a judge as to a runner.
+_KEYED_JUDGES = {"pydantic-ai": PydanticAIJudge, "langchain": LangChainJudge}
+_JUDGE_NAMES: tuple[str, ...] = ("fake", *_KEYED_JUDGES, *PRODUCT_NAMES)
 
 # Authoring errors: bad skill/case/config files, or a malformed assertion in an
 # eval YAML (Tasks 6/7 decided the latter aborts the whole run rather than
@@ -66,8 +70,8 @@ _AUTHORING_ERRORS = (
     # scripts enabled but cannot run here: a missing interpreter, or a
     # required sandbox that is absent
     ScriptSetupError,
-    # a product runner that cannot run here: executable missing, version
-    # probe failed, or a case it cannot serve
+    # a product runner or judge that cannot run here: executable missing,
+    # version probe failed, or a case it cannot serve
     ProductSetupError,
 )
 
@@ -148,6 +152,20 @@ def _build_runner(name: str, settings: Config, model_name: str) -> Runner:
             retry_backoff_seconds=settings.retry_backoff_seconds,
         )
     return ProductRunner(settings.product(name))
+
+
+def _build_judge(name: str, settings: Config, model_name: str) -> Judge:
+    """One judge by name, the way `_build_runner` builds a runner."""
+    if name == "fake":
+        return FakeJudge()
+    if name in _KEYED_JUDGES:
+        return _KEYED_JUDGES[name](
+            model=model_name,
+            temperature=settings.judge_temperature,
+            retries=settings.retries,
+            retry_backoff_seconds=settings.retry_backoff_seconds,
+        )
+    return ProductJudge(settings.product(name))
 
 
 @app.command()
@@ -264,10 +282,9 @@ def run(
         uses_product = any(name in PRODUCT_NAMES for name in runner_names)
         model_name = model if model is not None else settings.model
         judge_name = settings.judge
-        if judge_name not in _JUDGES:
+        if judge_name not in _JUDGE_NAMES:
             raise typer.BadParameter(f"unknown judge: {judge_name}")
-        judge_class = _JUDGES[judge_name]
-        judge_needs_key = getattr(judge_class, "needs_api_key", False)
+        judge_needs_key = judge_name in _KEYED_JUDGES
         # A flag nothing reads is a trap, not a no-op: `--runner copilot
         # --model gpt-5.2` would look honoured while the product ran its own
         # default. `--model` is read by a keyed runner, or by a keyed judge
@@ -299,14 +316,7 @@ def run(
         if judge_needs_key:
             _require_a_model("--judge-model", resolved_judge_model)
             check_api_key(resolved_judge_model, os.environ)
-            active_judge = judge_class(
-                model=resolved_judge_model,
-                temperature=settings.judge_temperature,
-                retries=settings.retries,
-                retry_backoff_seconds=settings.retry_backoff_seconds,
-            )
-        else:
-            active_judge = judge_class()
+        active_judge = _build_judge(judge_name, settings, resolved_judge_model)
         if needs_key or uses_product:
             # A ceiling, not a forecast. Printed for keyed and product
             # runners alike: both spend. The tag and case filters are applied

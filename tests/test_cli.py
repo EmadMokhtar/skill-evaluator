@@ -956,9 +956,12 @@ def test_a_single_runner_plan_line_still_states_the_runner_factor(tmp_path, monk
     assert "x 1 runner(s) x" in plain(result.stdout)
 
 
-def _product_config(tmp_path, name="copilot") -> Path:
+def _product_config(tmp_path, name="copilot", judge: str | None = None) -> Path:
     command = [sys.executable, str(FAKE_PRODUCT), "-p", "{prompt}"]
-    body = f"[runners.{name}]\ncommand = {command!r}\n".replace("'", '"')
+    # A key after a [table] header would belong to that table, so the judge
+    # line -- when there is one -- goes first.
+    prefix = f'judge = "{judge}"\n' if judge is not None else ""
+    body = f"{prefix}[runners.{name}]\ncommand = {command!r}\n".replace("'", '"')
     path = tmp_path / "skill-lens.toml"
     path.write_text(body, encoding="utf-8")
     return path
@@ -1068,3 +1071,102 @@ def test_a_product_runner_and_a_keyed_runner_share_one_invocation(tmp_path, monk
     )
     assert result.exit_code == 2
     assert "OPENAI_API_KEY" in result.output
+
+
+JUDGED_CASES_YAML = """cases:
+  - name: pongs
+    task: Please ping.
+    judge:
+      rubric:
+        - greets by name
+        - asks a question
+"""
+
+
+def test_a_product_judge_grades_a_rubric(tmp_path, monkeypatch):
+    # `JudgeEvaluator` numbers a two-entry rubric r1/r2 positionally; the
+    # shared fixture is scripted with c1/c2 (test_product_judge.py builds its
+    # JudgeRequest directly with those ids, bypassing that numbering), so a
+    # private copy with the ids renamed is what makes this a real grade
+    # rather than an id-mismatch error. The shared fixture itself stays
+    # untouched -- test_product_judge.py's unit tests pin c1/c2.
+    fixture_text = (PRODUCT_FIXTURES / "claude-code-verdict.jsonl").read_text(encoding="utf-8")
+    verdict_path = tmp_path / "verdict-r.jsonl"
+    verdict_path.write_text(
+        fixture_text.replace('\\"c1\\"', '\\"r1\\"').replace('\\"c2\\"', '\\"r2\\"'),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(verdict_path))
+    skill_dir = _make_skill(tmp_path, cases=JUDGED_CASES_YAML)
+    config = _product_config(tmp_path, name="claude-code", judge="claude-code")
+    # The same fake serves runner and judge here: the runner reads a verdict
+    # trace as its output (fine -- assertions are not what this test checks)
+    # and the judge reads the two-check verdict.
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--runner", "claude-code", "--config", str(config)]
+    )
+    assert result.exit_code == 1, result.output  # r2 failed in the fixture verdict
+    assert "0 errored" in result.output  # the case failed; it did not error
+    assert "r2: no name given" in result.output  # the check's evidence line the console renders
+    assert "product claude-code" in result.output
+
+
+def test_a_product_judge_needs_no_key_and_no_judge_model(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(PRODUCT_FIXTURES / "claude-code-verdict.jsonl"))
+    skill_dir = _make_skill(tmp_path)  # no judge: block, so the judge is never called
+    config = _product_config(tmp_path, name="claude-code", judge="claude-code")
+    result = runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
+    assert result.exit_code == 0, result.output
+    assert "OPENAI_API_KEY" not in result.output
+
+
+def test_judge_model_with_a_product_judge_is_a_user_error(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-lens.toml").write_text('judge = "copilot"\n', encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(skill_dir),
+            "--judge-model",
+            "x",
+            "--config",
+            str(tmp_path / "skill-lens.toml"),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "--judge-model is read by" in plain(result.output)
+
+
+def test_a_product_judge_that_is_not_installed_is_exit_2_before_any_case(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-lens.toml").write_text('judge = "copilot"\n', encoding="utf-8")
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--config", str(tmp_path / "skill-lens.toml")]
+    )
+    assert result.exit_code == 2
+    assert "judge copilot: 'copilot' is not on PATH" in plain(result.output)
+
+
+def test_model_with_a_product_judge_and_the_fake_runner_is_a_user_error(tmp_path):
+    # --model is rejected before run_evals ever preflights the judge, so this
+    # is a pure argument-parsing error: no copilot executable needs to exist.
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-lens.toml").write_text('judge = "copilot"\n', encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(skill_dir),
+            "--runner",
+            "fake",
+            "--model",
+            "x",
+            "--config",
+            str(tmp_path / "skill-lens.toml"),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "--model is read by pydantic-ai and langchain only" in plain(result.output)

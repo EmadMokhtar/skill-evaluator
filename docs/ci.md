@@ -197,7 +197,10 @@ with its permission prompts disabled and the whole job environment in reach, so 
 token only to jobs whose checkout you trust — see
 [Security](security.md#product-runners) for why pinning `runner:` alone is not enough. The
 `model` input is refused (exit 2) when only product runners are named and no keyed judge
-falls back to it; set the product's model with `[runners.<name>] args` in `skill-lens.toml`.
+falls back to it, and so is `judge-model` when the file's `judge` is a product
+(`copilot`, `claude-code` or `cli` — see
+[Judging with a product](runners.md#judging-with-a-product)); set the product's model with
+`[runners.<name>] args` in `skill-lens.toml`, which serves the runner and the judge alike.
 
 ## Without the action
 
