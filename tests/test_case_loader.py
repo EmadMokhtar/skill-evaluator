@@ -714,3 +714,64 @@ def test_a_trajectory_naming_run_script_without_a_workspace_is_rejected(tmp_path
     )
     with pytest.raises(CaseParseError, match="workspace and bundle tools only exist"):
         parse_cases_file(path)
+
+
+INPUT_SCHEMA_CASE = """cases:
+  - name: n
+    task: t
+    tools:
+      - name: get-pull-request
+        description: Get a pull request
+        input_schema:
+          type: object
+          properties:
+            owner: {type: string}
+            pull_number: {type: integer}
+          required: [owner]
+        returns: '{"number": 1}'
+    trajectory:
+      called: [get-pull-request]
+"""
+
+
+def test_a_tool_may_declare_an_input_schema(tmp_path):
+    cases = parse_cases_file(_write(tmp_path, INPUT_SCHEMA_CASE))
+    tool = cases[0].tools[0]
+    assert tool.name == "get-pull-request"
+    assert tool.input_schema["required"] == ["owner"]
+    assert tool.parameters == {}
+
+
+def test_a_tool_may_not_declare_both_parameters_and_an_input_schema(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    tools:\n"
+        "      - name: lookup\n        parameters: {q: string}\n"
+        "        input_schema: {type: object}\n",
+    )
+    with pytest.raises(CaseParseError, match="tool 'lookup' declares both parameters and"):
+        parse_cases_file(path)
+
+
+def test_an_input_schema_that_is_not_an_object_is_rejected(tmp_path):
+    # Every provider requires a tool's arguments to be an object.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    tools:\n"
+        "      - name: lookup\n        input_schema: {type: string}\n",
+    )
+    with pytest.raises(
+        CaseParseError, match="tool 'lookup' input_schema must declare type: object"
+    ):
+        parse_cases_file(path)
+
+
+def test_a_malformed_input_schema_is_rejected_at_load_time(tmp_path):
+    # Caught before any case runs, like an assertion's json_schema.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    tools:\n"
+        "      - name: lookup\n        input_schema: {type: 5}\n",
+    )
+    with pytest.raises(CaseParseError, match="tool 'lookup' has an invalid input_schema"):
+        parse_cases_file(path)
