@@ -1084,7 +1084,19 @@ JUDGED_CASES_YAML = """cases:
 
 
 def test_a_product_judge_grades_a_rubric(tmp_path, monkeypatch):
-    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(PRODUCT_FIXTURES / "claude-code-verdict.jsonl"))
+    # `JudgeEvaluator` numbers a two-entry rubric r1/r2 positionally; the
+    # shared fixture is scripted with c1/c2 (test_product_judge.py builds its
+    # JudgeRequest directly with those ids, bypassing that numbering), so a
+    # private copy with the ids renamed is what makes this a real grade
+    # rather than an id-mismatch error. The shared fixture itself stays
+    # untouched -- test_product_judge.py's unit tests pin c1/c2.
+    fixture_text = (PRODUCT_FIXTURES / "claude-code-verdict.jsonl").read_text(encoding="utf-8")
+    verdict_path = tmp_path / "verdict-r.jsonl"
+    verdict_path.write_text(
+        fixture_text.replace('\\"c1\\"', '\\"r1\\"').replace('\\"c2\\"', '\\"r2\\"'),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(verdict_path))
     skill_dir = _make_skill(tmp_path, cases=JUDGED_CASES_YAML)
     config = _product_config(tmp_path, name="claude-code", judge="claude-code")
     # The same fake serves runner and judge here: the runner reads a verdict
@@ -1093,13 +1105,10 @@ def test_a_product_judge_grades_a_rubric(tmp_path, monkeypatch):
     result = runner.invoke(
         app, ["run", str(skill_dir), "--runner", "claude-code", "--config", str(config)]
     )
-    assert result.exit_code == 1, result.output  # c2 failed in the fixture verdict
+    assert result.exit_code == 1, result.output  # r2 failed in the fixture verdict
+    assert "0 errored" in result.output  # the case failed; it did not error
+    assert "no name given" in result.output  # the failing check's evidence
     assert "product claude-code" in result.output
-    assert "judge" in result.output
-    # The failing check's own evidence is visible in the output either way:
-    # whether the rubric's positional r1/r2 ids happen to line up with the
-    # fixture's scripted c1/c2 ids or not.
-    assert "no name given" in result.output
 
 
 def test_a_product_judge_needs_no_key_and_no_judge_model(tmp_path, monkeypatch):
