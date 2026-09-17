@@ -130,7 +130,7 @@ product discovers skills, and read the output, tool calls, tokens and the skill-
 back from the product's own trace; `--runner cli` does the same for any command a
 `[runners.cli]` table names, with stdout as the output. No provider API key is involved:
 the product uses its own auth. The two presets carry the argv the probes verified, and a
-`[runners.<name>]` table appends flags with `args` (a model, say) or replaces the argv with
+`[runners.<name>]` table appends flags with `args` (for example, a model) or replaces the argv with
 `command`. A once-per-run preflight hook on the `Runner` protocol finds the executable,
 runs its `--version`, and refuses the cases the runner cannot serve — `tools:` under any
 product, `trajectory:` or `mode: offered` under `cli` — before any quota is spent. Every
@@ -146,7 +146,8 @@ and [Security](security.md#product-runners).
 
 Part 2 — `judge = "copilot"`, `"claude-code"` or `"cli"`, grading rubrics through the same
 product — is next. Deferred: mock tools under a product through an MCP bridge, a per-case
-timeout, an automated hermetic Copilot run, and tool-name normalisation across products.
+timeout, an automated hermetic Copilot run (one that loads nothing from the user's personal
+setup), and tool-name normalisation across products.
 See the
 [M9 design](https://github.com/EmadMokhtar/skill-evaluator/blob/main/docs/superpowers/specs/2026-09-17-skill-lens-m9-design.md).
 

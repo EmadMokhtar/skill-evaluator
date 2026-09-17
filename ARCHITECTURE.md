@@ -80,7 +80,7 @@ The framework runners define none; `ProductRunner` does. The hook is looked up w
 | `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. `scaffold_target` decides where `init` writes. |
 | `workspace.py` | The per-case temporary directory: creation, seeding, path containment, and cleanup. Framework-neutral, like every other top-level module. Its methods **raise** (`PathRefused`, `WorkspaceError`) for `cases/loader.py` and the evaluators to catch as authoring or infra errors; `runners/tools.py`'s built-in tools catch those same exceptions and turn them into ordinary tool-result strings instead. |
 | `bundle.py` | A read-only view of the three Agent Skills directories beside `SKILL.md` (`scripts/`, `references/`, `assets/`) and nothing else — an eval file beside `SKILL.md` is never readable by the agent. Same "methods raise, tools catch" split as `workspace.py`. |
-| `scripts.py` | Runs a bundled script: the policy, the once-per-run preflight (interpreters on `PATH`, the sandbox probe), the allowlisted environment, the scratch directory, the process-group timeout, capped output read through the harness's own descriptors, and the `sandbox-exec` / `bwrap` wrapping. Never raises for a script that will not run; raises `ScriptSetupError` only from preflight. |
+| `scripts.py` | Runs a bundled script: the policy, the once-per-run preflight (interpreters on `PATH`, the sandbox probe), the allowlisted environment, the scratch directory, the process-group timeout and the capped output read through the harness's own descriptors (both via `process.py`), and the `sandbox-exec` / `bwrap` wrapping. Never raises for a script that will not run; raises `ScriptSetupError` only from preflight. |
 | `process.py` | Starts a child in its own process group, waits with a timeout, kills the group after every exit, and reads output through the harness's own handle. Shared by `scripts.py` and `runners/product.py`; imports nothing from the rest of the project. |
 | `runners/base.py` | The `Runner` protocol. `run` takes optional `workspace=` and `scripts=` keywords, both additive with a default, so a runner written against an earlier milestone keeps working. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
@@ -917,9 +917,11 @@ for a generic product, so the runner never claims what it cannot observe.
 tokens what `cost_note` is to cost: `0 <= max_tokens` is always true, so `BudgetEvaluator`
 records a `max_tokens` under a non-empty `usage_note` as a failing *not evaluated* check
 carrying the note, exactly as it already did for `max_cost_usd` under `cost_note`, and
-excludes it from `score`'s divisor. Copilot bills per premium request, so its cost is `0.0`
-with a `cost_note` naming the count and `max_cost_usd` fails as not evaluated; Claude Code
-reports a list-price `total_cost_usd`, a real and comparable number, so it has none.
+excludes it from `score`'s divisor. Copilot bills per premium request (its billing unit:
+one counted request to a model, not a token count), so its cost is `0.0` with a
+`cost_note` naming the count and `max_cost_usd` fails as not evaluated; Claude Code reports
+`total_cost_usd` at list price (the provider's published per-token price), a real and
+comparable number, so it has none.
 
 **A truncated trace is `RunResult.error`, never a partial parse.** The final event is the
 last line, and losing it loses the output. `invoke` compares the captured size against
@@ -942,8 +944,9 @@ framework runner in the same matrix. `TRUST_NOTE` is fixed harness text on
 cannot drift and the JSON carries the sentence a human reads.
 
 **Preflight spends nothing.** `ProductRunner.preflight` finds the executable on `PATH`
-and *executes* its version command (a `copilot` that cannot start is exit 2 up front, not
-thirty errored cases — the same rule as the sandbox probe), checks every skill name is one
+and, for the two presets, *executes* its `--version` (a `copilot` that cannot start is exit
+2 up front, not thirty errored cases — the same rule as the sandbox probe; `cli` has no
+version command, so only the `PATH` lookup applies to it), checks every skill name is one
 directory entry, and refuses `tools:` under any product and `trajectory:` or `mode:
 offered` under `cli`, all before the first case. The orchestrator hands it only the
 candidate-arm `(skill, case)` pairs planned for that runner, once each: compatibility is a
@@ -961,7 +964,8 @@ nothing from the rest of the project.
 
 **`--model` with nothing to read it is a user error, and so is `--judge-model`.** Before
 M9, `--runner fake --model x` was silently ignored; with `--runner copilot` that silence
-becomes a trap, because the flag looks honoured while the product runs its own default.
+becomes a mistake that is easy to miss, because the flag looks honoured while the product
+runs its own default.
 `cli.py` refuses `--model` unless a keyed runner is named or a keyed judge with no
 `judge_model` of its own will fall back to it, and refuses `--judge-model` unless the judge
 is keyed. A product's model is set with `[runners.<name>] args`, which never reaches the
@@ -979,7 +983,7 @@ executable missing at run time and a `ProductSetupError` from delivery are all
 turns it into exit 2.
 
 **`command` replaces the argv; `args` appends; presets forbid `skills_dir` and `invoke`.**
-Two knobs with two meanings: drop an isolation flag with `command`, add a model with
+Two keys with two meanings: drop an isolation flag with `command`, add a model with
 `args`. `command` must contain exactly one element equal to `{prompt}`, not in the
 executable slot, substituted as a whole argv element and never through a shell; `args`
 must not contain it. A preset is the verified spelling for its product; a repository that

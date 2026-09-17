@@ -154,7 +154,7 @@ max_output_bytes = 8000000                        # default
 | `skills_dir` | `".agents/skills"` | `cli` only. Where the skill is written, relative to the working directory; no absolute path and no `..`. |
 | `invoke` | `"{task}"` | `cli` only. The prompt in `mode: loaded`; `{name}` and `{task}` are substituted, and `{task}` must appear. |
 
-Two knobs with two meanings: drop an isolation flag with `command`, add a model with
+Two keys with two meanings: drop an isolation flag with `command`, add a model with
 `args`. `skills_dir` or `invoke` under a preset, an unknown table name, a `command` without
 exactly one `{prompt}` element, `{prompt}` in `args`, and `cli` named as a runner with no
 `command` are all config errors (exit 2) naming the key. No API key or token belongs here:

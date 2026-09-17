@@ -86,9 +86,10 @@ stops a stray `AGENTS.md` or a personal instructions file shaping a Copilot run;
 servers out of a Claude Code run while the project skill is still discovered and
 OAuth auth still works; `--no-session-persistence` writes nothing under `~/.claude`.
 Personal skills and plugins under `~/.copilot` do still load for Copilot — that is the
-product as you have it; for a hermetic run point `COPILOT_HOME` at an empty directory
-and set `COPILOT_GITHUB_TOKEN`. Add flags with `[runners.<name>] args` (a model, say);
-replace the whole argv with `command`. See
+product as you have it; for a hermetic run (one that loads nothing from your personal
+setup) point `COPILOT_HOME` at an empty directory and set `COPILOT_GITHUB_TOKEN`. Add flags
+with `[runners.<name>] args` (for example, a model); replace the whole argv with `command`.
+See
 [Configuration](configuration.md#product-runners).
 
 **What the product sees.** The eval's working directory (the case's workspace when it
@@ -111,9 +112,9 @@ modes; under `--baseline previous` the previous version is delivered with its ow
 | `trajectory:` (the product's own tool names, e.g. `bash`, `Bash`) | yes | yes | no — an authoring error |
 | `mode: offered` / `skill_triggered` | yes | yes | no — an authoring error |
 | `budget: max_tokens` (input + cache read + cache write, plus output) | when the trace reports usage; otherwise a failing "not evaluated" check | yes | failing "not evaluated" check |
-| `budget: max_cost_usd` | failing "not evaluated" check — Copilot bills per premium request, and the note says how many | yes, at the list price the product reports (`total_cost_usd`) | failing "not evaluated" check |
+| `budget: max_cost_usd` | failing "not evaluated" check — Copilot bills per premium request (its billing unit: one counted request, not tokens), and the note says how many | yes, at list price (the provider's published per-token price), as the product reports it in `total_cost_usd` | failing "not evaluated" check |
 | `budget: max_latency_ms` | yes | yes | yes |
-| `tools:` (mock tools) | authoring error under any product runner | | |
+| `tools:` (mock tools) | authoring error | authoring error | authoring error |
 
 Tool calls are what the model *requested* (Copilot's `toolRequests`, Claude Code's
 `tool_use` blocks), not what executed — a refused call was still the model's choice, the

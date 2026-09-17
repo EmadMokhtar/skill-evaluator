@@ -343,8 +343,9 @@ form, that file is the explanation.
   disabled, full environment, no sandbox; `allow_scripts` governs only `run_script`.
   `TRUST_NOTE` lives on `ProductStatus.trust`, on the model, so the three reporters cannot
   drift.
-- **Product preflight spends nothing**: executable found and executed (`--version`), skill
-  names checked, `tools:` refused under any product and `trajectory:`/`offered` under
+- **Product preflight spends nothing**: executable found on `PATH` and, for the two
+  presets, executed (`--version`; `cli` has no version command), skill names checked,
+  `tools:` refused under any product and `trajectory:`/`offered` under
   `cli`, all before the first case; only the candidate-arm cases that will run are
   inspected, once each.
 - **`ProductRunner.run` never raises for a product failure.** Timeout, non-zero exit,

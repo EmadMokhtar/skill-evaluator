@@ -271,15 +271,16 @@ is the pull request, so the file can name a product runner for itself in `defaul
 and set its `[runners.<name>]` table — including a `command` that replaces the product's
 argv with any executable on the runner. A workflow that runs untrusted pull requests should
 pin `runner:` explicitly in the action (the flag replaces the file's `default_runner`, so
-the file cannot pick the product) and pass the product's token only to jobs it trusts:
-the pin decides *which* runner, but the checkout's table still decides *how* it starts,
-so the token is what keeps an untrusted checkout from spending your quota or acting as
-you. Under plain `pull_request` a fork gets no secrets, so the product has no token to act
-with and its cases **error** instead of running (preflight checks that the executable
-starts, not that it is signed in); the exposure is `pull_request_target`, pull requests
-from collaborators, and self-hosted runners, the same three as for scripts. For a hermetic
-Copilot run, point `COPILOT_HOME` at an empty directory and provide
-`COPILOT_GITHUB_TOKEN`, so nothing from your personal `~/.copilot` loads. See
+the file cannot pick the product). It should also pass the product's token only to jobs it
+trusts. The pin decides *which* runner, but the checkout's table still decides *how* it
+starts, so the token is what keeps an untrusted checkout from spending your quota or acting
+as you. Preflight checks that the executable starts, not that it is signed in: if the
+product's own auth fails at run time, that surfaces as an **errored** case, and what the
+product does with whatever token the job gives it is the product's behaviour, not
+skill-lens's. The exposure is `pull_request_target`, pull requests from collaborators, and
+self-hosted runners, the same three as for scripts. For a hermetic Copilot run (one that
+loads nothing from your personal setup), point `COPILOT_HOME` at an empty directory and
+provide `COPILOT_GITHUB_TOKEN`, so nothing from your personal `~/.copilot` loads. See
 [Product runners](runners.md#product-runners) for what each product runner measures and
 [CI integration](ci.md#running-under-a-product) for the workflow.
 

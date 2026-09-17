@@ -195,9 +195,9 @@ so a pull request cannot pick the product for itself:
 Each case spends the product's quota; the `Plan:` line prints the ceiling. The product runs
 with its permission prompts disabled and the whole job environment in reach, so give the
 token only to jobs whose checkout you trust — see
-[Security](security.md#product-runners) for why pinning `runner:` alone is not enough. A
-`--model` input is refused (exit 2) when only product runners are named; set the product's
-model with `[runners.<name>] args` in `skill-lens.toml`.
+[Security](security.md#product-runners) for why pinning `runner:` alone is not enough. The
+`model` input is refused (exit 2) when only product runners are named and no keyed judge
+falls back to it; set the product's model with `[runners.<name>] args` in `skill-lens.toml`.
 
 ## Without the action
 
