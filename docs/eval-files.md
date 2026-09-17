@@ -165,7 +165,8 @@ naming a file no case could ever produce, is an authoring error.
 
 Judging costs money, so it is opted into explicitly with `judge = "pydantic-ai"` (or
 `"langchain"`, or an installed product — `"copilot"`, `"claude-code"`, `"cli"` — which
-needs no API key) in [`skill-lens.toml`](configuration.md#judging). The default
+needs no API key, but spends the product's own quota) in
+[`skill-lens.toml`](configuration.md#judging). The default
 `judge = "fake"` does not grade at all —
 and rather than passing a rubric it never checked, it reports the case as **errored**. Judge
 spend is reported as "judge overhead", separately from what the runs themselves cost, and

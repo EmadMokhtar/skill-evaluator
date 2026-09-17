@@ -132,7 +132,10 @@ scripts which did not run because execution was off, each as `{skill_name, scrip
 `products` (one entry per product the run executed, as a runner or as the judge — a product
 serving as both is listed once — each as `{name, executable, version, trust}`; `trust` is
 the fixed sentence about permission prompts and the missing sandbox, the same one the
-console prints; empty when no product ran), and the `gate` decision with its reasons.
+console prints, describing the product's runner trust whichever seat it filled — a
+judge-only product delivers no skill, so it has no bundle for that sentence's reachable-
+scripts clause to reach; empty when no product ran), and the `gate` decision with its
+reasons.
 
 Comparative evals changed this document additively, not by rewriting what was already there:
 every M3 field means what it always meant, and M4 only adds fields alongside them — `arm` and

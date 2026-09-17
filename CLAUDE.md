@@ -390,7 +390,8 @@ form, that file is the explanation.
   holds no skill; `judge_temperature` is not consulted. `judges/product.py` sends the
   shared prompt as one text turn closed by a JSON-only line; `extract_json_object` takes
   the earliest-opening balanced `{...}` outside JSON strings in one pass; `_RawVerdict` is
-  a strict local view of `JudgeOutput` (`extra="forbid"`, `checks` required,
+  a strict local view of `JudgeOutput` (`extra="forbid"` at the top level — a check's own
+  extra keys are ignored, as `CheckResult` allows — `checks` required,
   `title="JudgeOutput"`), so the shared schema the framework judges send as structured
   output — and their cassettes — is unchanged. A missing, cut-off or wrong-shaped object is
   `JudgeVerdict(error="JudgeOutputInvalid: ...")`, which `JudgeEvaluator` reports as an

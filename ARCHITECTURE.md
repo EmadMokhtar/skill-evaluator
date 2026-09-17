@@ -1056,9 +1056,11 @@ a cut-off object, the wrong shape, an empty object or a key beside `checks` is
 which `JudgeEvaluator` reports as an **errored** case: an unreadable verdict is an infra
 signal, not a low score, and the error says so here rather than surfacing several layers
 away as a mismatched id set. A product failure — timeout, non-zero exit, truncated output,
-an over-size prompt, an executable gone since preflight — is `JudgeVerdict.error` the same
-way, through the runner's own `read_trace`; the judge never raises. The judge's working
-directory is a fresh empty temporary directory removed in a `finally`, and holds no skill:
+an executable gone since preflight — is `JudgeVerdict.error` the same way, through the
+runner's own `read_trace`; the judge never raises. An over-size prompt is checked in the
+judge before the product starts, also `JudgeVerdict.error`, but never reaches `read_trace`.
+The judge's working directory is a fresh empty temporary directory removed in a `finally`,
+and holds no skill:
 the judge grades text and must not discover the skill under test. `Product.judge_args` is
 appended only when the product judges — `("--tools", "")` for `claude-code`, verified to
 disable every tool; nothing for `copilot`, which has no verified equivalent — after the

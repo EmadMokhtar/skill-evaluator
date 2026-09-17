@@ -124,8 +124,11 @@ whether it arrives from `model`, `judge_model`, or the matching flag.
 
 One `[runners.<name>]` table per product — `copilot`, `claude-code`, or `cli` — whether the
 product runs cases, grades rubrics as the [judge](#judging), or both: the same table serves
-the judge. Each table is optional for a preset (the preset supplies the verified argv) and
-required for `cli`, which has no preset:
+the judge. `args` in particular reaches both seats at once: a flag added there, such as a
+hypothetical `--deny-tool`, changes what the product can do as the runner and as the
+judge — there is no separate key to restrict one without the other. Each table is optional
+for a preset (the preset supplies the verified argv) and required for `cli`, which has no
+preset:
 
 ```toml
 default_runner = ["copilot", "claude-code"]
