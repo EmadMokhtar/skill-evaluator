@@ -108,9 +108,22 @@ def test_tool_spec_rejects_an_unsupported_parameter_type():
         ToolSpec(name="lookup", parameters={"order_id": "uuid"})
 
 
-def test_tool_spec_rejects_a_name_that_is_not_an_identifier():
-    with pytest.raises(ValidationError):
-        ToolSpec(name="look up")
+def test_tool_spec_accepts_a_hyphenated_name():
+    # MCP servers routinely name tools `get-pull-request`. A mock must answer to
+    # the name the live server uses, and both providers accept a hyphen.
+    assert ToolSpec(name="get-pull-request").name == "get-pull-request"
+
+
+@pytest.mark.parametrize("name", ["look up", "a.b", "café", "", "x" * 65])
+def test_tool_spec_rejects_a_name_no_provider_would_register(name):
+    # ^[A-Za-z0-9_-]{1,64}$ is the rule OpenAI and Anthropic enforce. A name
+    # outside it could never be registered, so it is an authoring error.
+    with pytest.raises(ValidationError, match="tool name must match"):
+        ToolSpec(name=name)
+
+
+def test_tool_spec_accepts_a_sixty_four_character_name():
+    assert len(ToolSpec(name="x" * 64).name) == 64
 
 
 def test_tool_spec_accepts_a_full_declaration():
@@ -122,6 +135,17 @@ def test_tool_spec_accepts_a_full_declaration():
     )
     assert spec.parameters["order_id"] == "string"
     assert spec.returns == '{"id": "1234"}'
+
+
+def test_tool_spec_carries_an_input_schema():
+    schema = {"type": "object", "properties": {"owner": {"type": "string"}}}
+    spec = ToolSpec(name="get_pull_request", input_schema=schema)
+    assert spec.input_schema == schema
+    assert spec.parameters == {}
+
+
+def test_tool_spec_input_schema_defaults_to_none():
+    assert ToolSpec(name="ping").input_schema is None
 
 
 def test_case_carries_tools_trajectory_and_budget():
