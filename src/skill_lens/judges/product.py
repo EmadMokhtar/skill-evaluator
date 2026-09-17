@@ -17,6 +17,7 @@ text, and must not discover the skill under test.
 
 from __future__ import annotations
 
+import json
 import shutil
 import tempfile
 from dataclasses import replace
@@ -115,17 +116,24 @@ def extract_json_object(text: str) -> str | None:
     last) can complete after an inner one already has, and "first balanced
     object" means the earliest-opening brace, not the first to close.
 
-    A completion that empties the stack closes a *top-level* object -- one
-    not nested inside another still-open one. Two or more of those mean the
-    reply holds two separate top-level JSON objects (siblings, not one
-    nested in the other), which is ambiguous: `AmbiguousReply` is raised
-    naming the count instead of silently returning whichever opened first.
-    A single top-level completion (or none, when an outer object never
-    closes) is unambiguous, and the earliest-opening completion is
-    returned exactly as before.
+    A completion that empties the stack closes a *top-level* span -- one
+    not nested inside another still-open one. Only a top-level span that
+    parses as a JSON object counts: prose braces such as `{name}` are not
+    objects and must neither be returned in place of the verdict nor make
+    the reply look ambiguous. Two or more counted spans mean the reply holds
+    two separate JSON objects (siblings, not one nested in the other), which
+    is ambiguous: `AmbiguousReply` is raised naming the count instead of
+    silently returning whichever opened first. Exactly one counted span is
+    the verdict. None at all (an outer object that never closes, say) falls
+    back to the earliest-opening completion when that parses as an object,
+    so a nested object inside a broken outer one is still found; prose
+    braces alone yield None. Parsing happens only at top-level completions,
+    whose spans never overlap, plus at most once for the fallback, so the
+    pass stays linear.
     """
     stack: list[int] = []
     best: tuple[int, int] | None = None
+    best_object: tuple[int, int] | None = None
     top_level_completions = 0
     in_string = False
     escaped = False
@@ -146,13 +154,28 @@ def extract_json_object(text: str) -> str | None:
             start = stack.pop()
             if best is None or start < best[0]:
                 best = (start, index)
-            if not stack:
+            if not stack and _is_json_object(text[start : index + 1]):
                 top_level_completions += 1
+                if best_object is None:
+                    best_object = (start, index)
     if top_level_completions > 1:
         raise AmbiguousReply(top_level_completions)
+    if best_object is not None:
+        return text[best_object[0] : best_object[1] + 1]
     if best is None:
         return None
-    return text[best[0] : best[1] + 1]
+    # No top-level object closed. The earliest completion is a nested one
+    # inside an outer object that never closed; it is the verdict only if
+    # it is itself a JSON object, otherwise the reply holds none.
+    span = text[best[0] : best[1] + 1]
+    return span if _is_json_object(span) else None
+
+
+def _is_json_object(span: str) -> bool:
+    try:
+        return isinstance(json.loads(span), dict)
+    except ValueError:
+        return False
 
 
 class ProductJudge:

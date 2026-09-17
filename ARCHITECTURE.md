@@ -1068,8 +1068,9 @@ table's `args`, so a repository's model flag still applies. `judge_temperature` 
 consulted: no product exposes it. Tokens, cost, cost note and model come from the trace,
 so `cli` reports none and Copilot reports a per-request note, as under the runner.
 `ProductJudge.preflight()` finds the executable and runs the preset's `--version` with
-`role="judge"` in the message, and `needs_api_key = False` keeps `cli.py` from demanding a
-key or a `judge_model`; `--judge-model` with a product judge is refused as a user error.
+`role="judge"` in the message. `cli.py` demands a key and a `judge_model` only for the two
+keyed judges in `_KEYED_JUDGES`; a product judge is built from its table with neither, and
+`--judge-model` with a product judge is refused as a user error.
 
 ## Extension points
 

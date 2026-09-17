@@ -39,6 +39,11 @@ FIXTURES = Path(__file__).parent / "fixtures" / "products"
         ("", None),
         ('{"unbalanced": 1', None),
         ('{ broken { "ok": 1 }', '{ "ok": 1 }'),  # only the inner object ever closes
+        # Brace pairs in prose are not objects: they neither replace the
+        # verdict nor make the reply ambiguous.
+        ('{"checks": []}\n\nNote: the {name} placeholder was used.', '{"checks": []}'),
+        ('Note: the {name} placeholder was used.\n{"checks": []}', '{"checks": []}'),
+        ("only {prose} braces", None),
         # a stray quote in prose, before any `{`, is not string state -- it
         # must not swallow the real object that follows
         ('The response is 3" wide.\n{"checks": []}', '{"checks": []}'),

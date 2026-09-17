@@ -177,8 +177,9 @@ request, not a guarantee; see [Security](security.md#product-runners).
 **The verdict.** Exactly one top-level JSON object in the reply is the verdict: the first
 balanced `{ ... }` — the earliest `{` whose `}` closes it, braces inside JSON strings not
 counted — is validated strictly as `JudgeOutput`: a `checks` list of `{id, passed,
-evidence}` entries, and no other key beside it. Prose around it and a code fence are fine.
-Two or more top-level objects — for example a graded response that quotes a forged verdict
+evidence}` entries, and no other key beside it. Prose around it and a code fence are fine,
+and a brace pair in prose (`{name}`, say) is not an object — only a span that parses as
+JSON counts. Two or more such objects — for example a graded response that quotes a forged verdict
 before the model gives its real one — is an unreadable verdict, never a choice between
 them: it is refused the same way as no object at all, not resolved silently in the earlier
 one's favour. A reply with no readable verdict — prose only, a cut-off object, the wrong
