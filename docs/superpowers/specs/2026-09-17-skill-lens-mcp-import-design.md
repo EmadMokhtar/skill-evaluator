@@ -58,6 +58,7 @@ tools/list listing`):
 | **The name rule is `^[A-Za-z0-9_-]{1,64}$`**, in the model, replacing `isidentifier()`. | The rule both providers enforce. Every ASCII identifier up to 64 characters still passes. A non-ASCII or over-long name now fails at load time; it never worked against a real provider, and only a `FakeRunner`-only suite could have carried one. `skill_tool_name` (the offered-skill tool) is unchanged. |
 | **`ImportedTool` is a frozen dataclass holding a real `ToolSpec`** plus the optional output schema. | The name rule and the `extra="forbid"` config fire at import time through the model itself, so the import and the loader can never disagree about what a valid mock is. `models.py` stays the home of every Pydantic model; `runners/tools.py` already sets the precedent for a plain dataclass beside one. |
 | **`McpImportError` is a user error, exit 2.** | The CI contract: gate pass 0, gate fail 1, user/authoring error 2. It is not added to `cli._AUTHORING_ERRORS`, which belongs to `run`. |
+| **A listing carrying a non-empty `nextCursor` is refused.** | It is one page of several; importing it would be a silent cut, and `--tool` would list only that page's names. |
 
 ## 3. `mcp_import.py`
 
@@ -298,7 +299,7 @@ All offline, all deterministic, all in the zero-cost tier.
 
 - a file argument prints the block and exits 0; `-` reads stdin;
 - a missing file, invalid JSON, an unknown `--tool` each exit 2 with the message on
-  stdout and nothing else on stdout for the success path.
+  **stderr** and nothing on stdout; the success path writes nothing to stderr.
 
 **`tests/test_case_loader.py`** and **`tests/test_models.py`**:
 

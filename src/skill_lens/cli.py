@@ -482,19 +482,27 @@ def mcp_import(
     nothing but the block, so `> tools.yaml` captures exactly it; every error
     goes to stderr.
     """
-    if str(source) == "-":
-        text = sys.stdin.read()
-        label = "<stdin>"
-    else:
-        label = str(source)
-        try:
-            text = source.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            typer.echo(f"cannot read {source}: {exc}", err=True)
-            raise typer.Exit(code=2) from exc
+    label = "<stdin>" if str(source) == "-" else str(source)
+    try:
+        # The rendered block gets pasted into a file the loader reads as
+        # UTF-8, so UTF-8 is the only correct encoding here too -- reading
+        # raw bytes off the buffered stream and decoding them ourselves
+        # means the process locale (e.g. PYTHONIOENCODING=ascii) can never
+        # substitute its own encoding underneath us.
+        text = (
+            sys.stdin.buffer.read().decode("utf-8")
+            if label == "<stdin>"
+            else source.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError) as exc:
+        typer.echo(f"cannot read {label}: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
     try:
         rendered = render_tool_mocks(parse_tools_list(text, source=label), only=tool or ())
     except McpImportError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
-    typer.echo(rendered, nl=False)
+    # Same reasoning on the way out: write UTF-8 bytes straight to the binary
+    # stream rather than `typer.echo`, which would re-encode with the locale.
+    sys.stdout.buffer.write(rendered.encode("utf-8"))
+    sys.stdout.buffer.flush()

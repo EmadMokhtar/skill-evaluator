@@ -154,6 +154,29 @@ def test_an_unknown_shape_names_the_accepted_ones(payload):
         _parse(payload)
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"jsonrpc": "2.0", "id": 1, "result": {"tools": [PULL_REQUEST], "nextCursor": "p2"}},
+        {"tools": [PULL_REQUEST], "nextCursor": "p2"},
+    ],
+    ids=["envelope", "bare-result"],
+)
+def test_a_paginated_listing_is_refused_naming_next_cursor(payload):
+    # A page-one capture would otherwise import a silent subset of the
+    # server's tools, and --tool would only ever be able to list that page's
+    # names.
+    with pytest.raises(McpImportError, match=r"nextCursor 'p2'"):
+        _parse(payload)
+
+
+@pytest.mark.parametrize("cursor", [None, ""])
+def test_a_null_or_empty_next_cursor_is_the_last_page(cursor):
+    payload = {"tools": [PULL_REQUEST], "nextCursor": cursor}
+    names = [tool.spec.name for tool in _parse(payload)]
+    assert names == ["get_pull_request"]
+
+
 def test_a_tool_without_an_input_schema_is_refused_by_name():
     entry = {k: v for k, v in PULL_REQUEST.items() if k != "inputSchema"}
     with pytest.raises(McpImportError, match="tool 'get_pull_request' has no inputSchema"):

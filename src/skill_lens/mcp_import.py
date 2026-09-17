@@ -85,8 +85,20 @@ def _unwrap(data: object, source: str) -> list[object]:
             )
         if "result" in data:
             data = data["result"]
-        if isinstance(data, dict) and isinstance(data.get("tools"), list):
-            return data["tools"]
+        if isinstance(data, dict):
+            # A truthy nextCursor means more tools exist on a later page; a
+            # page-one capture would otherwise import a silent subset, and
+            # --tool would only ever be able to list that page's names. None
+            # or "" means "last page" and is accepted below as usual.
+            cursor = data.get("nextCursor")
+            if cursor:
+                raise McpImportError(
+                    f"{source}: the listing carries nextCursor {cursor!r}, so it is "
+                    f"one page of several; capture every page (or the tool list as "
+                    f"one array) and import that"
+                )
+            if isinstance(data.get("tools"), list):
+                return data["tools"]
     raise McpImportError(f"{source}: expected {_ACCEPTED_SHAPES}")
 
 

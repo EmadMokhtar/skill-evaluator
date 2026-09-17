@@ -775,3 +775,25 @@ def test_a_malformed_input_schema_is_rejected_at_load_time(tmp_path):
     )
     with pytest.raises(CaseParseError, match="tool 'lookup' has an invalid input_schema"):
         parse_cases_file(path)
+
+
+@pytest.mark.parametrize(
+    "schema_yaml",
+    ["{}", '{type: [object, "null"]}'],
+    ids=["empty", "type-array-with-null"],
+)
+def test_an_input_schema_must_declare_a_bare_object_type(tmp_path, schema_yaml):
+    # `{}` is valid JSON Schema but declares no type at all; a type *array*
+    # naming object is valid JSON Schema too but is not the bare `object`
+    # every provider requires a tool's arguments to be. Neither should be
+    # confused with the "malformed schema" case above, which fails
+    # check_schema outright.
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    tools:\n"
+        f"      - name: lookup\n        input_schema: {schema_yaml}\n",
+    )
+    with pytest.raises(
+        CaseParseError, match="tool 'lookup' input_schema must declare type: object"
+    ):
+        parse_cases_file(path)

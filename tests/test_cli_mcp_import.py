@@ -60,11 +60,57 @@ def test_reads_stdin_for_a_dash():
     assert "name: list-issues" in result.stdout
 
 
+CAFE_LISTING = {
+    "tools": [
+        {
+            "name": "get_pull_request",
+            "description": "Café ☕",
+            "inputSchema": {"type": "object"},
+        }
+    ]
+}
+
+
+def test_stdin_is_read_as_utf8():
+    # Piped through `-`: stdin must be decoded as UTF-8 regardless of the
+    # process locale, or a non-ASCII description raises under a narrow one
+    # (e.g. PYTHONIOENCODING=ascii) instead of failing cleanly or succeeding.
+    result = runner.invoke(app, ["mcp-import", "-"], input=json.dumps(CAFE_LISTING).encode("utf-8"))
+    assert result.exit_code == 0, result.output
+    text = result.stdout if isinstance(result.stdout, str) else result.stdout_bytes.decode("utf-8")
+    assert "Café ☕" in text
+
+
+def test_undecodable_stdin_is_a_user_error():
+    result = runner.invoke(app, ["mcp-import", "-"], input=b"\xff\xfe{")
+    assert result.exit_code == 2
+    assert "cannot read <stdin>" in result.stderr
+    assert result.stdout == ""
+
+
+def test_output_is_utf8_bytes(tmp_path):
+    result = runner.invoke(app, ["mcp-import", str(_listing(tmp_path, CAFE_LISTING))])
+    assert result.exit_code == 0, result.output
+    assert "Café ☕" in result.stdout_bytes.decode("utf-8")
+
+
 def test_tool_filters_and_repeats(tmp_path):
-    result = runner.invoke(app, ["mcp-import", str(_listing(tmp_path)), "--tool", "list-issues"])
+    # Twice, in reverse listing order, to pin that the output always comes
+    # back in the listing's own order rather than the order --tool was given.
+    result = runner.invoke(
+        app,
+        [
+            "mcp-import",
+            str(_listing(tmp_path)),
+            "--tool",
+            "list-issues",
+            "--tool",
+            "get_pull_request",
+        ],
+    )
     assert result.exit_code == 0, result.output
     names = [tool["name"] for tool in safe_load(result.stdout)["tools"]]
-    assert names == ["list-issues"]
+    assert names == ["get_pull_request", "list-issues"]
 
 
 def test_an_unknown_tool_is_a_user_error_on_stderr(tmp_path):

@@ -162,8 +162,9 @@ the mock drifts from the server it stands in for — this command copies it inst
 `<source>` is a JSON file, or `-` to read stdin. Any of the three shapes people save is
 accepted: the whole JSON-RPC response (`{"jsonrpc": ..., "result": {"tools": [...]}}`),
 just its result (`{"tools": [...]}`), or the bare array (`[...]`). To capture one, ask any
-MCP client for the listing — `npx @modelcontextprotocol/inspector` shows it under
-*Tools*, and Claude Code's `/mcp` panel lists the same schemas.
+MCP client for the listing. The inspector's CLI mode prints the listing as JSON:
+`npx @modelcontextprotocol/inspector --cli <your server command> --method tools/list >
+tools.json`. Claude Code's `/mcp` panel lists the same schemas.
 
 | Flag | Meaning |
 | --- | --- |
@@ -203,14 +204,15 @@ tools:
 
 Tool names are kept as the server spells them — `get-pull-request` stays hyphenated,
 because the mock has to answer to the name the skill's prose and the live server use. A
-name outside `^[A-Za-z0-9_-]{1,64}$` (the rule every provider enforces) is a user error
-naming the tool, never a rewrite.
+name outside `^[A-Za-z0-9_-]{1,64}$` (the rule OpenAI and Anthropic enforce) is a user
+error naming the tool, never a rewrite.
 
 Stdout carries nothing but the block, so `> tools.yaml` captures exactly it; every error
 goes to stderr. The command never touches the network. Exit `0` on success; exit `2` for
 an unreadable file, invalid JSON, a shape that is not a `tools/list` listing, a listing the
 server answered with an error, a tool without an `inputSchema`, a name no provider would
-register, or an unknown `--tool`.
+register, a listing that carries `nextCursor` (one page of several — capture every page),
+or an unknown `--tool`.
 
 ## `--version`
 
