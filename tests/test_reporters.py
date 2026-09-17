@@ -8,6 +8,7 @@ from skill_lens.models import (
     CaseOutcome,
     CheckResult,
     EvalScore,
+    ProductStatus,
     RunReport,
     RunResult,
     ScriptNote,
@@ -721,3 +722,41 @@ def test_json_carries_the_script_status_and_notes():
     }
     assert payload["script_notes"] == [{"skill_name": "pdf", "script_count": 1}]
     assert json.loads(render_json(_report()))["scripts"] is None
+
+
+_PRODUCT = ProductStatus(
+    name="copilot", executable="/opt/homebrew/bin/copilot", version="1.0.37", trust="no sandbox"
+)
+
+
+def test_console_names_each_product_its_version_and_its_trust_model():
+    report = _report().model_copy(update={"products": [_PRODUCT]})
+    assert render_console(report).splitlines()[0] == (
+        "product copilot 1.0.37 (/opt/homebrew/bin/copilot): no sandbox"
+    )
+
+
+def test_console_omits_a_blank_version():
+    status = _PRODUCT.model_copy(update={"name": "cli", "version": ""})
+    report = _report().model_copy(update={"products": [status]})
+    assert render_console(report).splitlines()[0] == (
+        "product cli (/opt/homebrew/bin/copilot): no sandbox"
+    )
+
+
+def test_console_prints_products_before_the_script_lines():
+    report = _report().model_copy(
+        update={
+            "products": [_PRODUCT],
+            "scripts": ScriptStatus(sandbox="bwrap", detail="bwrap probe succeeded"),
+        }
+    )
+    first, second = render_console(report).splitlines()[:2]
+    assert first.startswith("product copilot")
+    assert second == "scripts: on, sandbox: bwrap"
+
+
+def test_json_carries_the_products():
+    report = _report().model_copy(update={"products": [_PRODUCT]})
+    assert json.loads(render_json(report))["products"] == [_PRODUCT.model_dump()]
+    assert json.loads(render_json(_report()))["products"] == []

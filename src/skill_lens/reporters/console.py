@@ -88,6 +88,20 @@ def _no_baseline_block(report: RunReport) -> list[str]:
     return lines
 
 
+def _product_lines(report: RunReport) -> list[str]:
+    """One line per product the run executed: which, which version, under what trust.
+
+    Printed on every run that used one, because the trust model -- no
+    permission prompts, no sandbox -- is the product's and an operator must
+    see it in the log, not remember it.
+    """
+    lines = []
+    for product in report.products:
+        version = f" {product.version}" if product.version else ""
+        lines.append(f"product {product.name}{version} ({product.executable}): {product.trust}")
+    return lines
+
+
 def _script_lines(report: RunReport) -> list[str]:
     """One line saying whether scripts ran and under which sandbox.
 
@@ -197,7 +211,7 @@ def render_console(
     `output_limit` caps the agent output shown under a non-passing case; None
     prints all of it (`--full-output`).
     """
-    lines: list[str] = _script_lines(report)
+    lines: list[str] = [*_product_lines(report), *_script_lines(report)]
     if lines:
         lines.append("")
     if delta is None:
