@@ -450,6 +450,8 @@ def test_an_unknown_product_is_a_config_error():
         ("[runners.copilot]\ntimeout_seconds = inf\n", "timeout_seconds"),
         ("[runners.copilot]\nmax_output_bytes = 0\n", "max_output_bytes"),
         ("[runners.copilot]\nnonsense = 1\n", "nonsense"),
+        ('[runners.copilot]\nargs = ["{prompt}"]\n', "must not contain {prompt}"),
+        ('[runners.cli]\ncommand = ["{prompt}", "extra"]\n', "exactly one element"),
     ],
 )
 def test_invalid_product_settings_are_config_errors(tmp_path, toml, message):

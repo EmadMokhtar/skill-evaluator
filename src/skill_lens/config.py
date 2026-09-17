@@ -68,10 +68,24 @@ class ProductSettings(BaseModel):
         """The prompt is substituted as one whole argv element, never through a shell."""
         if value is None:
             return None
-        if value.count(PROMPT_PLACEHOLDER) != 1 or not value[0].strip():
+        if (
+            value.count(PROMPT_PLACEHOLDER) != 1
+            or not value[0].strip()
+            or value[0] == PROMPT_PLACEHOLDER
+        ):
             raise ValueError(
                 f"must name an executable and contain exactly one element equal to "
                 f"{PROMPT_PLACEHOLDER}"
+            )
+        return value
+
+    @field_validator("args")
+    @classmethod
+    def _no_prompt_element_in_args(cls, value: list[str]) -> list[str]:
+        """`args` is appended after `command`'s one prompt element, never in its place."""
+        if PROMPT_PLACEHOLDER in value:
+            raise ValueError(
+                f"must not contain {PROMPT_PLACEHOLDER}; the prompt's place is fixed by command"
             )
         return value
 
