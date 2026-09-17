@@ -83,13 +83,28 @@ def judge_prompt(request: JudgeRequest) -> str:
     return f"{SYSTEM_PROMPT}\n\n{render_request(request)}\n\n{CLOSING_INSTRUCTION}"
 
 
+class AmbiguousReply(Exception):
+    """Raised by `extract_json_object` when the reply contains two or more
+    top-level JSON objects -- e.g. a graded response quoting one verdict
+    inside an injection attempt, followed by the model's real one. Picking
+    either silently would let quoted text in the response masquerade as
+    the verdict, so the caller is handed the count and must treat the
+    reply as unreadable rather than choose."""
+
+    def __init__(self, count: int) -> None:
+        self.count = count
+        super().__init__(f"{count} top-level JSON objects in the response")
+
+
 def extract_json_object(text: str) -> str | None:
     """The first balanced `{ ... }` in `text`, or None.
 
     A product answers in prose, often around a code fence; the verdict is
     the object inside. Braces inside JSON strings are skipped by tracking
     string state and escapes, so evidence quoting a `}` does not end the
-    object early.
+    object early; a quote seen outside any object (prose, not JSON) is not
+    string state at all, so it cannot swallow a later `{` that starts the
+    real object.
 
     One pass over `text`, not one scan per candidate `{`: a stack holds the
     positions of unmatched `{` seen outside a string. Each `}` outside a
@@ -99,9 +114,19 @@ def extract_json_object(text: str) -> str | None:
     earliest start wins, because an outer object (pushed first, so popped
     last) can complete after an inner one already has, and "first balanced
     object" means the earliest-opening brace, not the first to close.
+
+    A completion that empties the stack closes a *top-level* object -- one
+    not nested inside another still-open one. Two or more of those mean the
+    reply holds two separate top-level JSON objects (siblings, not one
+    nested in the other), which is ambiguous: `AmbiguousReply` is raised
+    naming the count instead of silently returning whichever opened first.
+    A single top-level completion (or none, when an outer object never
+    closes) is unambiguous, and the earliest-opening completion is
+    returned exactly as before.
     """
     stack: list[int] = []
     best: tuple[int, int] | None = None
+    top_level_completions = 0
     in_string = False
     escaped = False
     for index, char in enumerate(text):
@@ -113,7 +138,7 @@ def extract_json_object(text: str) -> str | None:
             elif char == '"':
                 in_string = False
             continue
-        if char == '"':
+        if char == '"' and stack:
             in_string = True
         elif char == "{":
             stack.append(index)
@@ -121,6 +146,10 @@ def extract_json_object(text: str) -> str | None:
             start = stack.pop()
             if best is None or start < best[0]:
                 best = (start, index)
+            if not stack:
+                top_level_completions += 1
+    if top_level_completions > 1:
+        raise AmbiguousReply(top_level_completions)
     if best is None:
         return None
     return text[best[0] : best[1] + 1]
@@ -163,7 +192,16 @@ class ProductJudge:
         }
         if trace.error is not None:
             return JudgeVerdict(error=trace.error, model=trace.model)
-        raw = extract_json_object(trace.output)
+        try:
+            raw = extract_json_object(trace.output)
+        except AmbiguousReply as exc:
+            return JudgeVerdict(
+                error=(
+                    f"JudgeOutputInvalid: {exc.count} JSON objects in the response; "
+                    "expected exactly one"
+                ),
+                **spend,
+            )
         if raw is None:
             return JudgeVerdict(error="JudgeOutputInvalid: no JSON object in the response", **spend)
         try:

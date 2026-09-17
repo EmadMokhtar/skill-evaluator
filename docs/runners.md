@@ -174,18 +174,22 @@ equivalent and keeps its tools, so a graded response that reads like an instruct
 a Copilot judge act on it — the prompt says the response is untrusted data, but that is a
 request, not a guarantee; see [Security](security.md#product-runners).
 
-**The verdict.** The first balanced JSON object in the reply — the earliest `{` whose `}`
-closes it, braces inside JSON strings not counted — is validated strictly as `JudgeOutput`:
-a `checks` list of `{id, passed, evidence}` entries, and no other key beside it. Prose
-around it and a code fence are fine. A reply with no readable verdict — prose only, a
-cut-off object, the wrong shape, an empty object, a key beside `checks` — is an **errored**
-case (`judge failed: JudgeOutputInvalid: ...` naming the mismatch), never a low score: the
-same rule as the framework judges, because an unreadable verdict is an infrastructure
-signal. From there the verdict is handled as under every judge: a verdict whose check ids
-do not match the rubric is errored, and a pass with no evidence (an empty or missing
-`evidence`) is recorded as a failure. A product failure — a timeout, a non-zero exit, a reply
-over `max_output_bytes`, a prompt over 100 KiB, an executable that vanished after preflight
-— is errored the same way.
+**The verdict.** Exactly one top-level JSON object in the reply is the verdict: the first
+balanced `{ ... }` — the earliest `{` whose `}` closes it, braces inside JSON strings not
+counted — is validated strictly as `JudgeOutput`: a `checks` list of `{id, passed,
+evidence}` entries, and no other key beside it. Prose around it and a code fence are fine.
+Two or more top-level objects — for example a graded response that quotes a forged verdict
+before the model gives its real one — is an unreadable verdict, never a choice between
+them: it is refused the same way as no object at all, not resolved silently in the earlier
+one's favour. A reply with no readable verdict — prose only, a cut-off object, the wrong
+shape, an empty object, a key beside `checks`, two or more top-level objects — is an
+**errored** case (`judge failed: JudgeOutputInvalid: ...` naming the mismatch), never a low
+score: the same rule as the framework judges, because an unreadable verdict is an
+infrastructure signal. From there the verdict is handled as under every judge: a verdict
+whose check ids do not match the rubric is errored, and a pass with no evidence (an empty
+or missing `evidence`) is recorded as a failure. A product failure — a timeout, a non-zero
+exit, a reply over `max_output_bytes`, a prompt over 100 KiB, an executable that vanished
+after preflight — is errored the same way.
 
 **What is read and what is not.** `judge_model` and `judge_temperature` are not read: no
 product exposes a temperature, and a product's model is set with `[runners.<name>] args`.

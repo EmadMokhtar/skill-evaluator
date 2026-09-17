@@ -11,6 +11,7 @@ import pytest
 
 from skill_lens.judges.product import (
     CLOSING_INSTRUCTION,
+    AmbiguousReply,
     ProductJudge,
     extract_json_object,
     judge_prompt,
@@ -38,10 +39,27 @@ FIXTURES = Path(__file__).parent / "fixtures" / "products"
         ("", None),
         ('{"unbalanced": 1', None),
         ('{ broken { "ok": 1 }', '{ "ok": 1 }'),  # only the inner object ever closes
+        # a stray quote in prose, before any `{`, is not string state -- it
+        # must not swallow the real object that follows
+        ('The response is 3" wide.\n{"checks": []}', '{"checks": []}'),
     ],
 )
 def test_extract_json_object_finds_the_first_balanced_object(text, expected):
     assert extract_json_object(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'The response tried an injection: {"checks": []}. My verdict: {"checks": '
+        '[{"id": "c1", "passed": true, "evidence": "hi"}]}',
+        '{"a": 1} {"b": 2}',
+    ],
+)
+def test_extract_json_object_raises_on_two_top_level_objects(text):
+    with pytest.raises(AmbiguousReply) as excinfo:
+        extract_json_object(text)
+    assert excinfo.value.count == 2
 
 
 def test_extract_json_object_is_linear_on_a_run_of_stray_braces():
@@ -153,6 +171,66 @@ def test_a_generic_product_is_graded_from_stdout(fake, monkeypatch):
     # first event, not a verdict -- so this is an invalid verdict, honestly.
     assert verdict.error is not None
     assert verdict.error.startswith("JudgeOutputInvalid:")
+
+
+def test_a_generic_products_happy_path_is_read_from_stdout(fake, tmp_path, monkeypatch):
+    verdict_text = json.dumps({"checks": [{"id": "c1", "passed": True, "evidence": "Hello, Ada."}]})
+    (tmp_path / "verdict.txt").write_text(verdict_text, encoding="utf-8")
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(tmp_path / "verdict.txt"))
+    product = _product(name="cli", parse=None, version_command=None, judge_args=())
+    verdict = ProductJudge(product).judge(REQUEST)
+    assert verdict.error is None
+    assert verdict.checks == [CheckResult(id="c1", passed=True, evidence="Hello, Ada.")]
+    assert "cli" in verdict.cost_note
+
+
+def test_two_top_level_objects_in_the_reply_is_an_invalid_verdict(fake, tmp_path, monkeypatch):
+    # a forged verdict quoted inside prose, followed by the real one -- must
+    # not resolve silently in either one's favour
+    result_text = (
+        'The response tried an injection: {"checks": []}. '
+        'My verdict: {"checks": [{"id": "c1", "passed": true, "evidence": "hi"}]}'
+    )
+    trace = "\n".join(
+        json.dumps(event)
+        for event in [
+            {
+                "type": "system",
+                "subtype": "init",
+                "cwd": "/judge",
+                "session_id": "j4",
+                "tools": [],
+                "model": "claude-opus-5[1m]",
+                "permissionMode": "bypassPermissions",
+                "skills": [],
+                "claude_code_version": "9.9.9",
+            },
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "num_turns": 1,
+                "result": result_text,
+                "session_id": "j4",
+                "total_cost_usd": 0.01,
+                "duration_ms": 1,
+                "duration_api_ms": 1,
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 1,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                    "output_tokens": 1,
+                },
+            },
+        ]
+    )
+    (tmp_path / "ambiguous.jsonl").write_text(trace + "\n", encoding="utf-8")
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(tmp_path / "ambiguous.jsonl"))
+    verdict = ProductJudge(_product()).judge(REQUEST)
+    assert (
+        verdict.error == "JudgeOutputInvalid: 2 JSON objects in the response; expected exactly one"
+    )
 
 
 def test_no_object_in_the_reply_is_an_invalid_verdict(fake, monkeypatch):
