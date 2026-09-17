@@ -111,7 +111,7 @@ modes; under `--baseline previous` the previous version is delivered with its ow
 | Output text and `assertions:` | yes | yes | yes (stdout) |
 | `trajectory:` (the product's own tool names, e.g. `bash`, `Bash`) | yes | yes | no — an authoring error |
 | `mode: offered` / `skill_triggered` | yes | yes | no — an authoring error |
-| `budget: max_tokens` (input + cache read + cache write, plus output) | when the trace reports usage; otherwise a failing "not evaluated" check | yes | failing "not evaluated" check |
+| `budget: max_tokens` (input + cache read + cache write, plus output) | when the trace reports usage; otherwise a failing "not evaluated" check | when the trace reports usage; otherwise a failing "not evaluated" check | failing "not evaluated" check |
 | `budget: max_cost_usd` | failing "not evaluated" check — Copilot bills per premium request (its billing unit: one counted request, not tokens), and the note says how many | yes, at list price (the provider's published per-token price), as the product reports it in `total_cost_usd` | failing "not evaluated" check |
 | `budget: max_latency_ms` | yes | yes | yes |
 | `tools:` (mock tools) | authoring error | authoring error | authoring error |

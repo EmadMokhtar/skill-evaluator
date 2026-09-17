@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,18 @@ def test_claude_code_without_a_result_event_is_an_error():
 def test_claude_code_marks_a_trace_with_a_result_event_complete():
     assert parse_claude_code(_fixture("claude-code-trigger.jsonl")).complete is True
     assert parse_claude_code(_fixture("claude-code-error.jsonl")).complete is True
+
+
+def test_claude_code_without_usage_says_tokens_were_not_reported():
+    lines = _fixture("claude-code-trigger.jsonl").splitlines()
+    result = json.loads(lines[-1])
+    del result["usage"]
+    lines[-1] = json.dumps(result)
+    trace = parse_claude_code("\n".join(lines))
+    assert trace.input_tokens == 0
+    assert trace.output_tokens == 0
+    assert trace.usage_note == "claude-code did not report token usage"
+    assert trace.error is None
 
 
 # --- Copilot ---

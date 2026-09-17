@@ -191,7 +191,8 @@ def parse_claude_code(text: str) -> Trace:
             invoked_skills=frozenset(invoked),
             error="no result event in the claude-code trace",
         )
-    usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
+    usage_seen = isinstance(result.get("usage"), dict)
+    usage = result.get("usage") if usage_seen else {}
     output = result.get("result") if isinstance(result.get("result"), str) else ""
     failed = result.get("is_error") is True or result.get("subtype") != "success"
     cost = result.get("total_cost_usd")
@@ -209,6 +210,7 @@ def parse_claude_code(text: str) -> Trace:
         cost_usd=float(cost)
         if isinstance(cost, (int, float)) and not isinstance(cost, bool)
         else 0.0,
+        usage_note="" if usage_seen else "claude-code did not report token usage",
         invoked_skills=frozenset(invoked),
         complete=True,
         error=f"claude-code: {output or result.get('subtype')}" if failed else None,
