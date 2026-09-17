@@ -35,6 +35,16 @@ class Skill(BaseModel):
     and the `--baseline none` skill both carry no bundle by default: keying
     the bundle tools on `path` instead would leak the candidate's scripts into
     the "no skill" arm, since every Skill has a path.
+
+    `markdown` is the `SKILL.md` text verbatim -- its text as written, though
+    line endings are normalised, since the loader reads it in text mode --
+    what a product runner writes into the product's skill directory. Products
+    honour frontmatter keys skill-lens does not model (`allowed-tools`,
+    `disable-model-invocation`), so a re-rendering from the parsed fields
+    would change the product's behaviour and the eval would measure the
+    re-rendering. Empty when there is no file: a Skill built by hand, and the
+    `--baseline none` skill, which is how a product runner knows to write no
+    directory at all.
     """
 
     name: str
@@ -44,6 +54,7 @@ class Skill(BaseModel):
     path: Path
     variant: Arm = "candidate"
     bundle_root: Path | None = None
+    markdown: str = ""
 
 
 class ToolCall(BaseModel):
@@ -126,6 +137,11 @@ class RunResult(BaseModel):
     orchestrator clears it after deleting and leaves it set under
     `--keep-workspace`. A path pointing at a deleted directory would be a lie
     in the JSON report; this way the field's presence is self-documenting.
+
+    `usage_note` says why `input_tokens`/`output_tokens` are 0 when the runner
+    could not count them (a product that reports no token usage). It is to
+    tokens what `cost_note` is to cost: `BudgetEvaluator` refuses to evaluate
+    `max_tokens` against a zero it knows is not a measurement.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -138,6 +154,7 @@ class RunResult(BaseModel):
     latency_ms: int = 0
     cost_usd: float = 0.0
     cost_note: str = ""
+    usage_note: str = ""
     model: str = ""
     skill_triggered: bool | None = None
     workspace: Path | None = None
@@ -360,6 +377,23 @@ class ScriptNote(BaseModel):
     script_count: int
 
 
+class ProductStatus(BaseModel):
+    """One agent product a run executed, as preflight found it.
+
+    `trust` is fixed harness text -- permission prompts disabled, no skill-lens
+    sandbox, bundled scripts reachable through the product's own tools -- on
+    the model rather than in each reporter so the three reporters cannot
+    drift, and so the JSON report carries the same sentence a human reads.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    executable: str
+    version: str = ""
+    trust: str = ""
+
+
 class CaseOutcome(BaseModel):
     """The fully-scored result of one (skill, case, runner) combination.
 
@@ -396,6 +430,7 @@ class RunReport(BaseModel):
     baseline_notes: list[BaselineNote] = Field(default_factory=list)
     scripts: ScriptStatus | None = None
     script_notes: list[ScriptNote] = Field(default_factory=list)
+    products: list[ProductStatus] = Field(default_factory=list)
 
     @property
     def candidate_outcomes(self) -> list[CaseOutcome]:

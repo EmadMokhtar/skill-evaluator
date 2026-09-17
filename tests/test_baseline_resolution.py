@@ -247,3 +247,11 @@ def test_an_archive_failure_is_unavailable_not_raised(tmp_path, monkeypatch):
     result = _resolve(tmp_path, parse_skill_file(repo / "SKILL.md"))
     assert isinstance(result, BaselineUnavailable)
     assert "archive" in result.reason
+
+
+def test_the_previous_version_carries_its_own_file_text(tmp_path):
+    repo = _repo(tmp_path)
+    _commit(repo, _skill_md("1.0.0", "v1"), "first")
+    _commit(repo, _skill_md("1.1.0", "v2"), "second")
+    previous = _resolve(tmp_path, parse_skill_file(repo / "SKILL.md"))
+    assert previous.markdown == _skill_md("1.0.0", "v1")

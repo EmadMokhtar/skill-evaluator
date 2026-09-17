@@ -17,7 +17,7 @@ from skill_lens.cases.loader import (
     load_cases_for_skill,
 )
 from skill_lens.comparison import build_delta
-from skill_lens.config import ConfigError, load_config
+from skill_lens.config import PRODUCT_NAMES, Config, ConfigError, load_config
 from skill_lens.evaluators.assertion import InvalidAssertionValue, UnknownAssertionKind
 from skill_lens.gating import EXIT_OK, evaluate_gate
 from skill_lens.judges.fake import FakeJudge
@@ -31,10 +31,11 @@ from skill_lens.reporters.failure_context import OUTPUT_LIMIT
 from skill_lens.reporters.json_reporter import render_json
 from skill_lens.reporters.junit import render_junit
 from skill_lens.reporters.markdown import render_markdown
-from skill_lens.runners.base import RunnerDependencyError
+from skill_lens.runners.base import Runner, RunnerDependencyError
 from skill_lens.runners.fake import FakeRunner
 from skill_lens.runners.langchain import LangChainRunner
 from skill_lens.runners.preflight import MissingAPIKey, check_api_key
+from skill_lens.runners.product import ProductRunner, ProductSetupError
 from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.scaffold import render_scaffold, scaffold_target
 from skill_lens.scripts import ScriptSetupError
@@ -43,7 +44,10 @@ from skill_lens.workspace import WorkspaceLimits
 
 app = typer.Typer(help="Run evaluations on Agent Skills (SKILL.md).", no_args_is_help=True)
 
-_RUNNERS = {"fake": FakeRunner, "pydantic-ai": PydanticAIRunner, "langchain": LangChainRunner}
+# Keyed runners share one model and one API key; product runners are built
+# from their [runners.<name>] table; `fake` takes nothing.
+_KEYED_RUNNERS = {"pydantic-ai": PydanticAIRunner, "langchain": LangChainRunner}
+_RUNNER_NAMES: tuple[str, ...] = ("fake", *_KEYED_RUNNERS, *PRODUCT_NAMES)
 _JUDGES = {"fake": FakeJudge, "pydantic-ai": PydanticAIJudge, "langchain": LangChainJudge}
 
 # Authoring errors: bad skill/case/config files, or a malformed assertion in an
@@ -62,6 +66,9 @@ _AUTHORING_ERRORS = (
     # scripts enabled but cannot run here: a missing interpreter, or a
     # required sandbox that is absent
     ScriptSetupError,
+    # a product runner that cannot run here: executable missing, version
+    # probe failed, or a case it cannot serve
+    ProductSetupError,
 )
 
 
@@ -118,7 +125,7 @@ def _resolve_runners(flag: list[str] | None, configured: str | list[str]) -> lis
         names = [configured] if isinstance(configured, str) else list(configured)
     seen: set[str] = set()
     for name in names:
-        if name not in _RUNNERS:
+        if name not in _RUNNER_NAMES:
             raise typer.BadParameter(f"unknown runner: {name}")
         if name in seen:
             raise typer.BadParameter(
@@ -126,6 +133,21 @@ def _resolve_runners(flag: list[str] | None, configured: str | list[str]) -> lis
             )
         seen.add(name)
     return names
+
+
+def _build_runner(name: str, settings: Config, model_name: str) -> Runner:
+    """One runner by name: `fake` takes nothing, a keyed runner takes the shared
+    model, a product runner takes its `[runners.<name>]` table."""
+    if name == "fake":
+        return FakeRunner()
+    if name in _KEYED_RUNNERS:
+        return _KEYED_RUNNERS[name](
+            model=model_name,
+            temperature=settings.temperature,
+            retries=settings.retries,
+            retry_backoff_seconds=settings.retry_backoff_seconds,
+        )
+    return ProductRunner(settings.product(name))
 
 
 @app.command()
@@ -238,34 +260,43 @@ def run(
         if resolved_min_delta is not None and not baseline_kind:
             raise typer.BadParameter("--min-delta requires --baseline none or --baseline previous")
         runner_names = _resolve_runners(runner, settings.default_runner)
-        runner_classes = [_RUNNERS[name] for name in runner_names]
-        needs_key = any(getattr(cls, "needs_api_key", False) for cls in runner_classes)
+        needs_key = any(name in _KEYED_RUNNERS for name in runner_names)
+        uses_product = any(name in PRODUCT_NAMES for name in runner_names)
         model_name = model if model is not None else settings.model
-        if needs_key:
-            # Once for the whole matrix: every keyed runner shares one model.
-            _require_a_model("--model", model_name)
-            check_api_key(model_name, os.environ)
-        active_runners = [
-            cls(
-                model=model_name,
-                temperature=settings.temperature,
-                retries=settings.retries,
-                retry_backoff_seconds=settings.retry_backoff_seconds,
-            )
-            if getattr(cls, "needs_api_key", False)
-            else cls()
-            for cls in runner_classes
-        ]
         judge_name = settings.judge
         if judge_name not in _JUDGES:
             raise typer.BadParameter(f"unknown judge: {judge_name}")
         judge_class = _JUDGES[judge_name]
+        judge_needs_key = getattr(judge_class, "needs_api_key", False)
+        # A flag nothing reads is a trap, not a no-op: `--runner copilot
+        # --model gpt-5.2` would look honoured while the product ran its own
+        # default. `--model` is read by a keyed runner, or by a keyed judge
+        # whose own model is unset (it falls back to `model`).
+        model_is_read = needs_key or (
+            judge_needs_key and judge_model is None and not settings.judge_model
+        )
+        if model is not None and not model_is_read:
+            raise typer.BadParameter(
+                "--model is read by pydantic-ai and langchain only, and this run names "
+                "neither; a product's model is set with "
+                '[runners.<name>] args = ["--model", "..."] in skill-lens.toml'
+            )
+        if judge_model is not None and not judge_needs_key:
+            raise typer.BadParameter(
+                '--judge-model is read by judge = "pydantic-ai" or "langchain" only; '
+                f'this run\'s judge is "{judge_name}"'
+            )
+        if needs_key:
+            # Once for the whole matrix: every keyed runner shares one model.
+            _require_a_model("--model", model_name)
+            check_api_key(model_name, os.environ)
+        active_runners = [_build_runner(name, settings, model_name) for name in runner_names]
         # An empty judge_model means "grade with the same model you run with",
         # so a project opting into real judging only has to name one model.
         resolved_judge_model = (
             judge_model if judge_model is not None else (settings.judge_model or model_name)
         )
-        if getattr(judge_class, "needs_api_key", False):
+        if judge_needs_key:
             _require_a_model("--judge-model", resolved_judge_model)
             check_api_key(resolved_judge_model, os.environ)
             active_judge = judge_class(
@@ -276,8 +307,9 @@ def run(
             )
         else:
             active_judge = judge_class()
-        if needs_key:
-            # A ceiling, not a forecast. The tag and case filters are applied
+        if needs_key or uses_product:
+            # A ceiling, not a forecast. Printed for keyed and product
+            # runners alike: both spend. The tag and case filters are applied
             # here because `run_evals` applies them too and ignoring them can
             # overstate the total wildly -- but the baseline arm is also
             # dropped per-case for `mode: offered` under --baseline none, and

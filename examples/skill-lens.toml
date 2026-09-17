@@ -14,7 +14,10 @@
 # `skill-lens run` from the repository root keeps the offline defaults and
 # never reaches for a real agent — or an API key — by accident.
 
-# "fake" is the offline, scripted runner; "pydantic-ai" runs a real agent.
+# "fake" is the offline, scripted runner; "pydantic-ai" and "langchain" run a
+# real agent through a framework; "copilot", "claude-code" and "cli" start an
+# installed agent product (see [runners.*] below). A list runs every case
+# through each name.
 default_runner = "pydantic-ai"
 
 # Model id for the runner. Needs the provider's key in the environment
@@ -87,6 +90,25 @@ allow_scripts = true
 # [script_interpreters]
 # py = ["python3"]
 # sh = ["bash"]
+
+# Product runners: start the product the skill ships to, no API key needed.
+# Each table is optional for a preset; the preset supplies the verified argv.
+# "command" replaces that argv (exactly one element must be "{prompt}"),
+# "args" is appended to it. No token belongs here: the product reads its own.
+# [runners.copilot]
+# args = ["--model", "gpt-5.2"]     # appended to the preset's argv
+# timeout_seconds = 600.0
+# max_output_bytes = 8000000
+#
+# [runners.claude-code]
+# args = ["--model", "sonnet"]
+#
+# "cli" has no preset, so "command" is required. "skills_dir" and "invoke"
+# are accepted here only; a preset's spellings are fixed.
+# [runners.cli]
+# command = ["my-agent", "--prompt", "{prompt}"]   # exactly one "{prompt}" element
+# skills_dir = ".agents/skills"
+# invoke = "{task}"
 
 # A stricter floor for one skill, by name. Must stay the last section: in
 # TOML every key after a [table] header belongs to that table.

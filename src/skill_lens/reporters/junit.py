@@ -12,7 +12,7 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 from skill_lens.comparison import Delta
 from skill_lens.gating import GateResult
-from skill_lens.models import CaseOutcome, RunReport
+from skill_lens.models import CaseOutcome, ProductStatus, RunReport
 from skill_lens.reporters.failure_context import (
     OUTPUT_LIMIT,
     cut_note,
@@ -127,8 +127,8 @@ def _by_skill(outcomes: list[CaseOutcome]) -> dict[str, list[CaseOutcome]]:
     return groups
 
 
-def _script_properties(suite: Element, report: RunReport) -> None:
-    """The run's script facts, as the suite's first child.
+def _run_properties(suite: Element, report: RunReport) -> None:
+    """The run's script and product facts, as the suite's first child.
 
     Properties are where JUnit puts run-level facts; a testcase is the wrong
     place for something true of the whole run. Called for *every* suite the
@@ -137,22 +137,38 @@ def _script_properties(suite: Element, report: RunReport) -> None:
     a CI UI reading one suite in isolation must not conclude scripts were
     off. First child, because the JUnit schema puts `<properties>` before any
     `<testcase>`, so it must be called before the cases are appended.
+
+    A product's line is the console's, so a CI UI and a terminal say the
+    same thing.
     """
-    if report.scripts is None:
+    if report.scripts is None and not report.products:
         return
     properties = SubElement(suite, "properties")
-    SubElement(
-        properties,
-        "property",
-        name="skill-lens.scripts.sandbox",
-        value=_xml_safe(report.scripts.sandbox),
-    )
-    SubElement(
-        properties,
-        "property",
-        name="skill-lens.scripts.detail",
-        value=_xml_safe(report.scripts.detail),
-    )
+    if report.scripts is not None:
+        SubElement(
+            properties,
+            "property",
+            name="skill-lens.scripts.sandbox",
+            value=_xml_safe(report.scripts.sandbox),
+        )
+        SubElement(
+            properties,
+            "property",
+            name="skill-lens.scripts.detail",
+            value=_xml_safe(report.scripts.detail),
+        )
+    if report.products:
+        SubElement(
+            properties,
+            "property",
+            name="skill-lens.products",
+            value=_xml_safe("; ".join(_product_line(p) for p in report.products)),
+        )
+
+
+def _product_line(product: ProductStatus) -> str:
+    version = f" {product.version}" if product.version else ""
+    return f"{product.name}{version} ({product.executable}): {product.trust}"
 
 
 def _skipped_suite(
@@ -168,7 +184,7 @@ def _skipped_suite(
         skipped="1",
         time="0.000",
     )
-    _script_properties(suite, report)
+    _run_properties(suite, report)
     case = SubElement(
         suite,
         "testcase",
@@ -205,7 +221,7 @@ def render_junit(
 
     for skill_name, outcomes in _by_skill(report.candidate_outcomes).items():
         suite = SubElement(root, "testsuite", name=_xml_safe(skill_name))
-        _script_properties(suite, report)
+        _run_properties(suite, report)
         suite_failures = suite_errors = 0
         suite_time = 0.0
         for outcome in outcomes:
@@ -281,7 +297,7 @@ def render_junit(
             skipped="0",
             time="0.000",
         )
-        _script_properties(suite, report)
+        _run_properties(suite, report)
         case = SubElement(
             suite, "testcase", classname="skill-lens", name="no eval cases ran", time="0.000"
         )

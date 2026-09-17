@@ -15,6 +15,7 @@ from skill_lens.models import (
     CaseOutcome,
     CheckResult,
     EvalScore,
+    ProductStatus,
     RunReport,
     RunResult,
     ScriptNote,
@@ -599,3 +600,15 @@ def test_a_backtick_in_a_skill_name_cannot_close_its_scripts_code_span():
     )
     text = render_markdown(report)
     assert "``a`b``" in text
+
+
+def test_the_products_block_names_each_product():
+    report = _mixed_report().model_copy(
+        update={
+            "products": [
+                ProductStatus(name="copilot", executable="/x/copilot", version="1.0.37", trust="t")
+            ]
+        }
+    )
+    text = render_markdown(report)
+    assert "Product `copilot` 1.0.37 (`/x/copilot`): t" in text

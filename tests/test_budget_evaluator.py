@@ -153,3 +153,23 @@ def test_an_unpriceable_cost_limit_is_a_failing_check_with_its_reason():
     assert score.passed is False
     assert [(c.id, c.passed) for c in score.checks] == [("max_cost_usd", False)]
     assert "no pricing" in score.checks[0].evidence
+
+
+def test_a_token_limit_the_runner_could_not_measure_is_a_failing_check():
+    case = EvalCase(name="c", task="t", budget=BudgetSpec(max_tokens=500))
+    result = RunResult(output="x", usage_note="copilot did not report token usage")
+    score = BudgetEvaluator().evaluate(case, result)
+    assert score.passed is False
+    assert score.score == 0.0  # nothing was evaluated
+    (check,) = score.checks
+    assert check.id == "max_tokens"
+    assert check.passed is False
+    assert check.evidence == "token budget not evaluated: copilot did not report token usage"
+
+
+def test_an_unmeasured_token_limit_does_not_dilute_the_measured_ones():
+    case = EvalCase(name="c", task="t", budget=BudgetSpec(max_tokens=500, max_latency_ms=1000))
+    result = RunResult(output="x", latency_ms=10, usage_note="not counted")
+    score = BudgetEvaluator().evaluate(case, result)
+    assert score.passed is False  # the skipped limit still fails the case
+    assert score.score == 1.0  # the one evaluated limit held

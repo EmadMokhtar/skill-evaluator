@@ -78,6 +78,7 @@ def parse_skill_text(text: str, *, name_fallback: str, path: Path, source: str) 
         instructions=body.strip(),
         version=_version(frontmatter, source),
         path=path,
+        markdown=text,
     )
 
 

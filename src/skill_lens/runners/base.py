@@ -11,7 +11,15 @@ from skill_lens.workspace import Workspace
 
 @runtime_checkable
 class Runner(Protocol):
-    """Runs a case against a skill and reports what happened."""
+    """Runs a case against a skill and reports what happened.
+
+    A runner may also define an optional `preflight(skills, cases_by_skill)
+    -> ProductStatus | None`. The orchestrator calls it once per run, after
+    discovery and before any case runs, with the candidate-arm skills and the
+    cases planned for this runner. It raises an authoring error to abort the
+    run before anything is spent, and may return a `ProductStatus` for the
+    report. The framework runners define none; `ProductRunner` does.
+    """
 
     name: str
 

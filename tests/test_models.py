@@ -13,6 +13,7 @@ from skill_lens.models import (
     JudgeRequest,
     JudgeSpec,
     JudgeVerdict,
+    ProductStatus,
     RubricCheck,
     RunReport,
     RunResult,
@@ -433,3 +434,29 @@ def test_a_run_report_defaults_to_scripts_off():
     )
     assert report.scripts.sandbox == "bwrap"
     assert report.script_notes[0].script_count == 2
+
+
+def test_run_result_carries_a_usage_note_for_tokens_it_could_not_count():
+    result = RunResult(usage_note="copilot did not report token usage")
+    assert result.tokens == 0
+    assert result.usage_note == "copilot did not report token usage"
+
+
+def test_a_product_status_is_a_typed_record():
+    status = ProductStatus(
+        name="copilot", executable="/usr/local/bin/copilot", version="1.0.37", trust="t"
+    )
+    assert status.model_dump() == {
+        "name": "copilot",
+        "executable": "/usr/local/bin/copilot",
+        "version": "1.0.37",
+        "trust": "t",
+    }
+
+
+def test_a_report_lists_no_products_by_default():
+    assert RunReport().products == []
+
+
+def test_a_skill_defaults_to_no_markdown():
+    assert Skill(name="s", path=Path("/tmp/s")).markdown == ""

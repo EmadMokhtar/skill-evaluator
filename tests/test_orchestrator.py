@@ -16,6 +16,7 @@ from skill_lens.models import (
     EvalCase,
     EvalScore,
     JudgeVerdict,
+    ProductStatus,
     RunResult,
     ScriptNote,
     Skill,
@@ -1139,3 +1140,64 @@ def test_baseline_none_arm_gets_no_bundle_even_when_the_candidate_has_one(tmp_pa
     run_evals([skill], [_Peeking()], evals_path=_evals(tmp_path, _case()), baseline="none")
     assert seen["candidate"] == skill.bundle_root
     assert seen["baseline"] is None
+
+
+class _PreflightRunner(FakeRunner):
+    """A FakeRunner that also defines the optional preflight hook."""
+
+    name = "probed"
+
+    def __init__(self, *, raises: Exception | None = None):
+        super().__init__(default=RunResult(output="yes"))
+        self.calls: list[tuple[list[str], dict[str, list[str]]]] = []
+        self._raises = raises
+
+    def preflight(self, skills, cases_by_skill):
+        self.calls.append(
+            ([s.name for s in skills], {k: [c.name for c in v] for k, v in cases_by_skill.items()})
+        )
+        if self._raises is not None:
+            raise self._raises
+        return ProductStatus(name=self.name, executable="/bin/probed", version="1", trust="t")
+
+
+def test_preflight_runs_once_with_the_cases_that_will_run(tmp_path):
+    # The file's CASES_YAML: "passes" carries tags: [smoke], "fails" does not.
+    runner = _PreflightRunner()
+    report = run_evals([_skill_with_cases(tmp_path)], [runner], tag="smoke", repeat=3)
+    assert runner.calls == [(["pdf"], {"pdf": ["passes"]})]  # filtered, and not per repeat
+    assert report.products == [
+        ProductStatus(name="probed", executable="/bin/probed", version="1", trust="t")
+    ]
+
+
+def test_preflight_sees_only_the_candidate_arm(tmp_path):
+    runner = _PreflightRunner()
+    run_evals([_skill_with_cases(tmp_path)], [runner], baseline="none")
+    (call,) = runner.calls
+    assert call == (["pdf"], {"pdf": ["passes", "fails"]})  # one entry per case, not per arm
+
+
+def test_a_preflight_error_aborts_before_any_case_runs(tmp_path):
+    class Boom(Exception):
+        pass
+
+    runner = _PreflightRunner(raises=Boom("no product"))
+    with pytest.raises(Boom):
+        run_evals([_skill_with_cases(tmp_path)], [runner])
+
+
+def test_a_runner_without_the_hook_is_untouched(tmp_path):
+    report = run_evals([_skill_with_cases(tmp_path)], [_runner()])
+    assert report.products == []
+
+
+def test_a_hook_returning_none_adds_no_status(tmp_path):
+    class Quiet(FakeRunner):
+        name = "quiet"
+
+        def preflight(self, skills, cases_by_skill):
+            return None
+
+    report = run_evals([_skill_with_cases(tmp_path)], [Quiet(default=RunResult(output="yes"))])
+    assert report.products == []

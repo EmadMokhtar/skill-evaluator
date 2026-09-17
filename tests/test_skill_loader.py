@@ -226,3 +226,10 @@ def test_bundle_root_is_none_for_a_bare_skill(tmp_path):
 def test_parse_skill_text_never_sets_a_bundle_root(tmp_path):
     skill = parse_skill_text(SKILL_MD, name_fallback="pdf", path=tmp_path, source="x")
     assert skill.bundle_root is None
+
+
+def test_the_skill_carries_its_file_text_verbatim(tmp_path):
+    body = SKILL_MD + "\n<!-- trailing comment the parser ignores -->\n"
+    _write_skill(tmp_path, "pdf", body)
+    (skill,) = load_skills(tmp_path / "pdf")
+    assert skill.markdown == body

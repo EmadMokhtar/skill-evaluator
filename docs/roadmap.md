@@ -11,6 +11,7 @@
 | M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions, bundled files and `run_script` | shipped |
 | M7 | DX: failing cases explain themselves, `--case`, `init` batch mode and workspace case, versioned example, quickstart | shipped |
 | M8 | LangChain runner and judge (`[langchain]` extra); runner matrix | shipped |
+| M9 | Product runners: `copilot`, `claude-code`, a configured `cli`; product judge | in progress |
 
 ## What M4 shipped
 
@@ -119,6 +120,37 @@ runner)` outcome counts toward the gate; a duplicate runner is a user error so n
 counts twice. Deferred: a per-runner gate threshold, a judge list, and normalising
 provider-prefix spellings across frameworks. See the
 [M8 design](https://github.com/EmadMokhtar/skill-evaluator/blob/main/docs/superpowers/specs/2026-09-11-skill-lens-m8-design.md).
+
+## What M9 part 1 shipped
+
+A skill written for a named product is now measured under that product. `--runner
+copilot` and `--runner claude-code` start GitHub Copilot CLI or Claude Code in its
+non-interactive mode, with `SKILL.md` and its bundle placed verbatim (its text as
+written; line endings are normalised) where the
+product discovers skills, and read the output, tool calls, tokens and the skill-load event
+back from the product's own trace; `--runner cli` does the same for any command a
+`[runners.cli]` table names, with stdout as the output. No provider API key is involved:
+the product uses its own auth. The two presets carry the argv the probes verified, and a
+`[runners.<name>]` table appends flags with `args` (for example, a model) or replaces the argv with
+`command`. A once-per-run preflight hook on the `Runner` protocol finds the executable,
+runs its `--version`, and refuses the cases the runner cannot serve — `tools:` under any
+product, `trajectory:` or `mode: offered` under `cli` — before any quota is spent. Every
+report carries `products`: which product, which version, which executable, and the fixed
+trust sentence (permission prompts disabled, full environment, no skill-lens sandbox).
+`RunResult.usage_note` makes a token limit the product cannot measure a failing check, as
+`cost_note` already did for cost; and `--model` or `--judge-model` with nothing in the
+run that reads it is now a user error rather than a flag silently ignored. The subprocess
+mechanics (process-group kill, capped read through the harness's own handle) moved to
+`process.py`, shared with `run_script`. Full detail is in
+[Product runners](runners.md#product-runners), [Configuration](configuration.md#product-runners)
+and [Security](security.md#product-runners).
+
+Part 2 — `judge = "copilot"`, `"claude-code"` or `"cli"`, grading rubrics through the same
+product — is next. Deferred: mock tools under a product through an MCP bridge, a per-case
+timeout, an automated hermetic Copilot run (one that loads nothing from the user's personal
+setup), and tool-name normalisation across products.
+See the
+[M9 design](https://github.com/EmadMokhtar/skill-evaluator/blob/main/docs/superpowers/specs/2026-09-17-skill-lens-m9-design.md).
 
 ## The rename to skill-lens
 

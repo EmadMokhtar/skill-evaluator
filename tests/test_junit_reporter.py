@@ -14,6 +14,7 @@ from skill_lens.models import (
     CaseOutcome,
     CheckResult,
     EvalScore,
+    ProductStatus,
     RunReport,
     RunResult,
     ScriptStatus,
@@ -392,3 +393,41 @@ def test_no_suite_of_any_kind_carries_properties_when_scripts_are_off():
     )
     assert _parse(report).findall("testsuite/properties") == []
     assert _parse(RunReport(outcomes=[])).findall("testsuite/properties") == []
+
+
+_PRODUCT = ProductStatus(name="copilot", executable="/x/copilot", version="1.0.37", trust="t")
+
+
+def test_products_are_a_property_on_every_kind_of_suite_first():
+    # Same promise as the script properties: every <testsuite> of the run
+    # carries the run-level facts, before any <testcase>.
+    report = RunReport(
+        outcomes=[_outcome()],
+        skipped_skills=["docx"],
+        tag_filtered_skills=["xlsx"],
+        case_filtered_skills=["pptx"],
+        products=[_PRODUCT],
+    )
+    root = _parse(report)
+    suites = root.findall("testsuite")
+    assert [s.get("name") for s in suites] == ["pdf", "docx", "xlsx", "pptx"]
+    for suite in suites:
+        assert suite[0].tag == "properties", suite.get("name")
+        assert _property_names(suite) == ["skill-lens.products"]
+        (prop,) = suite.findall("properties/property")
+        assert prop.get("value") == "copilot 1.0.37 (/x/copilot): t"
+
+
+def test_products_follow_the_script_properties_when_both_apply():
+    root = _parse(RunReport(outcomes=[_outcome()], scripts=_SCRIPTS, products=[_PRODUCT]))
+    assert _property_names(root.find("testsuite")) == [
+        "skill-lens.scripts.sandbox",
+        "skill-lens.scripts.detail",
+        "skill-lens.products",
+    ]
+
+
+def test_the_zero_case_error_suite_carries_the_products():
+    root = _parse(RunReport(outcomes=[], products=[_PRODUCT]), gate=evaluate_gate(RunReport()))
+    (suite,) = root.findall("testsuite")
+    assert _property_names(suite) == ["skill-lens.products"]

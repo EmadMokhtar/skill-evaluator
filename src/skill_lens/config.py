@@ -2,27 +2,135 @@
 
 from __future__ import annotations
 
+import string
 import tomllib
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from skill_lens.models import SandboxMode
+from skill_lens.runners.product import (
+    DEFAULT_INVOKE,
+    DEFAULT_SKILLS_DIR,
+    PRESETS,
+    PROMPT_PLACEHOLDER,
+    Product,
+)
+from skill_lens.runners.product import (
+    DEFAULT_MAX_OUTPUT_BYTES as PRODUCT_DEFAULT_MAX_OUTPUT_BYTES,
+)
+from skill_lens.runners.product import (
+    DEFAULT_TIMEOUT_SECONDS as PRODUCT_DEFAULT_TIMEOUT_SECONDS,
+)
 from skill_lens.scripts import (
     DEFAULT_INTERPRETERS,
     DEFAULT_MAX_OUTPUT_BYTES,
     DEFAULT_TIMEOUT_SECONDS,
     ScriptPolicy,
 )
-from skill_lens.workspace import DEFAULT_LIMITS
+from skill_lens.workspace import DEFAULT_LIMITS, PathRefused, check_relative_path
 
 CONFIG_FILENAME = "skill-lens.toml"
 DEFAULT_MODEL = "openai:gpt-4o-mini"
+PRODUCT_NAMES: tuple[str, ...] = (*PRESETS, "cli")
 
 
 class ConfigError(Exception):
     """Raised when a config file is missing or invalid."""
+
+
+class ProductSettings(BaseModel):
+    """One `[runners.<name>]` table: how a product runner or judge is started.
+
+    `command` replaces the preset's whole argv (and is required for `cli`,
+    which has no preset); `args` is appended to whichever argv results. Two
+    knobs with two meanings: drop an isolation flag with `command`, add a
+    model with `args`. `skills_dir` and `invoke` are accepted for `cli` only;
+    a preset is the verified spelling for its product. No secret lives here:
+    the product reads its own auth.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    command: list[str] | None = None
+    args: list[str] = Field(default_factory=list)
+    timeout_seconds: float = Field(
+        default=PRODUCT_DEFAULT_TIMEOUT_SECONDS, gt=0, allow_inf_nan=False
+    )
+    max_output_bytes: int = Field(default=PRODUCT_DEFAULT_MAX_OUTPUT_BYTES, gt=0)
+    skills_dir: str | None = None
+    invoke: str | None = None
+
+    @field_validator("command")
+    @classmethod
+    def _one_prompt_element(cls, value: list[str] | None) -> list[str] | None:
+        """The prompt is substituted as one whole argv element, never through a shell."""
+        if value is None:
+            return None
+        if (
+            value.count(PROMPT_PLACEHOLDER) != 1
+            or not value[0].strip()
+            or value[0] == PROMPT_PLACEHOLDER
+        ):
+            raise ValueError(
+                f"must name an executable and contain exactly one element equal to "
+                f"{PROMPT_PLACEHOLDER}"
+            )
+        return value
+
+    @field_validator("args")
+    @classmethod
+    def _no_prompt_element_in_args(cls, value: list[str]) -> list[str]:
+        """`args` is appended after `command`'s one prompt element, never in its place."""
+        if PROMPT_PLACEHOLDER in value:
+            raise ValueError(
+                f"must not contain {PROMPT_PLACEHOLDER}; the prompt's place is fixed by command"
+            )
+        return value
+
+    @field_validator("skills_dir")
+    @classmethod
+    def _inside_the_working_directory(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            check_relative_path(value)
+        except PathRefused as exc:
+            raise ValueError(str(exc)) from exc
+        return value
+
+    @field_validator("invoke")
+    @classmethod
+    def _carries_the_task(cls, value: str | None) -> str | None:
+        """Refuse any template `product.invoke.format(name=..., task=...)` cannot render.
+
+        Walking the template with `string.Formatter().parse` catches what a
+        bare `"{task}" in value` substring check misses: an unbalanced brace
+        (`Formatter.parse` itself raises `ValueError`), an unknown field name
+        (`KeyError` at format time), a positional field (`IndexError`), and a
+        conversion or attribute/index access (`AttributeError`/`TypeError`) --
+        all of which would otherwise load fine here and only blow up out of
+        `ProductRunner.run`, where a malformed template must not raise.
+        """
+        if value is None:
+            return None
+        error = f"invoke may use only {{name}} and {{task}}; got {value!r}"
+        try:
+            fields = list(string.Formatter().parse(value))
+        except ValueError as exc:
+            raise ValueError(error) from exc
+        task_present = False
+        for _literal_text, field_name, format_spec, conversion in fields:
+            if field_name is None:
+                continue
+            if field_name not in ("name", "task") or conversion is not None or format_spec:
+                raise ValueError(error)
+            task_present = task_present or field_name == "task"
+        if not task_present:
+            raise ValueError('must contain "{task}"')
+        return value
 
 
 class Config(BaseModel):
@@ -97,6 +205,11 @@ class Config(BaseModel):
     infinity is no timeout at all.
     Setting them while `allow_scripts` is false is the normal state of a
     repository that turns execution on only in one CI job.
+
+    `runners` holds one `[runners.<name>]` table per product runner or judge
+    (`copilot`, `claude-code`, `cli`); see `ProductSettings`. Config-only:
+    which product a repository evaluates under, and how, is repository
+    policy.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -132,6 +245,7 @@ class Config(BaseModel):
     script_interpreters: dict[str, list[str]] = Field(
         default_factory=lambda: {ext: list(argv) for ext, argv in DEFAULT_INTERPRETERS.items()}
     )
+    runners: dict[str, ProductSettings] = Field(default_factory=dict)
 
     @field_validator("default_runner")
     @classmethod
@@ -186,6 +300,66 @@ class Config(BaseModel):
             timeout_seconds=self.script_timeout_seconds,
             max_output_bytes=self.max_script_output_bytes,
             interpreters={ext: tuple(argv) for ext, argv in self.script_interpreters.items()},
+        )
+
+    @field_validator("runners")
+    @classmethod
+    def _product_tables_are_well_formed(
+        cls, value: dict[str, ProductSettings]
+    ) -> dict[str, ProductSettings]:
+        for key, settings in value.items():
+            if key not in PRODUCT_NAMES:
+                raise ValueError(
+                    f"runners.{key}: unknown product; expected one of {', '.join(PRODUCT_NAMES)}"
+                )
+            if key != "cli" and (settings.skills_dir is not None or settings.invoke is not None):
+                raise ValueError(
+                    f"runners.{key}: skills_dir and invoke are fixed by the {key} preset; "
+                    "describe a product with different spellings under runners.cli"
+                )
+        return value
+
+    def product(self, name: str) -> Product:
+        """The product a runner or judge named `name` starts: preset plus its table.
+
+        Checked here rather than at load time because the name can arrive
+        from `default_runner`, `judge` or the `--runner` flag, and only the
+        first two are visible to the model.
+        """
+        if name not in PRODUCT_NAMES:
+            raise ConfigError(f"unknown product: {name}")
+        settings = self.runners.get(name, ProductSettings())
+        if name == "cli":
+            if settings.command is None:
+                raise ConfigError(
+                    "runner cli needs [runners.cli] command in skill-lens.toml, "
+                    'e.g. command = ["my-agent", "--prompt", "{prompt}"]'
+                )
+            base = Product(
+                name="cli",
+                argv=tuple(settings.command),
+                skills_dir=settings.skills_dir or DEFAULT_SKILLS_DIR,
+                invoke=settings.invoke or DEFAULT_INVOKE,
+                parse=None,
+                version_command=None,
+            )
+        else:
+            base = PRESETS[name]
+            if settings.command is not None:
+                # The preset's `--version` is only known to work on the
+                # preset's executable; a wrapper named in `command` is not
+                # probed, so preflight cannot start it with a stray argument.
+                same_executable = settings.command[0] == base.argv[0]
+                base = replace(
+                    base,
+                    argv=tuple(settings.command),
+                    version_command=base.version_command if same_executable else None,
+                )
+        return replace(
+            base,
+            argv=(*base.argv, *settings.args),
+            timeout_seconds=settings.timeout_seconds,
+            max_output_bytes=settings.max_output_bytes,
         )
 
 

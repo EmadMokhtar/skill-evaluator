@@ -29,9 +29,9 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--evals <path>` | discovery | An explicit eval file or directory, overriding discovery |
-| `--runner <name>` | `fake` | `fake`, `pydantic-ai` or `langchain`; repeat the flag to run every case through more than one — see [Runners](runners.md) |
-| `--model <name>` | `openai:gpt-4o-mini` | Model id, passed to runners that use one |
-| `--judge-model <name>` | falls back to `--model` | Model id for the LLM judge |
+| `--runner <name>` | `fake` | `fake`, `pydantic-ai`, `langchain`, `copilot`, `claude-code` or `cli`; repeatable — every case then runs through each runner named. `copilot`, `claude-code` and `cli` start an installed agent product and need no API key; see [Runners](runners.md) and [Product runners](runners.md#product-runners) |
+| `--model <name>` | `openai:gpt-4o-mini` | Model id. Read by `pydantic-ai` and `langchain` (and by a keyed judge, `judge = "pydantic-ai"` or `"langchain"`, whose `judge_model` is unset). Passing it to a run where nothing reads it — `--runner fake`, or only product runners, with no keyed judge falling back to it — is a user error (exit 2): a flag that looks honoured while the product runs its own default model would be a mistake that is easy to miss. A product's model is set with `[runners.<name>] args` in `skill-lens.toml` |
+| `--judge-model <name>` | falls back to `--model` | Model id for the LLM judge. Read by `judge = "pydantic-ai"` or `"langchain"` only; passing it under any other judge (the default `"fake"` included) is a user error (exit 2) |
 | `--tag <tag>` | none | Only run cases carrying this tag |
 | `--case <text>` | none | Only run cases whose name contains `<text>`, case-insensitively — copy any distinctive part of a case name out of a CI log to rerun just that case. Combined with `--tag`, both must hold. No config key: a filter is a property of one invocation |
 | `--min-pass-rate <float>` | `1.0` | Required overall pass rate, `0.0`–`1.0` |
@@ -65,7 +65,8 @@ characters; --full-output prints them)`). Passing cases stay one line. See
 [what a failing case shows](gating.md#what-a-failing-case-shows).
 
 `--repeat` and `--baseline` multiply spend: `--repeat 5 --baseline previous` runs 10x as many
-cases as a plain run (5 repetitions x 2 arms). Before a run on a runner that needs an API key,
+cases as a plain run (5 repetitions x 2 arms). Before a run on a runner that spends — a
+framework runner that needs an API key, or a product runner that spends the product's quota —
 the CLI prints a run plan:
 
 ```
@@ -80,8 +81,14 @@ count from what the plan line shows.
 
 `--judge-model` names the model the judge grades with, but it does not turn judging on: the
 judge is selected by the `judge` key in [`skill-lens.toml`](configuration.md#judging), which
-defaults to `"fake"` so that upgrading never starts spending money on its own. A blank model
-id is rejected as a user error (exit 2) rather than reaching a provider.
+defaults to `"fake"` so that upgrading never starts spending money on its own. Because the
+flag is read only by `judge = "pydantic-ai"` or `"langchain"`, passing it under any other
+judge is a user error (exit 2) rather than a flag that silently did nothing. `--model` follows
+the same rule: it is read by the two framework runners, and by a keyed judge whose
+`judge_model` is unset; a run that names neither — `--runner fake`, or product runners only —
+refuses it, and a product's model is set with `[runners.<name>] args` in
+[`skill-lens.toml`](configuration.md#product-runners) instead. A blank model id is rejected
+as a user error (exit 2) rather than reaching a provider.
 
 ## `list`
 

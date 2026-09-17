@@ -1,0 +1,11 @@
+{"type":"session.skills_loaded","data":{"skills":[{"name":"ping","description":"Use when asked to ping.","source":"project","userInvocable":true,"enabled":true,"path":"/work/.agents/skills/ping/SKILL.md"}]},"id":"e1","timestamp":"2026-09-17T10:00:00.000Z","ephemeral":true}
+{"type":"session.tools_updated","data":{"model":"gpt-5.4"},"id":"e2","timestamp":"2026-09-17T10:00:00.100Z","ephemeral":true}
+{"type":"user.message","data":{"content":"/ping Please ping.","attachments":[]},"id":"e3","timestamp":"2026-09-17T10:00:00.200Z"}
+{"type":"assistant.turn_start","data":{"turnId":"0"},"id":"e4","timestamp":"2026-09-17T10:00:00.300Z"}
+{"type":"skill.invoked","data":{"name":"ping","description":"Use when asked to ping.","path":"/work/.agents/skills/ping/SKILL.md","content":"# ping"},"id":"e5","timestamp":"2026-09-17T10:00:00.400Z"}
+{"type":"assistant.message","data":{"messageId":"m1","content":"","toolRequests":[{"toolCallId":"c1","name":"bash","arguments":{"command":"ls","intent":"list files"},"type":"function"}]},"id":"e6","timestamp":"2026-09-17T10:00:01.000Z"}
+{"type":"tool.execution_start","data":{"toolCallId":"c1","toolName":"bash","arguments":{"command":"ls","intent":"list files"}},"id":"e7","timestamp":"2026-09-17T10:00:01.100Z"}
+{"type":"tool.execution_complete","data":{"toolCallId":"c1","success":true,"result":{"content":"SKILL.md"},"toolTelemetry":{}},"id":"e8","timestamp":"2026-09-17T10:00:01.200Z"}
+{"type":"assistant.message","data":{"messageId":"m2","content":"PONG-7731","toolRequests":[]},"id":"e9","timestamp":"2026-09-17T10:00:02.000Z"}
+{"type":"assistant.turn_end","data":{"turnId":"0"},"id":"e10","timestamp":"2026-09-17T10:00:02.100Z"}
+{"type":"result","timestamp":"2026-09-17T10:00:02.300Z","sessionId":"s1","exitCode":0,"usage":{"premiumRequests":1,"totalApiDurationMs":3000,"sessionDurationMs":4000,"codeChanges":{"linesAdded":0,"linesRemoved":0,"filesModified":[]}}}

@@ -331,6 +331,17 @@ def _skipped(report: RunReport) -> str:
     return "<sub>" + "<br>".join(bits) + "</sub>" if bits else ""
 
 
+def _products(report: RunReport) -> str:
+    bits = []
+    for product in report.products:
+        version = f" {_escape(product.version)}" if product.version else ""
+        bits.append(
+            f"Product {_code(product.name)}{version} ({_code(product.executable)}): "
+            f"{_escape(product.trust)}"
+        )
+    return "<sub>" + "<br>".join(bits) + "</sub>" if bits else ""
+
+
 def _scripts(report: RunReport) -> str:
     """The sandbox line and the not-run notes, as one optional block."""
     bits = []
@@ -387,6 +398,7 @@ def render_markdown(
         _low_signal(delta) if delta is not None else "",
         _high_variance(delta) if delta is not None else "",
         _skipped(report),
+        _products(report),
         _scripts(report),
     ]
     gated = gate is not None and not gate.passed

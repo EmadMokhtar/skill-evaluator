@@ -8,6 +8,7 @@ from skill_lens.models import (
     CaseOutcome,
     CheckResult,
     EvalScore,
+    ProductStatus,
     RunReport,
     RunResult,
     ScriptNote,
@@ -204,7 +205,9 @@ def test_json_carries_model_and_cost_note_per_outcome():
     # The adapter goes to real trouble to capture the dated snapshot name the
     # provider actually served, and cost_note is the only visible signal that
     # pricing degraded (e.g. an unpriced Groq/Mistral model). Neither is worth
-    # anything if the JSON artifact drops them on the floor.
+    # anything if the JSON artifact drops them on the floor. usage_note is the
+    # matching signal for a token count that degraded to 0 (e.g. a product
+    # runner whose trace reported no usage).
     report = RunReport(
         outcomes=[
             CaseOutcome(
@@ -217,6 +220,7 @@ def test_json_carries_model_and_cost_note_per_outcome():
                     output="yes",
                     model="gpt-4o-mini-2024-07-18",
                     cost_note="no price data for groq:llama (KeyError)",
+                    usage_note="claude-code did not report token usage",
                 ),
             ),
             CaseOutcome(
@@ -233,10 +237,12 @@ def test_json_carries_model_and_cost_note_per_outcome():
     first = data["outcomes"][0]
     assert first["model"] == "gpt-4o-mini-2024-07-18"
     assert first["cost_note"] == "no price data for groq:llama (KeyError)"
+    assert first["usage_note"] == "claude-code did not report token usage"
 
     second = data["outcomes"][1]
     assert second["model"] == ""
     assert second["cost_note"] == ""
+    assert second["usage_note"] == ""
 
 
 def test_json_includes_tag_filtered_skills():
@@ -721,3 +727,41 @@ def test_json_carries_the_script_status_and_notes():
     }
     assert payload["script_notes"] == [{"skill_name": "pdf", "script_count": 1}]
     assert json.loads(render_json(_report()))["scripts"] is None
+
+
+_PRODUCT = ProductStatus(
+    name="copilot", executable="/opt/homebrew/bin/copilot", version="1.0.37", trust="no sandbox"
+)
+
+
+def test_console_names_each_product_its_version_and_its_trust_model():
+    report = _report().model_copy(update={"products": [_PRODUCT]})
+    assert render_console(report).splitlines()[0] == (
+        "product copilot 1.0.37 (/opt/homebrew/bin/copilot): no sandbox"
+    )
+
+
+def test_console_omits_a_blank_version():
+    status = _PRODUCT.model_copy(update={"name": "cli", "version": ""})
+    report = _report().model_copy(update={"products": [status]})
+    assert render_console(report).splitlines()[0] == (
+        "product cli (/opt/homebrew/bin/copilot): no sandbox"
+    )
+
+
+def test_console_prints_products_before_the_script_lines():
+    report = _report().model_copy(
+        update={
+            "products": [_PRODUCT],
+            "scripts": ScriptStatus(sandbox="bwrap", detail="bwrap probe succeeded"),
+        }
+    )
+    first, second = render_console(report).splitlines()[:2]
+    assert first.startswith("product copilot")
+    assert second == "scripts: on, sandbox: bwrap"
+
+
+def test_json_carries_the_products():
+    report = _report().model_copy(update={"products": [_PRODUCT]})
+    assert json.loads(render_json(report))["products"] == [_PRODUCT.model_dump()]
+    assert json.loads(render_json(_report()))["products"] == []

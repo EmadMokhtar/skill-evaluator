@@ -9,24 +9,34 @@ def _checks(spec: BudgetSpec, result: RunResult) -> tuple[list[CheckResult], int
     """One CheckResult per declared limit, plus how many were actually evaluated.
 
     A cost limit is declared but not evaluated when `result.cost_note` is
-    non-empty: `calculate_cost` degrades to 0.0 for an unpriced model, and
-    `0.0 > max_cost_usd` is always False, so evaluating it anyway would report
-    "within budget" for a limit nobody checked. It becomes a *failing* check
-    carrying the reason -- never a passing one.
+    non-empty, and a token limit when `result.usage_note` is: `calculate_cost`
+    degrades to 0.0 for an unpriced model, and `0.0 > max_cost_usd` is always
+    False, so evaluating it anyway would report "within budget" for a limit
+    nobody checked. It becomes a *failing* check carrying the reason -- never
+    a passing one.
     """
     checks: list[CheckResult] = []
     evaluated = 0
 
     if spec.max_tokens is not None:
-        evaluated += 1
-        held = result.tokens <= spec.max_tokens
-        checks.append(
-            CheckResult(
-                id="max_tokens",
-                passed=held,
-                evidence=f"used {result.tokens} tokens, limit is {spec.max_tokens}",
+        if result.usage_note:
+            checks.append(
+                CheckResult(
+                    id="max_tokens",
+                    passed=False,
+                    evidence=f"token budget not evaluated: {result.usage_note}",
+                )
             )
-        )
+        else:
+            evaluated += 1
+            held = result.tokens <= spec.max_tokens
+            checks.append(
+                CheckResult(
+                    id="max_tokens",
+                    passed=held,
+                    evidence=f"used {result.tokens} tokens, limit is {spec.max_tokens}",
+                )
+            )
     if spec.max_cost_usd is not None:
         if result.cost_note:
             checks.append(
@@ -64,8 +74,7 @@ class BudgetEvaluator:
     """Every declared limit must hold to pass; an unevaluated limit fails the
     case. The score is the fraction of *evaluated* limits that held, so an
     unpriceable limit neither inflates nor deflates it. An unpriced model
-    degrades cost to 0.0, and 0.0 > max_cost_usd is always False—so evaluating
-    it would falsely report "within budget" for something never checked.
+    degrades cost to 0.0, and a product that reports no usage leaves tokens at 0.
     """
 
     name = "budget"
@@ -95,7 +104,12 @@ class BudgetEvaluator:
         # `passed` keys on *all* failures -- a skipped cost limit still fails
         # the case -- while `score` counts only what was actually evaluated, so
         # an unpriced limit neither inflates nor deflates the fraction.
-        skipped_ids = {c.id for c in checks if c.id == "max_cost_usd" and result.cost_note}
+        skipped_ids = {
+            c.id
+            for c in checks
+            if (c.id == "max_cost_usd" and result.cost_note)
+            or (c.id == "max_tokens" and result.usage_note)
+        }
         real_failures = [c for c in checks if not c.passed and c.id not in skipped_ids]
         return EvalScore(
             evaluator=self.name,

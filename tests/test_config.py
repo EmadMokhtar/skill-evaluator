@@ -2,7 +2,15 @@ from pathlib import Path
 
 import pytest
 
-from skill_lens.config import Config, ConfigError, find_config_file, load_config
+from skill_lens.config import (
+    PRODUCT_NAMES,
+    Config,
+    ConfigError,
+    ProductSettings,
+    find_config_file,
+    load_config,
+)
+from skill_lens.runners.product import PRESETS
 from skill_lens.workspace import DEFAULT_LIMITS
 
 TOML = """
@@ -337,3 +345,156 @@ def test_a_duplicate_runner_in_the_list_is_a_config_error(tmp_path):
     with pytest.raises(ConfigError, match="default_runner") as excinfo:
         load_config(path=config)
     assert "'fake' twice" in str(excinfo.value)
+
+
+def test_product_names_are_the_presets_plus_cli():
+    assert set(PRODUCT_NAMES) == set(PRESETS) | {"cli"}
+
+
+def test_product_settings_have_the_documented_defaults():
+    settings = ProductSettings()
+    assert settings.command is None
+    assert settings.args == []
+    assert settings.timeout_seconds == 600.0
+    assert settings.max_output_bytes == 8_000_000
+    assert settings.skills_dir is None
+    assert settings.invoke is None
+
+
+def test_a_preset_table_appends_args_and_sets_the_timeout(tmp_path):
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.copilot]\nargs = ["--model", "gpt-5.2"]\ntimeout_seconds = 900\n',
+        encoding="utf-8",
+    )
+    product = load_config(tmp_path / "skill-lens.toml").product("copilot")
+    assert product.argv == (*PRESETS["copilot"].argv, "--model", "gpt-5.2")
+    assert product.timeout_seconds == 900.0
+    assert product.parse is PRESETS["copilot"].parse
+
+
+def test_command_replaces_a_presets_argv_wholesale(tmp_path):
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.claude-code]\ncommand = ["claude", "-p", "{prompt}", '
+        '"--output-format", "stream-json", "--verbose"]\n',
+        encoding="utf-8",
+    )
+    product = load_config(tmp_path / "skill-lens.toml").product("claude-code")
+    assert product.argv == (
+        "claude",
+        "-p",
+        "{prompt}",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+    )
+    assert product.skills_dir == ".claude/skills"  # the preset's, untouched
+
+
+def test_a_preset_needs_no_table_at_all():
+    assert Config().product("copilot") == PRESETS["copilot"]
+
+
+def test_cli_builds_from_its_table(tmp_path):
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.cli]\ncommand = ["my-agent", "--prompt", "{prompt}"]\n'
+        'skills_dir = ".github/skills"\ninvoke = "use {name}: {task}"\n',
+        encoding="utf-8",
+    )
+    product = load_config(tmp_path / "skill-lens.toml").product("cli")
+    assert product.name == "cli"
+    assert product.argv == ("my-agent", "--prompt", "{prompt}")
+    assert product.skills_dir == ".github/skills"
+    assert product.invoke == "use {name}: {task}"
+    assert product.parse is None
+    assert product.version_command is None
+
+
+def test_cli_defaults_to_the_agents_directory_and_the_bare_task(tmp_path):
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.cli]\ncommand = ["my-agent", "{prompt}"]\n', encoding="utf-8"
+    )
+    product = load_config(tmp_path / "skill-lens.toml").product("cli")
+    assert product.skills_dir == ".agents/skills"
+    assert product.invoke == "{task}"
+
+
+def test_cli_without_a_command_is_a_config_error_naming_the_key():
+    with pytest.raises(ConfigError, match=r"\[runners\.cli\] command"):
+        Config().product("cli")
+
+
+def test_an_unknown_product_is_a_config_error():
+    with pytest.raises(ConfigError, match=r"unknown product"):
+        Config().product("vim")
+
+
+@pytest.mark.parametrize(
+    "toml, message",
+    [
+        ("[runners.vim]\nargs = []\n", "unknown product"),
+        (
+            '[runners.copilot]\ncommand = ["copilot", "-p"]\n',
+            "exactly one element equal to {prompt}",
+        ),
+        (
+            '[runners.copilot]\ncommand = ["copilot", "{prompt}", "{prompt}"]\n',
+            "exactly one element",
+        ),
+        ('[runners.copilot]\ncommand = ["copilot", "-p{prompt}"]\n', "exactly one element"),
+        ('[runners.copilot]\nskills_dir = ".x"\n', "fixed by the copilot preset"),
+        ('[runners.claude-code]\ninvoke = "{task}"\n', "fixed by the claude-code preset"),
+        ('[runners.cli]\ncommand = ["a", "{prompt}"]\nskills_dir = "/abs"\n', "skills_dir"),
+        ('[runners.cli]\ncommand = ["a", "{prompt}"]\nskills_dir = "../up"\n', "skills_dir"),
+        ('[runners.cli]\ncommand = ["a", "{prompt}"]\ninvoke = "no task here"\n', "{task}"),
+        (
+            '[runners.cli]\ncommand = ["a", "{prompt}"]\ninvoke = "/{name} {task} {extra}"\n',
+            "invoke",
+        ),
+        ('[runners.cli]\ncommand = ["a", "{prompt}"]\ninvoke = "{task} {"\n', "invoke"),
+        ('[runners.cli]\ncommand = ["a", "{prompt}"]\ninvoke = "{0} {task}"\n', "invoke"),
+        (
+            '[runners.cli]\ncommand = ["a", "{prompt}"]\ninvoke = "{task} {name.__class__}"\n',
+            "invoke",
+        ),
+        ("[runners.copilot]\ntimeout_seconds = 0\n", "timeout_seconds"),
+        ("[runners.copilot]\ntimeout_seconds = inf\n", "timeout_seconds"),
+        ("[runners.copilot]\nmax_output_bytes = 0\n", "max_output_bytes"),
+        ("[runners.copilot]\nnonsense = 1\n", "nonsense"),
+        ('[runners.copilot]\nargs = ["{prompt}"]\n', "must not contain {prompt}"),
+        ('[runners.cli]\ncommand = ["{prompt}", "extra"]\n', "exactly one element"),
+    ],
+)
+def test_invalid_product_settings_are_config_errors(tmp_path, toml, message):
+    (tmp_path / "skill-lens.toml").write_text(toml, encoding="utf-8")
+    with pytest.raises(ConfigError, match=message):
+        load_config(tmp_path / "skill-lens.toml")
+
+
+@pytest.mark.parametrize("template", ["/{name} {task}", "{task}"])
+def test_invoke_template_using_only_name_and_task_still_loads(tmp_path, template):
+    (tmp_path / "skill-lens.toml").write_text(
+        f'[runners.cli]\ncommand = ["a", "{{prompt}}"]\ninvoke = {template!r}\n',
+        encoding="utf-8",
+    )
+    product = load_config(tmp_path / "skill-lens.toml").product("cli")
+    assert product.invoke == template
+
+
+def test_a_command_naming_another_executable_drops_the_presets_version_probe(tmp_path):
+    # `./run-claude.sh --version` might forward `--version` as a prompt and
+    # start a real session in preflight; the probe is only known to work on
+    # the preset's own executable.
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.claude-code]\ncommand = ["./run-claude.sh", "{prompt}"]\n', encoding="utf-8"
+    )
+    product = load_config(tmp_path / "skill-lens.toml").product("claude-code")
+    assert product.version_command is None
+
+
+def test_a_command_keeping_the_presets_executable_keeps_its_version_probe(tmp_path):
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.claude-code]\ncommand = ["claude", "-p", "{prompt}", "--verbose"]\n',
+        encoding="utf-8",
+    )
+    product = load_config(tmp_path / "skill-lens.toml").product("claude-code")
+    assert product.version_command == ("claude", "--version")

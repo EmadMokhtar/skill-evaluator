@@ -1,7 +1,9 @@
 import json
 import re
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -69,6 +71,27 @@ WORKSPACE_CASES_YAML = """cases:
     assertions:
       - kind: contains
         value: pdf
+"""
+
+FAKE_PRODUCT = Path(__file__).parent / "fake_product.py"
+PRODUCT_FIXTURES = Path(__file__).parent / "fixtures" / "products"
+
+PRODUCT_CASES_YAML = """cases:
+  - name: pongs
+    task: Please ping.
+    assertions:
+      - kind: contains
+        value: PONG
+"""
+
+TOOLS_CASES_YAML = """cases:
+  - name: uses a mock tool
+    task: anything
+    tools:
+      - name: lookup
+    assertions:
+      - kind: contains
+        value: x
 """
 
 
@@ -869,7 +892,15 @@ def test_the_runner_flag_replaces_the_config_list_rather_than_appending(tmp_path
 def test_every_case_runs_through_every_runner_and_each_outcome_names_its_runner(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setitem(cli_module._RUNNERS, "fake-2", SecondFake)
+    monkeypatch.setattr(cli_module, "_RUNNER_NAMES", (*cli_module._RUNNER_NAMES, "fake-2"))
+    original_build_runner = cli_module._build_runner
+
+    def _build_runner(name, settings, model_name):
+        if name == "fake-2":
+            return SecondFake()
+        return original_build_runner(name, settings, model_name)
+
+    monkeypatch.setattr(cli_module, "_build_runner", _build_runner)
     skill_dir = _make_skill(tmp_path)
     out = tmp_path / "report.json"
     result = runner.invoke(
@@ -923,3 +954,117 @@ def test_a_single_runner_plan_line_still_states_the_runner_factor(tmp_path, monk
     _make_skill(tmp_path, cases=None)
     result = runner.invoke(app, ["run", str(tmp_path), "--runner", "pydantic-ai"])
     assert "x 1 runner(s) x" in plain(result.stdout)
+
+
+def _product_config(tmp_path, name="copilot") -> Path:
+    command = [sys.executable, str(FAKE_PRODUCT), "-p", "{prompt}"]
+    body = f"[runners.{name}]\ncommand = {command!r}\n".replace("'", '"')
+    path = tmp_path / "skill-lens.toml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_a_product_runner_runs_the_case_and_names_the_product(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(PRODUCT_FIXTURES / "copilot-trigger.jsonl"))
+    skill_dir = _make_skill(tmp_path, cases=PRODUCT_CASES_YAML)
+    config = _product_config(tmp_path)
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--runner", "copilot", "--config", str(config)]
+    )
+    assert result.exit_code == 0, result.output
+    # `command` names the interpreter, not `copilot`, so the preset's
+    # `--version` probe is skipped and the line carries no version.
+    assert "product copilot (" in result.output
+    assert "product copilot Python" not in result.output
+    assert "permission prompts disabled" in result.output
+    assert "Plan: up to 1 arm(s) x 1 repeat(s) x 1 runner(s) x 1 case(s) = 1 runs" in result.output
+    assert "pdf :: pongs (copilot)" in result.output
+
+
+def test_a_product_that_is_not_installed_is_exit_2_before_any_case(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))  # nothing on it
+    skill_dir = _make_skill(tmp_path, cases=PRODUCT_CASES_YAML)
+    result = runner.invoke(app, ["run", str(skill_dir), "--runner", "copilot"])
+    assert result.exit_code == 2
+    assert "runner copilot: 'copilot' is not on PATH" in plain(result.output)
+
+
+def test_cli_without_a_command_table_is_exit_2_naming_the_key(tmp_path):
+    skill_dir = _make_skill(tmp_path, cases=PRODUCT_CASES_YAML)
+    result = runner.invoke(app, ["run", str(skill_dir), "--runner", "cli"])
+    assert result.exit_code == 2
+    assert "[runners.cli] command" in plain(result.output)
+
+
+def test_a_case_with_mock_tools_under_a_product_runner_is_exit_2(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(PRODUCT_FIXTURES / "copilot-trigger.jsonl"))
+    skill_dir = _make_skill(tmp_path, cases=TOOLS_CASES_YAML)
+    config = _product_config(tmp_path)
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--runner", "copilot", "--config", str(config)]
+    )
+    assert result.exit_code == 2
+    assert "declares tools:" in plain(result.output)
+
+
+def test_model_with_nothing_that_reads_it_is_a_user_error(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(skill_dir), "--runner", "fake", "--model", "gpt-5.2"])
+    assert result.exit_code == 2
+    assert "--model is read by pydantic-ai and langchain only" in plain(result.output)
+    assert "[runners.<name>] args" in plain(result.output)
+
+
+def test_model_is_allowed_when_a_keyed_judge_falls_back_to_it(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-lens.toml").write_text('judge = "pydantic-ai"\n', encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(skill_dir),
+            "--runner",
+            "fake",
+            "--model",
+            "openai:gpt-4o-mini",
+            "--config",
+            str(tmp_path / "skill-lens.toml"),
+        ],
+        env={"OPENAI_API_KEY": "k"},
+    )
+    assert result.exit_code == 0, result.output  # no judge: block, so nothing is spent
+
+
+def test_judge_model_with_a_judge_that_does_not_read_it_is_a_user_error(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(skill_dir), "--judge-model", "gpt-5.2"])
+    assert result.exit_code == 2
+    assert '--judge-model is read by judge = "pydantic-ai" or "langchain" only' in plain(
+        result.output
+    )
+
+
+def test_a_product_runner_and_a_keyed_runner_share_one_invocation(tmp_path, monkeypatch):
+    # --model reaches the keyed runner; the product ignores it. Preflight for
+    # the keyed runner (no key) stops the run first, which is enough to prove
+    # both names resolve.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    skill_dir = _make_skill(tmp_path, cases=PRODUCT_CASES_YAML)
+    config = _product_config(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(skill_dir),
+            "--runner",
+            "copilot",
+            "--runner",
+            "pydantic-ai",
+            "--model",
+            "openai:gpt-4o-mini",
+            "--config",
+            str(config),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "OPENAI_API_KEY" in result.output
