@@ -6,6 +6,7 @@ schema and a callable, which every adapter can register in its own way.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -37,11 +38,24 @@ class AgentTool:
 def build_mock_tool(spec: ToolSpec) -> AgentTool:
     """Turn a declared ToolSpec into a callable plus its JSON schema.
 
-    Parameter types are already constrained by `ToolSpec`, so an unsupported
-    type is rejected by the case loader as an authoring error long before it
-    reaches here.
+    Two shapes, deliberately asymmetric. The `parameters:` shorthand is closed
+    (`additionalProperties: false`, every key required) because the author
+    wrote every key. A declared `input_schema` is passed verbatim -- deep
+    copied so an adapter cannot mutate the case -- because fidelity to the
+    server it stands in for is its reason to exist. Types in the shorthand
+    are already constrained by `ToolSpec`, and the loader has already checked
+    a declared schema, so nothing here can be rejected.
     """
-    properties = {name: {"type": type_name} for name, type_name in spec.parameters.items()}
+    if spec.input_schema is not None:
+        json_schema: dict[str, Any] = copy.deepcopy(spec.input_schema)
+    else:
+        properties = {name: {"type": type_name} for name, type_name in spec.parameters.items()}
+        json_schema = {
+            "type": "object",
+            "properties": properties,
+            "required": list(properties),
+            "additionalProperties": False,
+        }
     returns = spec.returns
 
     def call(**_arguments: Any) -> str:
@@ -51,14 +65,16 @@ def build_mock_tool(spec: ToolSpec) -> AgentTool:
     return AgentTool(
         name=spec.name,
         description=spec.description,
-        json_schema={
-            "type": "object",
-            "properties": properties,
-            "required": list(properties),
-            "additionalProperties": False,
-        },
+        json_schema=json_schema,
         call=call,
     )
+
+
+# The characters an offered-skill tool name may carry, and its length cap: the
+# subset of `TOOL_NAME_PATTERN` (`^[A-Za-z0-9_-]{1,64}$`) that `skill_tool_name`
+# emits. See its docstring for why the hyphen is left out.
+_TOOL_NAME_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
+_TOOL_NAME_MAX_LENGTH = 64
 
 
 def _empty_schema() -> dict[str, Any]:
@@ -78,32 +94,36 @@ def _empty_schema() -> dict[str, Any]:
 
 
 def skill_tool_name(skill_name: str) -> str:
-    """The identifier a skill is offered under: 'order-support' -> 'order_support'.
+    """The name a skill is offered under: 'order-support' -> 'order_support'.
 
     Deterministic, because both the runner (which registers the tool) and the
     case loader (which rejects a case tool that would collide with it) have to
     agree on the answer without talking to each other.
 
-    Must be total: every possible input has to yield a valid Python
-    identifier. `char.isalnum()` / `char.isdigit()` are not safe tests for
-    this -- both return True for Unicode "Other Number" (No) characters
-    (superscripts, circled digits, vulgar fractions) that are nonetheless
-    illegal in an identifier in any position. Asking Python directly avoids
-    that trap: `f"a{char}".isidentifier()` is exactly "valid in a non-leading
-    position", and `char.isidentifier()` is exactly "valid in the leading
-    position".
+    Must be total over the provider rule: every possible input has to yield a
+    name that matches `TOOL_NAME_PATTERN`, or the offered tool could not be
+    registered at all. A Python identifier is not enough -- 'café' is one, and
+    OpenAI and Anthropic both reject the accented letter -- so the test is
+    plain ASCII membership, not `str.isidentifier()`. Anything outside
+    `[A-Za-z0-9_]` becomes `_`. Hyphens are included in that, even though the
+    pattern allows them, because the recorded provider traffic (the
+    cassettes) registers `order-support` as `order_support`; keeping the
+    hyphen would change every request body they replay against. A leading
+    digit gets a `skill_` prefix, as before; the result is then cut to the
+    64-character limit, after the prefix so the cut never removes it.
 
-    Distinct names can collapse to the same identifier (e.g. "a-b", "a_b" and
-    "a b" all become "a_b"). That's an accepted, deliberate tradeoff: only one
-    skill is offered as a tool per run, so there's never a same-run collision
-    to resolve.
+    Distinct names can collapse to the same name (e.g. "a-b", "a_b" and "a b"
+    all become "a_b", and two 70-character names that differ only at the end
+    become one). That's an accepted, deliberate tradeoff: only one skill is
+    offered as a tool per run, so there's never a same-run collision to
+    resolve.
     """
-    cleaned = "".join(char if f"a{char}".isidentifier() else "_" for char in skill_name)
+    cleaned = "".join(char if char in _TOOL_NAME_CHARS else "_" for char in skill_name)
     if not cleaned.strip("_"):
         return "skill"
-    if not cleaned[0].isidentifier():
+    if cleaned[0].isdigit():
         cleaned = f"skill_{cleaned}"
-    return cleaned
+    return cleaned[:_TOOL_NAME_MAX_LENGTH]
 
 
 def build_skill_tool(skill: Skill) -> AgentTool:

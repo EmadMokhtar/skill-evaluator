@@ -103,6 +103,7 @@ def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
         _validate_cross_references(path, case, skill)
         _validate_workspace(path, case)
         _validate_assertions(path, case)
+        _validate_tools(path, case)
         cases.append(case)
     return cases
 
@@ -167,6 +168,32 @@ def _validate_assertions(path: Path, case: EvalCase) -> None:
                 Draft202012Validator.check_schema(spec.json_schema)
             except SchemaError as exc:
                 raise CaseParseError(f"{where} has an invalid json_schema: {exc.message}") from exc
+
+
+def _validate_tools(path: Path, case: EvalCase) -> None:
+    """Check each mock tool's declared schema at load time.
+
+    A tool declares its arguments one of two ways -- the `parameters:`
+    shorthand or a full `input_schema:` -- never both, and a declared schema
+    has to be one a provider would register: valid JSON Schema whose top
+    level is an object. All three mistakes are the author's, so they abort
+    before any case runs rather than surface as an errored case.
+    """
+    for tool in case.tools:
+        where = f"{path}: case {case.name!r} tool {tool.name!r}"
+        if tool.input_schema is None:
+            continue
+        if tool.parameters:
+            raise CaseParseError(f"{where} declares both parameters and input_schema; choose one.")
+        try:
+            Draft202012Validator.check_schema(tool.input_schema)
+        except SchemaError as exc:
+            raise CaseParseError(f"{where} has an invalid input_schema: {exc.message}") from exc
+        if tool.input_schema.get("type") != "object":
+            raise CaseParseError(
+                f"{where} input_schema must declare type: object; a tool's arguments "
+                f"are always an object."
+            )
 
 
 def _validate_workspace(path: Path, case: EvalCase) -> None:

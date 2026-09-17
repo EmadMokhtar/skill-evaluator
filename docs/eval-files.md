@@ -10,7 +10,7 @@ Extra keys alongside `cases:` at the top level of the file are ignored.
 | `task` | yes | The prompt handed to the runner |
 | `assertions` | no | Scoring rules; a case with none passes |
 | `tags` | no | Labels for `--tag` filtering |
-| `tools` | no | Mock tools the agent may call — see [Declaring tools and scoring the trajectory](runners.md#declaring-tools-and-scoring-the-trajectory) |
+| `tools` | no | Mock tools the agent may call — see [Mock tools](#mock-tools) |
 | `trajectory` | no | Which tools must/must not have been called, and in what order |
 | `budget` | no | Ceilings on tokens, cost, and latency |
 | `judge` | no | A rubric for an LLM judge — see [Judging output quality](#judging-output-quality) |
@@ -68,6 +68,51 @@ like any other tool call, so it counts toward `max_calls` and any `budget:` ceil
 See [The workspace](runners.md#the-workspace) for containment and the size caps, and
 [Assertion kinds](#assertion-kinds) below for scoring a produced file rather than the chat
 output.
+
+## Mock tools
+
+A `tools:` list declares the tools the agent may call. Nothing executes: calling one records
+the call and returns `returns` verbatim, so the trajectory is the model's own choice and
+the run has no side effects. See [Declaring tools and scoring the
+trajectory](runners.md#declaring-tools-and-scoring-the-trajectory) for how the calls are
+scored.
+
+A tool declares its arguments one of two ways:
+
+```yaml
+    tools:
+      - name: lookup_order              # ^[A-Za-z0-9_-]{1,64}$ — what providers accept
+        description: Look up an order by its id
+        parameters:                     # the shorthand: name -> primitive type
+          order_id: string              # string | integer | number | boolean
+        returns: '{"id": "1234", "status": "delivered"}'
+      - name: get-pull-request
+        description: Get details of a specific pull request
+        input_schema:                   # a full JSON Schema, passed to the agent verbatim
+          type: object
+          properties:
+            owner: {type: string}
+            pull_number: {type: integer}
+            labels: {type: array, items: {type: string}}
+          required: [owner, pull_number]
+        returns: '{"number": 1}'
+```
+
+`parameters:` is for a tool you describe by hand. Every key is required and the schema is
+closed (`additionalProperties: false`), because you wrote every key. `input_schema:` is
+for a tool that must match a real server's declared schema — optional arguments, enums,
+arrays, nested objects — and reaches the agent exactly as written; nothing is added. It
+must be a valid JSON Schema whose top-level `type` is `object`, which is what every
+provider requires of a tool. A tool that declares both, or an `input_schema` that is not
+a valid object schema, is an authoring error (exit `2`) caught before any case runs.
+
+[`skill-lens mcp-import`](cli.md#mcp-import) writes an `input_schema:` block from an MCP
+server's own `tools/list` listing, so a mock for a real server's tool is copied rather
+than transcribed.
+
+Tool names follow the rule both OpenAI and Anthropic enforce, `^[A-Za-z0-9_-]{1,64}$`, so
+a hyphenated MCP tool name such as `get-pull-request` is kept as the server spells it. A
+name outside the rule is an authoring error; skill-lens never rewrites one.
 
 ## Judging output quality
 
@@ -154,8 +199,10 @@ Three things to know:
   `max_calls`.
 - Check it with `skill_triggered`, not by naming it in `called:` — that list only accepts
   tools the case itself declares.
-- The tool name is the skill's name normalised to an identifier (`order-support` becomes
-  `order_support`). A case tool that collides with it is an authoring error.
+- The tool name is the skill's name normalised to what providers accept — ASCII letters,
+  digits and `_`, at most 64 characters (`order-support` becomes `order_support`, `café`
+  becomes `caf_`). A case tool that collides with it is an authoring error. This
+  normalisation applies only to the offered-skill tool; a case's own tools keep their names.
 
 Setting `skill_triggered` on a `mode: loaded` case is an authoring error too: a loaded skill
 is always in force, so the check could never be false. Running an offered case on a runner

@@ -1,3 +1,9 @@
+## v0.7.0 (2026-09-17)
+
+### Feat
+
+- import mock tools from an MCP server's tools/list listing (#45)
+
 ## v0.6.0 (2026-09-13)
 
 ### Feat

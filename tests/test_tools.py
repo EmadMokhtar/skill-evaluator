@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import skill_lens.runners.tools as tools_module
-from skill_lens.models import Skill, ToolSpec
+from skill_lens.models import TOOL_NAME_PATTERN, Skill, ToolSpec
 from skill_lens.runners.tools import build_mock_tool, build_skill_tool, skill_tool_name
 
 
@@ -30,6 +30,35 @@ def test_a_tool_with_no_parameters_still_has_a_valid_schema():
     tool = build_mock_tool(ToolSpec(name="ping"))
     assert tool.json_schema["properties"] == {}
     assert tool.json_schema["required"] == []
+
+
+def test_a_declared_input_schema_reaches_the_agent_verbatim():
+    # The schema is the point: a mock standing in for a real MCP tool must show
+    # the model exactly what the live server would, optional arguments included.
+    schema = {
+        "type": "object",
+        "properties": {
+            "owner": {"type": "string"},
+            "labels": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["owner"],
+    }
+    tool = build_mock_tool(ToolSpec(name="get-pull-request", input_schema=schema))
+    assert tool.json_schema == schema
+    assert "additionalProperties" not in tool.json_schema
+
+
+def test_a_declared_input_schema_is_copied_not_shared():
+    schema = {"type": "object", "properties": {}}
+    spec = ToolSpec(name="ping", input_schema=schema)
+    tool = build_mock_tool(spec)
+    tool.json_schema["properties"]["injected"] = {"type": "string"}
+    assert spec.input_schema == {"type": "object", "properties": {}}
+
+
+def test_a_tool_with_an_input_schema_still_returns_the_canned_value():
+    tool = build_mock_tool(ToolSpec(name="ping", input_schema={"type": "object"}, returns="pong"))
+    assert tool.call(anything="at all") == "pong"
 
 
 def test_calling_the_tool_returns_the_canned_value_verbatim():
@@ -73,14 +102,44 @@ def test_a_name_with_nothing_usable_falls_back_to_a_stable_default():
 def test_a_name_with_a_category_no_character_is_still_a_valid_identifier():
     # '²' (superscript two) and '①' (circled digit one) are Unicode category
     # "Other Number" (No): char.isalnum() and char.isdigit() both say True for
-    # them, but they are not legal in a Python identifier in any position.
-    # A cleaning pass built on isalnum()/isdigit() lets them survive and
-    # defeats the digit-prefix guard, breaking the function's totality
-    # contract. Assert the property (isidentifier()), not one output string,
-    # since totality is the actual thing being guaranteed.
+    # them, but they are not legal in a Python identifier in any position, and
+    # no provider accepts them either. The cleaning pass is plain ASCII
+    # membership, so they cannot survive it. Assert the property, not one
+    # output string, since totality is the actual thing being guaranteed.
     assert skill_tool_name("²").isidentifier()
     assert skill_tool_name("①").isidentifier()
     assert skill_tool_name("Level²").isidentifier()
+
+
+def test_a_non_ascii_name_becomes_one_a_provider_accepts():
+    # 'café' is a valid Python identifier, but OpenAI and Anthropic reject the
+    # accented letter. The offered tool has to be registrable, so the rule is
+    # the provider's, not Python's.
+    assert skill_tool_name("café") == "caf_"
+    assert TOOL_NAME_PATTERN.fullmatch(skill_tool_name("café"))
+    assert TOOL_NAME_PATTERN.fullmatch(skill_tool_name("résumé-writer"))
+
+
+def test_a_long_name_is_cut_to_the_provider_limit():
+    long_name = "x" * 70
+    assert skill_tool_name(long_name) == "x" * 64
+    assert TOOL_NAME_PATTERN.fullmatch(skill_tool_name(long_name))
+
+
+def test_the_prefix_never_pushes_a_name_over_the_limit():
+    # The leading-digit prefix is added before the cut, so the result is still
+    # 64 characters and still starts with the prefix.
+    name = skill_tool_name("9" * 70)
+    assert len(name) == 64
+    assert name.startswith("skill_")
+    assert TOOL_NAME_PATTERN.fullmatch(name)
+
+
+def test_every_output_matches_the_provider_rule():
+    # Totality: whatever the skill is called, the tool name is one a provider
+    # will register.
+    for skill_name in ["", "---", "²", "①", "Level²", "a b", "🎉 party", "-lead", "_x"]:
+        assert TOOL_NAME_PATTERN.fullmatch(skill_tool_name(skill_name)), skill_name
 
 
 def test_distinct_names_may_collapse_to_the_same_identifier():

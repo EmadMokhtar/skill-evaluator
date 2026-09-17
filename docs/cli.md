@@ -13,12 +13,14 @@ skill-lens run <path> [--evals <path>] [--runner <name>]... [--model <name>]
                       [--allow-scripts | --no-allow-scripts]
 skill-lens list <path> [--evals <path>]
 skill-lens init <path> [--force]
+skill-lens mcp-import <source> [--tool <name>]...
 skill-lens --version
 ```
 
 `<path>` is a skill directory or a directory of skill directories. Discovery is
 recursive. `init` is the exception: its `<path>` is exactly one skill directory
-containing `SKILL.md`, never a directory of skills.
+containing `SKILL.md`, never a directory of skills. `mcp-import` takes no skill path at
+all; its `<source>` is a saved `tools/list` response.
 
 ## `run`
 
@@ -151,6 +153,74 @@ Exit `0` on success, including when every skill already had a suite (`Nothing to
 Exit `2` when the path holds no `SKILL.md` anywhere under it, when a `SKILL.md` is
 malformed, when a target file exists and `--force` was not given (one skill), when `--force`
 is given for a directory of skills, or when a file cannot be written.
+
+## `mcp-import`
+
+```bash
+skill-lens mcp-import <source> [--tool <name>]... > tools.yaml
+```
+
+Turns a saved MCP `tools/list` response into a `tools:` block you paste under a case.
+MCP (Model Context Protocol) is the protocol an agent uses to discover and call the tools
+a separate server exposes; `tools/list` is the request that returns each tool's name,
+description and the JSON Schema of its arguments. Hand-copying that into a mock is where
+the mock drifts from the server it stands in for — this command copies it instead.
+
+`<source>` is a JSON file, or `-` to read stdin. Any of the three shapes people save is
+accepted: the whole JSON-RPC response (`{"jsonrpc": ..., "result": {"tools": [...]}}`),
+just its result (`{"tools": [...]}`), or the bare array (`[...]`). To capture one, ask any
+MCP client for the listing. The inspector's CLI mode prints the listing as JSON:
+`npx @modelcontextprotocol/inspector --cli <your server command> --method tools/list >
+tools.json`. Claude Code's `/mcp` panel lists the same schemas.
+
+| Flag | Meaning |
+| --- | --- |
+| `--tool <name>` | Import only this tool. Repeat the flag for several. A name the listing does not carry is a user error, and the message lists the names it does. |
+
+**What is copied, and what is not.** Each tool's `name` and `inputSchema` are copied
+verbatim — the schema lands in [`input_schema:`](eval-files.md#mock-tools), so the agent
+sees exactly what the live server would declare, optional arguments and all. `description`
+is copied when the server gives one. `returns:` is **always** the `TODO(skill-lens)`
+placeholder: the listing says nothing about what a call returns, and inventing a value
+would be exactly the silent drift the import exists to remove. A missing description gets
+the placeholder too. Until you replace them, the file refuses to run as an
+[authoring error](eval-files.md#unfilled-scaffolds) rather than passing a case that checks
+nothing. When the server declares an `outputSchema`, it is written as a comment above
+`returns:` so you can shape the value against it.
+
+```yaml
+# Written by `skill-lens mcp-import`. Replace every TODO(skill-lens); until you do,
+# skill-lens refuses to run the file rather than pass a case that checks nothing.
+tools:
+  - name: get_pull_request
+    description: Get details of a specific pull request
+    input_schema:
+      type: object
+      properties:
+        owner:
+          type: string
+        pull_number:
+          type: integer
+      required:
+      - owner
+      - pull_number
+    # The server declares this output schema; shape `returns` to match it:
+    #   {"properties": {"number": {"type": "integer"}}, "type": "object"}
+    returns: TODO(skill-lens) the JSON this tool returns
+```
+
+Tool names are kept as the server spells them — `get-pull-request` stays hyphenated,
+because the mock has to answer to the name the skill's prose and the live server use. A
+name outside `^[A-Za-z0-9_-]{1,64}$` (the rule OpenAI and Anthropic enforce) is a user
+error naming the tool, never a rewrite.
+
+Stdout carries nothing but the block, so `> tools.yaml` captures exactly it; every error
+goes to stderr. The command never touches the network. Exit `0` on success; exit `2` for
+an unreadable file, invalid JSON, a shape that is not a `tools/list` listing, a listing the
+server answered with an error, a tool without an `inputSchema` (or one that is not a valid
+JSON Schema of `type: object` — the case loader would refuse it too), a name no provider
+would register, a listing that carries `nextCursor` (one page of several — capture every page),
+or an unknown `--tool`.
 
 ## `--version`
 

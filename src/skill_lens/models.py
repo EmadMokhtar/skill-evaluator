@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -14,6 +15,10 @@ Arm = Literal["candidate", "baseline"]
 BaselineKind = Literal["none", "previous"]
 SandboxMode = Literal["auto", "required", "off"]
 SandboxBackend = Literal["sandbox-exec", "bwrap", "none"]
+
+# What OpenAI and Anthropic accept as a tool name. A mock is registered under
+# its name verbatim, so a name outside this rule could never reach the model.
+TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class Skill(BaseModel):
@@ -224,6 +229,13 @@ class ToolSpec(BaseModel):
     Nothing executes: calling the tool records the call and returns `returns`
     verbatim, so the trajectory is genuinely the model's choice and a run has
     no side effects.
+
+    `parameters` is the shorthand for a tool the author describes by hand: a
+    flat name -> primitive type map that `build_mock_tool` closes with
+    `additionalProperties: false`. `input_schema` is for a tool that must
+    match a real server's declared JSON Schema -- optional arguments, enums,
+    arrays, nested objects -- and reaches the agent verbatim. A tool declares
+    one or the other; the case loader refuses both.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -231,13 +243,17 @@ class ToolSpec(BaseModel):
     name: str
     description: str = ""
     parameters: dict[str, ToolParamType] = Field(default_factory=dict)
+    input_schema: dict[str, Any] | None = None
     returns: str = ""
 
     @field_validator("name")
     @classmethod
-    def _must_be_an_identifier(cls, value: str) -> str:
-        if not value.isidentifier():
-            raise ValueError(f"tool name must be a valid identifier, got {value!r}")
+    def _must_be_a_provider_tool_name(cls, value: str) -> str:
+        if not TOOL_NAME_PATTERN.fullmatch(value):
+            raise ValueError(
+                f"tool name must match {TOOL_NAME_PATTERN.pattern} (what providers "
+                f"accept), got {value!r}"
+            )
         return value
 
 
