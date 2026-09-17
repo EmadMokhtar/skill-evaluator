@@ -1,3 +1,9 @@
+## v0.9.0 (2026-09-17)
+
+### Feat
+
+- grade rubrics through an agent product's CLI (#48)
+
 ## v0.8.0 (2026-09-17)
 
 ### Feat
