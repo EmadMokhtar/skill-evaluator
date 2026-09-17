@@ -129,6 +129,9 @@ cases:
         value: "1234"             # name the order you are talking about
 ```
 
+A tool a real MCP server exposes need not be transcribed: `skill-lens mcp-import tools.json`
+writes the block from the server's own `tools/list` listing, schema and all.
+
 ## A run reads like a test suite
 
 Your own repository follows the same layout — one directory per skill, eval cases beside the

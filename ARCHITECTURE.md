@@ -71,6 +71,7 @@ problem (errored) from a low score (failed).
 | `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`, and extracts that same commit's bundle (`git archive`, `tarfile` with the `data` filter) so the old instructions are paired with the old scripts. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
 | `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models. |
 | `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. `scaffold_target` decides where `init` writes. |
+| `mcp_import.py` | Turns a saved MCP `tools/list` response into mock-tool YAML: `parse_tools_list` (three accepted shapes, every refusal a `McpImportError`) and `render_tool_mocks` (a pasteable `tools:` block). Pure: text in, text out; `cli.py` reads the file or stdin. Never touches the network. |
 | `workspace.py` | The per-case temporary directory: creation, seeding, path containment, and cleanup. Framework-neutral, like every other top-level module. Its methods **raise** (`PathRefused`, `WorkspaceError`) for `cases/loader.py` and the evaluators to catch as authoring or infra errors; `runners/tools.py`'s built-in tools catch those same exceptions and turn them into ordinary tool-result strings instead. |
 | `bundle.py` | A read-only view of the three Agent Skills directories beside `SKILL.md` (`scripts/`, `references/`, `assets/`) and nothing else — an eval file beside `SKILL.md` is never readable by the agent. Same "methods raise, tools catch" split as `workspace.py`. |
 | `scripts.py` | Runs a bundled script: the policy, the once-per-run preflight (interpreters on `PATH`, the sandbox probe), the allowlisted environment, the scratch directory, the process-group timeout, capped output read through the harness's own descriptors, and the `sandbox-exec` / `bwrap` wrapping. Never raises for a script that will not run; raises `ScriptSetupError` only from preflight. |
@@ -785,6 +786,39 @@ the placeholder.
 **`examples/greeting` stays at `1.1.0` or later, with `1.0.0` in history.** `--baseline
 previous` resolves an earlier *declared version* from git, so the shipped comparative
 example only works because the bump is real and the earlier version is on `main`.
+
+### Importing MCP tools
+
+**An imported mock is the server's schema verbatim, and `returns` is never invented.**
+`mcp-import` copies `name` and `inputSchema` byte-for-byte into `input_schema:` and writes
+the `TODO(skill-lens)` sentinel for `returns` (and for a missing `description`), so a
+pasted block cannot run until the author has said what the tool returns. The listing says
+nothing about return values; a generated one would be exactly the silent drift the import
+exists to remove. The server's `outputSchema`, when declared, rides along as a comment.
+
+**`parameters` and `input_schema` are exclusive, and `input_schema` is validated at load
+time.** Both set, a schema that fails `check_schema`, or a top-level type other than
+`object` is an authoring error (exit 2) in `cases/loader.py`, before any case runs — the
+same treatment an assertion's `json_schema` gets.
+
+**The shorthand is closed; a declared schema is open.** `build_mock_tool` adds
+`additionalProperties: false` and marks every key required only when it derived the schema
+from `parameters:`, where the author wrote every key. A declared `input_schema` is deep
+copied and passed as written, because fidelity to the server it stands in for is its reason
+to exist.
+
+**A tool name is what providers accept**: `^[A-Za-z0-9_-]{1,64}$`, the rule OpenAI and
+Anthropic enforce, in place of `isidentifier()`. MCP tool names are routinely hyphenated
+and a mock must answer to the name the skill's prose and the live server use; the import
+keeps the name, and a name outside the rule is an error naming the tool, never a rewrite.
+`skill_tool_name` — the offered-skill tool — is the one place a name *is* rewritten, and
+it is total over the same rule: anything outside `[A-Za-z0-9_]` becomes `_` (the hyphen
+included, because the recorded cassettes register `order-support` as `order_support`), a
+leading digit gets `skill_`, and the result is cut to 64 characters after the prefix. A
+Python identifier was not enough: `café` is one, and every provider rejects it.
+
+**`mcp-import` never touches the network.** `SOURCE` is a file or `-`; a live `--server`
+is deliberately deferred (see the design spec).
 
 ### Security checks
 

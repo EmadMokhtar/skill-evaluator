@@ -152,3 +152,8 @@ def test_an_existing_evals_directory_wins_over_files_beside(tmp_path):
 def test_eval_filename_neutralises_path_separators():
     assert eval_filename("../../etc/passwd") == "etc-passwd.eval.yaml"
     assert eval_filename("") == "skill.eval.yaml"
+
+
+def test_the_scaffold_points_at_mcp_import_for_a_real_server_tool():
+    # A tool a real MCP server exposes should be imported, not transcribed.
+    assert "skill-lens mcp-import" in render_scaffold(SKILL)

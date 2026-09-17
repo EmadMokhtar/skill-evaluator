@@ -93,6 +93,17 @@ cases:
 `order` is a relative subsequence: unrelated calls may appear in between, but the
 listed tools must not appear out of sequence.
 
+A tool declares its arguments with the `parameters:` shorthand shown above, or with a full
+`input_schema:` when it must match a real server's declared JSON Schema; see [Mock
+tools](eval-files.md#mock-tools). The shorthand is closed — every key required,
+`additionalProperties: false` — because the author wrote every key. A declared
+`input_schema` is handed to the agent verbatim, because fidelity to the server it stands in
+for is its reason to exist. Each framework may still normalise it on the way to the
+provider — LangChain inlines `$ref` and drops `$defs`, PydanticAI passes it untouched — so
+the schema in a request log can differ in spelling from the eval file while meaning the
+same thing. [`skill-lens mcp-import`](cli.md#mcp-import) writes one from the server's own
+`tools/list` listing.
+
 Every tool name in `called`, `forbidden`, or `order` must be declared in that case's
 `tools:` — including `forbidden`, since forbidding a tool the agent was never offered in
 the first place is a check that can never fire. A name that isn't declared is an
