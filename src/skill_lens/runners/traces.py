@@ -100,7 +100,8 @@ def parse_copilot(text: str) -> Trace:
             content = data.get("content")
             if isinstance(content, str) and content.strip():
                 output = content
-            for request in data.get("toolRequests") or []:
+            requests = data.get("toolRequests")
+            for request in requests if isinstance(requests, list) else []:
                 if isinstance(request, dict) and isinstance(request.get("name"), str):
                     tool_calls.append(
                         ToolCall(
@@ -135,7 +136,8 @@ def parse_copilot(text: str) -> Trace:
         error = error or "no result event in the copilot trace"
     elif error is None and _int(result.get("exitCode")) != 0:
         error = f"copilot exited with code {result.get('exitCode')}"
-    premium = _int((result or {}).get("usage", {}).get("premiumRequests")) if result else 0
+    result_usage = result.get("usage") if result else None
+    premium = _int(result_usage.get("premiumRequests")) if isinstance(result_usage, dict) else 0
     return Trace(
         output=output,
         tool_calls=tool_calls,
@@ -168,7 +170,8 @@ def parse_claude_code(text: str) -> Trace:
                 model = event["model"]
         elif kind == "assistant":
             message = event.get("message") if isinstance(event.get("message"), dict) else {}
-            for block in message.get("content") or []:
+            content = message.get("content")
+            for block in content if isinstance(content, list) else []:
                 if not isinstance(block, dict) or block.get("type") != "tool_use":
                     continue
                 name = block.get("name")

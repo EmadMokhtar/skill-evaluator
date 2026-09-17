@@ -180,3 +180,29 @@ def test_copilot_non_dict_arguments_are_preserved_raw():
     assert parse_copilot(line).tool_calls == [
         ToolCall(name="bash", arguments={"_raw": "not a dict"})
     ]
+
+
+def test_copilot_result_with_null_usage_does_not_raise():
+    trace = parse_copilot('{"type":"result","exitCode":0,"usage":null}')
+    assert trace.error is None
+    assert trace.complete is True
+    assert trace.cost_note == (
+        "copilot bills per premium request, not per token; 0 premium request(s)"
+    )
+
+
+def test_copilot_non_list_tool_requests_does_not_raise():
+    line = (
+        '{"type":"assistant.message","data":{"content":"","toolRequests":5}}\n'
+        '{"type":"result","exitCode":0,"usage":{"premiumRequests":0}}'
+    )
+    assert parse_copilot(line).tool_calls == []
+
+
+def test_claude_code_non_list_content_does_not_raise():
+    lines = (
+        '{"type":"assistant","message":{"model":"m","content":true},"session_id":"s"}\n'
+        '{"type":"result","subtype":"success","is_error":false,"result":"ok",'
+        '"session_id":"s","total_cost_usd":0.0}'
+    )
+    assert parse_claude_code(lines).tool_calls == []
