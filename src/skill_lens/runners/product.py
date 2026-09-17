@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from skill_lens.bundle import BUNDLE_DIRS
-from skill_lens.models import EvalCase, RunResult, Skill
+from skill_lens.models import EvalCase, ProductStatus, RunResult, Skill
 from skill_lens.process import group_kwargs, read_capped_handle, reap_and_kill_group
 from skill_lens.runners.traces import Trace, parse_claude_code, parse_copilot
 from skill_lens.skills.loader import SKILL_FILENAME
@@ -56,8 +56,9 @@ TRUST_NOTE = (
 
 
 class ProductSetupError(Exception):
-    """A product runner cannot run here: raised only from `preflight`, before any
-    case, and turned into exit 2 by `cli.py`."""
+    """A product runner cannot run here: raised from `preflight` (exit 2 via
+    `cli.py`) and from `deliver_skill`, where `run` turns it into
+    `RunResult.error` for the arm it concerns."""
 
 
 @dataclass(frozen=True)
@@ -286,6 +287,44 @@ def _check_skill_name(name: str) -> None:
         )
 
 
+def _install_hint(product: Product) -> str:
+    if product.name == "cli":
+        return "set [runners.cli] command in skill-lens.toml to a command on PATH"
+    return f"install the product, or set [runners.{product.name}] command in skill-lens.toml"
+
+
+def probe_version(product: Product, executable: str, role: str = "runner") -> str:
+    """Run the product's version command; the first line of what it prints.
+
+    Executed, not merely found: a product on PATH that cannot start should be
+    exit 2 up front, not one errored case per work item. `role` ("runner" or
+    "judge") names the seat in the message. Raises `ProductSetupError`;
+    returns "" when the product has no version command.
+    """
+    if product.version_command is None:
+        return ""
+    argv = [executable, *product.version_command[1:]]
+    spoken = " ".join(argv)
+    try:
+        completed = subprocess.run(  # noqa: S603 - fixed argv from a preset or config, no shell
+            argv,
+            capture_output=True,
+            timeout=VERSION_PROBE_TIMEOUT_SECONDS,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ProductSetupError(f"{role} {product.name}: {spoken} could not run: {exc}") from exc
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip().splitlines()
+        first = detail[0] if detail else ""
+        exited = f"exited with code {completed.returncode}"
+        message = f"{role} {product.name}: {spoken} {exited}: {first}"
+        raise ProductSetupError(message.rstrip(": "))
+    lines = completed.stdout.decode("utf-8", errors="replace").strip().splitlines()
+    return lines[0].strip() if lines else ""
+
+
 class ProductRunner:
     """Runs a case through one product, behind the framework-agnostic protocol."""
 
@@ -368,4 +407,47 @@ class ProductRunner:
                 if case.mode == "offered" and product.parse is not None
                 else None
             ),
+        )
+
+    def preflight(
+        self, skills: list[Skill], cases_by_skill: dict[str, list[EvalCase]]
+    ) -> ProductStatus:
+        """Refuse, before any case runs, everything this runner cannot do.
+
+        Called once per run by the orchestrator with the candidate-arm skills
+        and cases that will run under this runner -- compatibility is a
+        property of (case, runner), unlike the sandbox decision, which is
+        run-wide. Raises `ProductSetupError`; returns the status the report
+        carries.
+        """
+        product = self._product
+        executable = shutil.which(product.argv[0])
+        if executable is None:
+            raise ProductSetupError(
+                f"runner {product.name}: {product.argv[0]!r} is not on PATH; "
+                f"{_install_hint(product)}"
+            )
+        version = probe_version(product, executable)
+        for skill in skills:
+            _check_skill_name(skill.name)
+            for case in cases_by_skill.get(skill.name, []):
+                where = f"case {case.name!r} of skill {skill.name!r}"
+                if case.tools:
+                    raise ProductSetupError(
+                        f"{where} declares tools:, which the {product.name} runner cannot "
+                        "provide -- mock tools reach only pydantic-ai and langchain"
+                    )
+                if product.parse is None:
+                    if case.trajectory is not None:
+                        raise ProductSetupError(
+                            f"{where} declares trajectory:, but the cli runner records no "
+                            "tool calls; use a preset (copilot, claude-code)"
+                        )
+                    if case.mode == "offered":
+                        raise ProductSetupError(
+                            f"{where} is mode: offered, but the cli runner cannot observe "
+                            "whether a skill was loaded; use a preset or mode: loaded"
+                        )
+        return ProductStatus(
+            name=product.name, executable=executable, version=version, trust=TRUST_NOTE
         )
