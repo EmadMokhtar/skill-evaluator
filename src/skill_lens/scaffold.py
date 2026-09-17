@@ -44,6 +44,8 @@ cases:
   #    calling one records the call and returns `returns` verbatim, so the
   #    trajectory is genuinely the model's choice. `trajectory` catches the
   #    failure an output assertion cannot see -- deciding without looking.
+  #    For a tool a real MCP server exposes, `skill-lens mcp-import tools.json`
+  #    writes this block from the server's own schema instead.
   - name: takes the right path on the hard case
     task: >-
       {sentinel} the prompt that reaches the policy edge
