@@ -430,7 +430,7 @@ def _preflight_hooks(
     plan: _Plan, runners: list[Runner], judge: Judge | None
 ) -> list[ProductStatus]:
     """Give every runner that defines `preflight` one look at what it will run,
-    and the judge's, which takes no arguments.
+    and call the judge's `preflight()`, which takes no arguments.
 
     Called after discovery and before execution, so a runner (or the judge)
     can refuse the run -- by raising an authoring error -- before any quota

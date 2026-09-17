@@ -1227,3 +1227,14 @@ def test_the_same_product_as_runner_and_judge_is_listed_once(tmp_path):
 
     report = run_evals([_skill_with_cases(tmp_path)], [_PreflightRunner()], judge=SameJudge())
     assert report.products == [status]
+
+
+def test_a_judges_hook_returning_none_adds_no_status(tmp_path):
+    class QuietJudge(FakeJudge):
+        name = "quiet-judge"
+
+        def preflight(self):
+            return None
+
+    report = run_evals([_skill_with_cases(tmp_path)], [_runner()], judge=QuietJudge())
+    assert report.products == []

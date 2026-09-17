@@ -1107,7 +1107,7 @@ def test_a_product_judge_grades_a_rubric(tmp_path, monkeypatch):
     )
     assert result.exit_code == 1, result.output  # r2 failed in the fixture verdict
     assert "0 errored" in result.output  # the case failed; it did not error
-    assert "no name given" in result.output  # the failing check's evidence
+    assert "r2: no name given" in result.output  # the check's evidence line the console renders
     assert "product claude-code" in result.output
 
 
@@ -1148,3 +1148,25 @@ def test_a_product_judge_that_is_not_installed_is_exit_2_before_any_case(tmp_pat
     )
     assert result.exit_code == 2
     assert "judge copilot: 'copilot' is not on PATH" in plain(result.output)
+
+
+def test_model_with_a_product_judge_and_the_fake_runner_is_a_user_error(tmp_path):
+    # --model is rejected before run_evals ever preflights the judge, so this
+    # is a pure argument-parsing error: no copilot executable needs to exist.
+    skill_dir = _make_skill(tmp_path)
+    (tmp_path / "skill-lens.toml").write_text('judge = "copilot"\n', encoding="utf-8")
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(skill_dir),
+            "--runner",
+            "fake",
+            "--model",
+            "x",
+            "--config",
+            str(tmp_path / "skill-lens.toml"),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "--model is read by pydantic-ai and langchain only" in plain(result.output)

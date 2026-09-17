@@ -50,6 +50,7 @@ app = typer.Typer(help="Run evaluations on Agent Skills (SKILL.md).", no_args_is
 # from their [runners.<name>] table; `fake` takes nothing.
 _KEYED_RUNNERS = {"pydantic-ai": PydanticAIRunner, "langchain": LangChainRunner}
 _RUNNER_NAMES: tuple[str, ...] = ("fake", *_KEYED_RUNNERS, *PRODUCT_NAMES)
+# The same three kinds -- fake, keyed, product -- apply to a judge as to a runner.
 _KEYED_JUDGES = {"pydantic-ai": PydanticAIJudge, "langchain": LangChainJudge}
 _JUDGE_NAMES: tuple[str, ...] = ("fake", *_KEYED_JUDGES, *PRODUCT_NAMES)
 
@@ -69,8 +70,8 @@ _AUTHORING_ERRORS = (
     # scripts enabled but cannot run here: a missing interpreter, or a
     # required sandbox that is absent
     ScriptSetupError,
-    # a product runner that cannot run here: executable missing, version
-    # probe failed, or a case it cannot serve
+    # a product runner or judge that cannot run here: executable missing,
+    # version probe failed, or a case it cannot serve
     ProductSetupError,
 )
 
