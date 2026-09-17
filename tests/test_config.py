@@ -446,6 +446,16 @@ def test_an_unknown_product_is_a_config_error():
         ('[runners.cli]\ncommand = ["a", "{prompt}"]\nskills_dir = "/abs"\n', "skills_dir"),
         ('[runners.cli]\ncommand = ["a", "{prompt}"]\nskills_dir = "../up"\n', "skills_dir"),
         ('[runners.cli]\ncommand = ["a", "{prompt}"]\ninvoke = "no task here"\n', "{task}"),
+        (
+            '[runners.cli]\ncommand = ["a", "{prompt}"]\ninvoke = "/{name} {task} {extra}"\n',
+            "invoke",
+        ),
+        ('[runners.cli]\ncommand = ["a", "{prompt}"]\ninvoke = "{task} {"\n', "invoke"),
+        ('[runners.cli]\ncommand = ["a", "{prompt}"]\ninvoke = "{0} {task}"\n', "invoke"),
+        (
+            '[runners.cli]\ncommand = ["a", "{prompt}"]\ninvoke = "{task} {name.__class__}"\n',
+            "invoke",
+        ),
         ("[runners.copilot]\ntimeout_seconds = 0\n", "timeout_seconds"),
         ("[runners.copilot]\ntimeout_seconds = inf\n", "timeout_seconds"),
         ("[runners.copilot]\nmax_output_bytes = 0\n", "max_output_bytes"),
@@ -458,3 +468,13 @@ def test_invalid_product_settings_are_config_errors(tmp_path, toml, message):
     (tmp_path / "skill-lens.toml").write_text(toml, encoding="utf-8")
     with pytest.raises(ConfigError, match=message):
         load_config(tmp_path / "skill-lens.toml")
+
+
+@pytest.mark.parametrize("template", ["/{name} {task}", "{task}"])
+def test_invoke_template_using_only_name_and_task_still_loads(tmp_path, template):
+    (tmp_path / "skill-lens.toml").write_text(
+        f'[runners.cli]\ncommand = ["a", "{{prompt}}"]\ninvoke = {template!r}\n',
+        encoding="utf-8",
+    )
+    product = load_config(tmp_path / "skill-lens.toml").product("cli")
+    assert product.invoke == template

@@ -152,7 +152,7 @@ max_output_bytes = 8000000                        # default
 | `timeout_seconds` | `600.0` | Wall clock per case, finite and positive; the process group is killed at expiry. |
 | `max_output_bytes` | `8000000` | Cap on the trace, positive; a longer one is an errored case naming this key. |
 | `skills_dir` | `".agents/skills"` | `cli` only. Where the skill is written, relative to the working directory; no absolute path and no `..`. |
-| `invoke` | `"{task}"` | `cli` only. The prompt in `mode: loaded`; `{name}` and `{task}` are substituted, and `{task}` must appear. |
+| `invoke` | `"{task}"` | `cli` only. The prompt in `mode: loaded`; only `{name}` and `{task}` may appear (no other field name, no conversion, no format spec), and `{task}` must appear. |
 
 Two keys with two meanings: drop an isolation flag with `command`, add a model with
 `args`. `skills_dir` or `invoke` under a preset, an unknown table name, a `command` without

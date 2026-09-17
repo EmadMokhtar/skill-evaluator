@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import string
 import tomllib
 from dataclasses import replace
 from pathlib import Path
@@ -103,7 +104,31 @@ class ProductSettings(BaseModel):
     @field_validator("invoke")
     @classmethod
     def _carries_the_task(cls, value: str | None) -> str | None:
-        if value is not None and "{task}" not in value:
+        """Refuse any template `product.invoke.format(name=..., task=...)` cannot render.
+
+        Walking the template with `string.Formatter().parse` catches what a
+        bare `"{task}" in value` substring check misses: an unbalanced brace
+        (`Formatter.parse` itself raises `ValueError`), an unknown field name
+        (`KeyError` at format time), a positional field (`IndexError`), and a
+        conversion or attribute/index access (`AttributeError`/`TypeError`) --
+        all of which would otherwise load fine here and only blow up out of
+        `ProductRunner.run`, where a malformed template must not raise.
+        """
+        if value is None:
+            return None
+        error = f"invoke may use only {{name}} and {{task}}; got {value!r}"
+        try:
+            fields = list(string.Formatter().parse(value))
+        except ValueError as exc:
+            raise ValueError(error) from exc
+        task_present = False
+        for _literal_text, field_name, format_spec, conversion in fields:
+            if field_name is None:
+                continue
+            if field_name not in ("name", "task") or conversion is not None or format_spec:
+                raise ValueError(error)
+            task_present = task_present or field_name == "task"
+        if not task_present:
             raise ValueError('must contain "{task}"')
         return value
 
