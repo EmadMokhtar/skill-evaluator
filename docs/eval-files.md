@@ -199,8 +199,9 @@ Three things to know:
   `max_calls`.
 - Check it with `skill_triggered`, not by naming it in `called:` — that list only accepts
   tools the case itself declares.
-- The tool name is the skill's name normalised to an identifier (`order-support` becomes
-  `order_support`). A case tool that collides with it is an authoring error. This
+- The tool name is the skill's name normalised to what providers accept — ASCII letters,
+  digits and `_`, at most 64 characters (`order-support` becomes `order_support`, `café`
+  becomes `caf_`). A case tool that collides with it is an authoring error. This
   normalisation applies only to the offered-skill tool; a case's own tools keep their names.
 
 Setting `skill_triggered` on a `mode: loaded` case is an authoring error too: a loaded skill

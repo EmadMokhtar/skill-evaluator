@@ -327,7 +327,9 @@ form, that file is the explanation.
   `additionalProperties: false` only for `parameters:`; an `input_schema` is deep copied
   and passed as written.
 - **A tool name is `^[A-Za-z0-9_-]{1,64}$`** — what providers accept — never rewritten.
-  `skill_tool_name` (the offered-skill tool) still normalises to an identifier.
+  `skill_tool_name` (the offered-skill tool) is the one rewrite, total over the same rule:
+  non-`[A-Za-z0-9_]` → `_` (hyphen too — the cassettes pin `order_support`), leading digit
+  → `skill_`, then cut to 64. A Python identifier was not enough (`café`).
 - **`mcp-import` never touches the network.** `SOURCE` is a file or `-`.
 - **Script execution is off unless the run turned it on** (`allow_scripts` /
   `--allow-scripts`); nothing in an eval file or a `SKILL.md` can enable it. Reading the

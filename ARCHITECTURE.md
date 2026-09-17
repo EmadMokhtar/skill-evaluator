@@ -811,7 +811,11 @@ to exist.
 Anthropic enforce, in place of `isidentifier()`. MCP tool names are routinely hyphenated
 and a mock must answer to the name the skill's prose and the live server use; the import
 keeps the name, and a name outside the rule is an error naming the tool, never a rewrite.
-`skill_tool_name` — the offered-skill tool — still normalises to an identifier.
+`skill_tool_name` — the offered-skill tool — is the one place a name *is* rewritten, and
+it is total over the same rule: anything outside `[A-Za-z0-9_]` becomes `_` (the hyphen
+included, because the recorded cassettes register `order-support` as `order_support`), a
+leading digit gets `skill_`, and the result is cut to 64 characters after the prefix. A
+Python identifier was not enough: `café` is one, and every provider rejects it.
 
 **`mcp-import` never touches the network.** `SOURCE` is a file or `-`; a live `--server`
 is deliberately deferred (see the design spec).
