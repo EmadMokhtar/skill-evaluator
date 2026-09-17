@@ -11,14 +11,15 @@ Skills and their eval cases are **inputs** to the tool. Nothing about a skill un
 test is vendored here, so any skill repository can adopt `skill-lens` without
 embedding it.
 
-!!! info "Status: M9 part 1"
+!!! info "Status: M9"
     The full pipeline — discovery, scoring, reporting, gating — runs offline against
     `FakeRunner` (the default, scripted, free), against real agents through the
     `pydantic-ai` and `langchain` frameworks, and through an installed agent product —
     GitHub Copilot CLI or Claude Code — with no provider key at all. It scores output
     text, tool-use trajectories, efficiency budgets and
     the files a case produces in a contained workspace, plus output quality via a
-    rubric-based LLM judge with per-check evidence. Each case can also run against a
+    rubric-based LLM judge with per-check evidence, graded through a framework or through
+    the same installed product. Each case can also run against a
     baseline for comparative, delta-gated evals; JUnit/Markdown reporters and a composite
     GitHub Action make a run CI-legible, and every failing case shows what the agent
     actually did. Merging to `main` versions the change from its commit history and
@@ -36,7 +37,8 @@ needed to evaluate against a real agent; `skill-lens` on its own is enough for t
 default runner. The `langchain` extra installs the LangChain runner and judge the same way;
 the two can be installed together. An installed GitHub Copilot CLI or Claude Code needs no
 extra and no API key: `--runner copilot` or `--runner claude-code` starts the product
-itself — see [Product runners](runners.md#product-runners).
+itself, and `judge = "copilot"` or `judge = "claude-code"` in `skill-lens.toml` grades
+rubrics through it — see [Product runners](runners.md#product-runners).
 
 To work on `skill-lens` itself, or to have the example skills to hand, install from a
 checkout instead — every command then runs as `uv run skill-lens ...`:

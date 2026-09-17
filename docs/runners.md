@@ -31,7 +31,9 @@ tools, and the same [bundle tools](#bundled-files-and-scripts) (`list_skill_file
 `read_skill_file`, and `run_script` under `allow_scripts`) — and produce the same
 `RunResult`, so a case passing under one and failing under the other says something about
 the skill's instructions, not about the harness. The judge is chosen separately
-(`judge = "pydantic-ai"` or `"langchain"`), and one judge grades every runner's output.
+(`judge = "pydantic-ai"`, `"langchain"`, or a product — see
+[Judging with a product](#judging-with-a-product)), and one judge grades every runner's
+output.
 
 Naming both — `--runner` repeated, or `default_runner = ["pydantic-ai", "langchain"]` in
 `skill-lens.toml` — runs every case through each in one invocation and produces one
@@ -145,6 +147,54 @@ skill-lens sandbox applies; the skill's bundled scripts are reachable through th
 own shell whatever `allow_scripts` says, which governs only skill-lens's `run_script` tool.
 **Naming a product runner is that decision**, and every report says so. See
 [Security](security.md#product-runners).
+
+### Judging with a product
+
+`judge = "copilot"`, `"claude-code"` or `"cli"` grades every `judge:` block through that
+product, started from the same `[runners.<name>]` table the runner uses — `command`, `args`,
+`timeout_seconds` and `max_output_bytes` all apply; `skills_dir` and `invoke` do not, because
+no skill is delivered. A repository can run under one product and grade under another, or
+under a framework judge, or grade a framework runner's output through a product: the judge is
+chosen by the `judge` key alone. No provider API key is needed.
+
+```toml
+default_runner = "claude-code"
+judge = "claude-code"           # grades through the same product as the runner
+```
+
+**The prompt.** The shared judge prompt — the same grading rules, the same fenced response
+and artifacts the framework judges send — goes in as one text prompt, because a product has
+no structured-output mode and its system prompt is its own. One closing line asks for a
+single JSON object and nothing else: `{"checks": [{"id": ..., "passed": ..., "evidence":
+...}, ...]}`, one entry per rubric check. The judge runs in an empty temporary directory
+with no skill delivered: it grades text, it never invokes the skill under test, and the
+directory is removed after every call. Claude Code grades with `--tools ""` appended after
+the table's `args`, so it has no tools at all while it judges. Copilot has no verified
+equivalent and keeps its tools, so a graded response that reads like an instruction can make
+a Copilot judge act on it — the prompt says the response is untrusted data, but that is a
+request, not a guarantee; see [Security](security.md#product-runners).
+
+**The verdict.** The first balanced JSON object in the reply — the earliest `{` whose `}`
+closes it, braces inside JSON strings not counted — is validated strictly as `JudgeOutput`:
+a `checks` list of `{id, passed, evidence}` entries, and no other key beside it. Prose
+around it and a code fence are fine. A reply with no readable verdict — prose only, a
+cut-off object, the wrong shape, an empty object, a key beside `checks` — is an **errored**
+case (`judge failed: JudgeOutputInvalid: ...` naming the mismatch), never a low score: the
+same rule as the framework judges, because an unreadable verdict is an infrastructure
+signal. From there the verdict is handled as under every judge: a verdict whose check ids
+do not match the rubric is errored, and a pass with no evidence (an empty or missing
+`evidence`) is recorded as a failure. A product failure — a timeout, a non-zero exit, a reply
+over `max_output_bytes`, a prompt over 100 KiB, an executable that vanished after preflight
+— is errored the same way.
+
+**What is read and what is not.** `judge_model` and `judge_temperature` are not read: no
+product exposes a temperature, and a product's model is set with `[runners.<name>] args`.
+`--judge-model` with a product judge is a user error (exit 2). Tokens, cost and the model
+come from the product's trace exactly as for the runner — Claude Code reports cost at list
+price, Copilot reports premium requests as a note, `cli` reports neither usage nor cost — and
+are reported as judge overhead, never against the case's `budget:`. Preflight finds the
+judge's executable and, for a preset, runs its `--version`, before any case runs; a product
+serving as both runner and judge is listed once on the report.
 
 ## Declaring tools and scoring the trajectory
 

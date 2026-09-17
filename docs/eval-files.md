@@ -163,8 +163,10 @@ gave it, but the content itself is read as data, never as instructions, even one
 like it is trying to talk to the judge. `artifacts` on a case with no `workspace:` block, or
 naming a file no case could ever produce, is an authoring error.
 
-Judging costs money, so it is opted into explicitly with `judge = "pydantic-ai"` in
-[`skill-lens.toml`](configuration.md). The default `judge = "fake"` does not grade at all —
+Judging costs money, so it is opted into explicitly with `judge = "pydantic-ai"` (or
+`"langchain"`, or an installed product — `"copilot"`, `"claude-code"`, `"cli"` — which
+needs no API key) in [`skill-lens.toml`](configuration.md#judging). The default
+`judge = "fake"` does not grade at all —
 and rather than passing a rubric it never checked, it reports the case as **errored**. Judge
 spend is reported as "judge overhead", separately from what the runs themselves cost, and
 never counts against a case's `budget:`.

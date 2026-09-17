@@ -9,7 +9,7 @@ Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs**
 about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
 is the contract) or on demand.
 
-Currently at **M9 (part 1 complete)**, with **M6 part 2** shipped after M7: the
+Currently at **M9 complete**, with **M6 part 2** shipped after M7: the
 pipeline runs real agents through `PydanticAIRunner`
 (provider-flexible, via PydanticAI), scores tool use and efficiency as well as
 output text, and is tested against recorded provider traffic. `FakeRunner`
@@ -46,7 +46,13 @@ with stdout as the output. No provider key is involved. A once-per-run `prefligh
 on the `Runner` protocol refuses what the product cannot serve before any quota is spent,
 `RunReport.products` puts the product, its version and its trust sentence on every
 report, `RunResult.usage_note` makes an unmeasurable token limit a failing check, and a
-`--model`/`--judge-model` nothing reads is a user error. M6 part 2 lets the
+`--model`/`--judge-model` nothing reads is a user error. M9 part 2 adds the product judge:
+`judge = "copilot"`, `"claude-code"` or `"cli"` grades every `judge:` block through the
+product named in `[runners.<name>]` (`judges/product.py`), sending the shared judge prompt
+as one text turn closed by a JSON-only line from an empty directory with no skill, reading
+the first balanced JSON object in the reply as the verdict, with `--tools ""` under Claude
+Code; the orchestrator calls the judge's no-argument `preflight()` beside the runners' and
+lists a product serving as both once. M6 part 2 lets the
 agent read the files a skill ships beside `SKILL.md` (`scripts/`, `references/`,
 `assets/`) through `list_skill_files`/`read_skill_file`, and — only under
 `allow_scripts` / `--allow-scripts` — run a bundled script through `run_script`,
@@ -156,10 +162,10 @@ form, that file is the explanation.
   `runners/pydantic_ai.py`, `judges/pydantic_ai.py`, `runners/langchain.py`,
   `judges/langchain.py`. `runners/tools.py` builds framework-neutral `AgentTool`s (name +
   JSON schema + callable); `runners/prompting.py` and `runners/retry.py` hold the prompt and
-  retry rules both adapters share; the adapters wrap them. `runners/product.py` and
-  `runners/traces.py` import `subprocess` and `json`, not a framework — a product is an
-  executable and a trace grammar — and `process.py` beneath them imports nothing from the
-  project. `tests/test_framework_isolation.py`
+  retry rules both adapters share; the adapters wrap them. `runners/product.py`,
+  `judges/product.py` and `runners/traces.py` import `subprocess` and `json`, not a
+  framework — a product is an executable and a trace grammar — and `process.py` beneath
+  them imports nothing from the project. `tests/test_framework_isolation.py`
   guards this: it asserts no other module under `src/skill_lens/` imports `pydantic_ai`,
   `langchain*` or `langgraph` at the top level.
 - **`RunResult.tokens` is derived**, not stored — `extra="forbid"` makes writing it a loud
@@ -373,11 +379,26 @@ form, that file is the explanation.
   propagates only from `preflight`, where `cli.py` makes it exit 2.
 - **`--model` / `--judge-model` with nothing that reads them are user errors** (exit 2).
   `--model` is read by a keyed runner, or by a keyed judge whose `judge_model` is unset;
-  a product's model is set with `[runners.<name>] args`.
+  `--judge-model` by a keyed judge only, so under a product judge it is refused; a
+  product's model is set with `[runners.<name>] args`.
 - **`command` replaces the argv; `args` appends; presets forbid `skills_dir` and `invoke`.**
   `command` holds exactly one `{prompt}` element, never in the executable slot, substituted
   whole and never through a shell; `args` may not contain it; `[runners.<name>]` holds no
-  token.
+  token. The same table serves the product judge.
+- **A product judge's verdict is the first balanced JSON object in the reply, validated as
+  `JudgeOutput`; anything else is `JudgeVerdict.error`.** The judge's working directory
+  holds no skill; `judge_temperature` is not consulted. `judges/product.py` sends the
+  shared prompt as one text turn closed by a JSON-only line; `extract_json_object` takes
+  the earliest-opening balanced `{...}` outside JSON strings in one pass; `_RawVerdict` is
+  a strict local view of `JudgeOutput` (`extra="forbid"`, `checks` required,
+  `title="JudgeOutput"`), so the shared schema the framework judges send as structured
+  output — and their cassettes — is unchanged. A missing, cut-off or wrong-shaped object is
+  `JudgeVerdict(error="JudgeOutputInvalid: ...")`, which `JudgeEvaluator` reports as an
+  **errored** case, never a low score; a product failure is `JudgeVerdict.error` through
+  `read_trace`; the judge never raises. `Product.judge_args` (`("--tools", "")` for
+  `claude-code`, nothing for `copilot`) is appended after the table's `args` only when the
+  product judges. `ProductJudge.preflight()` takes no arguments; the orchestrator calls it
+  after the runners' hooks and lists an equal status once. `needs_api_key = False`.
 - **`process.py` is the one implementation** of group kill and capped read; `scripts.py`
   and `runners/product.py` both import it, and it imports nothing from the project.
 - **Script execution is off unless the run turned it on** (`allow_scripts` /

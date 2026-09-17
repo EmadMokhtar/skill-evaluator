@@ -266,17 +266,34 @@ and the full environment; no skill-lens sandbox applies; bundled scripts are rea
 through the product's own tools`), and the JSON report's `products` entries and the JUnit
 `skill-lens.products` property carry the same sentence.
 
+**A product judge is the same product under the same trust.** `judge = "copilot"`,
+`"claude-code"` or `"cli"` starts the product from the same `[runners.<name>]` table, with
+permission prompts disabled and the full environment, to grade a rubric — see
+[Judging with a product](runners.md#judging-with-a-product). Its prompt is the graded
+response and any judge artifacts: text the skill under test produced, and so untrusted. The
+prompt says so, but that is a request to the model, not a guarantee. Claude Code grades
+with `--tools ""`, so a response that reads like an instruction has nothing to act with.
+Copilot has no verified equivalent and keeps its tools (`--allow-all-tools` is what lets it
+run non-interactively), so a Copilot judge that follows an instruction inside a graded
+response can run commands as you; `cli` is whatever `command` names. The judge's working
+directory is empty and holds no skill; that limits what such an instruction can find, not
+what the product can do. The report lists the product once whether it ran, judged, or
+both.
+
 `skill-lens.toml` is inside the trust boundary: in a `pull_request` workflow the checkout
 is the pull request, so the file can name a product runner for itself in `default_runner`
 and set its `[runners.<name>]` table — including a `command` that replaces the product's
 argv with any executable on the runner. A workflow that runs untrusted pull requests should
 pin `runner:` explicitly in the action (the flag replaces the file's `default_runner`, so
-the file cannot pick the product). It should also pass the product's token only to jobs it
-trusts. The pin decides *which* runner, but the checkout's table still decides *how* it
-starts, so the token is what keeps an untrusted checkout from spending your quota or acting
-as you. Preflight checks that the executable starts, not that it is signed in: if the
-product's own auth fails at run time, that surfaces as an **errored** case, and what the
-product does with whatever token the job gives it is the product's behaviour, not
+the file cannot pick the product). The `judge` key has no flag and no action input, so the
+checkout's file still picks the judge: `judge = "cli"` with a `command` of its choosing
+starts that executable once for every case that carries a `judge:` block, which the same
+checkout can add. The workflow should also pass the product's token only to jobs it trusts.
+The pin decides *which* runner, but the checkout's file still decides the judge and *how*
+each product starts, so the token is what keeps an untrusted checkout from spending your
+quota or acting as you. Preflight checks that the executable starts, not that it is signed
+in: if the product's own auth fails at run time, that surfaces as an **errored** case, and
+what the product does with whatever token the job gives it is the product's behaviour, not
 skill-lens's. The exposure is `pull_request_target`, pull requests from collaborators, and
 self-hosted runners, the same three as for scripts. For a hermetic Copilot run (one that
 loads nothing from your personal setup), point `COPILOT_HOME` at an empty directory and
