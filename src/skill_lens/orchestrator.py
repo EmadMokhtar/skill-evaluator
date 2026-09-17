@@ -27,6 +27,7 @@ from skill_lens.models import (
     CaseStatus,
     EvalCase,
     EvalScore,
+    ProductStatus,
     RunReport,
     RunResult,
     ScriptNote,
@@ -425,6 +426,41 @@ def _execute(
     return outcomes
 
 
+def _preflight_runners(plan: _Plan, runners: list[Runner]) -> list[ProductStatus]:
+    """Give every runner that defines `preflight` one look at what it will run.
+
+    Called after discovery and before execution, so a runner can refuse the
+    run -- by raising an authoring error -- before any quota is spent. Each
+    runner sees the candidate-arm (skill, case) pairs planned for it, once
+    each: compatibility is a property of (case, runner), so a case `--tag`
+    or `--case` filtered out is not its concern, and neither arm nor repeat
+    changes the answer.
+    """
+    statuses: list[ProductStatus] = []
+    for runner in runners:
+        hook = getattr(runner, "preflight", None)
+        if hook is None:
+            continue
+        skills: list[Skill] = []
+        cases_by_skill: dict[str, list[EvalCase]] = {}
+        seen: set[tuple[str, str]] = set()
+        for item in plan.items:
+            if item.runner is not runner or item.arm != "candidate":
+                continue
+            key = (item.skill.name, item.case.name)
+            if key in seen:
+                continue
+            seen.add(key)
+            if item.skill.name not in cases_by_skill:
+                skills.append(item.skill)
+                cases_by_skill[item.skill.name] = []
+            cases_by_skill[item.skill.name].append(item.case)
+        status = hook(skills, cases_by_skill)
+        if status is not None:
+            statuses.append(status)
+    return statuses
+
+
 def run_evals(
     skills: list[Skill],
     runners: list[Runner],
@@ -486,7 +522,10 @@ def run_evals(
     absent raises `ScriptSetupError` before any money is spent, and the
     sandbox decision is recorded on the report. When it is not set, every
     skill that bundles scripts gets a `ScriptNote` so the report can say
-    execution was off.
+    execution was off. Every runner that defines a
+    `preflight(skills, cases_by_skill)` hook is called once here too, with
+    the candidate-arm cases planned for it; a status it returns lands on
+    `RunReport.products`.
 
     `keep_workspace` and `workspace_limits` are the M6 part 1 spelling of the
     first two `options` fields, kept in the positions they were added in so
@@ -553,6 +592,9 @@ def run_evals(
                 count = len(SkillBundle(skill.bundle_root).scripts())
                 if count:
                     notes.append(ScriptNote(skill_name=skill.name, script_count=count))
+        # After the script preflight, so a ScriptSetupError and a
+        # ProductSetupError cannot race for the exit.
+        products = _preflight_runners(plan, runners)
         outcomes = _execute(plan.items, evaluators, concurrency, executor_factory, options, runtime)
     finally:
         # However the run ended -- an authoring error out of an evaluator
@@ -568,4 +610,5 @@ def run_evals(
         baseline_notes=plan.notes,
         scripts=status,
         script_notes=notes,
+        products=products,
     )
