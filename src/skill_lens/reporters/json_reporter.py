@@ -57,6 +57,7 @@ def render_json(
                 "cost_usd": o.result.cost_usd if o.result else 0.0,
                 "model": o.result.model if o.result else "",
                 "cost_note": o.result.cost_note if o.result else "",
+                "usage_note": o.result.usage_note if o.result else "",
                 "workspace": (str(o.result.workspace) if o.result and o.result.workspace else None),
             }
             for o in report.outcomes

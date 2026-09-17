@@ -609,8 +609,8 @@ the block it copied at `exec`, and a test that planted the secret afterwards cou
 sends is joined into a command line; a NUL byte in an argument is refused by `Popen`
 before anything is spawned, and that refusal is text the model reads.
 
-**The process group is killed after every exit, not only a timeout.** `_reap_and_kill_group`
-in `scripts.py` runs whether the script exited on its own or ran past
+**The process group is killed after every exit, not only a timeout.** `process.reap_and_kill_group`,
+called from `scripts.py` and `runners/product.py`, runs whether the script exited on its own or ran past
 `script_timeout_seconds`, so a script that starts `sleep 1000` and exits at once leaves
 nothing behind — the promise the docs make, which a kill confined to the `TimeoutExpired`
 branch did not keep. On POSIX the order is observe-kill-reap. Where `os.waitid` exists —

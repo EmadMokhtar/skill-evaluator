@@ -205,7 +205,9 @@ def test_json_carries_model_and_cost_note_per_outcome():
     # The adapter goes to real trouble to capture the dated snapshot name the
     # provider actually served, and cost_note is the only visible signal that
     # pricing degraded (e.g. an unpriced Groq/Mistral model). Neither is worth
-    # anything if the JSON artifact drops them on the floor.
+    # anything if the JSON artifact drops them on the floor. usage_note is the
+    # matching signal for a token count that degraded to 0 (e.g. a product
+    # runner whose trace reported no usage).
     report = RunReport(
         outcomes=[
             CaseOutcome(
@@ -218,6 +220,7 @@ def test_json_carries_model_and_cost_note_per_outcome():
                     output="yes",
                     model="gpt-4o-mini-2024-07-18",
                     cost_note="no price data for groq:llama (KeyError)",
+                    usage_note="claude-code did not report token usage",
                 ),
             ),
             CaseOutcome(
@@ -234,10 +237,12 @@ def test_json_carries_model_and_cost_note_per_outcome():
     first = data["outcomes"][0]
     assert first["model"] == "gpt-4o-mini-2024-07-18"
     assert first["cost_note"] == "no price data for groq:llama (KeyError)"
+    assert first["usage_note"] == "claude-code did not report token usage"
 
     second = data["outcomes"][1]
     assert second["model"] == ""
     assert second["cost_note"] == ""
+    assert second["usage_note"] == ""
 
 
 def test_json_includes_tag_filtered_skills():

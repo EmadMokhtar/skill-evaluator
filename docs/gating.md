@@ -148,6 +148,11 @@ declared no `workspace:` block at all. It is never a path to a directory that ha
 been deleted: the field is cleared at the same moment the directory is, so it can never be
 a stale pointer in the report.
 
+`outcomes[].cost_note` and `outcomes[].usage_note` say why `cost_usd` or a token count is
+`0` rather than measured — an unpriced model, a product that bills per request rather than
+per token, or a trace that reported no usage — each empty string when the figure beside it
+is a real measurement.
+
 `delta` is the full comparison object — pass-rate, token, cost and latency deltas, per-case
 stats, low-signal checks, high-variance cases and notes — and is `null` when no baseline arm
 ran. `baseline_notes` lists why a skill's or case's baseline was skipped or unavailable.
