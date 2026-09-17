@@ -32,6 +32,35 @@ def test_a_tool_with_no_parameters_still_has_a_valid_schema():
     assert tool.json_schema["required"] == []
 
 
+def test_a_declared_input_schema_reaches_the_agent_verbatim():
+    # The schema is the point: a mock standing in for a real MCP tool must show
+    # the model exactly what the live server would, optional arguments included.
+    schema = {
+        "type": "object",
+        "properties": {
+            "owner": {"type": "string"},
+            "labels": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["owner"],
+    }
+    tool = build_mock_tool(ToolSpec(name="get-pull-request", input_schema=schema))
+    assert tool.json_schema == schema
+    assert "additionalProperties" not in tool.json_schema
+
+
+def test_a_declared_input_schema_is_copied_not_shared():
+    schema = {"type": "object", "properties": {}}
+    spec = ToolSpec(name="ping", input_schema=schema)
+    tool = build_mock_tool(spec)
+    tool.json_schema["properties"]["injected"] = {"type": "string"}
+    assert spec.input_schema == {"type": "object", "properties": {}}
+
+
+def test_a_tool_with_an_input_schema_still_returns_the_canned_value():
+    tool = build_mock_tool(ToolSpec(name="ping", input_schema={"type": "object"}, returns="pong"))
+    assert tool.call(anything="at all") == "pong"
+
+
 def test_calling_the_tool_returns_the_canned_value_verbatim():
     tool = build_mock_tool(ToolSpec(name="lookup_order", returns='{"id": "1234"}'))
     assert tool.call(order_id="1234") == '{"id": "1234"}'

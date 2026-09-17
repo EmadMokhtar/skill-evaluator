@@ -6,6 +6,7 @@ schema and a callable, which every adapter can register in its own way.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -37,11 +38,24 @@ class AgentTool:
 def build_mock_tool(spec: ToolSpec) -> AgentTool:
     """Turn a declared ToolSpec into a callable plus its JSON schema.
 
-    Parameter types are already constrained by `ToolSpec`, so an unsupported
-    type is rejected by the case loader as an authoring error long before it
-    reaches here.
+    Two shapes, deliberately asymmetric. The `parameters:` shorthand is closed
+    (`additionalProperties: false`, every key required) because the author
+    wrote every key. A declared `input_schema` is passed verbatim -- deep
+    copied so an adapter cannot mutate the case -- because fidelity to the
+    server it stands in for is its reason to exist. Types in the shorthand
+    are already constrained by `ToolSpec`, and the loader has already checked
+    a declared schema, so nothing here can be rejected.
     """
-    properties = {name: {"type": type_name} for name, type_name in spec.parameters.items()}
+    if spec.input_schema is not None:
+        json_schema: dict[str, Any] = copy.deepcopy(spec.input_schema)
+    else:
+        properties = {name: {"type": type_name} for name, type_name in spec.parameters.items()}
+        json_schema = {
+            "type": "object",
+            "properties": properties,
+            "required": list(properties),
+            "additionalProperties": False,
+        }
     returns = spec.returns
 
     def call(**_arguments: Any) -> str:
@@ -51,12 +65,7 @@ def build_mock_tool(spec: ToolSpec) -> AgentTool:
     return AgentTool(
         name=spec.name,
         description=spec.description,
-        json_schema={
-            "type": "object",
-            "properties": properties,
-            "required": list(properties),
-            "additionalProperties": False,
-        },
+        json_schema=json_schema,
         call=call,
     )
 
