@@ -40,7 +40,7 @@ case through every named framework. M9 part 1 adds product runners: `--runner co
 and `--runner claude-code` start GitHub Copilot CLI or Claude Code in non-interactive
 mode with `SKILL.md` and its bundle delivered verbatim (its text as written; line endings
 are normalised) into the product's own skill directory, and read output, tool calls,
-tokens and the skill-load event from the
+tokens and the skill-load signal from the
 product's trace; `--runner cli` does the same for a command a `[runners.cli]` table names,
 with stdout as the output. No provider key is involved. A once-per-run `preflight` hook
 on the `Runner` protocol refuses what the product cannot serve before any quota is spent,

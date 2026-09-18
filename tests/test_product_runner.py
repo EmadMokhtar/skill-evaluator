@@ -208,6 +208,8 @@ def test_offered_mode_under_copilot_negative_control_is_false(tmp_path, fake, mo
     product = _product(name="copilot", parse=parse_copilot, skills_dir=".agents/skills")
     result = ProductRunner(product).run(_skill(tmp_path), _case(mode="offered"))
     assert result.error is None
+    # The request was read (it names the other skill); it just is not ours.
+    assert [call.arguments for call in result.tool_calls] == [{"skill": "other"}]
     assert result.skill_triggered is False
 
 
