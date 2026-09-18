@@ -1,3 +1,9 @@
+## v0.9.1 (2026-09-18)
+
+### Fix
+
+- **copilot**: read the skill tool request as the offered-mode load signal (#51)
+
 ## v0.9.0 (2026-09-17)
 
 ### Feat

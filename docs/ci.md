@@ -32,7 +32,7 @@ to hold even the verdict) that falls back to a hard character cut.
 ## The composite action
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v0.9.0
+- uses: EmadMokhtar/skill-evaluator@v0.9.1
   with:
     path: ./skills
     runner: pydantic-ai
@@ -60,7 +60,7 @@ inputs are about the environment rather than the run:
 
 | Input | Default | Purpose |
 | --- | --- | --- |
-| `install-spec` | `skill-lens[pydantic-ai]==0.9.0` | Passed verbatim to `uv tool install`. Accepts a PyPI name, a pinned version, a git ref, or a local path. Add the `langchain` extra (`skill-lens[pydantic-ai,langchain]`, pinned the same way) when a job runs the LangChain runner. |
+| `install-spec` | `skill-lens[pydantic-ai]==0.9.1` | Passed verbatim to `uv tool install`. Accepts a PyPI name, a pinned version, a git ref, or a local path. Add the `langchain` extra (`skill-lens[pydantic-ai,langchain]`, pinned the same way) when a job runs the LangChain runner. |
 | `working-directory` | `.` | Directory to run in. |
 | `step-summary` | `true` | Append the Markdown summary to `$GITHUB_STEP_SUMMARY`. |
 
@@ -85,7 +85,7 @@ steps:
   - uses: actions/checkout@v4
     with:
       persist-credentials: false
-  - uses: EmadMokhtar/skill-evaluator@v0.9.0
+  - uses: EmadMokhtar/skill-evaluator@v0.9.1
     with:
       path: ./skills
       allow-scripts: true
@@ -104,7 +104,7 @@ backstop. In those workflows pass `allow-scripts: false` explicitly, which overr
 file:
 
 ```yaml
-  - uses: EmadMokhtar/skill-evaluator@v0.9.0
+  - uses: EmadMokhtar/skill-evaluator@v0.9.1
     with:
       path: ./skills
       allow-scripts: false
@@ -155,10 +155,10 @@ only a fixture that is *supposed* to go red can catch a regression in how red ge
 One job, one report, every case through both frameworks:
 
 ```yaml
-      - uses: EmadMokhtar/skill-evaluator@v0.9.0
+      - uses: EmadMokhtar/skill-evaluator@v0.9.1
         with:
           path: ./skills
-          install-spec: "skill-lens[pydantic-ai,langchain]==0.9.0"
+          install-spec: "skill-lens[pydantic-ai,langchain]==0.9.1"
           runner: pydantic-ai,langchain
           model: openai:gpt-4o-mini
           markdown-output: skill-lens.md
@@ -184,7 +184,7 @@ so a pull request cannot pick the product for itself:
 - uses: actions/setup-node@v4
   with: { node-version: 22 }
 - run: npm install -g @github/copilot
-- uses: EmadMokhtar/skill-evaluator@v0.9.0
+- uses: EmadMokhtar/skill-evaluator@v0.9.1
   with:
     path: ./skills
     runner: copilot
