@@ -252,6 +252,11 @@ the schema in a request log can differ in spelling from the eval file while mean
 same thing. [`skill-lens mcp-import`](cli.md#mcp-import) writes one from the server's own
 `tools/list` listing.
 
+A tool declared in a [tool library](eval-files.md#sharing-tools-across-eval-files) and
+named with `ref:` is resolved by the case loader before any runner is involved, so a
+runner never sees a reference — only the `ToolSpec` it named, with the case's own
+`returns:`.
+
 Every tool name in `called`, `forbidden`, or `order` must be declared in that case's
 `tools:` — including `forbidden`, since forbidding a tool the agent was never offered in
 the first place is a check that can never fire. A name that isn't declared is an

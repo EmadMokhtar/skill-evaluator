@@ -81,7 +81,9 @@ judge is one entry on `RunReport.products`.
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
 | `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`, and extracts that same commit's bundle (`git archive`, `tarfile` with the `data` filter) so the old instructions are paired with the old scripts. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
-| `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models. |
+| `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models; imports the file's `tool_libraries:` and resolves every `- ref:` into the library's `ToolSpec` on the raw mapping, before validation. |
+| `cases/checks.py` | The checks an eval file and a tool library share: the `TODO(skill-lens)` sentinel walk (`find_unfilled`, keys and values, cycle-safe) and `check_tool_schema` (`parameters`/`input_schema` exclusive, `check_schema`, top-level `type: object`). Below both loaders so neither imports the other. |
+| `cases/tool_libraries.py` | A tool library is a YAML file with one top-level `tools:` list — the block `mcp-import` prints. `parse_tool_library` checks each tool as the case loader would and names the file and position in every refusal; `load_tool_libraries` resolves an eval file's `tool_libraries:` entries against the eval file's directory (file or directory, never absolute) into one `ToolLibrary` that refuses a name declared twice; `ToolLibrary.resolve` turns a `ref:` into its `ToolSpec` or says what to fix. Raises `ToolLibraryError`; the case loader wraps it with the importing file. |
 | `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. `scaffold_target` decides where `init` writes. |
 | `mcp_import.py` | Turns a saved MCP `tools/list` response into mock-tool YAML: `parse_tools_list` (three accepted shapes, every refusal a `McpImportError`) and `render_tool_mocks` (a pasteable `tools:` block). Pure: text in, text out; `cli.py` reads the file or stdin. Never touches the network. |
 | `workspace.py` | The per-case temporary directory: creation, seeding, path containment, and cleanup. Framework-neutral, like every other top-level module. Its methods **raise** (`PathRefused`, `WorkspaceError`) for `cases/loader.py` and the evaluators to catch as authoring or infra errors; `runners/tools.py`'s built-in tools catch those same exceptions and turn them into ordinary tool-result strings instead. |
@@ -123,7 +125,7 @@ judge is one entry on `RunReport.products`.
 path
   └─ skills/loader (walk for SKILL.md) ──────────────► [Skill] (bundle_root if scripts/, references/ or assets/ exists)
         └─ per skill: skills/baseline (once, if --baseline) ──► baseline Skill (+ its own bundle) | note
-        └─ per skill: cases/loader (evals/ dir or *.eval.yaml) ──► [EvalCase]
+        └─ per skill: cases/loader (evals/ dir or *.eval.yaml; tool_libraries: → cases/tool_libraries; ref: resolved) ──► [EvalCase]
   └─ scripts.preflight (once, only if allow_scripts) ──► ScriptRuntime | ScriptSetupError (exit 2)
   └─ each Runner.preflight(skills, cases_by_skill), then Judge.preflight() (once, where defined) ──► [ProductStatus] | ProductSetupError (exit 2)
 
@@ -841,6 +843,48 @@ Python identifier was not enough: `café` is one, and every provider rejects it.
 
 **`mcp-import` never touches the network.** `SOURCE` is a file or `-`; a live `--server`
 is deliberately deferred (see the design spec).
+
+### Tool libraries
+
+**`EvalCase.tools` holds only `ToolSpec`.** A `ref:` is resolved by `cases/loader.py` on
+the raw case mapping, before `EvalCase.model_validate`: `ToolSpec` forbids unknown keys
+and requires a name, so a reference is not a ToolSpec and must never become one
+half-built. Resolving there is what keeps every runner, evaluator, reporter and product
+preflight unchanged — the product runners' `tools:` refusal applies to a referenced tool
+exactly as to an inline one, and the duplicate-name, built-in-name, offered-skill and
+trajectory checks all read the resolved name.
+
+**A `ref:` may set `returns:` and nothing else.** The library owns the contract (name,
+description, schema); the case owns the scenario. Overriding the contract per case would
+reintroduce the drift the library exists to remove; `ToolRef` (`extra="forbid"`) is what
+refuses it.
+
+**An unresolvable `ref:` is an authoring error at load time**, exit 2, before any case
+runs: no `tool_libraries:` key (the message says to add one), an unknown name (the message
+lists the names the imports declare), a missing, unreadable or malformed library. Never
+an errored or failed case.
+
+**A name two imported libraries declare is refused naming both files** — never resolved
+by position — and so are one file declaring a name twice and one file imported twice
+(listed twice, or a directory plus a file inside it). A runner named twice is refused
+rather than de-duplicated for the same reason.
+
+**Library paths are relative to the eval file, never the working directory, and never
+absolute** (`is_absolute()`, `drive` or `root`, the three checks `check_relative_path`
+makes — but `..` is allowed, because the library sits above the skill by design). The
+same eval file resolves identically under discovery, `--evals`, `list` and from any
+checkout.
+
+**A library is checked as an eval file is**: the sentinel (keys and values), the
+tool-name rule, unknown keys at the tool and at the top level, schema validity — each
+refusal naming the library file and the tool's position, because that is the file to fix;
+the case loader then prefixes the eval file that imported it.
+
+**A library is a top-level `tools:` list and nothing else** — the block `mcp-import`
+prints, so `mcp-import tools.json > shared-tools/server.yaml` is the whole import step.
+
+**The resolver never mutates parsed YAML.** An anchored `tools:` list aliased into two
+cases resolves in both; the resolver returns a new mapping with a new list.
 
 ### Security checks
 

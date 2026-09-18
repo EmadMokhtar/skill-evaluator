@@ -225,6 +225,11 @@ JSON Schema of `type: object` — the case loader would refuse it too), a name n
 would register, a listing that carries `nextCursor` (one page of several — capture every page),
 or an unknown `--tool`.
 
+The block is also a [tool library](eval-files.md#sharing-tools-across-eval-files) as
+printed: `skill-lens mcp-import tools.json > shared-tools/server.yaml`, fill the
+placeholders, then import it from each eval file with `tool_libraries:` and name a tool
+with `- ref: <name>` — one contract for every skill that fronts the server.
+
 ## `--version`
 
 Print the installed version and exit.

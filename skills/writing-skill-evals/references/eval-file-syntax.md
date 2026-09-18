@@ -103,6 +103,26 @@ written and must be a valid JSON Schema of `type: object`. For a tool a real MCP
 exposes, `skill-lens mcp-import tools.json` writes the `input_schema:` block from the
 server's `tools/list` listing — `returns:` still has to be filled in by hand.
 
+A tool several skills share is declared once in a **tool library** — a YAML file with a
+top-level `tools:` list, the block above, which is also what `mcp-import` prints. The eval
+file imports it with `tool_libraries:` (paths relative to the eval file; a directory
+imports every `.yaml`/`.yml` in it) and a case names a tool with `ref:`, setting only
+its own `returns:`:
+
+```yaml
+tool_libraries:
+  - ../../shared-tools/order-api.yaml
+cases:
+  - name: refuses a refund outside the return window
+    task: I want a refund for order 1234
+    tools:
+      - ref: lookup_order           # name, description, schema from the library
+        returns: '{"id": "1234", "days_since_delivery": 45}'   # this case's scenario
+```
+
+A `ref:` may carry `returns:` and nothing else. An unknown name, a missing library, a name
+two libraries both declare, or an absolute path is an authoring error (exit 2).
+
 ## Trajectory
 
 ```yaml

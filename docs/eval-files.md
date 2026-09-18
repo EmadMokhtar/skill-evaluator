@@ -2,7 +2,9 @@
 
 Each file has a top-level `cases:` list. Unknown keys **within a case or an assertion** are
 rejected — a typo like `assertion:` would otherwise produce a case that passes vacuously.
-Extra keys alongside `cases:` at the top level of the file are ignored.
+Extra keys alongside `cases:` at the top level of the file are ignored, with one exception
+skill-lens reads: `tool_libraries:` — see [Sharing tools across eval
+files](#sharing-tools-across-eval-files).
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -113,6 +115,57 @@ than transcribed.
 Tool names follow the rule both OpenAI and Anthropic enforce, `^[A-Za-z0-9_-]{1,64}$`, so
 a hyphenated MCP tool name such as `get-pull-request` is kept as the server spells it. A
 name outside the rule is an authoring error; skill-lens never rewrites one.
+
+### Sharing tools across eval files
+
+Several skills often front one API — one MCP server behind nine skills — and every eval
+file that mocks `get_pull_request` would otherwise carry the same block. A **tool
+library** declares a tool once. It is a YAML file with one top-level `tools:` list, the
+same block a case takes, and exactly what [`skill-lens mcp-import`](cli.md#mcp-import)
+prints — so `skill-lens mcp-import tools.json > shared-tools/server.yaml` writes one:
+
+```yaml
+# shared-tools/order-api.yaml
+tools:
+  - name: lookup_order
+    description: Look up an order by its id
+    parameters:
+      order_id: string
+    returns: '{"id": "0000", "status": "delivered", "days_since_delivery": 0}'
+```
+
+An eval file imports libraries with `tool_libraries:` beside `cases:`, and a case names a
+tool with `ref:`:
+
+```yaml
+tool_libraries:
+  - ../../shared-tools/order-api.yaml    # relative to this file; a directory imports every .yaml/.yml in it
+
+cases:
+  - name: refuses a refund outside the return window
+    task: I want a refund for order 1234
+    tools:
+      - ref: lookup_order                # the library's name, description and schema
+        returns: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
+```
+
+The library owns the tool's **contract** — name, description, `parameters:` or
+`input_schema:` — and the case owns the **scenario**: a `ref:` may set `returns:` and
+nothing else. Any other key beside `ref:` is an authoring error naming it; a case that
+needs a different contract declares the tool inline, and a `ref:` may sit in the same list
+as inline tools. After loading, the case is exactly what it would have been with the
+library's block pasted in: `trajectory:` names, the six reserved built-in names and the
+`mode: offered` collision rule all read the resolved tool, and every runner sees a plain
+mock.
+
+Library paths are relative to the eval file — never to the working directory, never
+absolute — so the same file loads identically under discovery, under `--evals`, under
+`skill-lens list` and from any checkout. A library is checked as an eval file is: an
+unfilled `TODO(skill-lens)`, a tool name outside the rule, an unknown key, or an invalid
+schema is an authoring error (exit `2`) naming the library file and the tool's position.
+So is an unresolvable `ref:` — no `tool_libraries:` key, a name no import declares (the
+message lists the names they do), a missing file — a name two imported files both declare
+(never resolved by position), or one file imported twice.
 
 ## Judging output quality
 
@@ -335,3 +388,6 @@ For each discovered skill, in order:
 
 `--evals <path>` overrides discovery with an explicit file or directory. Skills with no eval
 files are reported as **skipped** — visible in the output, never silently ignored.
+
+A `tool_libraries:` entry resolves against the eval file's own directory whichever way the
+file was found, so `--evals` does not change where a library is looked for.
