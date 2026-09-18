@@ -257,6 +257,21 @@ class ToolSpec(BaseModel):
         return value
 
 
+class ToolRef(BaseModel):
+    """A case's reference to a tool a library declares: `- ref: lookup_order`.
+
+    The library owns the contract (name, description, schema); the case may
+    set only `returns`, the scenario. The case loader resolves every ref into
+    the `ToolSpec` it names before the case is validated, so `EvalCase.tools`
+    never holds one and no runner ever sees one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ref: str
+    returns: str | None = None
+
+
 class TrajectorySpec(BaseModel):
     """What the agent should (and should not) have done to get its answer."""
 
