@@ -6,21 +6,20 @@
 #     LLM judge grades it instead.
 #   - triggering (`mode: offered`): does the agent even reach for the skill,
 #     including the negative control that proves it isn't firing on everything.
+#
+# The two mock tools are declared once, in ../shared-tools/order-api.yaml, and
+# each case sets only what its scenario returns.
+tool_libraries:
+  - ../shared-tools/order-api.yaml
+
 cases:
   - name: refuses a refund outside the return window
     task: I want a refund for order 1234
     tags: [smoke, refund]
     tools:
-      - name: lookup_order
-        description: Look up an order by its id
-        parameters:
-          order_id: string
+      - ref: lookup_order
         returns: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
-      - name: issue_refund
-        description: Issue a refund for an order
-        parameters:
-          order_id: string
-        returns: '{"ok": true}'
+      - ref: issue_refund
     trajectory:
       called: [lookup_order]
       forbidden: [issue_refund]
@@ -36,16 +35,9 @@ cases:
     task: Please refund order 5678
     tags: [refund]
     tools:
-      - name: lookup_order
-        description: Look up an order by its id
-        parameters:
-          order_id: string
+      - ref: lookup_order
         returns: '{"id": "5678", "status": "delivered", "days_since_delivery": 3}'
-      - name: issue_refund
-        description: Issue a refund for an order
-        parameters:
-          order_id: string
-        returns: '{"ok": true}'
+      - ref: issue_refund
     trajectory:
       order: [lookup_order, issue_refund]
       max_calls: 4
@@ -62,10 +54,7 @@ cases:
     task: I want a refund for order 1234
     tags: [refund, judged]
     tools:
-      - name: lookup_order
-        description: Look up an order by its id
-        parameters:
-          order_id: string
+      - ref: lookup_order
         returns: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
     judge:
       expected: A short, plain-language refusal that names the order id.
@@ -81,10 +70,7 @@ cases:
     task: I want a refund for order 1234
     tags: [triggering]
     tools:
-      - name: lookup_order
-        description: Look up an order by its id
-        parameters:
-          order_id: string
+      - ref: lookup_order
         returns: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
     trajectory:
       skill_triggered: true

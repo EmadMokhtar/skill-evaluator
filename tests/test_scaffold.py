@@ -157,3 +157,7 @@ def test_eval_filename_neutralises_path_separators():
 def test_the_scaffold_points_at_mcp_import_for_a_real_server_tool():
     # A tool a real MCP server exposes should be imported, not transcribed.
     assert "skill-lens mcp-import" in render_scaffold(SKILL)
+
+
+def test_the_scaffold_points_at_tool_libraries_for_a_shared_tool():
+    assert "tool_libraries" in render_scaffold(SKILL)

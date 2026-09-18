@@ -45,7 +45,9 @@ cases:
   #    trajectory is genuinely the model's choice. `trajectory` catches the
   #    failure an output assertion cannot see -- deciding without looking.
   #    For a tool a real MCP server exposes, `skill-lens mcp-import tools.json`
-  #    writes this block from the server's own schema instead.
+  #    writes this block from the server's own schema instead. A tool several
+  #    skills share can live once in a library file each eval file imports
+  #    with `tool_libraries:` and names with `- ref: <name>`.
   - name: takes the right path on the hard case
     task: >-
       {sentinel} the prompt that reaches the policy edge
