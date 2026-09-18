@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from skill_lens.cases.loader import CaseParseError, load_cases_for_skill, parse_cases_file
-from skill_lens.models import Skill
+from skill_lens.models import Skill, ToolSpec
 
 CASES_YAML = """cases:
   - name: extracts text
@@ -796,4 +796,251 @@ def test_an_input_schema_must_declare_a_bare_object_type(tmp_path, schema_yaml):
     with pytest.raises(
         CaseParseError, match="tool 'lookup' input_schema must declare type: object"
     ):
+        parse_cases_file(path)
+
+
+# --- tool libraries and ref: ---------------------------------------------------
+
+LIBRARY_YAML = """tools:
+  - name: lookup_order
+    description: Look up an order by its id
+    parameters:
+      order_id: string
+    returns: '{"id": "0000"}'
+  - name: issue_refund
+    description: Issue a refund for an order
+    parameters:
+      order_id: string
+    returns: '{"ok": true}'
+"""
+
+REF_CASES = """tool_libraries:
+  - ../../../shared-tools/order-api.yaml
+cases:
+  - name: refuses
+    task: refund 1234
+    tools:
+      - ref: lookup_order
+        returns: '{"id": "1234", "days_since_delivery": 45}'
+      - ref: issue_refund
+    trajectory:
+      called: [lookup_order]
+      forbidden: [issue_refund]
+"""
+
+
+def _layout(tmp_path):
+    """An eval file three directories below the library, so a path relative to
+    the eval file and a path relative to the working directory differ."""
+    shared = tmp_path / "shared-tools"
+    shared.mkdir()
+    (shared / "order-api.yaml").write_text(LIBRARY_YAML, encoding="utf-8")
+    evals = tmp_path / "skills" / "orders" / "evals"
+    evals.mkdir(parents=True)
+    path = evals / "orders.yaml"
+    path.write_text(REF_CASES, encoding="utf-8")
+    return path
+
+
+def test_a_ref_resolves_to_the_library_tool_with_the_case_returns(tmp_path, monkeypatch):
+    path = _layout(tmp_path)
+    # conftest already moved us into tmp_path; move further so a path
+    # resolved against the working directory could not find the library.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    (case,) = parse_cases_file(path)
+    lookup, refund = case.tools
+    assert type(lookup) is ToolSpec and type(refund) is ToolSpec
+    assert lookup.description == "Look up an order by its id"
+    assert lookup.parameters == {"order_id": "string"}
+    assert lookup.returns == '{"id": "1234", "days_since_delivery": 45}'
+    assert refund.returns == '{"ok": true}'
+    assert case.trajectory.called == ["lookup_order"]
+
+
+def test_refs_resolve_under_an_explicit_evals_path_too(tmp_path):
+    path = _layout(tmp_path)
+    skill = _skill(tmp_path / "unrelated")
+    (case,) = load_cases_for_skill(skill, evals_path=path)
+    assert [t.name for t in case.tools] == ["lookup_order", "issue_refund"]
+
+
+def test_a_ref_may_sit_beside_an_inline_tool(tmp_path):
+    path = _layout(tmp_path)
+    path.write_text(
+        REF_CASES.replace(
+            "      - ref: issue_refund\n",
+            "      - name: escalate\n        returns: ok\n      - ref: issue_refund\n",
+        ),
+        encoding="utf-8",
+    )
+    (case,) = parse_cases_file(path)
+    assert [t.name for t in case.tools] == ["lookup_order", "escalate", "issue_refund"]
+
+
+@pytest.mark.parametrize("extra", ["description: rewritten", "name: other", "parameters: {}"])
+def test_a_ref_carrying_anything_but_returns_is_refused_naming_the_key(tmp_path, extra):
+    path = _layout(tmp_path)
+    path.write_text(
+        REF_CASES.replace(
+            "      - ref: issue_refund\n", f"      - ref: issue_refund\n        {extra}\n"
+        ),
+        encoding="utf-8",
+    )
+    key = extra.split(":")[0]
+    with pytest.raises(
+        CaseParseError, match=rf"orders.yaml: case #1 tool #2: invalid ref: entry \({key}\)"
+    ):
+        parse_cases_file(path)
+
+
+def test_a_placeholder_in_a_ref_returns_is_caught_before_any_library_is_read(tmp_path):
+    path = _layout(tmp_path)
+    # The library is gone, so importing it would fail first if the loader
+    # looked at it before scanning the cases for placeholders.
+    (tmp_path / "shared-tools" / "order-api.yaml").unlink()
+    path.write_text(
+        "tool_libraries: [../../../shared-tools/order-api.yaml]\n"
+        "cases:\n  - name: n\n    task: t\n    tools:\n"
+        "      - ref: lookup_order\n        returns: TODO(skill-lens) fill\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        CaseParseError, match=r"placeholder TODO\(skill-lens\) at tools\[0\]\.returns"
+    ):
+        parse_cases_file(path)
+
+
+def test_a_ref_with_no_tool_libraries_key_says_to_add_one(tmp_path):
+    path = _write(
+        tmp_path, "cases:\n  - name: n\n    task: t\n    tools:\n      - ref: lookup_order\n"
+    )
+    with pytest.raises(
+        CaseParseError,
+        match=r"cases.eval.yaml: case #1 tool #1 references tool 'lookup_order' but the "
+        r"file declares no tool_libraries:",
+    ):
+        parse_cases_file(path)
+
+
+def test_an_unknown_ref_lists_what_the_imports_declare(tmp_path):
+    path = _layout(tmp_path)
+    path.write_text(REF_CASES.replace("ref: issue_refund", "ref: cancel_order"), encoding="utf-8")
+    with pytest.raises(
+        CaseParseError,
+        match=r"case #1 tool #2 references tool 'cancel_order', which no imported library "
+        r"declares; the imports declare: issue_refund, lookup_order",
+    ):
+        parse_cases_file(path)
+
+
+def test_a_library_error_names_the_eval_file_and_the_library(tmp_path):
+    path = _layout(tmp_path)
+    (tmp_path / "shared-tools" / "order-api.yaml").write_text(
+        "tools: [unclosed\n", encoding="utf-8"
+    )
+    with pytest.raises(CaseParseError) as info:
+        parse_cases_file(path)
+    assert "orders.yaml: invalid YAML in tool library" in str(info.value)
+    assert "order-api.yaml" in str(info.value)
+
+
+def test_a_missing_library_names_the_entry_and_the_eval_file(tmp_path):
+    path = _layout(tmp_path)
+    (tmp_path / "shared-tools" / "order-api.yaml").unlink()
+    with pytest.raises(
+        CaseParseError,
+        match=r"orders.yaml: tool_libraries\[0\] '../../../shared-tools/order-api.yaml' "
+        r"does not exist",
+    ):
+        parse_cases_file(path)
+
+
+def test_a_ref_twice_in_one_case_hits_the_duplicate_check(tmp_path):
+    path = _layout(tmp_path)
+    path.write_text(REF_CASES.replace("ref: issue_refund", "ref: lookup_order"), encoding="utf-8")
+    with pytest.raises(CaseParseError, match="declares tool 'lookup_order' more than once"):
+        parse_cases_file(path)
+
+
+def test_a_ref_beside_an_inline_tool_of_the_same_name_hits_the_duplicate_check(tmp_path):
+    path = _layout(tmp_path)
+    path.write_text(
+        REF_CASES.replace("      - ref: issue_refund\n", "      - name: lookup_order\n"),
+        encoding="utf-8",
+    )
+    with pytest.raises(CaseParseError, match="declares tool 'lookup_order' more than once"):
+        parse_cases_file(path)
+
+
+def test_a_ref_to_a_builtin_name_collides_in_a_workspace_case(tmp_path):
+    path = _layout(tmp_path)
+    (tmp_path / "shared-tools" / "order-api.yaml").write_text(
+        "tools:\n  - name: read_file\n", encoding="utf-8"
+    )
+    path.write_text(
+        "tool_libraries: [../../../shared-tools/order-api.yaml]\n"
+        "cases:\n  - name: n\n    task: t\n    workspace: {}\n    tools:\n      - ref: read_file\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CaseParseError, match="collides with a built-in workspace tool"):
+        parse_cases_file(path)
+
+
+def test_a_ref_collides_with_the_offered_skill_name(tmp_path):
+    path = _layout(tmp_path)
+    (tmp_path / "shared-tools" / "order-api.yaml").write_text(
+        "tools:\n  - name: orders\n", encoding="utf-8"
+    )
+    path.write_text(
+        "tool_libraries: [../../../shared-tools/order-api.yaml]\n"
+        "cases:\n  - name: n\n    task: t\n    mode: offered\n    tools:\n      - ref: orders\n",
+        encoding="utf-8",
+    )
+    skill = Skill(name="orders", description="", instructions="", path=tmp_path)
+    with pytest.raises(
+        CaseParseError, match="collides with the name skill 'orders' is offered under"
+    ):
+        parse_cases_file(path, skill)
+
+
+def test_two_cases_sharing_an_anchored_tools_list_both_resolve(tmp_path):
+    path = _layout(tmp_path)
+    path.write_text(
+        "tool_libraries: [../../../shared-tools/order-api.yaml]\n"
+        "cases:\n"
+        "  - name: one\n    task: t\n    tools: &shared\n      - ref: lookup_order\n"
+        "  - name: two\n    task: t\n    tools: *shared\n",
+        encoding="utf-8",
+    )
+    one, two = parse_cases_file(path)
+    assert one.tools[0].description == two.tools[0].description == "Look up an order by its id"
+
+
+def test_a_file_with_tool_libraries_but_no_refs_loads_unchanged(tmp_path):
+    path = _layout(tmp_path)
+    path.write_text(
+        "tool_libraries: [../../../shared-tools/order-api.yaml]\n"
+        "cases:\n  - name: n\n    task: t\n",
+        encoding="utf-8",
+    )
+    (case,) = parse_cases_file(path)
+    assert case.tools == []
+
+
+@pytest.mark.parametrize("value", ["shared-tools/x.yaml", "{a: b}"])
+def test_a_tool_libraries_value_that_is_not_a_list_is_refused(tmp_path, value):
+    path = _write(tmp_path, f"tool_libraries: {value}\ncases: []\n")
+    with pytest.raises(
+        CaseParseError, match="cases.eval.yaml: tool_libraries must be a list of paths"
+    ):
+        parse_cases_file(path)
+
+
+@pytest.mark.parametrize("value", ["5", "[a, b]", "''"])
+def test_a_ref_that_is_not_a_name_is_refused_with_the_type_error(tmp_path, value):
+    path = _layout(tmp_path)
+    path.write_text(REF_CASES.replace("ref: issue_refund", f"ref: {value}"), encoding="utf-8")
+    with pytest.raises(CaseParseError, match=r"orders.yaml: case #1 tool #2: invalid ref: entry"):
         parse_cases_file(path)

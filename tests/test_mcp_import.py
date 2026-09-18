@@ -355,3 +355,28 @@ def test_the_block_round_trips_through_the_case_loader_to_the_agent(tmp_path: Pa
     assert issues.json_schema == ISSUES["inputSchema"]
     assert issues.name == "list-issues"
     assert pr.call(owner="o", pull_number=1) == '{"number": 1}'
+
+
+def test_the_block_is_a_library_an_eval_file_can_import(tmp_path: Path):
+    # `mcp-import tools.json > shared-tools/gh.yaml` is the whole import
+    # step: the rendered block is a tool library as printed, once the
+    # placeholders are filled.
+    shared = tmp_path / "shared-tools"
+    shared.mkdir()
+    block = _render([PULL_REQUEST, ISSUES]).replace(RETURNS_PLACEHOLDER, "'{\"number\": 1}'")
+    (shared / "gh.yaml").write_text(block, encoding="utf-8")
+    skill_dir = tmp_path / "gh"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: gh\n---\nbody\n", encoding="utf-8")
+    (skill_dir / "gh.eval.yaml").write_text(
+        "tool_libraries: [../shared-tools/gh.yaml]\n"
+        "cases:\n  - name: n\n    task: t\n    tools:\n"
+        "      - ref: get_pull_request\n      - ref: list-issues\n"
+        "    trajectory:\n      called: [list-issues]\n",
+        encoding="utf-8",
+    )
+    skill = Skill(name="gh", description="d", instructions="body", path=skill_dir)
+    (case,) = load_cases_for_skill(skill)
+    pr, issues = (build_mock_tool(tool) for tool in case.tools)
+    assert pr.json_schema == PULL_REQUEST["inputSchema"]
+    assert issues.json_schema == ISSUES["inputSchema"]

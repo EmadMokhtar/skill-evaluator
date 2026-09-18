@@ -130,7 +130,9 @@ cases:
 ```
 
 A tool a real MCP server exposes need not be transcribed: `skill-lens mcp-import tools.json`
-writes the block from the server's own `tools/list` listing, schema and all.
+writes the block from the server's own `tools/list` listing, schema and all. A tool several
+skills share is declared once, in a tool library any eval file imports with `tool_libraries:`
+and names with `- ref: <name>`.
 
 ## A run reads like a test suite
 

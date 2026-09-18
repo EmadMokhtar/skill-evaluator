@@ -63,7 +63,12 @@ applied; `--baseline previous` pairs the previous `SKILL.md` with its own
 bundle. `mcp-import` (issue #43) turns a saved MCP `tools/list` response into a pasteable `tools:`
 block carrying the server's schema verbatim in the new `ToolSpec.input_schema`, and
 `ToolSpec.name` now accepts what providers accept (`^[A-Za-z0-9_-]{1,64}$`). Its design is
-in `docs/superpowers/specs/2026-09-17-skill-lens-mcp-import-design.md`. Milestones are defined in
+in `docs/superpowers/specs/2026-09-17-skill-lens-mcp-import-design.md`. Tool libraries (issue #42)
+let a YAML file with one top-level `tools:` list — the block `mcp-import` prints — be imported by
+any eval file with `tool_libraries:` (paths relative to the eval file) and named in a case with
+`- ref: <name>`, which may set only `returns:`; the loader resolves every ref before validation,
+so `EvalCase.tools` still holds only `ToolSpec`. Its design is in
+`docs/superpowers/specs/2026-09-17-skill-lens-tool-libraries-design.md`. Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
 is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
@@ -352,6 +357,20 @@ form, that file is the explanation.
   non-`[A-Za-z0-9_]` → `_` (hyphen too — the cassettes pin `order_support`), leading digit
   → `skill_`, then cut to 64. A Python identifier was not enough (`café`).
 - **`mcp-import` never touches the network.** `SOURCE` is a file or `-`.
+- **`EvalCase.tools` holds only `ToolSpec`; a `ref:` is resolved by the case loader on the
+  raw mapping before validation.** No runner, evaluator, reporter or product preflight ever
+  sees a reference; the product `tools:` refusal, the duplicate-name, built-in-name,
+  offered-skill and trajectory checks all read the resolved tool.
+- **A `ref:` may set `returns:` and nothing else** — the library owns the contract, the
+  case owns the scenario. `ToolRef` is `extra="forbid"`.
+- **An unresolvable `ref:` is an authoring error at load time** (exit 2): no
+  `tool_libraries:` key, an unknown name (the message lists the declared names), a missing,
+  unreadable or malformed library. A name two imported files declare is refused naming
+  both; so is one file declaring a name twice or imported twice.
+- **Library paths are relative to the eval file, never the working directory, never
+  absolute**; `..` is allowed. A library is a top-level `tools:` list and nothing else, and
+  is checked as an eval file is (sentinel, name rule, unknown keys, schema), each refusal
+  naming the library file and the tool's position. The resolver never mutates parsed YAML.
 - **The product sees `SKILL.md` verbatim (its text as written; line endings are
   normalised).** `Skill.markdown` is the file; only the loader
   and the baseline resolver set it; `--baseline none` has none, so no directory is written.

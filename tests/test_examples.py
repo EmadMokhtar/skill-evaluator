@@ -86,3 +86,17 @@ def test_the_log_triage_script_counts_levels_with_the_standard_library_only(tmp_
         check=True,
     )
     assert completed.stdout == "ERROR: 2\nINFO: 2\nWARN: 1\n"
+
+
+def test_order_support_pulls_its_tools_from_the_shared_library():
+    # The four tool-bearing cases share two contracts and set their own
+    # scenario through `returns:` -- the case the library feature exists for.
+    skill = next(s for s in load_skills(EXAMPLES / "order-support"))
+    cases = {case.name: case for case in load_cases_for_skill(skill)}
+    refuses = cases["refuses a refund outside the return window"]
+    refunds = cases["refunds an order inside the return window"]
+    assert [t.name for t in refuses.tools] == ["lookup_order", "issue_refund"]
+    assert refuses.tools[0].description == refunds.tools[0].description
+    assert '"days_since_delivery": 45' in refuses.tools[0].returns
+    assert '"days_since_delivery": 3' in refunds.tools[0].returns
+    assert (EXAMPLES / "shared-tools" / "order-api.yaml").is_file()

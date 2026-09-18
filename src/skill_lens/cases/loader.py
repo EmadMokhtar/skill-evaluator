@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import yaml
@@ -9,7 +10,15 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from pydantic import ValidationError
 
-from skill_lens.models import EvalCase, Skill
+from skill_lens.cases.checks import UNFILLED_SENTINEL, check_tool_schema, find_unfilled
+from skill_lens.cases.tool_libraries import (
+    EMPTY_LIBRARY,
+    TOOL_LIBRARIES_KEY,
+    ToolLibrary,
+    ToolLibraryError,
+    load_tool_libraries,
+)
+from skill_lens.models import EvalCase, Skill, ToolRef
 from skill_lens.runners.tools import BUILTIN_TOOL_NAMES, skill_tool_name
 from skill_lens.workspace import PathRefused, check_relative_path
 from skill_lens.yaml_loading import safe_load
@@ -17,58 +26,88 @@ from skill_lens.yaml_loading import safe_load
 EVALS_DIRNAME = "evals"
 EVAL_SUFFIX = ".eval.yaml"
 
-# The placeholder `skill-lens init` writes into every field the author has to
-# fill in. Living here rather than in scaffold.py makes it the *loader's*
-# guarantee: a hand-written stub is refused exactly like a generated one.
-UNFILLED_SENTINEL = "TODO(skill-lens)"
-
 
 class CaseParseError(Exception):
     """Raised when an eval file is missing or cannot be parsed."""
 
 
-def _reject_unfilled(
-    path: Path, index: int, raw: object, trail: str = "", seen: set[int] | None = None
-) -> None:
+def _reject_unfilled(path: Path, index: int, raw: object) -> None:
     """Refuse a case still carrying scaffold placeholders.
 
     Runs before schema validation so the message names the field to fill in
     rather than complaining about the type of a value nobody meant to keep.
-    Mapping keys are checked as well as values: `workspace.files` is keyed by
-    filename.
-
-    An unfilled scaffold says something about the author's progress, not about
-    the skill, so it aborts the run as an authoring error instead of scoring
-    as a failure.
-
-    `seen` tracks the `id()` of every dict/list currently being walked, so a
-    self-referential YAML anchor (a node that contains itself) is skipped
-    instead of recursing forever -- still a malformed file, but one that must
-    exit cleanly rather than crash with a RecursionError.
+    An unfilled scaffold says something about the author's progress, not
+    about the skill, so it aborts the run as an authoring error instead of
+    scoring as a failure. The walk itself is `checks.find_unfilled` -- keys as
+    well as values, cycle-safe -- shared with tool libraries.
     """
-    if seen is None:
-        seen = set()
-    if isinstance(raw, str):
-        if UNFILLED_SENTINEL in raw:
-            raise CaseParseError(
-                f"{path}: case #{index + 1} still has the scaffold placeholder "
-                f"{UNFILLED_SENTINEL} at {trail or 'case'}. Fill it in -- an "
-                f"unfinished eval cannot say anything about the skill."
-            )
-    elif isinstance(raw, dict):
-        if id(raw) in seen:
-            return
-        seen = seen | {id(raw)}
-        for key, value in raw.items():
-            # Keys are user text too: `workspace.files` is keyed by filename.
-            _reject_unfilled(path, index, key, trail, seen)
-            _reject_unfilled(path, index, value, f"{trail}.{key}" if trail else str(key), seen)
-    elif isinstance(raw, list):
-        if id(raw) in seen:
-            return
-        seen = seen | {id(raw)}
-        for position, value in enumerate(raw):
-            _reject_unfilled(path, index, value, f"{trail}[{position}]", seen)
+    trail = find_unfilled(raw)
+    if trail is not None:
+        raise CaseParseError(
+            f"{path}: case #{index + 1} still has the scaffold placeholder "
+            f"{UNFILLED_SENTINEL} at {trail or 'case'}. Fill it in -- an "
+            f"unfinished eval cannot say anything about the skill."
+        )
+
+
+def _load_tool_libraries(path: Path, data: dict) -> ToolLibrary:
+    """The tools this file's `tool_libraries:` imports; `EMPTY_LIBRARY` when
+    the key is absent, so a `ref:` can say "add the key".
+
+    Paths resolve against the eval file's own directory, never the working
+    directory. A library error is re-raised naming this file too: the
+    library is the file to fix, this is the file that imported it.
+    """
+    if TOOL_LIBRARIES_KEY not in data:
+        return EMPTY_LIBRARY
+    try:
+        return load_tool_libraries(data[TOOL_LIBRARIES_KEY], relative_to=path.parent)
+    except ToolLibraryError as exc:
+        raise CaseParseError(f"{path}: {exc}") from exc
+
+
+def _resolve_tool_refs(path: Path, index: int, raw: object, library: ToolLibrary) -> object:
+    """Replace every `- ref: <name>` in the case's `tools:` with the tool the
+    library declares, keeping the case's own `returns:` when it set one.
+
+    Runs on the raw mapping, before `EvalCase.model_validate`: `ToolSpec`
+    forbids unknown keys and requires a name, so a ref is not a ToolSpec and
+    must never become one half-built. Resolving here is what keeps
+    `EvalCase.tools` a list of `ToolSpec` for every runner, evaluator and
+    preflight downstream. Nothing is mutated: a YAML anchor can alias one
+    `tools:` list into several cases, so the result is a new mapping with a
+    new list. Anything that is not a mapping with a `ref` key is kept as
+    written for the model to judge.
+    """
+    if not isinstance(raw, dict) or not isinstance(raw.get("tools"), list):
+        return raw
+    tools: list[object] = []
+    for position, entry in enumerate(raw["tools"]):
+        if not isinstance(entry, dict) or "ref" not in entry:
+            tools.append(entry)
+            continue
+        where = f"{path}: case #{index + 1} tool #{position + 1}"
+        try:
+            ref = ToolRef.model_validate(entry)
+        except ValidationError as exc:
+            errors = exc.errors()
+            fields = ", ".join(str(e["loc"][0]) for e in errors if e["loc"])
+            if any(e["type"] == "extra_forbidden" for e in errors):
+                raise CaseParseError(
+                    f"{where}: invalid ref: entry ({fields}): a ref: may carry only "
+                    f"returns: beside it; the library declares the tool's name, "
+                    f"description and schema."
+                ) from exc
+            raise CaseParseError(f"{where}: invalid ref: entry ({fields}): {exc}") from exc
+        try:
+            spec = library.resolve(ref.ref)
+        except ToolLibraryError as exc:
+            raise CaseParseError(f"{where} {exc}") from exc
+        resolved = copy.deepcopy(spec.model_dump())
+        if ref.returns is not None:
+            resolved["returns"] = ref.returns
+        tools.append(resolved)
+    return {**raw, "tools": tools}
 
 
 def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
@@ -92,9 +131,15 @@ def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
     raw_cases = data["cases"]
     if not isinstance(raw_cases, list):
         raise CaseParseError(f"{path}: 'cases' must be a list")
-    cases: list[EvalCase] = []
+    # The scaffold scan stays the first check after parsing, ahead of any
+    # library import: a half-filled file is told what to fill in, not that a
+    # library it will import is missing.
     for index, raw in enumerate(raw_cases):
         _reject_unfilled(path, index, raw)
+    library = _load_tool_libraries(path, data)
+    cases: list[EvalCase] = []
+    for index, raw in enumerate(raw_cases):
+        raw = _resolve_tool_refs(path, index, raw, library)
         try:
             case = EvalCase.model_validate(raw)
         except ValidationError as exc:
@@ -173,27 +218,16 @@ def _validate_assertions(path: Path, case: EvalCase) -> None:
 def _validate_tools(path: Path, case: EvalCase) -> None:
     """Check each mock tool's declared schema at load time.
 
-    A tool declares its arguments one of two ways -- the `parameters:`
-    shorthand or a full `input_schema:` -- never both, and a declared schema
-    has to be one a provider would register: valid JSON Schema whose top
-    level is an object. All three mistakes are the author's, so they abort
-    before any case runs rather than surface as an errored case.
+    The rules are `checks.check_tool_schema`'s, shared with tool libraries;
+    here each refusal names the file, the case and the tool. All three
+    mistakes are the author's, so they abort before any case runs rather than
+    surface as an errored case.
     """
     for tool in case.tools:
-        where = f"{path}: case {case.name!r} tool {tool.name!r}"
-        if tool.input_schema is None:
-            continue
-        if tool.parameters:
-            raise CaseParseError(f"{where} declares both parameters and input_schema; choose one.")
         try:
-            Draft202012Validator.check_schema(tool.input_schema)
-        except SchemaError as exc:
-            raise CaseParseError(f"{where} has an invalid input_schema: {exc.message}") from exc
-        if tool.input_schema.get("type") != "object":
-            raise CaseParseError(
-                f"{where} input_schema must declare type: object; a tool's arguments "
-                f"are always an object."
-            )
+            check_tool_schema(tool)
+        except ValueError as exc:
+            raise CaseParseError(f"{path}: case {case.name!r} tool {tool.name!r} {exc}") from exc
 
 
 def _validate_workspace(path: Path, case: EvalCase) -> None:

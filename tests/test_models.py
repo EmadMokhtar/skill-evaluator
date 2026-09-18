@@ -21,6 +21,7 @@ from skill_lens.models import (
     ScriptStatus,
     Skill,
     ToolCall,
+    ToolRef,
     ToolSpec,
     TrajectorySpec,
     WorkspaceSpec,
@@ -460,3 +461,18 @@ def test_a_report_lists_no_products_by_default():
 
 def test_a_skill_defaults_to_no_markdown():
     assert Skill(name="s", path=Path("/tmp/s")).markdown == ""
+
+
+def test_a_tool_ref_carries_a_name_and_optionally_returns():
+    assert ToolRef(ref="lookup_order").returns is None
+    assert ToolRef(ref="lookup_order", returns="{}").returns == "{}"
+
+
+def test_a_tool_ref_refuses_any_other_key():
+    # The library owns the contract; a case may set only the scenario.
+    with pytest.raises(ValidationError, match="description"):
+        ToolRef(ref="lookup_order", description="rewritten")
+    with pytest.raises(ValidationError, match="ref"):
+        ToolRef(returns="{}")
+    with pytest.raises(ValidationError, match="ref"):
+        ToolRef(ref="")
