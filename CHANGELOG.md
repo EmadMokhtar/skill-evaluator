@@ -1,3 +1,9 @@
+## v0.11.0 (2026-09-18)
+
+### Feat
+
+- share mock tools across eval files through tool libraries (#52)
+
 ## v0.10.0 (2026-09-18)
 
 ### Feat
