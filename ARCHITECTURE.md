@@ -1068,7 +1068,12 @@ to leave the model no tool, built-in or MCP; Copilot ignores an empty `--availab
 list, so the list names one tool that does not exist, as a single `=` element so the
 variadic option can never swallow what follows it — after the table's `args`, so a
 repository's model flag still applies, and only while `command` still names the preset's
-executable, since a wrapper is not known to accept the flag. `judge_temperature` is not
+executable, since a wrapper is not known to accept the flag. `Product.tool_flag` names the
+product's own tool-selection flag (`--tools`, `--available-tools`); both products
+*accumulate* a repeated one rather than taking the last (verified on both), so a table
+`args` or `command` entry equal to it or starting with `<flag>=` would hand the judge tools
+back behind `judge_args`, and `ProductJudge.preflight()` raises `ProductSetupError` (exit
+2) naming the entry before any case runs. `judge_temperature` is not
 consulted: no product exposes it. Tokens, cost, cost note and model come from the trace,
 so `cli` reports none and Copilot reports a per-request note, as under the runner.
 `ProductJudge.preflight()` finds the executable and runs the preset's `--version` with

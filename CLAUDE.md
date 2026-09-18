@@ -402,7 +402,11 @@ form, that file is the explanation.
   only the tools it names and ignores an empty list, so the list names one tool that does
   not exist — verified by reading the tool list Copilot sends the model, which is then
   empty, built-in and MCP alike) is appended after the table's `args` only when the
-  product judges, and only while `command` still names the preset's executable.
+  product judges, and only while `command` still names the preset's executable. **Both
+  products accumulate a repeated tool-selection flag rather than taking the last**, so a
+  table `args`/`command` entry equal to `Product.tool_flag` (`--tools`,
+  `--available-tools`) or starting with `<flag>=` is refused by `ProductJudge.preflight()`
+  (`ProductSetupError`, exit 2) — it would hand the judge tools back behind `judge_args`.
   `ProductJudge.preflight()` takes no arguments; the orchestrator calls it
   after the runners' hooks and lists an equal status once. `needs_api_key = False`.
 - **`process.py` is the one implementation** of group kill and capped read; `scripts.py`

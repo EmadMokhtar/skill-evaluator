@@ -31,6 +31,7 @@ from skill_lens.runners.product import (
     MAX_PROMPT_BYTES,
     TRUST_NOTE,
     Product,
+    ProductSetupError,
     find_executable,
     invoke,
     probe_version,
@@ -184,6 +185,7 @@ class ProductJudge:
     needs_api_key = False
 
     def __init__(self, product: Product) -> None:
+        self._base = product
         self._product = replace(product, argv=(*product.argv, *product.judge_args))
         self.name = product.name
 
@@ -238,8 +240,23 @@ class ProductJudge:
 
         A judge has no cases to inspect; the orchestrator calls this with no
         arguments and puts the status beside the runners'.
+
+        A table's `args` or `command` carrying the product's own
+        tool-selection flag is refused here: the product accumulates a
+        repeated flag rather than taking the last, so the entry would give
+        the judge tools back behind `judge_args` (see `Product.tool_flag`).
         """
         product = self._product
+        flag = self._base.tool_flag
+        if flag is not None:
+            for element in self._base.argv[1:]:
+                if element == flag or element.startswith(f"{flag}="):
+                    raise ProductSetupError(
+                        f"judge {product.name}: {element!r} in [runners.{product.name}] "
+                        f"would give the judge tools while it grades ({flag} accumulates; "
+                        f"the judge's own {' '.join(product.judge_args)!r} cannot override "
+                        "it); grade under another judge or drop the flag"
+                    )
         executable = find_executable(product, "judge")
         version = probe_version(product, executable, "judge")
         return ProductStatus(

@@ -86,6 +86,13 @@ class Product:
     # the preset). A single `=` element where the option is variadic, so it
     # can never swallow an argument that follows it.
     judge_args: tuple[str, ...] = ()
+    # The product's own tool-selection flag. Both products *accumulate* a
+    # repeated one instead of taking the last (verified: `claude --tools
+    # Bash --tools ""` runs Bash; `copilot --available-tools=bash
+    # --available-tools=skill-lens-none` sends `bash`), so a table's `args`
+    # or `command` naming it would hand the judge tools back behind
+    # `judge_args`. `ProductJudge.preflight` refuses it.
+    tool_flag: str | None = None
 
 
 PRESETS: dict[str, Product] = {
@@ -119,6 +126,7 @@ PRESETS: dict[str, Product] = {
         # `--allow-all-tools` stays: `-p` requires it, and there is nothing
         # left for it to approve.
         judge_args=("--available-tools=skill-lens-none",),
+        tool_flag="--available-tools",
     ),
     "claude-code": Product(
         name="claude-code",
@@ -145,6 +153,7 @@ PRESETS: dict[str, Product] = {
         parse=parse_claude_code,
         version_command=("claude", "--version"),
         judge_args=("--tools", ""),
+        tool_flag="--tools",
     ),
 }
 

@@ -281,7 +281,11 @@ from swaying the verdict: a judge is a model reading untrusted text, as every ju
 `cli` is whatever `command` names, with whatever tools that command gives its model, and a
 `command` under a preset that names another executable drops the preset's restriction
 along with its version probe, because a wrapper is not known to accept the flag;
-`[runners.<name>] args` serves both seats, so it cannot restrict the judge alone. The
+`[runners.<name>] args` serves both seats, so it cannot restrict the judge alone — and it
+cannot widen it either: an `args` or `command` entry carrying the product's tool-selection
+flag (`--tools`, `--available-tools`) is refused in the judge's preflight, because both
+products accumulate a repeated flag rather than taking the last one, and the entry would
+otherwise hand the judge tools back behind the restriction. The
 judge's working directory is empty and holds no skill; that limits what such an
 instruction can find, not what the product can do. The report lists the product once
 whether it ran, judged, or both.

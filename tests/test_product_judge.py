@@ -134,6 +134,59 @@ REQUEST = JudgeRequest(
 def test_the_presets_grade_with_the_verified_extra_args():
     assert PRESETS["claude-code"].judge_args == ("--tools", "")
     assert PRESETS["copilot"].judge_args == ("--available-tools=skill-lens-none",)
+    assert PRESETS["claude-code"].tool_flag == "--tools"
+    assert PRESETS["copilot"].tool_flag == "--available-tools"
+
+
+# Both products accumulate repeated tool-selection flags rather than taking
+# the last one (verified: `claude --tools Bash --tools ""` runs Bash;
+# `copilot --available-tools=bash --available-tools=skill-lens-none` sends
+# `bash`), so a repository's `args` naming the flag would hand the judge tools
+# back. Preflight refuses it before any case runs.
+@pytest.mark.parametrize(
+    "name, parse, judge_args, tool_flag, extra",
+    [
+        ("claude-code", parse_claude_code, ("--tools", ""), "--tools", ["--tools", "Bash"]),
+        ("claude-code", parse_claude_code, ("--tools", ""), "--tools", ["--tools=Bash"]),
+        (
+            "copilot",
+            parse_copilot,
+            ("--available-tools=skill-lens-none",),
+            "--available-tools",
+            ["--available-tools=bash"],
+        ),
+        (
+            "copilot",
+            parse_copilot,
+            ("--available-tools=skill-lens-none",),
+            "--available-tools",
+            ["--available-tools", "bash"],
+        ),
+    ],
+)
+def test_preflight_refuses_a_tool_flag_in_the_tables_args(
+    name, parse, judge_args, tool_flag, extra
+):
+    product = _product(
+        name=name,
+        argv=(sys.executable, str(FAKE), "-p", "{prompt}", "--model", "m", *extra),
+        parse=parse,
+        judge_args=judge_args,
+        tool_flag=tool_flag,
+    )
+    with pytest.raises(ProductSetupError) as excinfo:
+        ProductJudge(product).preflight()
+    message = str(excinfo.value)
+    assert message.startswith(f"judge {name}: {extra[0]!r} in [runners.{name}]")
+    assert "tools while it grades" in message
+
+
+def test_preflight_accepts_args_that_do_not_touch_tools():
+    product = _product(
+        argv=(sys.executable, str(FAKE), "-p", "{prompt}", "--model", "m", "--toolsX"),
+        tool_flag="--tools",
+    )
+    assert ProductJudge(product).preflight().name == "claude-code"
 
 
 def test_a_verdict_is_read_from_the_products_answer(fake):

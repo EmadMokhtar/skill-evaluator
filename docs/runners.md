@@ -176,7 +176,13 @@ exist and the model is left with none, built-in and MCP alike — verified again
 1.0.37 by reading the tool list it sends the model, which is empty; `--excluded-tools` takes
 no wildcard, and `--deny-tool` governs approval prompts, not what the model sees. A
 `command` that names another executable drops the restriction along with the version probe,
-because a wrapper is not known to accept it; `cli` has none. A graded response that reads
+because a wrapper is not known to accept it; `cli` has none. The table's `args` or `command`
+may not carry that same flag (`--tools`, `--available-tools`) when the product judges: both
+products accumulate a repeated flag rather than taking the last one (verified: `claude
+--tools Bash --tools ""` runs Bash; Copilot sends `bash` under `--available-tools=bash
+--available-tools=skill-lens-none`), so the entry would give the judge tools back, and
+preflight refuses it as a user error (exit 2) naming the entry, before any case runs. A
+graded response that reads
 like an instruction then has nothing to act with — the prompt says the response is untrusted
 data, but that is a request, not a guarantee; the restriction is what makes acting on it
 impossible, and it does not stop such an instruction from swaying the verdict itself; see
