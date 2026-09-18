@@ -123,8 +123,44 @@ def test_copilot_tool_calls_are_the_models_requests_in_order():
     ]
 
 
-def test_copilot_skill_load_is_the_skill_invoked_event():
+def test_copilot_slash_invocation_is_the_skill_invoked_event():
+    # `/ping ...` (mode: loaded) is what this recording invoked; the event is
+    # the slash invocation's, and offered mode never produces it.
     assert parse_copilot(_fixture("copilot-trigger.jsonl")).invoked_skills == frozenset({"ping"})
+
+
+def test_copilot_offered_skill_load_is_the_skill_tool_request():
+    # A skill the model chose itself is a `skill` tool request, on Copilot CLI
+    # 1.0.37 and 1.0.86-2 alike; no `skill.invoked` event is emitted for it
+    # (issue #50). Same rule as Claude Code's `Skill` tool call.
+    text = _fixture("copilot-offered-trigger.jsonl")
+    assert "skill.invoked" not in text
+    trace = parse_copilot(text)
+    assert trace.error is None
+    assert trace.output == "PONG-7731"
+    assert trace.tool_calls == [ToolCall(name="skill", arguments={"skill": "ping"})]
+    assert trace.invoked_skills == frozenset({"ping"})
+
+
+def test_copilot_skill_tool_request_names_the_skill_it_asked_for():
+    lines = (
+        '{"type":"assistant.message","data":{"content":"","toolRequests":'
+        '[{"toolCallId":"c","name":"skill","arguments":{"skill":"other"},"type":"function"}]}}\n'
+        '{"type":"result","exitCode":0,"usage":{"premiumRequests":1}}'
+    )
+    assert parse_copilot(lines).invoked_skills == frozenset({"other"})
+
+
+def test_copilot_skill_tool_request_without_a_string_skill_is_a_call_but_no_load():
+    lines = (
+        '{"type":"assistant.message","data":{"content":"","toolRequests":'
+        '[{"toolCallId":"c1","name":"skill","arguments":{},"type":"function"},'
+        '{"toolCallId":"c2","name":"skill","arguments":{"skill":5},"type":"function"}]}}\n'
+        '{"type":"result","exitCode":0,"usage":{"premiumRequests":1}}'
+    )
+    trace = parse_copilot(lines)
+    assert [call.name for call in trace.tool_calls] == ["skill", "skill"]
+    assert trace.invoked_skills == frozenset()
 
 
 def test_copilot_tokens_come_from_the_shutdown_metrics():

@@ -127,7 +127,7 @@ A skill written for a named product is now measured under that product. `--runne
 copilot` and `--runner claude-code` start GitHub Copilot CLI or Claude Code in its
 non-interactive mode, with `SKILL.md` and its bundle placed verbatim (its text as
 written; line endings are normalised) where the
-product discovers skills, and read the output, tool calls, tokens and the skill-load event
+product discovers skills, and read the output, tool calls, tokens and the skill-load signal
 back from the product's own trace; `--runner cli` does the same for any command a
 `[runners.cli]` table names, with stdout as the output. No provider API key is involved:
 the product uses its own auth. The two presets carry the argv the probes verified, and a

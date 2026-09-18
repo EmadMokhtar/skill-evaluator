@@ -82,7 +82,15 @@ def _int(value: Any) -> int:
 
 def parse_copilot(text: str) -> Trace:
     """Copilot CLI: `assistant.message`, `skill.invoked`, `session.shutdown`,
-    `session.error`, `result`."""
+    `session.error`, `result`.
+
+    A skill is loaded two ways, and the trace shows each differently. A slash
+    invocation (`/<name> ...`, mode `loaded`) emits a `skill.invoked` event. A
+    skill the model chose itself (mode `offered`) is a request for the `skill`
+    tool, `arguments.skill` naming it, with no `skill.invoked` event at all
+    (Copilot CLI 1.0.37 and 1.0.86-2 alike). Both count as an invocation --
+    the tool request is the same rule Claude Code's `Skill` call follows.
+    """
     events = parse_lines(text)
     output = ""
     tool_calls: list[ToolCall] = []
@@ -103,11 +111,10 @@ def parse_copilot(text: str) -> Trace:
             requests = data.get("toolRequests")
             for request in requests if isinstance(requests, list) else []:
                 if isinstance(request, dict) and isinstance(request.get("name"), str):
-                    tool_calls.append(
-                        ToolCall(
-                            name=request["name"], arguments=_arguments(request.get("arguments"))
-                        )
-                    )
+                    arguments = _arguments(request.get("arguments"))
+                    tool_calls.append(ToolCall(name=request["name"], arguments=arguments))
+                    if request["name"] == "skill" and isinstance(arguments.get("skill"), str):
+                        invoked.add(arguments["skill"])
         elif kind == "skill.invoked" and isinstance(data.get("name"), str):
             invoked.add(data["name"])
         elif kind == "session.tools_updated" and isinstance(data.get("model"), str):

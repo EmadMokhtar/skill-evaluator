@@ -40,7 +40,7 @@ case through every named framework. M9 part 1 adds product runners: `--runner co
 and `--runner claude-code` start GitHub Copilot CLI or Claude Code in non-interactive
 mode with `SKILL.md` and its bundle delivered verbatim (its text as written; line endings
 are normalised) into the product's own skill directory, and read output, tool calls,
-tokens and the skill-load event from the
+tokens and the skill-load signal from the
 product's trace; `--runner cli` does the same for a command a `[runners.cli]` table names,
 with stdout as the output. No provider key is involved. A once-per-run `preflight` hook
 on the `Runner` protocol refuses what the product cannot serve before any quota is spent,
@@ -357,8 +357,9 @@ form, that file is the explanation.
   Beside it go `scripts/`, `references/` and `assets/` and nothing else.
 - **A product runner's prompt is the task verbatim; the baseline-none arm never sees the
   skill's name.** `loaded` invokes the skill by the product's own spelling; `offered` sends
-  the bare task and reads the product's load event — a product without one (`cli`) makes
-  `offered` an authoring error, never a silent `false`.
+  the bare task and reads the product's load signal — Copilot's `skill` tool request (its
+  `skill.invoked` event is the slash invocation's only), Claude Code's `Skill` call — and a
+  product without one (`cli`) makes `offered` an authoring error, never a silent `false`.
 - **A limit the product cannot measure fails, it never passes.** `RunResult.usage_note` for
   tokens mirrors `cost_note` for cost in `BudgetEvaluator`: a declared `max_tokens` under a
   non-empty `usage_note` is a failing *not evaluated* check, excluded from `score`'s divisor.

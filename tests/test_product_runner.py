@@ -185,6 +185,34 @@ def test_offered_mode_negative_control_is_false(tmp_path, fake, monkeypatch):
     assert result.skill_triggered is False
 
 
+def test_offered_mode_under_copilot_reads_the_skill_tool_request(tmp_path, fake, monkeypatch):
+    # Copilot emits `skill.invoked` for a slash invocation only; a skill the
+    # model chose is a `skill` tool request (issue #50).
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "copilot-offered-trigger.jsonl"))
+    monkeypatch.setenv("FAKE_PRODUCT_SKILLS_DIR", ".agents/skills")
+    product = _product(name="copilot", parse=parse_copilot, skills_dir=".agents/skills")
+    result = ProductRunner(product).run(_skill(tmp_path), _case(mode="offered"))
+    assert result.error is None
+    assert fake()["prompt"] == "Please ping."
+    assert fake()["skill_files"] == ["ping/SKILL.md"]
+    assert [call.name for call in result.tool_calls] == ["skill"]
+    assert result.skill_triggered is True
+
+
+def test_offered_mode_under_copilot_negative_control_is_false(tmp_path, fake, monkeypatch):
+    # The same recording with the model asking for a different skill.
+    text = (FIXTURES / "copilot-offered-trigger.jsonl").read_text(encoding="utf-8")
+    trace = tmp_path / "other.jsonl"
+    trace.write_text(text.replace('"skill":"ping"', '"skill":"other"'), encoding="utf-8")
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(trace))
+    product = _product(name="copilot", parse=parse_copilot, skills_dir=".agents/skills")
+    result = ProductRunner(product).run(_skill(tmp_path), _case(mode="offered"))
+    assert result.error is None
+    # The request was read (it names the other skill); it just is not ours.
+    assert [call.arguments for call in result.tool_calls] == [{"skill": "other"}]
+    assert result.skill_triggered is False
+
+
 def test_offered_mode_on_a_generic_product_is_unknown_not_false(tmp_path, fake):
     # A generic product has no parser, so `invoked_skills` is always empty --
     # reporting False there would claim "the skill did not fire" when the

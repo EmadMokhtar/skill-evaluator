@@ -213,8 +213,9 @@ that does not support the mode is **errored**, never a quiet pass.
 
 Under a [product runner](runners.md#product-runners) there is no offered tool: the skill
 sits in the product's own skill directory, the bare task is sent, and `skill_triggered`
-comes from the product's own load event (Copilot's `skill.invoked`, Claude Code's `Skill`
-tool call). A product with no such event — `cli` — makes `mode: offered` an authoring error
+comes from the product's own load signal (Copilot's `skill` tool call — its `skill.invoked`
+event is only what a slash invocation emits — Claude Code's `Skill` tool call). A product
+with no such signal — `cli` — makes `mode: offered` an authoring error
 under that runner, never a silent `false` that would pass every negative control.
 
 ## Which runners serve which case features
