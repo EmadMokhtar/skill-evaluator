@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import yaml
@@ -10,7 +11,14 @@ from jsonschema.exceptions import SchemaError
 from pydantic import ValidationError
 
 from skill_lens.cases.checks import UNFILLED_SENTINEL, check_tool_schema, find_unfilled
-from skill_lens.models import EvalCase, Skill
+from skill_lens.cases.tool_libraries import (
+    EMPTY_LIBRARY,
+    TOOL_LIBRARIES_KEY,
+    ToolLibrary,
+    ToolLibraryError,
+    load_tool_libraries,
+)
+from skill_lens.models import EvalCase, Skill, ToolRef
 from skill_lens.runners.tools import BUILTIN_TOOL_NAMES, skill_tool_name
 from skill_lens.workspace import PathRefused, check_relative_path
 from skill_lens.yaml_loading import safe_load
@@ -42,6 +50,62 @@ def _reject_unfilled(path: Path, index: int, raw: object) -> None:
         )
 
 
+def _load_tool_libraries(path: Path, data: dict) -> ToolLibrary:
+    """The tools this file's `tool_libraries:` imports; `EMPTY_LIBRARY` when
+    the key is absent, so a `ref:` can say "add the key".
+
+    Paths resolve against the eval file's own directory, never the working
+    directory. A library error is re-raised naming this file too: the
+    library is the file to fix, this is the file that imported it.
+    """
+    if TOOL_LIBRARIES_KEY not in data:
+        return EMPTY_LIBRARY
+    try:
+        return load_tool_libraries(data[TOOL_LIBRARIES_KEY], relative_to=path.parent)
+    except ToolLibraryError as exc:
+        raise CaseParseError(f"{path}: {exc}") from exc
+
+
+def _resolve_tool_refs(path: Path, index: int, raw: object, library: ToolLibrary) -> object:
+    """Replace every `- ref: <name>` in the case's `tools:` with the tool the
+    library declares, keeping the case's own `returns:` when it set one.
+
+    Runs on the raw mapping, before `EvalCase.model_validate`: `ToolSpec`
+    forbids unknown keys and requires a name, so a ref is not a ToolSpec and
+    must never become one half-built. Resolving here is what keeps
+    `EvalCase.tools` a list of `ToolSpec` for every runner, evaluator and
+    preflight downstream. Nothing is mutated: a YAML anchor can alias one
+    `tools:` list into several cases, so the result is a new mapping with a
+    new list. Anything that is not a mapping with a `ref` key is kept as
+    written for the model to judge.
+    """
+    if not isinstance(raw, dict) or not isinstance(raw.get("tools"), list):
+        return raw
+    tools: list[object] = []
+    for position, entry in enumerate(raw["tools"]):
+        if not isinstance(entry, dict) or "ref" not in entry:
+            tools.append(entry)
+            continue
+        where = f"{path}: case #{index + 1} tool #{position + 1}"
+        try:
+            ref = ToolRef.model_validate(entry)
+        except ValidationError as exc:
+            fields = ", ".join(str(e["loc"][0]) for e in exc.errors() if e["loc"])
+            raise CaseParseError(
+                f"{where}: invalid ref: entry ({fields}): a ref: may carry only returns: "
+                f"beside it; the library declares the tool's name, description and schema."
+            ) from exc
+        try:
+            spec = library.resolve(ref.ref)
+        except ToolLibraryError as exc:
+            raise CaseParseError(f"{where} {exc}") from exc
+        resolved = copy.deepcopy(spec.model_dump())
+        if ref.returns is not None:
+            resolved["returns"] = ref.returns
+        tools.append(resolved)
+    return {**raw, "tools": tools}
+
+
 def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
     """Parse one YAML file into EvalCase models.
 
@@ -63,9 +127,11 @@ def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
     raw_cases = data["cases"]
     if not isinstance(raw_cases, list):
         raise CaseParseError(f"{path}: 'cases' must be a list")
+    library = _load_tool_libraries(path, data)
     cases: list[EvalCase] = []
     for index, raw in enumerate(raw_cases):
         _reject_unfilled(path, index, raw)
+        raw = _resolve_tool_refs(path, index, raw, library)
         try:
             case = EvalCase.model_validate(raw)
         except ValidationError as exc:

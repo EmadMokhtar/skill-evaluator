@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from skill_lens.cases.loader import parse_cases_file
 from skill_lens.models import EvalCase, Skill, ToolSpec, TrajectorySpec
 from skill_lens.runners.product import TRUST_NOTE, Product, ProductRunner, ProductSetupError
 from skill_lens.runners.traces import parse_claude_code
@@ -107,3 +108,20 @@ def test_only_the_cases_given_are_inspected():
     # A case the orchestrator filtered out never reaches preflight; nothing
     # here re-discovers it.
     ProductRunner(_product()).preflight([_skill()], {})  # no raise, no cases
+
+
+def test_a_referenced_tool_is_refused_like_an_inline_one(tmp_path):
+    # `ref:` resolves in the case loader, so preflight sees a ToolSpec and
+    # refuses it with the same message -- nothing product-specific to add.
+    (tmp_path / "lib.yaml").write_text("tools:\n  - name: lookup\n", encoding="utf-8")
+    path = tmp_path / "ping.eval.yaml"
+    path.write_text(
+        "tool_libraries: [lib.yaml]\ncases:\n  - name: uses tools\n    task: t\n"
+        "    tools:\n      - ref: lookup\n",
+        encoding="utf-8",
+    )
+    (case,) = parse_cases_file(path)
+    with pytest.raises(
+        ProductSetupError, match="case 'uses tools' of skill 'ping' declares tools:"
+    ):
+        ProductRunner(_product()).preflight([_skill()], {"ping": [case]})
