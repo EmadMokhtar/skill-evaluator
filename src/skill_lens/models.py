@@ -268,7 +268,7 @@ class ToolRef(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    ref: str
+    ref: str = Field(min_length=1)
     returns: str | None = None
 
 

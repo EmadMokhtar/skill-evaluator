@@ -474,3 +474,5 @@ def test_a_tool_ref_refuses_any_other_key():
         ToolRef(ref="lookup_order", description="rewritten")
     with pytest.raises(ValidationError, match="ref"):
         ToolRef(returns="{}")
+    with pytest.raises(ValidationError, match="ref"):
+        ToolRef(ref="")

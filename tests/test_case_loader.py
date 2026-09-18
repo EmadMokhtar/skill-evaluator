@@ -1033,3 +1033,11 @@ def test_a_tool_libraries_value_that_is_not_a_list_is_refused(tmp_path, value):
         CaseParseError, match="cases.eval.yaml: tool_libraries must be a list of paths"
     ):
         parse_cases_file(path)
+
+
+@pytest.mark.parametrize("value", ["5", "[a, b]", "''"])
+def test_a_ref_that_is_not_a_name_is_refused_with_the_type_error(tmp_path, value):
+    path = _layout(tmp_path)
+    path.write_text(REF_CASES.replace("ref: issue_refund", f"ref: {value}"), encoding="utf-8")
+    with pytest.raises(CaseParseError, match=r"orders.yaml: case #1 tool #2: invalid ref: entry"):
+        parse_cases_file(path)

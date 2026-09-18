@@ -90,11 +90,15 @@ def _resolve_tool_refs(path: Path, index: int, raw: object, library: ToolLibrary
         try:
             ref = ToolRef.model_validate(entry)
         except ValidationError as exc:
-            fields = ", ".join(str(e["loc"][0]) for e in exc.errors() if e["loc"])
-            raise CaseParseError(
-                f"{where}: invalid ref: entry ({fields}): a ref: may carry only returns: "
-                f"beside it; the library declares the tool's name, description and schema."
-            ) from exc
+            errors = exc.errors()
+            fields = ", ".join(str(e["loc"][0]) for e in errors if e["loc"])
+            if any(e["type"] == "extra_forbidden" for e in errors):
+                raise CaseParseError(
+                    f"{where}: invalid ref: entry ({fields}): a ref: may carry only "
+                    f"returns: beside it; the library declares the tool's name, "
+                    f"description and schema."
+                ) from exc
+            raise CaseParseError(f"{where}: invalid ref: entry ({fields}): {exc}") from exc
         try:
             spec = library.resolve(ref.ref)
         except ToolLibraryError as exc:
