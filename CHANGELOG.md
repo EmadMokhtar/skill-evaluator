@@ -1,3 +1,9 @@
+## v0.10.0 (2026-09-18)
+
+### Feat
+
+- leave the copilot judge no tools while it grades (#49)
+
 ## v0.9.1 (2026-09-18)
 
 ### Fix

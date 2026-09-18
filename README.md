@@ -178,7 +178,7 @@ Copilot CLI or Claude Code, with no API key. See
 ## Gate your pull requests
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v0.9.1
+- uses: EmadMokhtar/skill-evaluator@v0.10.0
   with:
     path: ./skills
     runner: pydantic-ai
