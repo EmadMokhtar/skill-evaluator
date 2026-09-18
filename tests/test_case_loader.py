@@ -897,8 +897,11 @@ def test_a_ref_carrying_anything_but_returns_is_refused_naming_the_key(tmp_path,
 
 def test_a_placeholder_in_a_ref_returns_is_caught_before_any_library_is_read(tmp_path):
     path = _layout(tmp_path)
+    # The library is gone, so importing it would fail first if the loader
+    # looked at it before scanning the cases for placeholders.
     (tmp_path / "shared-tools" / "order-api.yaml").unlink()
     path.write_text(
+        "tool_libraries: [../../../shared-tools/order-api.yaml]\n"
         "cases:\n  - name: n\n    task: t\n    tools:\n"
         "      - ref: lookup_order\n        returns: TODO(skill-lens) fill\n",
         encoding="utf-8",

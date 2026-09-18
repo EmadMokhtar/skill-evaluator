@@ -131,10 +131,14 @@ def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
     raw_cases = data["cases"]
     if not isinstance(raw_cases, list):
         raise CaseParseError(f"{path}: 'cases' must be a list")
+    # The scaffold scan stays the first check after parsing, ahead of any
+    # library import: a half-filled file is told what to fill in, not that a
+    # library it will import is missing.
+    for index, raw in enumerate(raw_cases):
+        _reject_unfilled(path, index, raw)
     library = _load_tool_libraries(path, data)
     cases: list[EvalCase] = []
     for index, raw in enumerate(raw_cases):
-        _reject_unfilled(path, index, raw)
         raw = _resolve_tool_refs(path, index, raw, library)
         try:
             case = EvalCase.model_validate(raw)
