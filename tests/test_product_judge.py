@@ -133,7 +133,60 @@ REQUEST = JudgeRequest(
 
 def test_the_presets_grade_with_the_verified_extra_args():
     assert PRESETS["claude-code"].judge_args == ("--tools", "")
-    assert PRESETS["copilot"].judge_args == ()
+    assert PRESETS["copilot"].judge_args == ("--available-tools=skill-lens-none",)
+    assert PRESETS["claude-code"].tool_flag == "--tools"
+    assert PRESETS["copilot"].tool_flag == "--available-tools"
+
+
+# Both products accumulate repeated tool-selection flags rather than taking
+# the last one (verified: `claude --tools Bash --tools ""` runs Bash;
+# `copilot --available-tools=bash --available-tools=skill-lens-none` sends
+# `bash`), so a repository's `args` naming the flag would hand the judge tools
+# back. Preflight refuses it before any case runs.
+@pytest.mark.parametrize(
+    "name, parse, judge_args, tool_flag, extra",
+    [
+        ("claude-code", parse_claude_code, ("--tools", ""), "--tools", ["--tools", "Bash"]),
+        ("claude-code", parse_claude_code, ("--tools", ""), "--tools", ["--tools=Bash"]),
+        (
+            "copilot",
+            parse_copilot,
+            ("--available-tools=skill-lens-none",),
+            "--available-tools",
+            ["--available-tools=bash"],
+        ),
+        (
+            "copilot",
+            parse_copilot,
+            ("--available-tools=skill-lens-none",),
+            "--available-tools",
+            ["--available-tools", "bash"],
+        ),
+    ],
+)
+def test_preflight_refuses_a_tool_flag_in_the_tables_args(
+    name, parse, judge_args, tool_flag, extra
+):
+    product = _product(
+        name=name,
+        argv=(sys.executable, str(FAKE), "-p", "{prompt}", "--model", "m", *extra),
+        parse=parse,
+        judge_args=judge_args,
+        tool_flag=tool_flag,
+    )
+    with pytest.raises(ProductSetupError) as excinfo:
+        ProductJudge(product).preflight()
+    message = str(excinfo.value)
+    assert message.startswith(f"judge {name}: {extra[0]!r} in [runners.{name}]")
+    assert "tools while it grades" in message
+
+
+def test_preflight_accepts_args_that_do_not_touch_tools():
+    product = _product(
+        argv=(sys.executable, str(FAKE), "-p", "{prompt}", "--model", "m", "--toolsX"),
+        tool_flag="--tools",
+    )
+    assert ProductJudge(product).preflight().name == "claude-code"
 
 
 def test_a_verdict_is_read_from_the_products_answer(fake):
@@ -155,6 +208,24 @@ def test_the_judge_sends_the_shared_prompt_with_the_extra_args_and_no_skill(fake
     assert seen["argv"][-2:] == ["--tools", ""]
     assert seen["skill_files"] == []
     assert not Path(seen["cwd"]).exists()  # the judge's directory is gone
+
+
+def test_the_copilot_judge_sends_its_tool_restriction_last(fake, monkeypatch):
+    # The preset's own flag, after a repository's `args`: a single `=` element,
+    # so the variadic `--available-tools` can never swallow whatever follows.
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "copilot-verdict.jsonl"))
+    preset = PRESETS["copilot"]
+    product = _product(
+        name="copilot",
+        argv=(sys.executable, str(FAKE), "-p", "{prompt}", "--model", "gpt-5.4"),
+        parse=parse_copilot,
+        judge_args=preset.judge_args,
+    )
+    verdict = ProductJudge(product).judge(REQUEST)
+    assert verdict.error is None
+    seen = fake()
+    assert seen["argv"][-3:] == ["--model", "gpt-5.4", "--available-tools=skill-lens-none"]
+    assert seen["skill_files"] == []
 
 
 def test_a_verdict_inside_prose_and_a_fence_is_still_read(fake, monkeypatch):

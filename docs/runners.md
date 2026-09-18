@@ -170,11 +170,25 @@ no structured-output mode and its system prompt is its own. One closing line ask
 single JSON object and nothing else: `{"checks": [{"id": ..., "passed": ..., "evidence":
 ...}, ...]}`, one entry per rubric check. The judge runs in an empty temporary directory
 with no skill delivered: it grades text, it never invokes the skill under test, and the
-directory is removed after every call. Claude Code grades with `--tools ""` appended after
-the table's `args`, so it has no tools at all while it judges. Copilot has no verified
-equivalent and keeps its tools, so a graded response that reads like an instruction can make
-a Copilot judge act on it — the prompt says the response is untrusted data, but that is a
-request, not a guarantee; see [Security](security.md#product-runners).
+directory is removed after every call. Each preset grades with its tool restriction
+appended after the table's `args`, so it has no tools at all while it judges: Claude Code
+with `--tools ""`, Copilot with `--available-tools=skill-lens-none`. Copilot's flag keeps
+only the tools it names and ignores an empty list, so the list names one tool that does not
+exist and the model is left with none, built-in and MCP alike — verified against `copilot`
+1.0.37 by reading the tool list it sends the model, which is empty; `--excluded-tools` takes
+no wildcard, and `--deny-tool` governs approval prompts, not what the model sees. A
+`command` that names another executable drops the restriction along with the version probe,
+because a wrapper is not known to accept it; `cli` has none. The table's `args` or `command`
+may not carry that same flag (`--tools`, `--available-tools`) when the product judges: both
+products accumulate a repeated flag rather than taking the last one (verified: `claude
+--tools Bash --tools ""` runs Bash; Copilot sends `bash` under `--available-tools=bash
+--available-tools=skill-lens-none`), so the entry would give the judge tools back, and
+preflight refuses it as a user error (exit 2) naming the entry, before any case runs. A
+graded response that reads
+like an instruction then has nothing to act with — the prompt says the response is untrusted
+data, but that is a request, not a guarantee; the restriction is what makes acting on it
+impossible, and it does not stop such an instruction from swaying the verdict itself; see
+[Security](security.md#product-runners).
 
 **The verdict.** Exactly one top-level JSON object in the reply is the verdict: the first
 balanced `{ ... }` — the earliest `{` whose `}` closes it, braces inside JSON strings not

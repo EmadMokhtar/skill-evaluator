@@ -23,6 +23,7 @@ cassette tier's network-blocked guarantee is unaffected.
 
 import os
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -34,7 +35,7 @@ from skill_lens.models import RunResult
 from skill_lens.orchestrator import run_evals
 from skill_lens.runners.fake import FakeRunner
 from skill_lens.runners.langchain import LangChainRunner
-from skill_lens.runners.product import PRESETS, ProductRunner
+from skill_lens.runners.product import PRESETS, ProductRunner, invoke, read_trace
 from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.skills.loader import load_skills
 
@@ -124,17 +125,36 @@ ORDER_1234_REFUSAL = (
 )
 
 
+# One parameter per product judge, each skipped without its executable.
+PRODUCT_JUDGES = [
+    pytest.param(
+        "claude-code",
+        marks=pytest.mark.skipif(
+            shutil.which("claude") is None, reason="needs the claude executable"
+        ),
+    ),
+    pytest.param(
+        "copilot",
+        marks=pytest.mark.skipif(
+            shutil.which("copilot") is None, reason="needs the copilot executable"
+        ),
+    ),
+]
+
+
 # The product judge, live. The runner is a scripted `FakeRunner`, not a
 # product runner: `examples/order-support`'s rubric case declares `tools:` (a
 # mock `lookup_order`), which every product runner refuses in preflight as an
 # authoring error, and the example is not edited to suit this test. What runs
-# live is the judge -- the example's own rubric graded through Claude Code
-# with `--tools ""`, end to end through `run_evals`. `case_filter` narrows the
-# run to that one case; the other four need real tool calls a scripted runner
-# cannot make. The case has no `budget:`, so the shared helper tolerates
-# nothing here: every check must pass on the judge's verdict.
-@pytest.mark.skipif(shutil.which("claude") is None, reason="needs the claude executable")
-def test_order_support_rubrics_pass_under_claude_code():
+# live is the judge -- the example's own rubric graded through the product
+# with its `judge_args` (no tools), end to end through `run_evals`.
+# `case_filter` narrows the run to that one case; the other four need real
+# tool calls a scripted runner cannot make. The case has no `budget:`, so the
+# shared helper tolerates nothing here: every check must pass on the judge's
+# verdict. Under Copilot this is also the proof that a judge left with no
+# tools still returns a reply.
+@pytest.mark.parametrize("name", PRODUCT_JUDGES)
+def test_order_support_rubrics_pass_under_a_product_judge(name):
     report = run_evals(
         load_skills(EXAMPLES / "order-support"),
         [
@@ -142,7 +162,7 @@ def test_order_support_rubrics_pass_under_claude_code():
                 responses={"I want a refund for order 1234": RunResult(output=ORDER_1234_REFUSAL)}
             )
         ],
-        judge=ProductJudge(PRESETS["claude-code"]),
+        judge=ProductJudge(PRESETS[name]),
         case_filter="explains the refusal",
     )
     assert report.total == 1, [o.case_name for o in report.outcomes]
@@ -151,13 +171,38 @@ def test_order_support_rubrics_pass_under_claude_code():
         for o in report.outcomes
         if o.status == "errored"
     ]
-    assert [p.name for p in report.products] == ["claude-code"]
+    assert [p.name for p in report.products] == [name]
     _assert_only_the_token_budget_failed(report)
     [outcome] = report.outcomes
     [judge_score] = [s for s in outcome.scores if s.evaluator == "judge"]
     assert judge_score.passed, [(c.id, c.passed, c.evidence) for c in judge_score.checks]
     assert [c.id for c in judge_score.checks] == ["r1", "r2", "r3"]
     assert all(c.evidence.strip() for c in judge_score.checks)
+
+
+# The tool restriction itself, live. The judge's argv -- the preset plus its
+# `judge_args`, composed as `ProductJudge` composes it (pinned by
+# `test_the_copilot_judge_sends_its_tool_restriction_last`) -- is sent a
+# prompt that asks for a shell command and, failing that, for a fixed
+# marker. A judge with no tools answers with the marker and its trace holds
+# no tool call; a judge that could run the command would record one.
+# `JudgeVerdict` carries no tool calls, so this reads the trace directly
+# rather than going through `judge`.
+NO_TOOLS_PROBE = (
+    "Run the shell command `echo PROBE-OK` and reply with its exact output. "
+    "If you have no tool that can run a shell command, reply with exactly the "
+    "text NO-TOOLS and nothing else."
+)
+
+
+@pytest.mark.parametrize("name", PRODUCT_JUDGES)
+def test_the_product_judge_has_no_tools(name, tmp_path):
+    preset = PRESETS[name]
+    product = replace(preset, argv=(*preset.argv, *preset.judge_args))
+    trace = read_trace(product, invoke(product, NO_TOOLS_PROBE, tmp_path))
+    assert trace.error is None, trace.error
+    assert trace.tool_calls == [], [call.name for call in trace.tool_calls]
+    assert "NO-TOOLS" in trace.output, trace.output
 
 
 # Copilot quota was exhausted when this was last run, so this test has never

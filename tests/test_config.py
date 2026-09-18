@@ -480,24 +480,33 @@ def test_invoke_template_using_only_name_and_task_still_loads(tmp_path, template
     assert product.invoke == template
 
 
-def test_a_command_naming_another_executable_drops_the_presets_version_probe(tmp_path):
+JUDGE_ARGS = {
+    "claude-code": ("--tools", ""),
+    "copilot": ("--available-tools=skill-lens-none",),
+}
+
+
+@pytest.mark.parametrize("name", ["claude-code", "copilot"])
+def test_a_command_naming_another_executable_drops_the_presets_version_probe(tmp_path, name):
     # `./run-claude.sh --version` might forward `--version` as a prompt and
     # start a real session in preflight; the probe is only known to work on
     # the preset's own executable.
     (tmp_path / "skill-lens.toml").write_text(
-        '[runners.claude-code]\ncommand = ["./run-claude.sh", "{prompt}"]\n', encoding="utf-8"
+        f'[runners.{name}]\ncommand = ["./wrapper.sh", "{{prompt}}"]\n', encoding="utf-8"
     )
-    product = load_config(tmp_path / "skill-lens.toml").product("claude-code")
+    product = load_config(tmp_path / "skill-lens.toml").product(name)
     assert product.version_command is None
     # a wrapper is not known to accept the preset's judge-only flag either
     assert product.judge_args == ()
 
 
-def test_a_command_keeping_the_presets_executable_keeps_its_version_probe(tmp_path):
+@pytest.mark.parametrize("name", ["claude-code", "copilot"])
+def test_a_command_keeping_the_presets_executable_keeps_its_version_probe(tmp_path, name):
+    executable = PRESETS[name].argv[0]
     (tmp_path / "skill-lens.toml").write_text(
-        '[runners.claude-code]\ncommand = ["claude", "-p", "{prompt}", "--verbose"]\n',
+        f'[runners.{name}]\ncommand = ["{executable}", "-p", "{{prompt}}", "--verbose"]\n',
         encoding="utf-8",
     )
-    product = load_config(tmp_path / "skill-lens.toml").product("claude-code")
-    assert product.version_command == ("claude", "--version")
-    assert product.judge_args == ("--tools", "")
+    product = load_config(tmp_path / "skill-lens.toml").product(name)
+    assert product.version_command == (executable, "--version")
+    assert product.judge_args == JUDGE_ARGS[name]

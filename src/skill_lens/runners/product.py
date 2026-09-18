@@ -80,9 +80,19 @@ class Product:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
     # Appended only when the product grades a rubric: what keeps it from
-    # acting while it judges. Verified for claude-code (`--tools ""` disables
-    # every tool); Copilot has no verified equivalent and gets none.
+    # acting while it judges, verified against each product's own CLI to
+    # leave the model no tool at all -- `--tools ""` for claude-code, and
+    # for copilot the one spelling of its three tool flags that does (see
+    # the preset). A single `=` element where the option is variadic, so it
+    # can never swallow an argument that follows it.
     judge_args: tuple[str, ...] = ()
+    # The product's own tool-selection flag. Both products *accumulate* a
+    # repeated one instead of taking the last (verified: `claude --tools
+    # Bash --tools ""` runs Bash; `copilot --available-tools=bash
+    # --available-tools=skill-lens-none` sends `bash`), so a table's `args`
+    # or `command` naming it would hand the judge tools back behind
+    # `judge_args`. `ProductJudge.preflight` refuses it.
+    tool_flag: str | None = None
 
 
 PRESETS: dict[str, Product] = {
@@ -106,6 +116,17 @@ PRESETS: dict[str, Product] = {
         invoke="/{name} {task}",
         parse=parse_copilot,
         version_command=("copilot", "--version"),
+        # Verified against copilot 1.0.37, reading the tool list it sends
+        # the model (`--log-level all`): `--available-tools` keeps only the
+        # tools it names and ignores an empty list (bare, `=""`, `=,`), so
+        # naming one tool that does not exist is what leaves the model with
+        # none -- built-in and MCP alike, `Tools: []` -- while the request
+        # still goes out. `--excluded-tools` takes no wildcard, and
+        # `--deny-tool` governs approval prompts, not what the model sees.
+        # `--allow-all-tools` stays: `-p` requires it, and there is nothing
+        # left for it to approve.
+        judge_args=("--available-tools=skill-lens-none",),
+        tool_flag="--available-tools",
     ),
     "claude-code": Product(
         name="claude-code",
@@ -132,6 +153,7 @@ PRESETS: dict[str, Product] = {
         parse=parse_claude_code,
         version_command=("claude", "--version"),
         judge_args=("--tools", ""),
+        tool_flag="--tools",
     ),
 }
 
