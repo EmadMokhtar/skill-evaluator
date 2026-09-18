@@ -1,0 +1,11 @@
+{"type":"session.skills_loaded","data":{"skills":[{"name":"ping","description":"Use when asked to ping.","source":"project","userInvocable":true,"enabled":true,"path":"/work/.agents/skills/ping/SKILL.md"}]},"id":"e1","timestamp":"2026-09-18T10:00:00.000Z","ephemeral":true}
+{"type":"session.tools_updated","data":{"model":"claude-sonnet-5"},"id":"e2","timestamp":"2026-09-18T10:00:00.100Z","ephemeral":true}
+{"type":"user.message","data":{"content":"Please ping.","attachments":[]},"id":"e3","timestamp":"2026-09-18T10:00:00.200Z"}
+{"type":"assistant.turn_start","data":{"turnId":"0"},"id":"e4","timestamp":"2026-09-18T10:00:00.300Z"}
+{"type":"assistant.message","data":{"messageId":"m1","content":"","toolRequests":[{"toolCallId":"toolu_01","name":"skill","arguments":{"skill":"ping"},"type":"function"}]},"id":"e5","timestamp":"2026-09-18T10:00:01.000Z"}
+{"type":"tool.execution_start","data":{"toolCallId":"toolu_01","toolName":"skill","arguments":{"skill":"ping"},"turnId":"0","model":"claude-sonnet-5"},"id":"e6","timestamp":"2026-09-18T10:00:01.100Z"}
+{"type":"tool.execution_complete","data":{"toolCallId":"toolu_01","success":true,"result":{"content":"Skill \"ping\" loaded successfully. Follow the instructions in the skill context."},"toolTelemetry":{"restrictedProperties":{"skillName":"ping"}}},"id":"e7","timestamp":"2026-09-18T10:00:01.200Z"}
+{"type":"assistant.message","data":{"messageId":"m2","content":"PONG-7731","toolRequests":[]},"id":"e8","timestamp":"2026-09-18T10:00:02.000Z"}
+{"type":"assistant.turn_end","data":{"turnId":"0"},"id":"e9","timestamp":"2026-09-18T10:00:02.100Z"}
+{"type":"session.shutdown","data":{"currentModel":"claude-sonnet-5","conversationTokens":1300,"totalPremiumRequests":1,"modelMetrics":{"claude-sonnet-5":{"requests":{"count":2,"cost":1},"usage":{"inputTokens":1100,"outputTokens":30,"cacheReadTokens":150,"cacheWriteTokens":50,"reasoningTokens":0}}}},"id":"e10","timestamp":"2026-09-18T10:00:02.200Z"}
+{"type":"result","timestamp":"2026-09-18T10:00:02.300Z","sessionId":"s2","exitCode":0,"usage":{"premiumRequests":1,"totalApiDurationMs":3000,"sessionDurationMs":4000,"codeChanges":{"linesAdded":0,"linesRemoved":0,"filesModified":[]}}}

@@ -357,8 +357,9 @@ form, that file is the explanation.
   Beside it go `scripts/`, `references/` and `assets/` and nothing else.
 - **A product runner's prompt is the task verbatim; the baseline-none arm never sees the
   skill's name.** `loaded` invokes the skill by the product's own spelling; `offered` sends
-  the bare task and reads the product's load event — a product without one (`cli`) makes
-  `offered` an authoring error, never a silent `false`.
+  the bare task and reads the product's load signal — Copilot's `skill` tool request (its
+  `skill.invoked` event is the slash invocation's only), Claude Code's `Skill` call — and a
+  product without one (`cli`) makes `offered` an authoring error, never a silent `false`.
 - **A limit the product cannot measure fails, it never passes.** `RunResult.usage_note` for
   tokens mirrors `cost_note` for cost in `BudgetEvaluator`: a declared `max_tokens` under a
   non-empty `usage_note` is a failing *not evaluated* check, excluded from `score`'s divisor.

@@ -102,8 +102,10 @@ beside it `scripts/`, `references/` and `assets/`, nothing else. The prompt is t
 `task`, verbatim: the product owns its system prompt, and skill-lens adds no preamble.
 `mode: loaded` invokes the skill through the product's own spelling (`/<name> <task>` for
 both presets; `invoke` under `cli`, default `{task}`); `mode: offered` sends the bare task
-and reads the product's skill-load event — the `skill.invoked` event in Copilot, the
-`Skill` tool call in Claude Code — so a negative control is measured, never assumed. Under
+and reads the product's own load signal — the `skill` tool call in Copilot, the `Skill`
+tool call in Claude Code — so a negative control is measured, never assumed. Copilot's
+`skill.invoked` event is the slash invocation's: a skill the model chose itself is a
+request for the `skill` tool and no event, so the parser reads both. Under
 `--baseline none` the baseline arm has no skill directory and gets the bare task in both
 modes; under `--baseline previous` the previous version is delivered with its own bundle.
 

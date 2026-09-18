@@ -953,12 +953,17 @@ The product owns its system prompt; anything skill-lens added would be part of w
 spelling (`/<name> <task>` for both presets, `invoke` for `cli`); `mode: offered` sends the
 bare task. The baseline arm, having nothing to invoke, gets the bare task in both modes.
 
-**`skill_triggered` comes only from the product's load event.** Copilot's `skill.invoked`
-event, Claude Code's `Skill` tool call. Inferring it from the output would let a model that
-guessed the answer read as a triggered skill. A product with no such event — `cli` — makes
-`mode: offered` an authoring error under that runner, never a silent `false`, which would
-pass every negative control. `ProductRunner.run` still returns `None` rather than `False`
-for a generic product, so the runner never claims what it cannot observe.
+**`skill_triggered` comes only from the product's own load signal.** Copilot's `skill` tool
+request (`toolRequests[]` named `skill`, `arguments.skill`) or its `skill.invoked` event,
+Claude Code's `Skill` tool call. Copilot emits `skill.invoked` for a slash invocation only —
+the M9 probe recorded it from `/ping`, loaded mode — while a skill the model chose itself is
+a `skill` tool request with no event, on 1.0.37 and 1.0.86-2 alike; reading the event alone
+failed every positive offered case under `--runner copilot` (issue #50). Inferring it from
+the output would let a model that guessed the answer read as a triggered skill. A product
+with no such signal — `cli` — makes `mode: offered` an authoring error under that runner,
+never a silent `false`, which would pass every negative control. `ProductRunner.run` still
+returns `None` rather than `False` for a generic product, so the runner never claims what
+it cannot observe.
 
 **A limit the product cannot measure fails, it never passes.** `RunResult.usage_note` is to
 tokens what `cost_note` is to cost: `0 <= max_tokens` is always true, so `BudgetEvaluator`
