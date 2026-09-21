@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from skill_lens.models import (
     AssertionSpec,
     BudgetSpec,
+    CallArgsSpec,
     CaseOutcome,
     CheckResult,
     EvalCase,
@@ -476,3 +477,44 @@ def test_a_tool_ref_refuses_any_other_key():
         ToolRef(returns="{}")
     with pytest.raises(ValidationError, match="ref"):
         ToolRef(ref="")
+
+
+def test_a_trajectory_may_check_the_arguments_a_tool_was_called_with():
+    spec = TrajectorySpec(
+        call_args=[CallArgsSpec(tool="list_threads", contains={"status": "active"})]
+    )
+    assert spec.call_args[0].tool == "list_threads"
+    assert spec.call_args[0].contains == {"status": "active"}
+    assert spec.call_args[0].equals is None
+    assert spec.call_args[0].every is False
+
+
+def test_a_trajectory_without_call_args_has_an_empty_list():
+    assert TrajectorySpec(called=["a"]).call_args == []
+
+
+def test_a_call_args_entry_forbids_unknown_keys():
+    with pytest.raises(ValidationError):
+        CallArgsSpec(tool="a", contains={"x": 1}, contain={"x": 1})
+
+
+def test_a_call_args_entry_needs_contains_or_equals():
+    # An entry with no subject would pass on any call: that is `called:`
+    # spelled longer, so it is refused rather than honoured vacuously.
+    with pytest.raises(ValidationError, match="exactly one of contains or equals"):
+        CallArgsSpec(tool="a")
+
+
+def test_a_call_args_entry_takes_only_one_of_contains_and_equals():
+    with pytest.raises(ValidationError, match="exactly one of contains or equals"):
+        CallArgsSpec(tool="a", contains={"x": 1}, equals={"x": 1})
+
+
+def test_an_empty_contains_is_refused():
+    # {} is a subset of every argument dict, so the check could never fail.
+    with pytest.raises(ValidationError, match="empty contains"):
+        CallArgsSpec(tool="a", contains={})
+
+
+def test_an_empty_equals_means_called_with_no_arguments():
+    assert CallArgsSpec(tool="a", equals={}).equals == {}

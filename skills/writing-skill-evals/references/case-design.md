@@ -25,7 +25,7 @@ agent sees when deciding whether to reach for the skill.
 | Archetype | What to check |
 | --- | --- |
 | Policy skill (refunds, approvals) | `trajectory` proving it looked before deciding; `forbidden` on the destructive tool; both sides of the policy line |
-| Tool-using skill | `order` for a required sequence; `max_calls` against loops; a case where the tool returns an error string |
+| Tool-using skill | `order` for a required sequence; `max_calls` against loops; `call_args` when correctness is in the arguments (a filter, an id, a path) — `called` alone cannot tell a filtered query from an unfiltered one; a case where the tool returns an error string |
 | Formatting skill | `regex` — but only on structure the skill actually promised; a judge for "reads plainly" |
 | Knowledge skill | `contains` on the fact; `not_contains` on the plausible wrong answer; a judge for reasoning |
 
