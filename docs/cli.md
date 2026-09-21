@@ -96,7 +96,10 @@ provider.
 ## `list`
 
 Show the skills that would be evaluated and how many cases each has. Discovers and
-validates every eval file without calling a runner — free, and no API key required.
+validates every eval file without calling a runner — free, and no API key required. A rule
+that depends on the runner is not `list`'s to apply: a `trajectory:` name must be one of the
+case's tools under `fake`, `pydantic-ai` or `langchain`, but is the product's own under
+`copilot` or `claude-code`, so `run` checks it in preflight and `list` accepts any name.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |

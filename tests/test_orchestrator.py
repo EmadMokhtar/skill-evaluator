@@ -25,6 +25,7 @@ from skill_lens.models import (
 )
 from skill_lens.orchestrator import RunOptions, _execute, _WorkItem, run_evals
 from skill_lens.runners.fake import FakeRunner
+from skill_lens.runners.preflight import UndeclaredTool
 from skill_lens.scripts import ScriptPolicy, ScriptRuntime, ScriptSetupError
 from skill_lens.skills.loader import load_skills
 from skill_lens.workspace import DEFAULT_LIMITS, Workspace, WorkspaceLimits
@@ -201,6 +202,46 @@ def test_default_evaluators_include_trajectory_and_budget(tmp_path):
         "judge",
     ]
     assert report.outcomes[0].status == "passed"
+
+
+def _product_tool_skill(tmp_path):
+    skill_dir = tmp_path / "s"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: s\n---\nbody\n", encoding="utf-8")
+    (skill_dir / "s.eval.yaml").write_text(
+        "cases:\n  - name: c\n    task: t\n    trajectory:\n      called: [Bash]\n",
+        encoding="utf-8",
+    )
+    return load_skills(skill_dir)
+
+
+def test_a_framework_runner_refuses_an_undeclared_trajectory_name_before_any_case_runs(tmp_path):
+    ran: list[str] = []
+
+    class Counting(FakeRunner):
+        def run(self, skill, case, workspace=None, scripts=None):
+            ran.append(case.name)
+            return super().run(skill, case, workspace=workspace, scripts=scripts)
+
+    with pytest.raises(UndeclaredTool, match=r"runner fake: case 'c' of skill 's'"):
+        run_evals(_product_tool_skill(tmp_path), [Counting()])
+    assert ran == []
+
+
+def test_a_runner_with_no_preflight_runs_the_case_and_scores_the_name_as_written(tmp_path):
+    # A product-like runner offers tools skill-lens cannot list. The name is
+    # not an authoring error there: the case runs, and `called: [Bash]` is
+    # judged on what the runner recorded.
+    class ProductLike:
+        name = "product-like"
+
+        def run(self, skill, case, workspace=None, scripts=None):
+            return RunResult(tool_calls=[ToolCall(name="Bash")])
+
+    report = run_evals(_product_tool_skill(tmp_path), [ProductLike()])
+    assert report.outcomes[0].status == "passed"
+    trajectory = next(s for s in report.outcomes[0].scores if s.evaluator == "trajectory")
+    assert [(c.id, c.passed) for c in trajectory.checks] == [("called:Bash", True)]
 
 
 class ErroringEvaluator:

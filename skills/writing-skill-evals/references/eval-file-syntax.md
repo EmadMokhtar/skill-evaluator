@@ -134,7 +134,10 @@ two libraries both declare, or an absolute path is an authoring error (exit 2).
       skill_triggered: true         # mode: offered only
 ```
 
-Every name in `called`, `forbidden` and `order` must be a tool the case itself declares.
+Under `fake`, `pydantic-ai` and `langchain`, every name in `called`, `forbidden` and `order`
+must be a tool the case itself declares (a built-in counts in a case with a `workspace:`);
+`run` refuses anything else before any case runs. Under `copilot` or `claude-code` the names
+are the product's own tools (`Bash`) and are not checked, so spell them as the product does.
 
 ## Budget
 

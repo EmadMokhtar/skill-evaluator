@@ -172,11 +172,32 @@ def test_typoed_assertion_key_singular_raises_instead_of_silently_passing(tmp_pa
     assert "assertion" in str(exc.value)
 
 
-def test_trajectory_called_naming_an_undeclared_tool_raises(tmp_path):
-    # A typo in `called:` (e.g. lookup_ordr instead of lookup_order) can never
-    # pass -- it isn't a signal about the skill, it's a mistake in the case
-    # file, and must abort the run rather than score as a failure.
-    path = tmp_path / "typo.eval.yaml"
+def test_trajectory_naming_an_undeclared_tool_is_the_runners_call_not_the_loaders(tmp_path):
+    # Which tools a case has depends on the runner: a framework runner offers
+    # the case's mock tools, a product runner offers the product's own (`Bash`),
+    # and one invocation may run the same case through both. The loader cannot
+    # know, so it accepts the name; each runner's preflight decides -- see
+    # tests/test_preflight.py and tests/test_product_preflight.py.
+    path = tmp_path / "product.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: order lookup\n"
+        "    task: look up order 1234\n"
+        "    trajectory:\n"
+        "      called: [Bash]\n"
+        "      forbidden: [Write]\n"
+        "      order: [Read, Bash]\n"
+    )
+    (case,) = parse_cases_file(path)
+    assert case.trajectory.called == ["Bash"]
+    assert case.trajectory.forbidden == ["Write"]
+    assert case.trajectory.order == ["Read", "Bash"]
+
+
+def test_a_trajectory_beside_declared_tools_may_still_name_others(tmp_path):
+    # A case can declare mock tools for a framework run and still name a name
+    # the loader has never heard of; the runner it runs under is the judge.
+    path = tmp_path / "mixed.eval.yaml"
     path.write_text(
         "cases:\n"
         "  - name: order lookup\n"
@@ -184,48 +205,10 @@ def test_trajectory_called_naming_an_undeclared_tool_raises(tmp_path):
         "    tools:\n"
         "      - name: lookup_order\n"
         "    trajectory:\n"
-        "      called: [lookup_ordr]\n"
+        "      called: [lookup_order, lookup_ordr]\n"
     )
-    with pytest.raises(CaseParseError) as exc:
-        parse_cases_file(path)
-    assert "typo.eval.yaml" in str(exc.value)
-    assert "order lookup" in str(exc.value)
-    assert "lookup_ordr" in str(exc.value)
-
-
-def test_trajectory_forbidden_naming_an_undeclared_tool_raises(tmp_path):
-    path = tmp_path / "typo.eval.yaml"
-    path.write_text(
-        "cases:\n"
-        "  - name: order lookup\n"
-        "    task: look up order 1234\n"
-        "    tools:\n"
-        "      - name: lookup_order\n"
-        "    trajectory:\n"
-        "      forbidden: [issue_refnd]\n"
-    )
-    with pytest.raises(CaseParseError) as exc:
-        parse_cases_file(path)
-    assert "typo.eval.yaml" in str(exc.value)
-    assert "order lookup" in str(exc.value)
-    assert "issue_refnd" in str(exc.value)
-
-
-def test_trajectory_order_naming_an_undeclared_tool_raises(tmp_path):
-    path = tmp_path / "typo.eval.yaml"
-    path.write_text(
-        "cases:\n"
-        "  - name: order lookup\n"
-        "    task: look up order 1234\n"
-        "    tools:\n"
-        "      - name: lookup_order\n"
-        "    trajectory:\n"
-        "      order: [lookup_order, issue_refnd]\n"
-    )
-    with pytest.raises(CaseParseError) as exc:
-        parse_cases_file(path)
-    assert "typo.eval.yaml" in str(exc.value)
-    assert "issue_refnd" in str(exc.value)
+    (case,) = parse_cases_file(path)
+    assert case.trajectory.called == ["lookup_order", "lookup_ordr"]
 
 
 def test_trajectory_referencing_only_declared_tools_is_fine(tmp_path):
@@ -642,13 +625,16 @@ def test_a_trajectory_may_name_a_builtin_when_a_workspace_exists(tmp_path):
     assert case.trajectory.called == ["write_file"]
 
 
-def test_a_trajectory_naming_a_builtin_without_a_workspace_is_rejected(tmp_path):
-    path = _write(
-        tmp_path,
-        "cases:\n  - name: n\n    task: t\n    trajectory:\n      called: [write_file]\n",
+def test_a_trajectory_naming_a_builtin_without_a_workspace_loads(tmp_path):
+    # Whether `write_file` exists for this case is the runner's to say: a
+    # framework runner refuses it in preflight (no workspace, no built-ins), a
+    # product runner may well have a tool of that name.
+    path = tmp_path / "x.eval.yaml"
+    path.write_text(
+        "cases:\n  - name: n\n    task: t\n    trajectory:\n      called: [write_file]\n"
     )
-    with pytest.raises(CaseParseError, match="workspace"):
-        parse_cases_file(path)
+    (case,) = parse_cases_file(path)
+    assert case.trajectory.called == ["write_file"]
 
 
 def test_a_case_with_no_workspace_still_loads_unchanged(tmp_path):
@@ -707,13 +693,17 @@ def test_a_trajectory_may_name_run_script_when_a_workspace_exists(tmp_path):
     assert case.trajectory.called == ["run_script", "read_skill_file"]
 
 
-def test_a_trajectory_naming_run_script_without_a_workspace_is_rejected(tmp_path):
+def test_a_trajectory_naming_run_script_without_a_workspace_loads(tmp_path):
+    # The bundle tools exist only where a workspace does -- a fact the
+    # framework runners' preflight enforces (tests/test_preflight.py), not
+    # the loader, which cannot know whether a product runner has a tool of
+    # that name.
     path = _write(
         tmp_path,
         "cases:\n  - name: n\n    task: t\n    trajectory:\n      called: [run_script]\n",
     )
-    with pytest.raises(CaseParseError, match="workspace and bundle tools only exist"):
-        parse_cases_file(path)
+    (case,) = parse_cases_file(path)
+    assert case.trajectory.called == ["run_script"]
 
 
 INPUT_SCHEMA_CASE = """cases:

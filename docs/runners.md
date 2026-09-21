@@ -114,7 +114,7 @@ modes; under `--baseline previous` the previous version is delivered with its ow
 | | `copilot` | `claude-code` | `cli` |
 | --- | --- | --- | --- |
 | Output text and `assertions:` | yes | yes | yes (stdout) |
-| `trajectory:` (the product's own tool names, e.g. `bash`, `Bash`) | yes | yes | no — an authoring error |
+| `trajectory:` (the product's own tool names, e.g. `bash`, `Bash` — spelled as the product spells them; skill-lens cannot list a product's tools, so a name is not checked) | yes | yes | no — an authoring error |
 | `mode: offered` / `skill_triggered` | yes | yes | no — an authoring error |
 | `budget: max_tokens` (input + cache read + cache write, plus output) | when the trace reports usage; otherwise a failing "not evaluated" check | when the trace reports usage; otherwise a failing "not evaluated" check | failing "not evaluated" check |
 | `budget: max_cost_usd` | failing "not evaluated" check — Copilot bills per premium request (its billing unit: one counted request, not tokens), and the note says how many | yes, at list price (the provider's published per-token price), as the product reports it in `total_cost_usd` | failing "not evaluated" check |
@@ -130,7 +130,10 @@ Tool calls are what the model *requested* (Copilot's `toolRequests`, Claude Code
 `tool_use` blocks), not what executed — a refused call was still the model's choice, the
 same rule the framework runners apply. A case the runner cannot serve is an **authoring
 error** (exit 2) found in preflight, before any case runs and before any quota is spent —
-never a vacuous pass. `--model` is not read by a product runner: a flag nothing reads is
+never a vacuous pass. A `trajectory:` name is not among the things checked: under a product
+it names one of the product's own tools, which skill-lens cannot enumerate, so a misspelled
+`called: [bassh]` is a failing check whose evidence says the tool was never called and whose
+failure excerpt shows the calls that did happen — read those before blaming the skill. `--model` is not read by a product runner: a flag nothing reads is
 refused as a user error rather than silently ignored; set the product's model in its table.
 
 **Errors.** A timeout (`timeout_seconds`, default 600), a non-zero exit, a product-reported
@@ -271,11 +274,19 @@ named with `ref:` is resolved by the case loader before any runner is involved, 
 runner never sees a reference — only the `ToolSpec` it named, with the case's own
 `returns:`.
 
-Every tool name in `called`, `forbidden`, or `order` must be declared in that case's
-`tools:` — including `forbidden`, since forbidding a tool the agent was never offered in
-the first place is a check that can never fire. A name that isn't declared is an
+Under `fake`, `pydantic-ai` and `langchain`, every tool name in `called`, `forbidden`, or
+`order` must be declared in that case's `tools:` — or be a built-in, in a case with a
+`workspace:` block — including `forbidden`, since forbidding a tool the agent was never
+offered in the first place is a check that can never fire. A name that isn't declared is an
 authoring error (the run aborts, exit `2`), not a failing case, because a check that can
 never pass tells you nothing about the skill.
+
+That check is the runner's, made in preflight for the cases that will run under it — before
+any case runs and before any spend — rather than the eval file's, because which tools a case
+has depends on the runner: under a [product runner](#product-runners) the same block names
+the product's own tools (`Bash`), which skill-lens cannot list, so no name is refused there.
+One invocation may run one case through both kinds. `skill-lens list` calls no runner, so it
+accepts any name; `run` is where the rule applies.
 
 ## The workspace
 

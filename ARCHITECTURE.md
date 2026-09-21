@@ -61,7 +61,9 @@ problem (errored) from a low score (failed).
 None`. The orchestrator calls it once per run, after discovery and before any case, with the
 candidate-arm skills and the cases planned for that runner; it raises an authoring error to
 abort the run before anything is spent, and may return a `ProductStatus` for the report.
-The framework runners define none; `ProductRunner` does. The hook is looked up with
+`FakeRunner`, `PydanticAIRunner` and `LangChainRunner` define it to refuse a `trajectory:`
+naming a tool they cannot offer the case (`runners/preflight.py`'s `check_trajectory_names`)
+and return None; `ProductRunner` returns its status. The hook is looked up with
 `getattr`, so a runner written against an earlier milestone keeps working. `Judge` may
 likewise define an optional `preflight() -> ProductStatus | None`, taking no arguments — a
 judge has no cases to inspect — called in the same pass, right after the runners' hooks;
@@ -99,7 +101,7 @@ judge is one entry on `RunReport.products`.
 | `runners/traces.py` | The Copilot JSONL and Claude Code `stream-json` parsers, each producing one `Trace`. Pure functions; a structural problem is `Trace.error`, never a raise. |
 | `runners/product.py` | The product runner: a `Product` value (argv template, skill directory, invocation spelling, trace parser, version command), the two presets, skill delivery into the product's working directory, the subprocess invocation, and the once-per-run `preflight`. Imports no agent framework. |
 | `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block, the built-in workspace tools, and the bundle tools (`list_skill_files`, `read_skill_file`, and `run_script` when the bundle has scripts and the run enabled them). Owns the six-name `BUILTIN_TOOL_NAMES` the case loader reads. |
-| `runners/preflight.py` | Verifies the provider API key is present before any spend. |
+| `runners/preflight.py` | What a framework runner verifies before any spend: the provider API key, and that every `trajectory:` name is a tool the case will have (`check_trajectory_names`, called from the three framework runners' `preflight`). |
 | `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
 | `evaluators/base.py` | The `Evaluator` protocol. |
 | `evaluators/assertion.py` | Rule-based scoring of the final output text. |
@@ -193,6 +195,20 @@ by `--tag`, or no case name matched `--case`.
 YAML key is a mistake in the user's files — it says nothing about the skill. Scoring it as
 a failure would be a lie about the skill's quality. `orchestrator.run_evals` lets these
 propagate; `cli.py` catches them via `_AUTHORING_ERRORS` and exits 2.
+
+**Which tools a case has is the runner's to know, so the declared-name rule for
+`trajectory:` is made in preflight, per runner — never in the loader.** A framework runner
+offers a case its mock `tools:` and, with a `workspace:`, the six built-ins; a product
+runner offers the product's own tools (`Bash`), which skill-lens cannot list; and one
+invocation may run the same case through both. So `FakeRunner`, `PydanticAIRunner` and
+`LangChainRunner` refuse a `called` / `forbidden` / `order` name outside their set
+(`UndeclaredTool`, exit 2, for the cases planned for that runner, before any case runs and
+before any spend), `ProductRunner` refuses no name, `cli` refuses `trajectory:` outright,
+and the loader — hence `skill-lens list` — accepts any name. The earlier loader check made
+the documented product combination unwritable: `tools:` is refused under a product, and the
+loader refused a `trajectory:` naming anything else. `check_trajectory_names` in
+`runners/preflight.py` is the one implementation; the message names the runner, so a
+multi-runner invocation says which one refused.
 
 **Exit codes are the CI contract.** Gate passed `0`, gate failed `1`, user or authoring
 error `2`. In `cli.py`, a JSON-write failure escalates to 2 only when the gate itself
@@ -1044,7 +1060,10 @@ and, for the two presets, *executes* its `--version` (a `copilot` that cannot st
 2 up front, not thirty errored cases — the same rule as the sandbox probe; `cli` has no
 version command, so only the `PATH` lookup applies to it), checks every skill name is one
 directory entry, and refuses `tools:` under any product and `trajectory:` or `mode:
-offered` under `cli`, all before the first case. The orchestrator hands it only the
+offered` under `cli`, all before the first case. It checks no `trajectory:` name against
+anything: under a product the names are the product's own tools, which skill-lens cannot
+enumerate (a translation table would be a third moving target), so that rule belongs to the
+framework runners' preflight — see the invariant above. The orchestrator hands it only the
 candidate-arm `(skill, case)` pairs planned for that runner, once each: compatibility is a
 property of `(case, runner)`, so a case `--tag` or `--case` filtered out is not its
 concern, and neither arm nor repeat changes the answer. `deliver_skill` re-checks the
