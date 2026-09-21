@@ -1,10 +1,12 @@
 import json
+import os
 import re
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from skill_lens.cli import app
@@ -999,7 +1001,9 @@ def test_cli_without_a_command_table_is_exit_2_naming_the_key(tmp_path):
     assert "[runners.cli] command" in plain(result.output)
 
 
-def test_a_case_with_mock_tools_under_a_product_runner_is_exit_2(tmp_path, monkeypatch):
+def test_a_case_with_mock_tools_under_a_wrapped_product_is_exit_2(tmp_path, monkeypatch):
+    # `command` names the interpreter, not `copilot`: a wrapper is not known
+    # to take the MCP config flag, so `tools:` is refused before any case.
     monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(PRODUCT_FIXTURES / "copilot-trigger.jsonl"))
     skill_dir = _make_skill(tmp_path, cases=TOOLS_CASES_YAML)
     config = _product_config(tmp_path)
@@ -1008,6 +1012,61 @@ def test_a_case_with_mock_tools_under_a_product_runner_is_exit_2(tmp_path, monke
     )
     assert result.exit_code == 2
     assert "declares tools:" in plain(result.output)
+    assert "[runners.copilot] command names another executable" in plain(result.output)
+
+
+BRIDGED_CASES_YAML = """cases:
+  - name: looks the order up
+    task: What is the status of order A-17?
+    tools:
+      - name: lookup_order
+        description: Look up an order.
+        parameters:
+          order_id: string
+        returns: '{"order_id": "A-17", "status": "shipped"}'
+      - name: cancel_order
+        parameters:
+          order_id: string
+        returns: cancelled
+    trajectory:
+      called: [lookup_order]
+      forbidden: [cancel_order]
+    assertions:
+      - kind: contains
+        value: shipped
+"""
+
+
+@pytest.mark.skipif(os.name == "nt", reason="puts a shell shim on PATH")
+def test_a_case_with_mock_tools_runs_through_the_bridge_under_a_preset(tmp_path, monkeypatch):
+    # The preset's own argv reaches the fake through a `claude` shim on PATH,
+    # so `Config.product` keeps the bridge (same executable), preflight
+    # probes it, and the run hands the product the config -- end to end.
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir()
+    shim = shim_dir / "claude"
+    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE_PRODUCT}" "$@"\n', encoding="utf-8")
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(PRODUCT_FIXTURES / "claude-code-mcp.jsonl"))
+    monkeypatch.setenv("FAKE_PRODUCT_MCP_CALL", "lookup_order")
+    skill_dir = _make_skill(tmp_path, cases=BRIDGED_CASES_YAML)
+    out = tmp_path / "report.json"
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--runner", "claude-code", "--json-output", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    report = json.loads(out.read_text(encoding="utf-8"))
+    (outcome,) = report["outcomes"]
+    assert outcome["status"] == "passed"
+    assert outcome["output"] == "Order A-17 is shipped."
+    # The trace named the tool `mcp__skill-lens__lookup_order`; the trajectory
+    # read it under the name the case declared, or `called:` could not pass.
+    scores = {score["evaluator"]: score for score in outcome["scores"]}
+    assert scores["trajectory"]["passed"] is True
+    assert scores["assertion"]["passed"] is True
+    (product,) = report["products"]
+    assert product["name"] == "claude-code" and product["version"] == "fake 1.2.3"
 
 
 def test_model_with_nothing_that_reads_it_is_a_user_error(tmp_path):

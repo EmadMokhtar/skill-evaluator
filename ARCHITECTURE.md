@@ -90,6 +90,7 @@ judge is one entry on `RunReport.products`.
 | `bundle.py` | A read-only view of the three Agent Skills directories beside `SKILL.md` (`scripts/`, `references/`, `assets/`) and nothing else — an eval file beside `SKILL.md` is never readable by the agent. Same "methods raise, tools catch" split as `workspace.py`. |
 | `scripts.py` | Runs a bundled script: the policy, the once-per-run preflight (interpreters on `PATH`, the sandbox probe), the allowlisted environment, the scratch directory, the process-group timeout and the capped output read through the harness's own descriptors (both via `process.py`), and the `sandbox-exec` / `bwrap` wrapping. Never raises for a script that will not run; raises `ScriptSetupError` only from preflight. |
 | `process.py` | Starts a child in its own process group, waits with a timeout, kills the group after every exit, and reads output through the harness's own handle. Shared by `scripts.py` and `runners/product.py`; imports nothing from the rest of the project. |
+| `mcp_bridge.py` | The stdio MCP server a product starts to reach a case's mock tools (`python -m skill_lens.mcp_bridge <spec>`): `initialize`, `ping`, `tools/list` and `tools/call` over JSON-RPC 2.0, one message per line, every list and call appended to the record file the spec names; `--check` drives the handlers in-process for preflight. Imports nothing from the rest of the project. |
 | `runners/base.py` | The `Runner` protocol. `run` takes optional `workspace=` and `scripts=` keywords, both additive with a default, so a runner written against an earlier milestone keeps working. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/prompting.py` | The three preambles and the system-prompt builder every runner calls. Framework-free, so the rules `--min-delta` measures against exist once. |
@@ -97,7 +98,8 @@ judge is one entry on `RunReport.products`.
 | `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of the four modules that import an agent framework.** |
 | `runners/langchain.py` | The LangChain runner adapter. **One of the four modules that import an agent framework.** |
 | `runners/traces.py` | The Copilot JSONL and Claude Code `stream-json` parsers, each producing one `Trace`. Pure functions; a structural problem is `Trace.error`, never a raise. |
-| `runners/product.py` | The product runner: a `Product` value (argv template, skill directory, invocation spelling, trace parser, version command), the two presets, skill delivery into the product's working directory, the subprocess invocation, and the once-per-run `preflight`. Imports no agent framework. |
+| `runners/product.py` | The product runner: a `Product` value (argv template, skill directory, invocation spelling, trace parser, version command, how it takes the MCP bridge), the two presets, skill delivery into the product's working directory, the subprocess invocation — with the bridge's config appended last when the case declares `tools:` — the connection check and the tool-name mapping afterwards, and the once-per-run `preflight`. Imports no agent framework. |
+| `runners/mcp.py` | The runner's side of the MCP bridge: `McpSupport` (each product's config flag, tool spelling, config-entry keys and hiding flags, as verified against the product), `write_bridge` (the spec and the product's config in a fresh directory), `Bridge.connected` (the record's `list` event), `restore_tool_names` (the product's spelling back to the case's) and `probe_bridge` (the once-per-run `--check`). Imports no agent framework. |
 | `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block, the built-in workspace tools, and the bundle tools (`list_skill_files`, `read_skill_file`, and `run_script` when the bundle has scripts and the run enabled them). Owns the six-name `BUILTIN_TOOL_NAMES` the case loader reads. |
 | `runners/preflight.py` | Verifies the provider API key is present before any spend. |
 | `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
@@ -226,9 +228,10 @@ file is committed; a key must not be.
 builds framework-neutral mock tools and the adapters wrap them. The prompt rules
 (`runners/prompting.py`) and the retry loop (`runners/retry.py`) import no framework, which
 is what lets both adapters share them. The product runner (`runners/product.py`), the
-product judge (`judges/product.py`) and the trace parsers (`runners/traces.py`) import
-`subprocess` and `json`, not a framework: a product is an executable and a trace grammar,
-and `process.py` beneath them imports nothing from the project at all.
+product judge (`judges/product.py`), the trace parsers (`runners/traces.py`) and the MCP
+bridge's runner side (`runners/mcp.py`) import `subprocess` and `json`, not a framework: a
+product is an executable and a trace grammar, and `process.py` and `mcp_bridge.py`
+beneath them import nothing from the project at all.
 `tests/test_framework_isolation.py` scans the whole
 package for top-level framework imports and allows only those four files; it matches import
 *forms*, so `cli.py` importing our own `skill_lens.runners.pydantic_ai` is not a false
@@ -850,8 +853,8 @@ is deliberately deferred (see the design spec).
 the raw case mapping, before `EvalCase.model_validate`: `ToolSpec` forbids unknown keys
 and requires a name, so a reference is not a ToolSpec and must never become one
 half-built. Resolving there is what keeps every runner, evaluator, reporter and product
-preflight unchanged — the product runners' `tools:` refusal applies to a referenced tool
-exactly as to an inline one, and the duplicate-name, built-in-name, offered-skill and
+preflight unchanged — the product runners serve (or, under `cli`, refuse) a referenced
+tool exactly as an inline one, and the duplicate-name, built-in-name, offered-skill and
 trajectory checks all read the resolved name.
 
 **A `ref:` may set `returns:` and nothing else.** The library owns the contract (name,
@@ -1067,10 +1070,12 @@ runs its own default.
 is keyed. A product's model is set with `[runners.<name>] args`, which never reaches the
 wrong runner.
 
-**`tools:` with a product runner is an authoring error**, not a silently emptier run. The
-product cannot be given mock tools yet (an MCP bridge is deferred); ignoring the block
-would make `trajectory: called:` fail for a reason that says nothing about the skill and
-`forbidden:` pass vacuously.
+**`tools:` under a product that cannot take the MCP bridge is an authoring error**, not a
+silently emptier run: `cli` has no known flag, and a preset whose `command` names another
+executable is not known to take the preset's. Ignoring the block would make `trajectory:
+called:` fail for a reason that says nothing about the skill and `forbidden:` pass
+vacuously. Under the two presets the block is served; see
+[Mock tools under a product](#mock-tools-under-a-product).
 
 **`ProductRunner.run` never raises for a product failure.** A timeout, a non-zero exit, a
 product-reported failure, a truncated trace, a prompt over `MAX_PROMPT_BYTES`, an
@@ -1129,6 +1134,65 @@ so `cli` reports none and Copilot reports a per-request note, as under the runne
 `role="judge"` in the message. `cli.py` demands a key and a `judge_model` only for the two
 keyed judges in `_KEYED_JUDGES`; a product judge is built from its table with neither, and
 `--judge-model` with a product judge is refused as a user error.
+
+### Mock tools under a product
+
+**A case's `tools:` reach a preset product through a stdio MCP server skill-lens ships,
+and the product starts it.** The framework adapters register mock tools as callables inside
+the agent loop they drive; a product owns its loop, and what it can take is an MCP server
+named in a config file. `mcp_bridge.py` is that server, started by the product as
+`python -m skill_lens.mcp_bridge <spec>` — `sys.executable`, so the package is importable
+with no environment of its own — and `runners/mcp.py` is the runner's side: per invocation,
+`write_bridge` puts the spec (name, description, the schema `build_mock_tool` registers,
+`returns`) and the product's config into a fresh directory of its own, never the working
+directory, which the product can list and a `file-produced` assertion can read; the config
+travels as the last argv element (`--mcp-config=<file>` for Claude Code, beside the
+preset's `--strict-mcp-config`; `--additional-mcp-config=@<file>` for Copilot), one element
+with `=` so Claude Code's variadic option can never swallow what follows. The directory is
+deleted in the run's `finally`, kept by nothing. The bridge imports nothing from the
+project, because the fewer things a child the product starts needs, the fewer ways that
+start can fail, and it writes nothing but JSON to stdout, because stdout is the protocol.
+No dependency was added: four JSON-RPC methods do not need an SDK.
+
+**No new opt-in.** A mock returns canned text and executes nothing — it adds a fixed
+answer to a tool the skill may call, not a capability the product lacked — so a case with
+`tools:` runs under a product the way it runs under a framework runner, in both modes and
+both arms. Naming the product runner remains the trust decision, and `TRUST_NOTE` is
+unchanged.
+
+**The trace names the tool the product's way; the result names it the case's way.** The
+model sees `mcp__skill-lens__<name>` under Claude Code and `skill-lens-<name>` under Copilot
+(each verified by reading what the product sends the model), and the trace reports the call
+so. `restore_tool_names` maps each declared tool back, by its exact product spelling and
+nothing looser, so `trajectory: called`/`forbidden`/`order` — which the loader already
+restricts to declared names — read identically under every runner; every other call keeps
+the product's name, per the M9 decision not to normalise tool names across products. The
+transcript keeps the product's spelling. Tool calls are still what the model requested,
+read from the trace; the bridge's record is not the source of the trajectory.
+
+**A product that ran but never asked the bridge for its tools is `errored`, never a
+failed `called:`.** The server appends a `list` event to a record file on every
+`tools/list`; `Bridge.connected` reads it after the run. It is product-independent — Claude
+Code's `init` event and Copilot's `session.mcp_servers_loaded` both report server status,
+but the record needs neither parser to change. A trace error wins over the connection
+check, because a product that failed is the better explanation.
+
+**Preflight proves the bridge starts and refuses what would hide it, before any quota is
+spent.** When a planned candidate case declares `tools:`, `probe_bridge` runs the module
+once with `--check` under `sys.executable` — executed, not merely found, like the version
+probe and the sandbox probe — and a `BridgeSetupError` is a `ProductSetupError`, exit 2.
+The same preflight refuses `--available-tools` in `[runners.copilot]` (verified: it keeps
+only the tools it names, MCP included), mirroring the judge's refusal of the flag; Claude
+Code's `--tools` governs the built-in set only (verified: the MCP tool stays listed under
+`--tools ""`) and is not refused. `Config.product` drops `mcp` along with the version probe
+and `judge_args` when `command` names another executable, so `tools:` under such a table
+is refused with a message naming the flag the wrapper is not known to take. The product
+judge is built from the same `Product` but never writes a bridge: it grades with no tools.
+
+**`ProductRunner.run` still never raises.** A bridge directory that cannot be written is
+`OSError` → `RunResult.error`; a runner reached with `tools:` and no `mcp` (a caller that
+skipped preflight) returns an errored result rather than running the case without its
+tools.
 
 ## Extension points
 

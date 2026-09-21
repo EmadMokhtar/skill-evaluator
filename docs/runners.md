@@ -114,12 +114,12 @@ modes; under `--baseline previous` the previous version is delivered with its ow
 | | `copilot` | `claude-code` | `cli` |
 | --- | --- | --- | --- |
 | Output text and `assertions:` | yes | yes | yes (stdout) |
-| `trajectory:` (the product's own tool names, e.g. `bash`, `Bash`) | yes | yes | no — an authoring error |
+| `trajectory:` | yes — `called`/`forbidden`/`order` name the case's mock tools, as declared; `max_calls` counts every call, the product's own tools included | same | no — an authoring error |
 | `mode: offered` / `skill_triggered` | yes | yes | no — an authoring error |
 | `budget: max_tokens` (input + cache read + cache write, plus output) | when the trace reports usage; otherwise a failing "not evaluated" check | when the trace reports usage; otherwise a failing "not evaluated" check | failing "not evaluated" check |
 | `budget: max_cost_usd` | failing "not evaluated" check — Copilot bills per premium request (its billing unit: one counted request, not tokens), and the note says how many | yes, at list price (the provider's published per-token price), as the product reports it in `total_cost_usd` | failing "not evaluated" check |
 | `budget: max_latency_ms` | yes | yes | yes |
-| `tools:` (mock tools) | authoring error | authoring error | authoring error |
+| `tools:` (mock tools) | yes, through the [MCP bridge](#mock-tools-under-a-product) | yes, through the [MCP bridge](#mock-tools-under-a-product) | no — an authoring error |
 
 Token counts under a product runner include the product's own system prompt and tool
 definitions — tens of thousands of tokens for a one-line answer under Claude Code. A
@@ -135,8 +135,9 @@ refused as a user error rather than silently ignored; set the product's model in
 
 **Errors.** A timeout (`timeout_seconds`, default 600), a non-zero exit, a product-reported
 failure, a trace cut short by `max_output_bytes`, a prompt over 100 KiB (the prompt travels
-as one argument, and Linux caps one at 128 KiB), and a missing executable at run time are
-all **errored** cases — never raised, never failed. A complete trace carrying the product's
+as one argument, and Linux caps one at 128 KiB), a missing executable at run time, and a
+product that ran a case with `tools:` but never asked the [MCP bridge](#mock-tools-under-a-product)
+for them are all **errored** cases — never raised, never failed. A complete trace carrying the product's
 own error message is reported in preference to the exit code; a cut trace names the cap to
 raise. Preflight checks the executable is on `PATH` and, for the two presets, that it
 actually starts (`--version`); `cli` has no version command, so only the `PATH` lookup
@@ -149,6 +150,65 @@ skill-lens sandbox applies; the skill's bundled scripts are reachable through th
 own shell whatever `allow_scripts` says, which governs only skill-lens's `run_script` tool.
 **Naming a product runner is that decision**, and every report says so. See
 [Security](security.md#product-runners).
+
+### Mock tools under a product
+
+A case's `tools:` reach a preset product through an MCP server (Model Context Protocol —
+the JSON-RPC protocol an agent product uses to discover and call tools a separate process
+serves) that ships inside skill-lens: the **MCP bridge**, `python -m skill_lens.mcp_bridge`.
+Nothing changes in the eval file, and no extra flag turns it on — a case that declares
+`tools:` runs under `copilot` and `claude-code` the way it runs under the framework runners,
+`mode: loaded` and `mode: offered` alike, in both arms of a comparative run:
+
+```bash
+skill-lens run ./skills --runner copilot        # every case, mock tools included, no API key
+```
+
+**How it works.** For each invocation the runner writes two files into a temporary
+directory of its own — never the working directory, which the product can list and a
+`file-produced` assertion can read: the case's tools (name, description, the JSON schema
+`build_mock_tool` registers — a `parameters:` shorthand closed with `additionalProperties:
+false`, an `input_schema` verbatim — and `returns`) and an MCP config naming the bridge as
+one stdio server: this Python interpreter, `-m`, the module, the tools file. The config is
+handed to the product as the last argument on its command line, after the table's `args`:
+`--mcp-config=<file>` under Claude Code, beside the preset's `--strict-mcp-config`, so the
+bridge is the only MCP server the run sees; `--additional-mcp-config=@<file>` under
+Copilot, where it is added beside the built-in GitHub server and whatever
+`~/.copilot/mcp-config.json` configures (the hermetic recipe above keeps those out). The
+product starts the bridge itself, lists its tools, and calls them as it would any MCP
+server's; a call returns `returns` verbatim whatever the arguments were, as under every
+other runner, and nothing executes. The directory is deleted after every run,
+`--keep-workspace` or not.
+
+**Tool names.** The product shows the model each tool under its own spelling for an MCP
+tool — `mcp__skill-lens__<name>` under Claude Code, `skill-lens-<name>` under Copilot — and
+its trace reports the call that way. The runner maps every declared tool back to the name
+the case gave it, so `trajectory: called`, `forbidden` and `order` read identically under
+every runner (the transcript keeps the product's spelling). Any other call keeps the
+product's own name. Claude Code loads an MCP tool's schema on demand and may fetch it with
+a `ToolSearch` call first — that call is the product's own and counts toward `max_calls`,
+so a cap written for a framework runner may need one more under Claude Code.
+
+**What is checked before, and after.** When any planned case declares `tools:`, preflight
+starts the bridge once under this interpreter (`--check`) — executed, not merely found,
+like the version probe — and a bridge that cannot start is exit 2 before any quota is
+spent. After a run, a product that reached a clean result but never asked the bridge for
+its tools (MCP support switched off by a table flag, say) is an **errored** case naming
+the cause, never a `called:` that failed for a reason that says nothing about the skill.
+`[runners.copilot] args` or `command` carrying `--available-tools` is refused in preflight
+when a case declares `tools:` — verified against `copilot` 1.0.37, the flag keeps only the
+tools it names, MCP tools included — while Claude Code's `--tools` governs the built-in set
+only (verified against 2.1.274: the MCP tool stays listed under `--tools ""`) and is not
+refused. A `command` naming another executable drops the bridge along with the version
+probe and the judge restriction, because a wrapper is not known to take the flag, and
+`tools:` is then an authoring error under that runner; `cli` has no known flag, so `tools:`
+is an authoring error there too. The [product judge](#judging-with-a-product) never gets
+the bridge: it grades text with no tools at all.
+
+**Trust.** The bridge is skill-lens's own code — it returns canned text and runs nothing
+from the eval file or the skill — started by the product as a child process with the
+product's environment; naming the product runner remains the trust decision, and the
+report's sentence is unchanged. See [Security](security.md#product-runners).
 
 ### Judging with a product
 

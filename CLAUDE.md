@@ -68,7 +68,14 @@ let a YAML file with one top-level `tools:` list — the block `mcp-import` prin
 any eval file with `tool_libraries:` (paths relative to the eval file) and named in a case with
 `- ref: <name>`, which may set only `returns:`; the loader resolves every ref before validation,
 so `EvalCase.tools` still holds only `ToolSpec`. Its design is in
-`docs/superpowers/specs/2026-09-17-skill-lens-tool-libraries-design.md`. Milestones are defined in
+`docs/superpowers/specs/2026-09-17-skill-lens-tool-libraries-design.md`. The MCP bridge (issue #53)
+serves a case's `tools:` under `copilot` and `claude-code`: `runners/mcp.py` writes the tools
+and an MCP config into a fresh directory, hands the config to the product as its last argument
+(`--mcp-config=`, `--additional-mcp-config=@`), the product starts `python -m
+skill_lens.mcp_bridge` — a stdio MCP server in the package, no new dependency — and the runner
+maps the product's spelling of a tool (`mcp__skill-lens__<name>`, `skill-lens-<name>`) back to
+the case's name. Its design is in
+`docs/superpowers/specs/2026-09-21-skill-lens-mcp-bridge-design.md`. Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
 is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
@@ -391,13 +398,28 @@ form, that file is the explanation.
   drift.
 - **Product preflight spends nothing**: executable found on `PATH` and, for the two
   presets, executed (`--version`; `cli` has no version command), skill names checked,
-  `tools:` refused under any product and `trajectory:`/`offered` under
-  `cli`, all before the first case; only the candidate-arm cases that will run are
-  inspected, once each.
+  `tools:` refused under `cli` and under a preset whose `command` names another executable,
+  `trajectory:`/`offered` refused under `cli`, and — when a planned case declares `tools:` —
+  the MCP bridge started once with `--check` and `--available-tools` refused in
+  `[runners.copilot]`, all before the first case; only the candidate-arm cases that will run
+  are inspected, once each.
+- **A case's `tools:` reach a preset product through the MCP bridge, and the product starts
+  it.** `runners/mcp.py` writes the spec and the config into a fresh directory (never the
+  working directory), appends the config flag as the *last* argv element, one element with
+  `=` (Claude Code's `--mcp-config` is variadic), and deletes the directory in a `finally`.
+  `mcp_bridge.py` imports nothing from the project and writes only JSON to stdout. No opt-in:
+  a mock returns canned text and executes nothing, so `TRUST_NOTE` is unchanged. The trace
+  names the tool the product's way and `restore_tool_names` maps each declared tool back by
+  its exact spelling; other calls keep the product's name. Tool calls still come from the
+  trace, never from the bridge's record. A product that ran but never listed the bridge's
+  tools (the record's `list` event) is `RunResult.error`, never a failed `called:`; a trace
+  error wins over that check. `Config.product` drops `mcp` with `judge_args` and the version
+  probe when `command` names another executable. The product judge never gets a bridge.
 - **`ProductRunner.run` never raises for a product failure.** Timeout, non-zero exit,
   product-reported failure, truncated trace, over-size prompt, missing executable at run
-  time and a delivery `ProductSetupError` are all `RunResult.error`; `ProductSetupError`
-  propagates only from `preflight`, where `cli.py` makes it exit 2.
+  time, a delivery `ProductSetupError`, a bridge directory that cannot be written and a
+  `tools:` case reaching a product with no `mcp` are all `RunResult.error`;
+  `ProductSetupError` propagates only from `preflight`, where `cli.py` makes it exit 2.
 - **`--model` / `--judge-model` with nothing that reads them are user errors** (exit 2).
   `--model` is read by a keyed runner, or by a keyed judge whose `judge_model` is unset;
   `--judge-model` by a keyed judge only, so under a product judge it is refused; a

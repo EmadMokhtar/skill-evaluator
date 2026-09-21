@@ -349,14 +349,16 @@ class Config(BaseModel):
                 # The preset's `--version` is only known to work on the
                 # preset's executable; a wrapper named in `command` is not
                 # probed, so preflight cannot start it with a stray argument.
-                # `judge_args` is a verified flag for the preset's own
-                # executable too -- a wrapper is not known to accept it.
+                # `judge_args` and the MCP config flag are verified flags for
+                # the preset's own executable too -- a wrapper is not known to
+                # accept either, so under one `tools:` is refused in preflight.
                 same_executable = settings.command[0] == base.argv[0]
                 base = replace(
                     base,
                     argv=tuple(settings.command),
                     version_command=base.version_command if same_executable else None,
                     judge_args=base.judge_args if same_executable else (),
+                    mcp=base.mcp if same_executable else None,
                 )
         return replace(
             base,

@@ -266,6 +266,18 @@ and the full environment; no skill-lens sandbox applies; bundled scripts are rea
 through the product's own tools`), and the JSON report's `products` entries and the JUnit
 `skill-lens.products` property carry the same sentence.
 
+**A case's mock tools reach the product through skill-lens's own MCP bridge.** A `tools:`
+block under `copilot` or `claude-code` is served by `python -m skill_lens.mcp_bridge`, a
+stdio server the product starts as a child process, with the product's environment, from a
+config the runner writes into a temporary directory of its own. The bridge is skill-lens's
+code, not the skill's: it lists the tools the case declared and answers every call with
+the case's `returns` text, verbatim, whatever the arguments — nothing from the eval file
+or the skill executes, and the server exits when the product closes its pipe. It adds no
+capability the product did not already have; what it adds is a fixed, known answer to a
+tool the skill under test may call. The trust sentence on the report is unchanged, because
+the decision is unchanged. See [Mock tools under a
+product](runners.md#mock-tools-under-a-product).
+
 **A product judge is the same product under the same trust.** `judge = "copilot"`,
 `"claude-code"` or `"cli"` starts the product from the same `[runners.<name>]` table, with
 permission prompts disabled and the full environment, to grade a rubric — see

@@ -77,7 +77,9 @@ A `tools:` list declares the tools the agent may call. Nothing executes: calling
 the call and returns `returns` verbatim, so the trajectory is the model's own choice and
 the run has no side effects. See [Declaring tools and scoring the
 trajectory](runners.md#declaring-tools-and-scoring-the-trajectory) for how the calls are
-scored.
+scored. The same block serves a [product runner](runners.md#mock-tools-under-a-product):
+`copilot` and `claude-code` get the tools through an MCP server skill-lens starts for the
+case, under the same names, with the same canned `returns`.
 
 A tool declares its arguments one of two ways:
 
@@ -276,8 +278,8 @@ under that runner, never a silent `false` that would pass every negative control
 | Case feature | `fake` | `pydantic-ai` / `langchain` | `copilot` / `claude-code` | `cli` |
 | --- | --- | --- | --- | --- |
 | `assertions:` | yes | yes | yes | yes |
-| `tools:` (mock tools) | yes | yes | authoring error | authoring error |
-| `trajectory:` | yes | yes | yes, the product's tool names | authoring error |
+| `tools:` (mock tools) | yes | yes | yes — through the [MCP bridge](runners.md#mock-tools-under-a-product) | authoring error |
+| `trajectory:` | yes | yes | yes — the case's tools by their declared names; `max_calls` counts the product's own calls too | authoring error |
 | `mode: offered` | yes | yes | yes | authoring error |
 | `budget:` | yes | yes | see [Product runners](runners.md#product-runners) | latency only |
 | `workspace:` | yes | yes | yes — the product's working directory | yes |

@@ -151,7 +151,7 @@ max_output_bytes = 8000000                        # default
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `command` | the preset's argv (required for `cli`) | The whole argv. Exactly one element must be `{prompt}`, and it cannot be the first (the executable); the prompt is substituted as that one element, never through a shell. When the first element is not the preset's own executable, preflight skips the `--version` probe (a wrapper might treat `--version` as a prompt). |
+| `command` | the preset's argv (required for `cli`) | The whole argv. Exactly one element must be `{prompt}`, and it cannot be the first (the executable); the prompt is substituted as that one element, never through a shell. When the first element is not the preset's own executable, preflight skips the `--version` probe (a wrapper might treat `--version` as a prompt), the judge's tool restriction is dropped, and a case with `tools:` is refused — a wrapper is not known to take the flag that hands the product the [MCP bridge](runners.md#mock-tools-under-a-product)'s config. |
 | `args` | `[]` | Appended after `command`. Must not contain `{prompt}`. |
 | `timeout_seconds` | `600.0` | Wall clock per case (per judge call, for the judge), finite and positive; the process group is killed at expiry. |
 | `max_output_bytes` | `8000000` | Cap on the trace, positive; a longer one is an errored case naming this key. |
@@ -172,7 +172,13 @@ gets nothing extra. The same table's `args` (or `command`) may not carry the pro
 tool-selection flag (`--tools` under `claude-code`, `--available-tools` under `copilot`) when
 the product judges: both products accumulate a repeated flag instead of taking the last
 one, so the entry would hand the judge tools back, and the judge's preflight refuses it
-(exit 2) naming the entry. Narrow the runner's tools under a different judge instead. See
+(exit 2) naming the entry. Narrow the runner's tools under a different judge instead. When
+a case declares `tools:`, the runner's preflight refuses `--available-tools` in
+`[runners.copilot]` the same way: the flag keeps only the tools it names, MCP tools
+included, so it would hide the case's mock tools from the model (Claude Code's `--tools`
+governs its built-in set only and is not refused). A case's `tools:` reach a preset through
+the [MCP bridge](runners.md#mock-tools-under-a-product), whose config is appended after
+`args` as the last argument; the bridge itself has no key here. See
 [Runners](runners.md#product-runners) for what
 each product runner measures, [Judging with a product](runners.md#judging-with-a-product)
 for the judge, and [Security](security.md#product-runners) for what naming one means.

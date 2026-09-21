@@ -496,8 +496,10 @@ def test_a_command_naming_another_executable_drops_the_presets_version_probe(tmp
     )
     product = load_config(tmp_path / "skill-lens.toml").product(name)
     assert product.version_command is None
-    # a wrapper is not known to accept the preset's judge-only flag either
+    # a wrapper is not known to accept the preset's judge-only flag either,
+    # nor the flag that hands it the MCP bridge's config
     assert product.judge_args == ()
+    assert product.mcp is None
 
 
 @pytest.mark.parametrize("name", ["claude-code", "copilot"])
@@ -510,3 +512,14 @@ def test_a_command_keeping_the_presets_executable_keeps_its_version_probe(tmp_pa
     product = load_config(tmp_path / "skill-lens.toml").product(name)
     assert product.version_command == (executable, "--version")
     assert product.judge_args == JUDGE_ARGS[name]
+    assert product.mcp is PRESETS[name].mcp
+
+
+def test_the_presets_take_the_bridge_and_cli_does_not(tmp_path):
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.cli]\ncommand = ["my-agent", "{prompt}"]\n', encoding="utf-8"
+    )
+    config = load_config(tmp_path / "skill-lens.toml")
+    assert config.product("cli").mcp is None
+    for name in PRESETS:
+        assert config.product(name).mcp is PRESETS[name].mcp is not None
