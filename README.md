@@ -280,10 +280,10 @@ contribution.
 
 ## Status
 
-Milestone 7. Discovery, scoring, judging, comparison, real-file workspaces, reporting, gating
-and the automated release pipeline all ship and are tested. Versions are derived from the
-commit history and published to PyPI on merge. This is `0.x`: a minor release may still
-change behaviour, so pin what you depend on. See the
+Discovery, scoring, judging, comparison, real-file workspaces, reporting, gating and the
+automated release pipeline all ship and are tested. Versions are derived from the commit
+history and published to PyPI on merge. This is `0.x`: a minor release may still change
+behaviour, so pin what you depend on. See the
 [roadmap](https://emadmokhtar.github.io/skill-evaluator/roadmap/) for what is shipped and
 what is planned.
 
