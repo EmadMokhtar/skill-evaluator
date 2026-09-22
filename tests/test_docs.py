@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 from typer.main import get_command
 
 from skill_lens.cli import app
@@ -28,6 +29,28 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCS = REPO_ROOT / "docs"
 MKDOCS_YML = REPO_ROOT / "mkdocs.yml"
 RELEASING = REPO_ROOT / "docs" / "releasing.md"
+
+
+class _TagTolerantLoader(yaml.SafeLoader):
+    """A loader for mkdocs.yml only.
+
+    mkdocs.yml carries `!!python/name:` tags, which MkDocs resolves at build
+    time and a SafeLoader refuses. These tests only read the nav and the
+    extension names, so an unknown tag can safely become None. The project's
+    own skill_lens.yaml_loading.safe_load is deliberately NOT changed: it
+    guards user-authored YAML, where an unknown tag must still be refused.
+    """
+
+
+_TagTolerantLoader.add_multi_constructor("", lambda loader, suffix, node: None)
+
+
+def _mkdocs_config() -> dict:
+    # S506 cannot see that _TagTolerantLoader subclasses SafeLoader: it only
+    # recognises the name `SafeLoader` itself. The loader is safe by
+    # construction (see the class above), so the finding is a false positive.
+    return yaml.load(MKDOCS_YML.read_text(encoding="utf-8"), Loader=_TagTolerantLoader)  # noqa: S506
+
 
 # docs/superpowers/ is a historical record of specs and plans, excluded from the
 # site (see mkdocs.yml) and from every check here.
@@ -52,7 +75,7 @@ def _site_pages() -> set[str]:
 
 def _nav_pages() -> set[str]:
     """Every page reachable from the mkdocs.yml nav, flattened."""
-    config = safe_load(MKDOCS_YML.read_text(encoding="utf-8"))
+    config = _mkdocs_config()
     found: set[str] = set()
 
     def walk(node: object) -> None:
@@ -166,8 +189,25 @@ def test_releasing_documents_every_piece_of_external_setup():
 
 
 def test_releasing_is_in_the_nav():
-    nav = safe_load((REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8"))["nav"]
+    nav = _mkdocs_config()["nav"]
     assert "releasing.md" in str(nav)
+
+
+def test_the_mkdocs_config_parses_with_a_python_name_tag():
+    """mkdocs.yml carries `!!python/name:` tags (Mermaid's custom fence needs
+    one). The project's own safe_load refuses unknown tags, which is right for
+    user YAML and wrong here, so the tests parse mkdocs.yml with a loader that
+    ignores them. This test fails if that loader is swapped back.
+    """
+    config = _mkdocs_config()
+    fences = config["markdown_extensions"]
+    superfences = next(
+        entry["pymdownx.superfences"]
+        for entry in fences
+        if isinstance(entry, dict) and "pymdownx.superfences" in entry
+    )
+    names = [fence["name"] for fence in superfences["custom_fences"]]
+    assert "mermaid" in names, f"no mermaid custom fence in mkdocs.yml: {names}"
 
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")

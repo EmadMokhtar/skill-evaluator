@@ -22,6 +22,11 @@ applyTo: "docs/**,*.md,mkdocs.yml"
 - Documentation ships **with** the change: a new flag updates `docs/cli.md`, a new config
   key updates `docs/configuration.md`, a new assertion kind updates `docs/eval-files.md`, a
   new invariant updates `ARCHITECTURE.md`.
-- Do not add `pymdownx.emoji` or mermaid `custom_fences` to `mkdocs.yml`: both need
-  `!!python/name:` YAML tags, which break the plain-YAML nav parsing in `tests/test_docs.py`.
+- **`!!python/name:` tags in `mkdocs.yml` are fine**, as long as `tests/test_docs.py` parses
+  the file with `_mkdocs_config()` — its tag-tolerant loader — rather than the project's
+  `safe_load`, which refuses unknown tags. Mermaid's `custom_fences` entry needs one.
+  `skill_lens.yaml_loading.safe_load` itself must not be loosened: it guards user YAML.
+- **Diagrams are Mermaid**, in a ```mermaid fence. GitHub renders them natively, so
+  `README.md` and `ARCHITECTURE.md` get diagrams too. No hard-coded colours — the default
+  theme follows the page, so a diagram stays legible in both light and dark mode.
 - Relative links must resolve — there is a test for it.

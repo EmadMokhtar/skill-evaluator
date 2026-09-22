@@ -43,7 +43,14 @@ markdown_extensions:
   - toc:
       permalink: true
       toc_depth: 2
-  - pymdownx.superfences
+  # The custom fence renders ```mermaid blocks as diagrams. The
+  # `!!python/name:` tag is what MkDocs needs and what a plain SafeLoader
+  # refuses; tests/test_docs.py parses this file with a tag-tolerant loader.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   # base_path reaches the repo root so docs/architecture.md can include the
   # root-level ARCHITECTURE.md instead of duplicating it.
   - pymdownx.snippets:
