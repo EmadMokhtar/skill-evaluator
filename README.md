@@ -42,7 +42,7 @@ without embedding it.
 ## What an eval looks like
 
 ```yaml
-# skills/refund/evals/refund.eval.yaml
+# an eval file, beside the SKILL.md it tests
 cases:
   - name: refuses a refund outside the return window
     task: I want a refund for order 1234
@@ -66,8 +66,8 @@ cases:
 ```
 
 ```bash
-uv tool install "skill-lens[pydantic-ai]"
-skill-lens run ./skills          # exit 0 passed, 1 failed, 2 your files are wrong
+uv tool install "skill-lens[pydantic-ai]"   # drop the extra for the offline runner alone
+skill-lens run ./skills                     # exit 0 passed, 1 failed, 2 your files are wrong
 ```
 
 That first run is free: the default runner is scripted and offline, so nothing is sent
@@ -92,6 +92,7 @@ which takes one skill from nothing to a CI gate.
 | Baselines, deltas, `--min-delta` | [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparative-evals/) |
 | Exit codes and reports | [Gating](https://emadmokhtar.github.io/skill-evaluator/gating/) |
 | The action and example workflows | [CI integration](https://emadmokhtar.github.io/skill-evaluator/ci/) |
+| The message on your screen | [Troubleshooting](https://emadmokhtar.github.io/skill-evaluator/troubleshooting/) |
 | How it is built | [ARCHITECTURE.md](https://github.com/EmadMokhtar/skill-evaluator/blob/main/ARCHITECTURE.md) |
 | Why a green run means something | [Invariants](https://emadmokhtar.github.io/skill-evaluator/invariants/) |
 | What is checked for vulnerabilities, and where | [Security](https://emadmokhtar.github.io/skill-evaluator/security/) |
