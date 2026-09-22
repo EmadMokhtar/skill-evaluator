@@ -64,7 +64,7 @@ abort the run before anything is spent, and may return a `ProductStatus` for the
 `FakeRunner`, `PydanticAIRunner` and `LangChainRunner` define it to refuse a `trajectory:`
 naming a tool they cannot offer the case (`runners/preflight.py`'s `check_trajectory_names`)
 and return None; `ProductRunner` returns its status. The hook is looked up with
-`getattr`, so a runner written against an earlier milestone keeps working. `Judge` may
+`getattr`, so a runner written against an earlier version keeps working. `Judge` may
 likewise define an optional `preflight() -> ProductStatus | None`, taking no arguments — a
 judge has no cases to inspect — called in the same pass, right after the runners' hooks;
 `ProductJudge` defines it, the framework judges and `FakeJudge` do not. A status equal to
@@ -94,7 +94,7 @@ judge is one entry on `RunReport.products`.
 | `process.py` | Starts a child in its own process group, waits with a timeout, kills the group after every exit, and reads output through the harness's own handle. Shared by `scripts.py` and `runners/product.py`; imports nothing from the rest of the project. |
 | `matching.py` | `structural_match`: one author's mapping against a call's recorded arguments — a subset at every level, or exact under `exact=True`; lists element by element at equal length; a bool only ever equals a bool. Shared by `trajectory.call_args` (`evaluators/trajectory.py`), a mock's `when:` (`ToolResponse.matches` in `models.py`) and the MCP bridge's `tools/call` (`mcp_bridge.py`); imports nothing from the rest of the project. |
 | `mcp_bridge.py` | The stdio MCP server a product starts to reach a case's mock tools (`python -m skill_lens.mcp_bridge <spec>`): `initialize`, `ping`, `tools/list` and `tools/call` over JSON-RPC 2.0, one message per line, `returns:` answered in all three shapes by the rules `runners/tools.py` applies (one value; a sequence in call order; a `when:` lookup through `matching.structural_match`), every list and call appended to the record file the spec names; `--check` drives the handlers in-process for preflight. Imports only `matching.py` from the project. |
-| `runners/base.py` | The `Runner` protocol. `run` takes optional `workspace=` and `scripts=` keywords, both additive with a default, so a runner written against an earlier milestone keeps working. |
+| `runners/base.py` | The `Runner` protocol. `run` takes optional `workspace=` and `scripts=` keywords, both additive with a default, so a runner written against an earlier version keeps working. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/prompting.py` | The three preambles and the system-prompt builder every runner calls. Framework-free, so the rules `--min-delta` measures against exist once. |
 | `runners/retry.py` | The transient-retry loop and the HTTP status policy every adapter shares; each adapter supplies its own `is_transient`. |
@@ -145,7 +145,7 @@ aggregate ──► RunReport ──► comparison.build_delta ──► Delta |
 
 `arm` is `"candidate"` for the skill under test and `"baseline"` for the comparison skill;
 absent `--baseline` every outcome is `"candidate"` and `build_delta` returns `None`, so the
-matrix, the aggregates and the reporters all degrade to exactly the pre-M4 shape.
+matrix, the aggregates and the reporters all degrade to exactly the single-arm shape.
 
 ## Core data models
 
@@ -157,7 +157,7 @@ All live in `models.py`.
 | `EvalCase` | name, task, `tools`, `assertions`, `trajectory`, `budget`, `tags` |
 | `ToolSpec` | one mock tool: name, description, `parameters` or `input_schema`, and `returns` — a string for every call, a `list[str]` consumed in call order, or a `list[ToolResponse]` (`when:` argument subset → `value`) matched per call; `ToolRef` (`ref` + optional `returns` in the same shapes) is what a case writes to import one from a library |
 | `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, `usage_note` (why the token split is `0` when the runner could not count — a declared `max_tokens` then fails as not evaluated), model, `error` |
-| `CheckResult` | one check's `id`, `passed`, `evidence` — emitted by the judge and, since M4, by assertion/trajectory/budget too |
+| `CheckResult` | one check's `id`, `passed`, `evidence` — emitted by the judge and by assertion/trajectory/budget alike |
 | `EvalScore` | one evaluator's `passed` / `score` / `detail`, plus its `checks: list[CheckResult]` |
 | `BaselineNote` | why a skill or case has no baseline arm: `kind` (`"unavailable"` or `"skipped"`) plus a reason |
 | `CaseOutcome` | one (skill, case, runner, arm, repetition) combination: status plus its scores and result |
@@ -175,7 +175,7 @@ comparison side apart from them. `pass_rate_by_skill` is likewise candidate-only
 `comparison.py` adds a second layer of models — `ArmStats`, `CaseStats`, `LowSignalCheck`,
 `CaseRef` and `Delta` — that are computed from a `RunReport`, never stored on it. `Delta` is
 `None` whenever no baseline arm ran, which is the signal reporters use to fall back to the
-pre-M4 single-arm rendering.
+single-arm rendering.
 
 ## Invariants, and why
 
@@ -354,14 +354,14 @@ the old name arriving through a commit subject written after the rename still fa
 
 **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
 
-### Comparative evals (M4)
+### Comparative evals
 
-**Absent `--baseline`, what runs is identical to the single-arm run that predates M4.** One
+**Absent `--baseline`, what runs is identical to a single-arm run.** One
 arm, no delta block, the same one-line-per-outcome layout, and JSON that keeps every prior key
 and value with additive ones alongside (`arm`, `repeat_index`, a null `delta`,
 `baseline_notes`). Console output is *not* byte-identical: a failing case now prints one
-indented line per failed check, because M4 made the assertion, trajectory and budget
-evaluators emit per-check evidence where only the judge did before. That is strictly more
+indented line per failed check, because the assertion, trajectory and budget
+evaluators emit per-check evidence, where once only the judge did. That is strictly more
 information, not a change in what runs; the Comparative evals page covers it in full.
 `none` names a *kind* of baseline — the flag being unset, not `--baseline none`, is what turns
 comparison off. Upgrading must never silently double a bill.
@@ -412,7 +412,7 @@ result) so the same id names the same check in both arms: `{kind}[{index}]` for 
 budget. This is what lets
 `comparison.py` name a specific low-signal check rather than only flag a whole case.
 
-### CI surfaces (M5)
+### Reporting and concurrency
 
 **JUnit reports the candidate arm only.** Under `--baseline`, a failing baseline is the
 evidence that the skill helped. Rendering it as `<failure>` would paint CI red for the skill
@@ -450,9 +450,9 @@ failure inside a pure function.
 produces the same ordering and the same exception propagation as any other concurrency level
 reading its futures in submission order, and it is what lets the cassette tier (vcrpy is
 order-sensitive and not thread-safe) still match requests. It is not, though, a literal replay
-of pre-M5 behavior in every respect: discovery is now always a separate, sequential pass that
+of the sequential behaviour in every respect: discovery is now always a separate, sequential pass that
 loads every skill's cases before any of them run, so a malformed eval file anywhere aborts the
-whole run before a single case runs — where before M5, discovery and execution were interleaved
+whole run before a single case runs — where once discovery and execution were interleaved
 per skill, and an earlier skill's cases could complete (and be paid for) before a later skill's
 bad file was even read.
 
@@ -569,7 +569,7 @@ checking nothing on the one path that creates a file. It hands back a **branch**
 request, because a pull request opened with `GITHUB_TOKEN` gets no CI checks, and on a cassette
 refresh those checks are the whole point of the review.
 
-### Real-execution tools (M6 part 1)
+### Workspaces and files
 
 **A built-in tool never raises; it returns a message the model can read.** `list_files`,
 `read_file` and `write_file` in `runners/tools.py` catch `PathRefused`, `OSError` and
@@ -656,7 +656,7 @@ money is spent. `cases/loader.py`'s `_validate_assertions` checks every `kind` a
 own field-requirements table — deliberately a second table, not a reuse of
 `AssertionEvaluator`'s `_CHECKS` (one maps a kind to a predicate, the other to which fields
 it requires and allows), pinned together by a test rather than an import. Discovery is a
-separate sequential pass ahead of execution (an M5 invariant), so a bad kind anywhere in a
+separate sequential pass ahead of execution, so a bad kind anywhere in a
 suite aborts the whole run before the first case, real or fake, is charged for.
 
 **A configured cap reaches the workspace.** `max_file_bytes`, `max_files` and
@@ -668,8 +668,8 @@ message quoting a number the user never set.
 
 **`run_evals` is library API: a new parameter is appended, never inserted.** A caller that
 bound a parameter positionally before a newer one existed must still bind the same thing.
-M6 part 1's `keep_workspace` and `workspace_limits` therefore keep their positions after
-`executor_factory`, and M6 part 2's `options` sits last. The legacy pair still works
+`keep_workspace` and `workspace_limits` therefore keep their positions after
+`executor_factory`, and `options` — added after both — sits last. The legacy pair still works
 (`keep_workspace=True` keeps the directory, `workspace_limits=` reaches the workspace) but
 can never enable scripts, which it predates; passing `options` together with either legacy
 argument raises `ValueError`, the same rejection `evaluators` with `judge` gets. The CLI
@@ -682,7 +682,7 @@ non-null `workspace`, regardless of whether `--keep-workspace` or the config fil
 a persistent setting that produced no visible output would fill a disk with nothing on
 screen to explain why.
 
-### Bundled scripts (M6 part 2)
+### Bundled scripts and the sandbox
 
 **Script execution is off unless the run turned it on.** `allow_scripts` /
 `--allow-scripts` is the only switch; nothing in an eval file or a `SKILL.md` can enable
@@ -860,14 +860,14 @@ consumes the artifact content budget — and `runners/tools.py` turns every one 
 a tool-result string.
 
 **`scripts=` reaches a runner only when execution is on.** `_run_one` passes the keyword
-only when the runtime is set, so a third-party runner written against M6 part 1 keeps
+only when the runtime is set, so a third-party runner written against a version without bundled scripts keeps
 working until the day someone turns scripts on — at which point the `TypeError` names
 `run()` as the method that cannot take the keyword and escapes `run_evals` as an uncaught
 traceback (exit 1), rather than the scripts silently never running. Both bundled adapters,
 PydanticAI and LangChain, take it and register the same six built-in tools under the same
 conditions.
 
-### Developer experience (M7)
+### Failure context and the run matrix
 
 **Output is expanded only under non-passing candidate outcomes.** `failure_context` returns
 `None` for a passed outcome, a baseline outcome or an outcome with no result, and every
@@ -892,9 +892,9 @@ repository declares. `full_output` and `keep_workspace` are rendering knobs with
 failure mode, which is why they may live in the file.
 
 **Every candidate `(skill, case, runner)` outcome counts toward the gate, and none counts
-twice.** The orchestrator has run a `skill × case × runner` matrix since M1 and every
-reporter has keyed on `CaseOutcome.runner` since M5; M8 part 2 only let the CLI and the
-config name more than one runner. The one new rule is that a name given twice is refused
+twice.** The orchestrator has always run a `skill × case × runner` matrix and every
+reporter keys on `CaseOutcome.runner`; naming more than one runner on the CLI or in the
+config came later. The one new rule is that a name given twice is refused
 rather than collapsed — `cli._resolve_runners` and `Config.default_runner`'s validator both
 enforce it — because under `--repeat` and `--baseline` a duplicate would weight one
 framework's vote double. `--runner` replaces the configured list; it never appends.
@@ -1024,7 +1024,7 @@ every call carried as sorted JSON and cuts at `_ARGUMENTS_LIMIT` with the remove
 stated — a `write_file` call can carry a document — while the failure excerpt keeps the
 full calls.
 
-### Per-call mock returns (issue #41)
+### Per-call mock returns
 
 A skill whose instructions loop over a tool — fetch item A, follow its parent link, fetch
 B, stop when there is none — cannot be exercised by a mock that hands back one fixed value.
@@ -1163,7 +1163,7 @@ a compromised dependency or build hook never executes under the token that can w
 `actions/configure-pages` calls `GET /repos/{owner}/{repo}/pages` and fails the job when that
 call is refused — a tightening that would only have shown up on the next push to `main`.)
 
-### Product runners (M9 part 1)
+### Product runners
 
 **The product sees `SKILL.md` verbatim (its text as written; line endings are normalised).**
 `Skill.markdown` is the file as the author
@@ -1191,7 +1191,7 @@ bare task. The baseline arm, having nothing to invoke, gets the bare task in bot
 **`skill_triggered` comes only from the product's own load signal.** Copilot's `skill` tool
 request (`toolRequests[]` named `skill`, `arguments.skill`) or its `skill.invoked` event,
 Claude Code's `Skill` tool call. Copilot emits `skill.invoked` for a slash invocation only —
-the M9 probe recorded it from `/ping`, loaded mode — while a skill the model chose itself is
+the probe recorded it from `/ping`, loaded mode — while a skill the model chose itself is
 a `skill` tool request with no event, on 1.0.37 and 1.0.86-2 alike; reading the event alone
 failed every positive offered case under `--runner copilot` (issue #50). Inferring it from
 the output would let a model that guessed the answer read as a triggered skill. A product
@@ -1252,9 +1252,9 @@ the kill after every exit, and the capped read through the harness's own handle.
 those mechanics, and one implementation is what stops two callers drifting. It imports
 nothing from the rest of the project.
 
-**`--model` with nothing to read it is a user error, and so is `--judge-model`.** Before
-M9, `--runner fake --model x` was silently ignored; with `--runner copilot` that silence
-becomes a mistake that is easy to miss, because the flag looks honoured while the product
+**`--model` with nothing to read it is a user error, and so is `--judge-model`.**
+`--runner fake --model x` was once silently ignored; with `--runner copilot` that silence
+is a mistake that is easy to miss, because the flag looks honoured while the product
 runs its own default.
 `cli.py` refuses `--model` unless a keyed runner is named or a keyed judge with no
 `judge_model` of its own will fall back to it, and refuses `--judge-model` unless the judge
@@ -1282,7 +1282,7 @@ must not contain it. A preset is the verified spelling for its product; a reposi
 needs a different skill directory or invocation is describing a different product and says
 so with `cli`. `[runners.<name>]` holds no token: the product reads its own.
 
-### The product judge (M9 part 2)
+### The product judge
 
 **A product judge's verdict is the first balanced JSON object in the reply, validated as
 `JudgeOutput`; anything else is `JudgeVerdict.error`.** A product has no structured-output
@@ -1364,7 +1364,7 @@ model sees `mcp__skill-lens__<name>` under Claude Code and `skill-lens-<name>` u
 so. `restore_tool_names` maps each declared tool back, by its exact product spelling and
 nothing looser, so `trajectory: called`/`forbidden`/`order` — which the loader already
 restricts to declared names — read identically under every runner; every other call keeps
-the product's name, per the M9 decision not to normalise tool names across products. The
+the product's name, per the decision not to normalise tool names across products. The
 transcript keeps the product's spelling. Tool calls are still what the model requested,
 read from the trace; the bridge's record is not the source of the trajectory.
 
