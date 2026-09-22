@@ -1,3 +1,9 @@
+## v0.16.0 (2026-09-22)
+
+### Feat
+
+- let skill-lens.toml name a base_url for self-hosted endpoints (#66)
+
 ## v0.15.0 (2026-09-22)
 
 ### Feat
