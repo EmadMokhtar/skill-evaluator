@@ -276,6 +276,53 @@ Two rules follow from that, and both are mechanical rather than a prompt asking 
 An empty `rubric`, or a blank entry within one, is an authoring error: a check that verifies
 nothing would score as a pass nobody verified.
 
+**The judge sees the task, `expected`, the response, and the files `artifacts` names —
+nothing else.** It is never shown what a case's mock `tools:` returned, or which tools were
+called: it grades text, and never invokes the skill under test. So a rubric line
+must never be a comparison against the mock data, however much it reads like a sensible
+hallucination check:
+
+```yaml
+    tools:
+      - name: pull_request_threads
+        description: The review threads on a pull request
+        returns: '{"threads": [{"author": "Alex Chen", "comment": "Rename this."}]}'
+    judge:
+      rubric:
+        # Refused: the judge cannot see the mocked data
+        - The summary does not invent any reviewer or comment not present in the mocked data
+```
+
+A check like that is unverifiable as written. A careful judge fails it as ambiguous — a red
+case that looks like a regression — and a lenient one passes it without looking, which is
+worse: a suite can stay green for months on a check no judge ever verified. skill-lens
+refuses the line at load time (exit `2`) when it names the harness's own vocabulary for that
+data: `mock`/`mocked` followed by `data`, `response`, `result`, `return`, `value`, `output` or
+`tool`; `tool`/`mock` (with or without `'s`) followed by `returned`, `returns`, `return value`,
+`response`, `result` or `output`; or `returned by the tool`/`mock`. A bare `mock` ("proposes a
+mock for the HTTP client") or `tool` ("names the tool it would use") is not refused, so a
+rubric about a testing skill or about the response itself is untouched; if a line trips the
+rule for a reason of your own, reword it.
+
+Two fixes, depending on what the check is really about. If it is about the response, phrase
+it against the response: "The summary names Alex Chen as the reviewer." If it is really a
+comparison against the data, put the data where the judge can read it — a `workspace:` file
+named under `artifacts` — and phrase the check against that file:
+
+```yaml
+    workspace:
+      files:
+        threads.json: '{"threads": [{"author": "Alex Chen", "comment": "Rename this."}]}'
+    tools:
+      - name: pull_request_threads
+        description: The review threads on a pull request
+        returns: '{"threads": [{"author": "Alex Chen", "comment": "Rename this."}]}'
+    judge:
+      rubric:
+        - The summary names no reviewer absent from threads.json
+      artifacts: [threads.json]
+```
+
 `artifacts` names [workspace](#workspaces) files the judge may read, so a rubric can grade
 the document a skill produced rather than the chat message about it:
 

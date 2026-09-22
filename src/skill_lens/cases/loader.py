@@ -10,7 +10,12 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from pydantic import ValidationError
 
-from skill_lens.cases.checks import UNFILLED_SENTINEL, check_tool, find_unfilled
+from skill_lens.cases.checks import (
+    UNFILLED_SENTINEL,
+    check_tool,
+    find_hidden_data_reference,
+    find_unfilled,
+)
 from skill_lens.cases.tool_libraries import (
     EMPTY_LIBRARY,
     TOOL_LIBRARIES_KEY,
@@ -321,6 +326,19 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
                     f"entry {position} is blank. Give the judge something to check, or "
                     f"remove the entry -- a check that verifies nothing would score as "
                     f"a pass nobody verified."
+                )
+            phrase = find_hidden_data_reference(entry)
+            if phrase is not None:
+                raise CaseParseError(
+                    f"{path}: case {case.name!r} rubric entry {position} names "
+                    f"{phrase!r}, which the judge never sees. A rubric is graded "
+                    f"from the task, the expected text, the response and the files "
+                    f"'judge.artifacts' names -- never from what a mock tool "
+                    f"returned -- so this check could only pass under a judge that "
+                    f"ignores its own 'fail when ambiguous' rule. Phrase the check "
+                    f"against the response itself, or put the data in a "
+                    f"'workspace:' file, name it under 'judge.artifacts', and phrase "
+                    f"the check against that file."
                 )
         if case.judge.artifacts and case.workspace is None:
             raise CaseParseError(

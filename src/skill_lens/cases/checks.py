@@ -10,6 +10,8 @@ neither, so the loader can import the library module without a cycle.
 
 from __future__ import annotations
 
+import re
+
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
@@ -55,6 +57,41 @@ def find_unfilled(raw: object, trail: str = "", seen: frozenset[int] = frozenset
             if found is not None:
                 return found
     return None
+
+
+# The harness's own words for a mock tool's `returns:` -- data the agent saw
+# and the judge never does. A rubric line naming it is unverifiable as
+# written: the judge grades the task, the `expected` text, the response and
+# the files `judge.artifacts` names, and nothing else. Each alternative
+# requires a second word, so a rubric about a testing skill ("proposes a mock
+# for the HTTP client") or about the response ("names the tool it would use",
+# "mentions no tool calls") is not caught. `\b` on both sides keeps "mockup"
+# and "toolset" out.
+_HIDDEN_DATA_NOUNS = r"(?:data|responses?|results?|returns?|values?|outputs?|tools?)"
+_HIDDEN_DATA_REFERENCE = re.compile(
+    r"\b(?:"
+    rf"mock(?:ed|s)?\s+{_HIDDEN_DATA_NOUNS}"
+    r"|(?:tools?|mocks?)(?:'s)?\s+(?:returned|returns?(?:\s+values?)?|responses?|results?|outputs?)"
+    r"|returned\s+by\s+(?:the|a|any|each|every)\s+(?:tool|mock)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def find_hidden_data_reference(text: str) -> str | None:
+    """The phrase in a rubric line that names a case's mock tool data, as the
+    author wrote it, or None when the line names none.
+
+    The judge is never shown what a mock tool returned, so a check phrased
+    against it ("does not invent any detail not present in the mocked data")
+    can only be passed by a judge that ignores its own "fail when ambiguous"
+    rule. Refusing it at load time is what stops a lenient judge from
+    passing a check no judge could verify. The vocabulary is fixed and
+    documented, so an author can predict a refusal; it is a heuristic, and
+    rewording is the escape hatch.
+    """
+    match = _HIDDEN_DATA_REFERENCE.search(text)
+    return match.group(0) if match else None
 
 
 def check_tool_schema(tool: ToolSpec) -> None:

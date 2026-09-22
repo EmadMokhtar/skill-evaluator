@@ -274,6 +274,23 @@ that passes without citing evidence is recorded as a *failure*. An unsupported P
 LLM judge's characteristic failure mode, so it gets a mechanical defence rather than a
 prompt asking nicely.
 
+**A rubric entry phrased against a mock tool's `returns:` is an authoring error** (exit 2,
+load time). The judge is shown the task, `expected`, the response and the files
+`judge.artifacts` names — never what a tool returned — so "does not invent any detail not
+present in the mocked data" is unverifiable as written: a judge that follows its own "fail
+when ambiguous" rule turns it red, and one that does not passes it unread, which is the
+worse outcome because nothing in the report says the check was never verified.
+`cases/checks.find_hidden_data_reference` matches a fixed, documented vocabulary — `mock`
+or `mocked` before `data`/`response`/`result`/`return`/`value`/`output`/`tool`, `tool` or
+`mock` before `returned`/`returns`/`return value`/`response`/`result`/`output`, and
+`returned by the tool`/`mock` — each alternative needing a second word, so a rubric about a
+testing skill ("proposes a mock for the HTTP client") or about the response ("names the
+tool it would use") is not caught; the loader raises `CaseParseError` naming the entry and
+the phrase, with both fixes: reword against the response, or put the data in a `workspace:`
+file named under `judge.artifacts`. It is a heuristic, applied to every case whether or not
+it declares `tools:` (the judge never sees a return in any case), and rewording is the
+escape hatch.
+
 **Judge spend never enters `RunResult`.** It lives on `EvalScore.cost_usd` and is reported
 as judge overhead. `budget:` measures the skill's efficiency, not the harness's.
 

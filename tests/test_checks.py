@@ -7,6 +7,7 @@ from skill_lens.cases.checks import (
     check_tool,
     check_tool_returns,
     check_tool_schema,
+    find_hidden_data_reference,
     find_unfilled,
 )
 from skill_lens.models import ToolSpec
@@ -181,3 +182,59 @@ def test_check_tool_runs_both_the_schema_and_the_returns_rules():
     with pytest.raises(ValueError, match="can never be reached"):
         check_tool(_lookup({"value": "a"}, {"value": "b"}))
     check_tool(ToolSpec(name="t", parameters={"q": "string"}, returns=["a", "b"]))
+
+
+# --- find_hidden_data_reference -------------------------------------------
+#
+# A rubric line is graded from the response (and any named artifacts) alone.
+# One that names a case's mock tool data asks the judge to verify against
+# something it was never shown; the phrases below are the harness's own
+# vocabulary for that data, not any domain's.
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The summary does not invent any detail not present in the mocked data",
+        "Every figure matches the mock response",
+        "The reply quotes the mock result verbatim",
+        "Names each reviewer the mocked tool listed",
+        "Uses only values present in the mock output",
+        "The reply repeats what the tool returned",
+        "The reply matches the tool's response",
+        "Every id appears in the tool output",
+        "Lists every thread returned by the tool",
+        "Lists every thread returned by the mock",
+        "Uses the tool return value in the total",
+    ],
+)
+def test_a_rubric_line_naming_hidden_mock_data_is_found(text):
+    assert find_hidden_data_reference(text) is not None
+
+
+def test_the_matched_phrase_is_returned_as_written():
+    text = "The summary does not invent any detail not present in the Mocked Data."
+    assert find_hidden_data_reference(text) == "Mocked Data"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # A testing skill's own vocabulary: a mock as a thing the reply talks about.
+        "The reply proposes a mock for the HTTP client",
+        "The test uses mocks rather than a live database",
+        "The reply explains what mocking is for",
+        # "tool" in a sentence about the response, not about the harness.
+        "The reply names the tool it would use",
+        "The reply mentions no tool calls",
+        "The reply recommends a linting tool",
+        # Word boundaries: no match inside another word.
+        "The reply describes the mockup data flow",
+        "The reply lists the toolset returned to the user",
+        # Ordinary rubric lines.
+        "The reply names order 1234",
+        "",
+    ],
+)
+def test_a_rubric_line_about_the_response_is_not_found(text):
+    assert find_hidden_data_reference(text) is None

@@ -220,6 +220,14 @@ form, that file is the explanation.
   `judge = "fake"` safe as the built-in default: an unchecked rubric is never a green case.
 - **Judge spend never enters `RunResult`.** It lives on `EvalScore.cost_usd` and is reported
   as judge overhead; `budget:` measures the skill, not the harness.
+- **A rubric entry phrased against a mock tool's `returns:` is an authoring error** (exit 2,
+  load time). The judge sees the task, `expected`, the response and the named
+  `judge.artifacts` — never a tool's return — so "not present in the mocked data" is
+  unverifiable: a careful judge fails it as ambiguous, a lenient one passes it unread.
+  `cases/checks.find_hidden_data_reference` matches a fixed vocabulary (`mock(ed)` +
+  `data`/`response`/…; `tool`/`mock` + `returned`/`response`/…; `returned by the tool`),
+  each needing a second word so a bare `mock` or `tool` is not caught; every case, with or
+  without `tools:`; rewording or a `workspace:` file named under `artifacts` is the fix.
 - **A `version:` that YAML does not parse as a string is an authoring error.** `SkillParseError`,
   exit 2. YAML resolves `1.20` and `1.2` to the same float, so two genuinely different versions
   would silently compare equal under `--baseline previous`; three-part semver (`1.0.0`) is
