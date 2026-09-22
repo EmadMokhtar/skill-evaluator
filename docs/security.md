@@ -268,61 +268,73 @@ through the product's own tools`), and the JSON report's `products` entries and 
 **A case's mock tools reach the product through skill-lens's own MCP bridge.** A `tools:`
 block under `copilot` or `claude-code` is served by `python -m skill_lens.mcp_bridge`, a
 stdio server the product starts as a child process, with the product's environment, from a
-config the runner writes into a temporary directory of its own. The bridge is skill-lens's
-code, not the skill's: it lists the tools the case declared and answers every call from
-the case's `returns:` — one value, a sequence, or a `when:` lookup, by the rules every
-runner applies — whatever the arguments; nothing from the eval file
-or the skill executes, and the server exits when the product closes its pipe. It adds no
-capability the product did not already have; what it adds is a fixed, known answer to a
-tool the skill under test may call. The trust sentence on the report is unchanged, because
-the decision is unchanged. See [Mock tools under a
+config the runner writes into a temporary directory of its own.
+
+The bridge is skill-lens's code, not the skill's: it lists the tools the case declared and
+answers every call from the case's `returns:` — one value, a sequence, or a `when:` lookup,
+by the rules every runner applies — whatever the arguments; nothing from the eval file or
+the skill executes, and the server exits when the product closes its pipe.
+
+It adds no capability the product did not already have; what it adds is a fixed, known
+answer to a tool the skill under test may call. The trust sentence on the report is
+unchanged, because the decision is unchanged. See [Mock tools under a
 product](runners.md#mock-tools-under-a-product).
 
 **A product judge is the same product under the same trust.** `judge = "copilot"`,
 `"claude-code"` or `"cli"` starts the product from the same `[runners.<name>]` table, with
-permission prompts disabled and the full environment, to grade a rubric — see
-[Judging with a product](runners.md#judging-with-a-product). Its prompt is the graded
-response and any judge artifacts: text the skill under test produced, and so untrusted. The
-prompt says so, but that is a request to the model, not a guarantee. Claude Code grades
-with `--tools ""` and Copilot with `--available-tools=skill-lens-none`, each verified
-against the product's own CLI to leave the model no tool at all, built-in or MCP, so a
-response that reads like an instruction has nothing to act with (`--allow-all-tools` stays
-on the Copilot argv because `-p` requires it; it governs approval prompts, and there is
-nothing left to approve). The restriction stops the instruction from being *acted on*, not
-from swaying the verdict: a judge is a model reading untrusted text, as every judge is.
-`cli` is whatever `command` names, with whatever tools that command gives its model, and a
-`command` under a preset that names another executable drops the preset's restriction
-along with its version probe, because a wrapper is not known to accept the flag;
-`[runners.<name>] args` serves both seats, so it cannot restrict the judge alone — and it
-cannot widen it either: an `args` or `command` entry carrying the product's tool-selection
-flag (`--tools`, `--available-tools`) is refused in the judge's preflight, because both
-products accumulate a repeated flag rather than taking the last one, and the entry would
-otherwise hand the judge tools back behind the restriction. The
-judge's working directory is empty and holds no skill; that limits what such an
-instruction can find, not what the product can do. The report lists the product once
-whether it ran, judged, or both.
+permission prompts disabled and the full environment, to grade a rubric — see [Judging with
+a product](runners.md#judging-with-a-product).
 
-`skill-lens.toml` is inside the trust boundary: in a `pull_request` workflow the checkout
-is the pull request, so the file can name a product runner for itself in `default_runner`
-and set its `[runners.<name>]` table — including a `command` that replaces the product's
-argv with any executable on the runner. A workflow that runs untrusted pull requests should
-pin `runner:` explicitly in the action (the flag replaces the file's `default_runner`, so
-the file cannot pick the product). The `judge` key has no flag and no action input, so the
-checkout's file still picks the judge: `judge = "cli"` with a `command` of its choosing
-starts that executable at least once for every case that carries a `judge:` block (once
-per arm and repetition), which the same checkout can add. The workflow should also pass
-the product's token only to jobs it trusts.
+Its prompt is the graded response and any judge artifacts: text the skill under test
+produced, and so untrusted. The prompt says so, but that is a request to the model, not a
+guarantee.
+
+Claude Code grades with `--tools ""` and Copilot with `--available-tools=skill-lens-none`,
+each verified against the product's own CLI to leave the model no tool at all, built-in or
+MCP, so a response that reads like an instruction has nothing to act with
+(`--allow-all-tools` stays on the Copilot argv because `-p` requires it; it governs approval
+prompts, and there is nothing left to approve). The restriction stops the instruction from
+being *acted on*, not from swaying the verdict: a judge is a model reading untrusted text,
+as every judge is.
+
+`cli` is whatever `command` names, with whatever tools that command gives its model, and a
+`command` under a preset that names another executable drops the preset's restriction along
+with its version probe, because a wrapper is not known to accept the flag; `[runners.<name>]
+args` serves both seats, so it cannot restrict the judge alone — and it cannot widen it
+either: an `args` or `command` entry carrying the product's tool-selection flag (`--tools`,
+`--available-tools`) is refused in the judge's preflight, because both products accumulate a
+repeated flag rather than taking the last one, and the entry would otherwise hand the judge
+tools back behind the restriction.
+
+The judge's working directory is empty and holds no skill; that limits what such an
+instruction can find, not what the product can do. The report lists the product once whether
+it ran, judged, or both.
+
+`skill-lens.toml` is inside the trust boundary: in a `pull_request` workflow the checkout is
+the pull request, so the file can name a product runner for itself in `default_runner` and
+set its `[runners.<name>]` table — including a `command` that replaces the product's argv
+with any executable on the runner.
+
+A workflow that runs untrusted pull requests should pin `runner:` explicitly in the action
+(the flag replaces the file's `default_runner`, so the file cannot pick the product). The
+`judge` key has no flag and no action input, so the checkout's file still picks the judge:
+`judge = "cli"` with a `command` of its choosing starts that executable at least once for
+every case that carries a `judge:` block (once per arm and repetition), which the same
+checkout can add. The workflow should also pass the product's token only to jobs it trusts.
+
 The pin decides *which* runner, but the checkout's file still decides the judge and *how*
 each product starts, so the token is what keeps an untrusted checkout from spending your
 quota or acting as you. Preflight checks that the executable starts, not that it is signed
 in: if the product's own auth fails at run time, that surfaces as an **errored** case, and
 what the product does with whatever token the job gives it is the product's behaviour, not
-skill-lens's. The exposure is `pull_request_target`, pull requests from collaborators, and
-self-hosted runners, the same three as for scripts. For a hermetic Copilot run (one that
-loads nothing from your personal setup), point `COPILOT_HOME` at an empty directory and
-provide `COPILOT_GITHUB_TOKEN`, so nothing from your personal `~/.copilot` loads. See
-[Product runners](runners.md#product-runners) for what each product runner measures and
-[CI integration](ci.md#running-under-a-product) for the workflow.
+skill-lens's.
+
+The exposure is `pull_request_target`, pull requests from collaborators, and self-hosted
+runners, the same three as for scripts. For a hermetic Copilot run (one that loads nothing
+from your personal setup), point `COPILOT_HOME` at an empty directory and provide
+`COPILOT_GITHUB_TOKEN`, so nothing from your personal `~/.copilot` loads. See [Product
+runners](runners.md#product-runners) for what each product runner measures and [CI
+integration](ci.md#running-under-a-product) for the workflow.
 
 ## Why these rules
 
