@@ -233,7 +233,7 @@ prior key and value with additive ones alongside (`arm`, `repeat_index`, a null 
 `baseline_notes`). Console output is *not* byte-identical: a failing case now prints one
 indented line per failed check, because the assertion, trajectory and budget evaluators emit
 per-check evidence, where once only the judge did. That is strictly more information, not a
-change in what runs; the Comparative evals page covers it in full. `none` names a *kind* of
+change in what runs; [Comparative evals](comparative-evals.md) covers it in full. `none` names a *kind* of
 baseline — the flag being unset, not `--baseline none`, is what turns comparison off.
 Upgrading must never silently double a bill.
 
