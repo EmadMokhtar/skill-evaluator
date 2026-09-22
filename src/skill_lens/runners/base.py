@@ -18,7 +18,9 @@ class Runner(Protocol):
     discovery and before any case runs, with the candidate-arm skills and the
     cases planned for this runner. It raises an authoring error to abort the
     run before anything is spent, and may return a `ProductStatus` for the
-    report. The framework runners define none; `ProductRunner` does.
+    report. The framework runners use it to refuse a `trajectory:` naming a
+    tool they cannot offer the case (`check_trajectory_names`) and return
+    None; `ProductRunner` returns its status.
     """
 
     name: str

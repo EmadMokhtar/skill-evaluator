@@ -19,6 +19,7 @@ from typing import Any
 from skill_lens.bundle import SkillBundle
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
 from skill_lens.runners.base import RunnerDependencyError
+from skill_lens.runners.preflight import check_trajectory_names
 from skill_lens.runners.pricing import calculate_cost, provider_of
 from skill_lens.runners.prompting import instructions
 from skill_lens.runners.retry import run_with_retries, transient_status
@@ -237,6 +238,14 @@ class LangChainRunner:
             self._sleep,
         )
         return list(state["messages"])
+
+    def preflight(self, skills: list[Skill], cases_by_skill: dict[str, list[EvalCase]]) -> None:
+        """Refuse a `trajectory:` naming a tool this runner cannot offer, before any spend.
+
+        This runner offers a case its mock tools and, with a workspace, the
+        built-ins -- so the check is `check_trajectory_names` and nothing more.
+        """
+        check_trajectory_names(self.name, cases_by_skill)
 
     def run(
         self,

@@ -104,8 +104,8 @@ def _find_skill(name: str):
 
 
 def test_the_shipped_skill_has_cases_that_parse():
-    # This call also exercises the loader's cross-reference validation, so an
-    # undeclared trajectory tool or a leftover placeholder surfaces here.
+    # This call also exercises the loader's cross-reference validation, so a
+    # duplicate tool name or a leftover placeholder surfaces here.
     skill = _find_skill("writing-skill-evals")
     cases = load_cases_for_skill(skill)
     assert cases
