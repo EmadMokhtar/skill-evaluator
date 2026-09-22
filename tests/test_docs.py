@@ -259,5 +259,7 @@ def _milestone_hits(path: Path) -> list[str]:
 
 
 def test_no_milestone_labels_outside_the_roadmap():
-    hits = _milestone_hits(REPO_ROOT / "ARCHITECTURE.md")
+    paths = [REPO_ROOT / "ARCHITECTURE.md"]
+    paths += [DOCS / name for name in sorted(_site_pages()) if name not in MILESTONE_ALLOWED]
+    hits = [hit for path in paths for hit in _milestone_hits(path)]
     assert not hits, "milestone labels found:\n" + "\n".join(hits)

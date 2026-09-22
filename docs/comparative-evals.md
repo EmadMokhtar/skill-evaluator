@@ -12,8 +12,8 @@ reporting the difference.
 
 Every case can run in two **arms**:
 
-- **candidate** — the skill under test, exactly as it runs today. This is the only arm that
-  existed before M4, and it is the only arm the gate reads.
+- **candidate** — the skill under test, exactly as it runs today. This is the only arm a run
+  without `--baseline` produces, and it is the only arm the gate reads.
 - **baseline** — a comparison point, selected with `--baseline`:
   - `none` — an **empty skill**: same name, no description, no instructions. This isolates
     what the skill's text contributes, as opposed to what the model would do unprompted.
@@ -22,10 +22,10 @@ Every case can run in two **arms**:
 
 **Omitting `--baseline` is what turns comparison off.** `none` names a *kind* of baseline (an
 empty skill), not the absence of one — so leaving the flag unset, not passing `--baseline
-none`, is the only way to get a single-arm run. With no flag, `skill-lens run` keeps the same
-layout it had before M4: one arm, one line per outcome, no delta block. It is not
+none`, is the only way to get a single-arm run. With no flag, `skill-lens run` keeps the single-arm
+layout: one arm, one line per outcome, no delta block. It is not
 byte-identical, though — a failing case's assertion, trajectory and budget evaluators now
-emit per-check evidence (an M4 addition, previously only the judge evaluator did this), so a
+emit per-check evidence (once, only the judge evaluator did this), so a
 failing outcome prints one indented line per failed check where it printed none before. That
 is strictly more information, not a behavior change in what runs. Upgrading to a version of
 `skill-lens` that supports comparison must never silently double anyone's bill.

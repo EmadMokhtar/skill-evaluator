@@ -180,8 +180,7 @@ order of jobs and how a failed step is recovered.
 
 ## Running bundled scripts
 
-A skill may ship code under `scripts/`. skill-lens can execute it — that is what M6 part 2
-adds — and the trust model is:
+A skill may ship code under `scripts/`. skill-lens can execute it, and the trust model is:
 
 - **Off by default, on only by the operator's decision.** `allow_scripts = true` in
   `skill-lens.toml` or `--allow-scripts`. Nothing in an eval file or a `SKILL.md` can turn

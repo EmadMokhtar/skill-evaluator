@@ -25,7 +25,7 @@ spend. `uv run skill-lens run ./examples` needs the `pydantic-ai` runner (see
 assert real model behavior, so `list` is what dogfoods discovery for free.
 
 `test_a_baseline_run_reaches_the_provider_without_the_skill_name` in `tests/test_cassettes.py`
-proves the M4 no-name-leak rule survives the wire, but its cassette has not been recorded yet
+proves the baseline no-name-leak rule survives the wire, but its cassette has not been recorded yet
 — no API key was available when it was written. A missing cassette **skips rather than
 fails**, by design, so a fresh clone is never red for this; whoever has a key next should
 record it with:

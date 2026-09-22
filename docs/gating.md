@@ -141,10 +141,10 @@ scripts clause to reach; empty when no product ran), and the `gate` decision wit
 reasons.
 
 Comparative evals changed this document additively, not by rewriting what was already there:
-every M3 field means what it always meant, and M4 only adds fields alongside them — `arm` and
-`repeat_index` on each outcome, `baseline_errored` in `summary`, and the top-level `delta`
-(`null` when no baseline arm ran) and `baseline_notes`. A tool reading only the M3 fields
-keeps working unmodified.
+every field that existed before them still means what it meant, and the comparison adds
+fields alongside them — `arm` and `repeat_index` on each outcome, `baseline_errored` in
+`summary`, and the top-level `delta` (`null` when no baseline arm ran) and `baseline_notes`.
+A tool that reads only the older fields keeps working unmodified.
 
 Each entry in `outcomes` carries `arm` (`"candidate"` or `"baseline"`) and `repeat_index`
 (0-based), so a comparative run's raw per-repetition results can be reconstructed from the
