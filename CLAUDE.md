@@ -68,7 +68,14 @@ let a YAML file with one top-level `tools:` list — the block `mcp-import` prin
 any eval file with `tool_libraries:` (paths relative to the eval file) and named in a case with
 `- ref: <name>`, which may set only `returns:`; the loader resolves every ref before validation,
 so `EvalCase.tools` still holds only `ToolSpec`. Its design is in
-`docs/superpowers/specs/2026-09-17-skill-lens-tool-libraries-design.md`. Milestones are defined in
+`docs/superpowers/specs/2026-09-17-skill-lens-tool-libraries-design.md`. Per-call mock returns
+(issue #41) let `returns:` be a list of strings consumed in call order (the last repeating) or
+a list of `when:`/`value:` entries matched against the call's arguments (first match wins, an
+entry with no `when:` the fallback), so one case can exercise a loop-until or
+branch-on-result skill; `ToolResponse` carries an entry, `cases/checks.check_tool_returns`
+refuses an entry that could never fire, and both keyed adapters rebuild the agent per retry
+attempt. Its design is in `docs/superpowers/specs/2026-09-21-skill-lens-per-call-returns-design.md`.
+Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
 is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
@@ -357,6 +364,29 @@ form, that file is the explanation.
   non-`[A-Za-z0-9_]` → `_` (hyphen too — the cassettes pin `order_support`), leading digit
   → `skill_`, then cut to 64. A Python identifier was not enough (`café`).
 - **`mcp-import` never touches the network.** `SOURCE` is a file or `-`.
+- **`returns:` has three shapes, and the shape says which rule applies.** A string answers
+  every call; a `list[str]` is a sequence consumed in call order, its **last entry
+  repeating** once used up (`trajectory.max_calls` is the check for a loop that should have
+  stopped); a `list[ToolResponse]` (`when:`/`value:`) is a lookup answered by the first
+  entry whose `when:` keys all equal the call's arguments, an entry with no `when:` being
+  the fallback. An empty list or a mixed list is refused by `ToolSpec` itself;
+  `ToolRef.returns` takes the same three shapes and nothing else.
+- **A sequence's counter lives in the built tool, never on the runner, and a retried
+  attempt gets fresh tools.** `build_mock_tool` keeps a locked counter in a closure, so each
+  arm, attempt and work item starts from the top and parallel calls from one model turn
+  each consume one entry; both keyed adapters build the agent *inside* the retried
+  callable, or a transient 429 would hand the retry's first call the second entry.
+- **A lookup entry that could never fire is an authoring error** (exit 2, load time, for an
+  inline tool, a library tool and a `ref:` override alike): a `when:` key the tool's closed
+  schema can never carry (`parameters:`, or an `input_schema` with `additionalProperties:
+  false` and listed `properties`; an open schema may key on anything), an empty `when: {}`,
+  or an entry an earlier entry already answers (a fallback above it, the same `when:`, or a
+  `when:` it only narrows) — `check_tool_returns` uses `ToolResponse.matches` itself, so
+  "unreachable" means what the runtime would do.
+- **A call no lookup entry answers gets `NO_RESPONSE_SCRIPTED`, never an exception** — the
+  tool's name and the arguments as sorted JSON with `default=str`. A `when:` value matches
+  by parsed value, and a boolean is only ever equal to a boolean (`_same` in `models.py`):
+  a YAML `true` never answers a model's `1`.
 - **`EvalCase.tools` holds only `ToolSpec`; a `ref:` is resolved by the case loader on the
   raw mapping before validation.** No runner, evaluator, reporter or product preflight ever
   sees a reference; the product `tools:` refusal, the duplicate-name, built-in-name,

@@ -159,6 +159,54 @@ def test_the_canned_return_value_is_handed_back_to_the_model():
     assert seen["content"] == '{"status": "shipped"}'
 
 
+def test_a_sequence_of_return_values_is_handed_back_in_call_order():
+    seen = []
+
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        for message in messages:
+            for part in getattr(message, "parts", []):
+                if type(part).__name__ == "ToolReturnPart" and part.content not in seen:
+                    seen.append(part.content)
+        if len(seen) < 3:
+            return tool_call("get_work_item", {"id": "x"})
+        return text("done")
+
+    runner = PydanticAIRunner(model=FunctionModel(reply))
+    runner.run(
+        SKILL,
+        case(tools=[ToolSpec(name="get_work_item", returns=['{"id": "A"}', '{"id": "B"}', "end"])]),
+    )
+    assert seen == ['{"id": "A"}', '{"id": "B"}', "end"]
+
+
+def test_a_retry_starts_a_sequence_of_return_values_from_the_top():
+    # A retried attempt is a fresh conversation, so its mocks must be fresh
+    # too: an agent reused across attempts would hand the second attempt's
+    # first call the sequence's second entry.
+    turns = {"n": 0}
+    seen = []
+
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        turn = turns["n"]
+        turns["n"] += 1
+        if turn in (0, 2):  # the first model turn of each attempt
+            return tool_call("poll", {})
+        if turn == 1:  # attempt 1 fails after the tool ran once
+            raise ModelHTTPError(status_code=429, model_name="scripted", body=None)
+        for message in messages:
+            for part in getattr(message, "parts", []):
+                if type(part).__name__ == "ToolReturnPart":
+                    seen.append(part.content)
+        return text("done")
+
+    runner = PydanticAIRunner(
+        model=FunctionModel(reply), retries=1, retry_backoff_seconds=0.01, sleep=lambda _: None
+    )
+    result = runner.run(SKILL, case(tools=[ToolSpec(name="poll", returns=["one", "two"])]))
+    assert result.errored is False
+    assert seen == ["one"]
+
+
 def test_usage_latency_and_transcript_are_captured():
     runner = PydanticAIRunner(model=scripted(text("done")))
     result = runner.run(SKILL, case())

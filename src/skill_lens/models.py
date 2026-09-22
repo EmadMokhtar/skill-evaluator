@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -223,12 +224,86 @@ class AssertionSpec(BaseModel):
     json_schema: dict[str, Any] | None = None
 
 
+def _same(expected: Any, actual: Any) -> bool:
+    """Whether a `when:` value and a call's argument are the same value.
+
+    Plain `==`, except that a boolean is only ever equal to a boolean: Python
+    says `True == 1`, but a YAML `true` and a model's `1` are different
+    arguments, and a match on the wrong one would be an invisible mistake.
+    Recurses so the rule holds inside lists and mappings too.
+    """
+    if isinstance(expected, bool) or isinstance(actual, bool):
+        return isinstance(expected, bool) and isinstance(actual, bool) and expected is actual
+    if isinstance(expected, dict) and isinstance(actual, dict):
+        return expected.keys() == actual.keys() and all(
+            _same(value, actual[key]) for key, value in expected.items()
+        )
+    if isinstance(expected, list) and isinstance(actual, list):
+        return len(expected) == len(actual) and all(map(_same, expected, actual))
+    return bool(expected == actual)
+
+
+class ToolResponse(BaseModel):
+    """One entry of a `returns:` lookup: what a mock tool hands back when the
+    call's arguments carry every key in `when:` with the same value.
+
+    A call may carry more arguments than `when:` names -- matching is on the
+    subset the author keyed on. An entry with no `when:` matches every call,
+    which makes it the fallback; the loader refuses one that a later entry
+    could never get past.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    when: dict[str, Any] | None = None
+    value: str
+
+    def matches(self, arguments: Mapping[str, Any]) -> bool:
+        """Whether a call with `arguments` is one this entry answers."""
+        return all(
+            key in arguments and _same(value, arguments[key])
+            for key, value in (self.when or {}).items()
+        )
+
+
+# What a mock tool's `returns:` may be: one value for every call; a list of
+# values consumed in call order, the last one repeating; or a list of
+# `when:`/`value:` entries matched against the call's arguments, first match
+# winning. Shared by `ToolSpec` and `ToolRef` so a case may set any shape a
+# library could have.
+ToolReturns = str | list[str] | list[ToolResponse]
+
+
+def _check_returns_shape(value: Any) -> Any:
+    """Refuse the two list shapes Pydantic's union would report confusingly.
+
+    An empty list has nothing to hand back on the first call, and a list
+    that mixes strings with mappings would be neither a sequence nor a
+    lookup. Everything else is left to the field's own type.
+    """
+    if isinstance(value, list):
+        if not value:
+            raise ValueError(
+                "returns is an empty list, which has nothing to hand back; write "
+                "returns: '' for an empty reply"
+            )
+        kinds = {isinstance(entry, dict) for entry in value}
+        if kinds == {True, False}:
+            raise ValueError(
+                "returns must be a string, a list of strings (one per call, in order) "
+                "or a list of when:/value: mappings (matched by argument) -- not a mix"
+            )
+    return value
+
+
 class ToolSpec(BaseModel):
     """A mock tool an eval case makes available to the agent.
 
     Nothing executes: calling the tool records the call and returns `returns`
     verbatim, so the trajectory is genuinely the model's choice and a run has
-    no side effects.
+    no side effects. `returns` is one string for every call, a list of
+    strings consumed in call order (see `ToolReturns`), or a list of
+    `ToolResponse` entries chosen by the call's arguments.
 
     `parameters` is the shorthand for a tool the author describes by hand: a
     flat name -> primitive type map that `build_mock_tool` closes with
@@ -244,7 +319,7 @@ class ToolSpec(BaseModel):
     description: str = ""
     parameters: dict[str, ToolParamType] = Field(default_factory=dict)
     input_schema: dict[str, Any] | None = None
-    returns: str = ""
+    returns: ToolReturns = ""
 
     @field_validator("name")
     @classmethod
@@ -256,20 +331,31 @@ class ToolSpec(BaseModel):
             )
         return value
 
+    @field_validator("returns", mode="before")
+    @classmethod
+    def _returns_must_be_one_shape(cls, value: Any) -> Any:
+        return _check_returns_shape(value)
+
 
 class ToolRef(BaseModel):
     """A case's reference to a tool a library declares: `- ref: lookup_order`.
 
     The library owns the contract (name, description, schema); the case may
-    set only `returns`, the scenario. The case loader resolves every ref into
-    the `ToolSpec` it names before the case is validated, so `EvalCase.tools`
-    never holds one and no runner ever sees one.
+    set only `returns`, the scenario -- in any of the shapes `ToolSpec`
+    takes. The case loader resolves every ref into the `ToolSpec` it names
+    before the case is validated, so `EvalCase.tools` never holds one and no
+    runner ever sees one.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     ref: str = Field(min_length=1)
-    returns: str | None = None
+    returns: ToolReturns | None = None
+
+    @field_validator("returns", mode="before")
+    @classmethod
+    def _returns_must_be_one_shape(cls, value: Any) -> Any:
+        return _check_returns_shape(value)
 
 
 class TrajectorySpec(BaseModel):

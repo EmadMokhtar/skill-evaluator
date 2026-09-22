@@ -7,12 +7,14 @@ schema and a callable, which every adapter can register in its own way.
 from __future__ import annotations
 
 import copy
+import json
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from skill_lens.bundle import SkillBundle
-from skill_lens.models import Skill, ToolSpec
+from skill_lens.models import Skill, ToolResponse, ToolSpec
 from skill_lens.scripts import ScriptResult, ScriptRuntime, run_script
 from skill_lens.workspace import PathRefused, Workspace
 
@@ -35,6 +37,67 @@ class AgentTool:
     call: Callable[..., str]
 
 
+# What a `returns:` lookup hands back when no entry matches the call. The
+# skill asked for something the author did not script -- an eval signal, so
+# the model reads a message and the transcript shows it; a mock never raises.
+NO_RESPONSE_SCRIPTED = "no response is scripted for {name} with arguments {arguments}"
+
+
+def _arguments_text(arguments: dict[str, Any]) -> str:
+    """The call's arguments as one line of JSON, for the no-match message.
+
+    Keys sorted so the message is stable, `default=str` so a value JSON
+    cannot encode -- a mock accepts anything -- still renders rather than
+    raising out of a tool that must never raise.
+    """
+    return json.dumps(arguments, sort_keys=True, default=str)
+
+
+def _canned(spec: ToolSpec) -> Callable[..., str]:
+    """The callable behind one mock tool, for whichever shape `returns` has.
+
+    One string answers every call. A list of strings is consumed in the
+    order the calls arrive, the last entry repeating once the list is used
+    up -- the steady state a skill that keeps calling should see, with
+    `trajectory.max_calls` the check for a loop that should have ended. The
+    counter is locked because a framework may run several calls from one
+    model turn in parallel, and it lives in this closure so every built tool
+    -- each arm, each attempt, each work item -- starts from the top. A list
+    of `ToolResponse` entries is matched against the arguments, first match
+    winning; a call no entry answers gets `NO_RESPONSE_SCRIPTED`.
+    """
+    returns = spec.returns
+    if isinstance(returns, str):
+
+        def fixed(**_arguments: Any) -> str:
+            """Return the canned value, whatever the model passed in."""
+            return returns
+
+        return fixed
+    if returns and isinstance(returns[0], ToolResponse):
+        entries = [entry for entry in returns if isinstance(entry, ToolResponse)]
+
+        def lookup(**arguments: Any) -> str:
+            for entry in entries:
+                if entry.matches(arguments):
+                    return entry.value
+            return NO_RESPONSE_SCRIPTED.format(name=spec.name, arguments=_arguments_text(arguments))
+
+        return lookup
+    sequence = [entry for entry in returns if isinstance(entry, str)]
+    lock = threading.Lock()
+    calls = 0
+
+    def in_order(**_arguments: Any) -> str:
+        nonlocal calls
+        with lock:
+            index = min(calls, len(sequence) - 1)
+            calls += 1
+        return sequence[index]
+
+    return in_order
+
+
 def build_mock_tool(spec: ToolSpec) -> AgentTool:
     """Turn a declared ToolSpec into a callable plus its JSON schema.
 
@@ -44,7 +107,9 @@ def build_mock_tool(spec: ToolSpec) -> AgentTool:
     copied so an adapter cannot mutate the case -- because fidelity to the
     server it stands in for is its reason to exist. Types in the shorthand
     are already constrained by `ToolSpec`, and the loader has already checked
-    a declared schema, so nothing here can be rejected.
+    a declared schema and its `returns`, so nothing here can be rejected.
+
+    Build one per run: a sequence's call counter lives in the tool.
     """
     if spec.input_schema is not None:
         json_schema: dict[str, Any] = copy.deepcopy(spec.input_schema)
@@ -56,17 +121,11 @@ def build_mock_tool(spec: ToolSpec) -> AgentTool:
             "required": list(properties),
             "additionalProperties": False,
         }
-    returns = spec.returns
-
-    def call(**_arguments: Any) -> str:
-        """Return the canned value, whatever the model passed in."""
-        return returns
-
     return AgentTool(
         name=spec.name,
         description=spec.description,
         json_schema=json_schema,
-        call=call,
+        call=_canned(spec),
     )
 
 

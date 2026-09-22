@@ -226,11 +226,18 @@ class LangChainRunner:
             system_prompt=instructions(skill, case, workspace is not None),
         )
 
-    def _invoke(self, agent: Any, task: str) -> list[Any]:
+    def _invoke(self, build_agent: Callable[[], Any], task: str) -> list[Any]:
+        """Build a fresh agent for every attempt, then invoke it.
+
+        A retry is a new conversation, and its tools must be new too: a mock
+        whose `returns:` is consumed in call order keeps its counter in the
+        built tool, so an agent reused across attempts would hand the second
+        attempt's first call the sequence's second entry.
+        """
         from langchain_core.messages import HumanMessage
 
         state = run_with_retries(
-            lambda: agent.invoke({"messages": [HumanMessage(task)]}),
+            lambda: build_agent().invoke({"messages": [HumanMessage(task)]}),
             _is_transient,
             self._retries,
             self._retry_backoff_seconds,
@@ -250,8 +257,9 @@ class LangChainRunner:
         offered = skill_tool_name(skill.name) if case.mode == "offered" else None
         started = time.monotonic()
         try:
-            agent = self._build_agent(skill, case, workspace, scripts)
-            messages = self._invoke(agent, case.task)
+            messages = self._invoke(
+                lambda: self._build_agent(skill, case, workspace, scripts), case.task
+            )
             input_tokens, output_tokens = _usage(messages)
             model_name = _model_name(messages, configured)
             cost_usd, cost_note = _cost(input_tokens, output_tokens, model_name, configured)

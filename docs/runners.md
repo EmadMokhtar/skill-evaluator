@@ -271,6 +271,15 @@ named with `ref:` is resolved by the case loader before any runner is involved, 
 runner never sees a reference — only the `ToolSpec` it named, with the case's own
 `returns:`.
 
+`returns:` may also be a list — of strings, consumed in call order with the last one
+repeating, or of `when:`/`value:` entries matched against the call's arguments; see
+[Answering differently per call](eval-files.md#answering-differently-per-call). The
+runner builds every mock afresh for each run, and for each *attempt* of a run: a
+transient provider failure that is retried starts a new conversation, and its tools start
+from the top of the sequence too, so the retried attempt is shown exactly what the first
+one was. A sequence's counter is locked, so a framework that runs several calls from one
+model turn in parallel still hands out each entry once — in whichever order it ran them.
+
 Every tool name in `called`, `forbidden`, or `order` must be declared in that case's
 `tools:` — including `forbidden`, since forbidding a tool the agent was never offered in
 the first place is a check that can never fire. A name that isn't declared is an

@@ -1,7 +1,8 @@
-# Five cases on the same skill, covering three concerns:
+# Six cases on the same skill, covering three concerns:
 #   - trajectory: did it look the order up before deciding -- one case where
-#     the policy forbids a refund, one where it allows it. Invisible to an
-#     output assertion.
+#     the policy forbids a refund, one where it allows it, and one with two
+#     orders where the mock answers by argument. Invisible to an output
+#     assertion.
 #   - judge: "explains it plainly" is not a substring, so a rubric-based
 #     LLM judge grades it instead.
 #   - triggering (`mode: offered`): does the agent even reach for the skill,
@@ -45,6 +46,33 @@ cases:
       max_tokens: 2000
       max_cost_usd: 0.01
     assertions:
+      - kind: contains
+        value: "5678"
+
+  # Two orders in one request. `returns:` answers by argument here -- each
+  # `when:` names the order id the call must carry -- so one case exercises
+  # "look each order up and refund only the eligible one", which a single
+  # canned reply could never tell apart.
+  - name: refunds only the order still inside the window
+    task: Please refund orders 1234 and 5678
+    tags: [refund]
+    tools:
+      - ref: lookup_order
+        returns:
+          - when: {order_id: "1234"}
+            value: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
+          - when: {order_id: "5678"}
+            value: '{"id": "5678", "status": "delivered", "days_since_delivery": 3}'
+      - ref: issue_refund
+    trajectory:
+      called: [lookup_order, issue_refund]
+      max_calls: 5
+    budget:
+      max_tokens: 3000
+      max_cost_usd: 0.01
+    assertions:
+      - kind: contains
+        value: "1234"
       - kind: contains
         value: "5678"
 

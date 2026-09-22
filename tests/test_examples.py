@@ -89,7 +89,7 @@ def test_the_log_triage_script_counts_levels_with_the_standard_library_only(tmp_
 
 
 def test_order_support_pulls_its_tools_from_the_shared_library():
-    # The four tool-bearing cases share two contracts and set their own
+    # The five tool-bearing cases share two contracts and set their own
     # scenario through `returns:` -- the case the library feature exists for.
     skill = next(s for s in load_skills(EXAMPLES / "order-support"))
     cases = {case.name: case for case in load_cases_for_skill(skill)}
@@ -100,3 +100,17 @@ def test_order_support_pulls_its_tools_from_the_shared_library():
     assert '"days_since_delivery": 45' in refuses.tools[0].returns
     assert '"days_since_delivery": 3' in refunds.tools[0].returns
     assert (EXAMPLES / "shared-tools" / "order-api.yaml").is_file()
+
+
+def test_order_support_answers_the_two_order_case_by_argument():
+    # One case, two orders: the mock's reply depends on which id the skill
+    # asked for, which a single canned `returns:` could never express.
+    skill = next(s for s in load_skills(EXAMPLES / "order-support"))
+    cases = {case.name: case for case in load_cases_for_skill(skill)}
+    lookup = cases["refunds only the order still inside the window"].tools[0]
+    assert [entry.when for entry in lookup.returns] == [
+        {"order_id": "1234"},
+        {"order_id": "5678"},
+    ]
+    assert '"days_since_delivery": 45' in lookup.returns[0].value
+    assert '"days_since_delivery": 3' in lookup.returns[1].value

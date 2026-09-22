@@ -110,7 +110,7 @@ uv run skill-lens list ./examples
 csv-report	1 case(s)	examples/csv-report
 greeting	1 case(s)	examples/greeting
 log-triage	1 case(s)	examples/log-triage
-order-support	5 case(s)	examples/order-support
+order-support	6 case(s)	examples/order-support
 ```
 
 ## `init`

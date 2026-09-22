@@ -167,10 +167,17 @@ class PydanticAIRunner:
             tools=tools,
         )
 
-    def _run_with_retries(self, agent: Any, task: str) -> Any:
+    def _run_with_retries(self, build_agent: Callable[[], Any], task: str) -> Any:
+        """Build a fresh agent for every attempt, then run it.
+
+        A retry is a new conversation, and its tools must be new too: a mock
+        whose `returns:` is consumed in call order keeps its counter in the
+        built tool, so an agent reused across attempts would hand the second
+        attempt's first call the sequence's second entry.
+        """
         settings = self._model_settings()
         return run_with_retries(
-            lambda: agent.run_sync(task, model_settings=settings),
+            lambda: build_agent().run_sync(task, model_settings=settings),
             _is_transient,
             self._retries,
             self._retry_backoff_seconds,
@@ -189,8 +196,9 @@ class PydanticAIRunner:
         offered = skill_tool_name(skill.name) if case.mode == "offered" else None
         started = time.monotonic()
         try:
-            agent = self._build_agent(skill, case, workspace, scripts)
-            result = self._run_with_retries(agent, case.task)
+            result = self._run_with_retries(
+                lambda: self._build_agent(skill, case, workspace, scripts), case.task
+            )
             messages = result.all_messages()
             usage = result.usage
             model_name = _model_name(messages, configured)

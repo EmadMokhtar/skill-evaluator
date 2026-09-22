@@ -116,6 +116,76 @@ Tool names follow the rule both OpenAI and Anthropic enforce, `^[A-Za-z0-9_-]{1,
 a hyphenated MCP tool name such as `get-pull-request` is kept as the server spells it. A
 name outside the rule is an authoring error; skill-lens never rewrites one.
 
+### Answering differently per call
+
+One `returns:` string answers every call the same way. A skill whose instructions loop
+over a tool — fetch work item A, follow its parent link, fetch B, stop when there is no
+parent — needs the mock to answer differently, and `returns:` takes two more shapes for
+that. **The shape says which rule applies.**
+
+A **list of strings** is a sequence, consumed in the order the calls arrive: the first
+call gets the first entry, the second call the second, and every call after the list is
+used up gets the **last entry again**.
+
+```yaml
+    tools:
+      - name: get_work_item
+        description: Fetch a work item by id, with its parent link
+        parameters:
+          id: string
+        returns:
+          - '{"id": "A", "parent": "B"}'
+          - '{"id": "B", "parent": null}'      # the third call and every later one get this too
+    trajectory:
+      called: [get_work_item]
+      max_calls: 2                            # the check for a loop that should have stopped
+```
+
+The last entry repeating is the steady state a skill that keeps calling should see — the
+item with no parent, the job that is done. It is not a check on how many calls were made:
+`trajectory.max_calls` is. A sequence ignores the arguments, so it is the right shape when
+the *position* of the call decides the answer (polling until done) and the wrong one when
+the *argument* does: a model that issues several calls in one turn gets the entries in
+whatever order the framework runs them.
+
+A **list of `when:`/`value:` mappings** is a lookup, answered by the first entry whose
+`when:` keys all equal the call's arguments — a subset is enough; the call may carry more
+arguments than `when:` names. An entry with no `when:` matches every call, which makes it
+the fallback.
+
+```yaml
+    tools:
+      - name: get_work_item
+        description: Fetch a work item by id, with its parent link
+        parameters:
+          id: string
+        returns:
+          - when: {id: "A"}
+            value: '{"id": "A", "parent": "B"}'
+          - when: {id: "B"}
+            value: '{"id": "B", "parent": null}'
+          - value: '{"error": "not found"}'   # no when: -- every other call lands here
+```
+
+Values are compared as YAML and JSON parse them: `when: {id: 1}` matches a call with the
+integer `1`, `when: {id: "1"}` a call with the string `"1"`, and a `true` matches only a
+boolean — never a `1`. Without a fallback, a call that matches nothing gets the fixed reply
+`no response is scripted for get_work_item with arguments {"id": "C"}` (the arguments as
+sorted JSON): the skill asked for something the case did not anticipate, which the
+transcript then shows, and a mock tool never raises.
+
+Three lookup mistakes are authoring errors (exit `2`), caught before any case runs, because
+each is a check that could never fire: a `when:` key the tool can never carry (one outside
+`parameters:`, or outside a closed `input_schema` — `additionalProperties: false` with its
+`properties` listed; an open schema may key on any name), an empty `when: {}` (drop the key
+to declare a fallback), and an entry an earlier one already answers — a fallback above it,
+the same `when:`, or a `when:` it only narrows — since the first match wins. So are an
+empty list (`returns: ''` is how an empty reply is spelled) and a list that mixes strings
+with mappings.
+
+A [`ref:`](#sharing-tools-across-eval-files) may set `returns:` in any of the three
+shapes; a lookup's `when:` keys are checked against the parameters the library declared.
+
 ### Sharing tools across eval files
 
 Several skills often front one API — one MCP server behind nine skills — and every eval
@@ -150,8 +220,9 @@ cases:
 ```
 
 The library owns the tool's **contract** — name, description, `parameters:` or
-`input_schema:` — and the case owns the **scenario**: a `ref:` may set `returns:` and
-nothing else. Any other key beside `ref:` is an authoring error naming it; a case that
+`input_schema:` — and the case owns the **scenario**: a `ref:` may set `returns:` (a
+string, a sequence or a lookup, as [above](#answering-differently-per-call)) and nothing
+else. Any other key beside `ref:` is an authoring error naming it; a case that
 needs a different contract declares the tool inline, and a `ref:` may sit in the same list
 as inline tools. After loading, the case is exactly what it would have been with the
 library's block pasted in: `trajectory:` names, the six reserved built-in names and the
