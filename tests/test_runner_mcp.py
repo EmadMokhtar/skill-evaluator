@@ -98,14 +98,14 @@ def test_bridge_config_names_this_interpreter_and_the_products_extra_keys(tmp_pa
         "mcpServers": {
             SERVER_NAME: {
                 "command": sys.executable,
-                "args": ["-m", "skill_lens.mcp_bridge", str(spec_path)],
+                "args": ["-P", "-m", "skill_lens.mcp_bridge", str(spec_path)],
             }
         }
     }
     copilot = bridge_config(COPILOT_MCP, spec_path)
     assert copilot["mcpServers"][SERVER_NAME] == {
         "command": sys.executable,
-        "args": ["-m", "skill_lens.mcp_bridge", str(spec_path)],
+        "args": ["-P", "-m", "skill_lens.mcp_bridge", str(spec_path)],
         "type": "local",
         "tools": ["*"],
     }

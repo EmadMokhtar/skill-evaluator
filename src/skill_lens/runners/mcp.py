@@ -82,7 +82,9 @@ COPILOT_MCP = McpSupport(
 # preset's `--strict-mcp-config` makes the bridge the only MCP server, the
 # `init` event lists it as connected and the tool as `mcp__<server>__<tool>`
 # (`mcp__skill-lens__lookup_order`), and `--tools` governs the built-in set
-# only -- the MCP tool stays listed under `--tools ""`.
+# only -- the MCP tool stays listed under `--tools ""`, and under `--tools
+# Bash,Read` (no `ToolSearch`) the model is sent its schema directly and
+# calls it, so no `--tools` spelling hides the mocks.
 CLAUDE_CODE_MCP = McpSupport(
     config_arg="--mcp-config={path}",
     tool_name="mcp__{server}__{tool}",
@@ -90,14 +92,17 @@ CLAUDE_CODE_MCP = McpSupport(
 
 
 def bridge_command() -> list[str]:
-    """The command a product runs to start the server: this interpreter, `-m`
-    the module. `sys.executable` is what is running skill-lens right now, so
-    the package is importable from it without any environment of its own."""
+    """The command a product runs to start the server: this interpreter, `-P`,
+    `-m` the module. `sys.executable` is what is running skill-lens right now,
+    so the package is importable from it without any environment of its own.
+    `-P` keeps the child's working directory off `sys.path`: the product
+    starts the server in the case's workspace, where a seeded `json.py` or
+    `skill_lens/` would otherwise shadow the import and kill the bridge."""
     if not sys.executable:
         raise BridgeSetupError(
             "this Python has no sys.executable, so a product cannot start the MCP bridge"
         )
-    return [sys.executable, "-m", BRIDGE_MODULE]
+    return [sys.executable, "-P", "-m", BRIDGE_MODULE]
 
 
 def bridge_spec(tools: Iterable[ToolSpec], record: Path | None) -> dict[str, Any]:
