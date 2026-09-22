@@ -38,7 +38,7 @@ per-skill minimum is not met, or when any case **errored**. Two distinctions mat
 
 - **failed** — the case ran and scored below the bar. An *eval* signal.
 - **errored** — something in the harness blew up rather than the skill scoring badly: the
-  runner (API error, timeout, missing key; a product that exited non-zero, timed out, or
+  runner (API error, timeout; a product that exited non-zero, timed out, or
   reported its own failure), or an evaluator (a judge endpoint returning 500,
   a judge verdict that does not match its rubric, a product judge whose reply holds no
   readable verdict, an offered case on a runner that does not support the mode). An *infra*

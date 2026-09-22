@@ -141,7 +141,7 @@ the tool calls it made, the tokens it spent, the time it took. Three kinds ship.
 | --- | --- | --- |
 | Fake | `fake` (the default) | nothing — scripted, offline, free |
 | Framework | `pydantic-ai`, `langchain` | the matching install extra, and an API key in the environment |
-| Product | `copilot`, `claude-code`, `cli` | the product installed; it uses its own auth, so no API key |
+| Product | `copilot`, `claude-code`, and `cli` for any command you name in `skill-lens.toml` | the product installed; it uses its own auth, so no API key |
 
 ```bash
 skill-lens run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
@@ -249,10 +249,11 @@ Every case ends in exactly one of three states, and the difference between the l
 most important distinction in the tool.
 
 - **passed** — the case ran and every check it declared held.
-- **failed** — the case ran and scored below the bar. This is a signal about *the skill*.
-- **errored** — the harness itself blew up: the provider returned a 500, the API key was
-  missing, the product exited non-zero, the judge's reply held no readable verdict. This is a
-  signal about *the infrastructure*.
+- **failed** — the case ran and scored below the bar: at least one check it declared did not
+  hold. This is a signal about *the skill*.
+- **errored** — the harness itself blew up: the provider returned a 500, the key was
+  rejected, the product exited non-zero, the judge's reply held no readable verdict. This is
+  a signal about *the infrastructure*.
 
 Conflating them would make a broken API key look like a badly written skill. An errored case
 fails the gate by default, so continuous integration never goes green on a run that did not
@@ -298,9 +299,9 @@ The gate turns the whole run into one number a pipeline can act on.
 | --- | --- |
 | `0` | The gate passed |
 | `1` | The gate failed — the pass rate was below `min_pass_rate`, a per-skill minimum was missed, or some case errored |
-| `2` | Something in your own files or flags is wrong: a bad path, malformed YAML, an unknown assertion kind, an unfilled `TODO(skill-lens)` |
+| `2` | Something about your setup is wrong — your files, your flags or your environment: a bad path, malformed YAML, an unknown assertion kind, an unfilled `TODO(skill-lens)`, an unset API key, a product's executable not on `PATH` |
 
-Exit `2` is deliberately not a gate failure. A mistake in your files says nothing about the
+Exit `2` is deliberately not a gate failure. A mistake in your setup says nothing about the
 skill, so it aborts the run rather than scoring as evidence against it.
 
 **A run that executed zero cases fails as well.** "Nothing ran" is a broken run, not a pass —
@@ -316,7 +317,7 @@ See [Gating and exit codes](gating.md).
 | --- | --- |
 | Agent Skill | A directory holding a `SKILL.md` file: instructions an agent loads to do one kind of task. |
 | Arm | One side of a comparison run — `candidate` (the skill as it is now) or `baseline`. |
-| Assertion | A rule checked against the agent's final output text, such as `contains` or `regex`. |
+| Assertion | A rule checked against the agent's final output text, or against a file it produced — such as `contains` or `file-produced`. |
 | Baseline | What the candidate is measured against: an empty skill (`none`) or the previous version (`previous`). |
 | Budget | A limit on tokens, cost or latency that a case declares and the run checks. |
 | Bundle | The `scripts/`, `references/` and `assets/` directories beside a `SKILL.md`. |
