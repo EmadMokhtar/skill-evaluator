@@ -1804,7 +1804,7 @@ wheels = [
 
 [[package]]
 name = "skill-lens"
-version = "0.14.2"
+version = "0.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "jsonschema" },

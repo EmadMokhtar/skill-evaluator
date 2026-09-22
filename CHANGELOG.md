@@ -1,3 +1,9 @@
+## v0.15.0 (2026-09-22)
+
+### Feat
+
+- refuse a rubric entry phrased against a mock tool's returns (#65)
+
 ## v0.14.2 (2026-09-22)
 
 ### Fix
