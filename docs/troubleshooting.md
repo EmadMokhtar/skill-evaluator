@@ -10,7 +10,7 @@ Two facts explain most of what follows.
 | Code | Meaning |
 | --- | --- |
 | `0` | The gate passed |
-| `1` | The gate failed — cases ran, and the result was below the bar |
+| `1` | The gate failed — cases ran and scored below the bar, a case errored, or [no case ran at all](#no-eval-cases-ran) |
 | `2` | A user or authoring error — something in your own files or flags is wrong, so nothing was measured |
 
 **`failed` is not `errored`.** A *failed* case ran and scored below the bar: that is a
