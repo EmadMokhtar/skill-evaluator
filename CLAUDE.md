@@ -64,13 +64,16 @@ their own data shapes.
 These are decided behaviors, not accidents — several were bugs caught in review. Preserve
 them, and expect a test asserting each.
 
-The full rationale for each of these — plus the module map and extension points — is in
-[`ARCHITECTURE.md`](ARCHITECTURE.md). Keep the two in sync: this list is the condensed
-form, that file is the explanation.
+The full rationale for each of these is in [`docs/invariants.md`](docs/invariants.md); the
+module map and extension points are in [`ARCHITECTURE.md`](ARCHITECTURE.md). This list is
+the condensed form, that page is the explanation, and `tests/test_invariants_sync.py`
+fails if the two drift apart — so a new invariant is added in both places or neither.
 
-- **`errored` ≠ `failed`.** `failed` = the case ran and scored below bar (an eval signal).
-  `errored` = the runner itself blew up (an infra signal). Runners must **never raise** for
-  provider failures — set `RunResult.error` instead. Errored cases fail the gate by default.
+- **`errored` is not `failed`.** `failed` = the case ran and scored below bar (an eval
+  signal). `errored` = the runner itself blew up (an infra signal). Runners must **never
+  raise** for provider failures — set `RunResult.error` instead; judges do the same with
+  `JudgeVerdict.error`, and an errored *evaluator* errors the case, so a judge endpoint
+  returning 500 never reads as a skill that got worse. Errored cases fail the gate by default.
 - **A run executing zero cases fails the gate.** "Nothing ran" is a broken run, not a pass.
   `gating.evaluate_gate` distinguishes the causes (no skills found / all skipped for having
   no cases / all filtered out by `--tag`).
@@ -78,19 +81,28 @@ form, that file is the explanation.
   `kind:`, a malformed regex, or an unknown YAML key is a mistake in the user's files, not a
   signal about the skill. `orchestrator.run_evals` deliberately lets these propagate; `cli.py`
   catches them via `_AUTHORING_ERRORS` and exits 2.
-- **Exit codes are the CI contract:** gate pass `0`, gate fail `1`, user/authoring error `2`.
+- **Exit codes are the CI contract.** Gate pass `0`, gate fail `1`, user/authoring error `2`.
   In `cli.py`, a JSON-write failure only escalates to 2 when the gate itself passed — it must
   not mask an already-failing gate.
-- **An unfilled scaffold aborts the run.** A case still containing `TODO(skill-lens)` is
-  an authoring error (exit 2), checked in `cases/loader.py` before validation so the
-  message names the field. The rule is the loader's, so hand-written stubs get it too.
-- **`extra="forbid"`** on `EvalCase` / `AssertionSpec` / `ToolSpec` / `TrajectorySpec` /
-  `BudgetSpec` / `Config` / `RunResult`. Without it a typo like `assertion:` yields a
-  vacuously-passing case.
+- **`run_evals` is library API: a new parameter is appended, never inserted.** A caller that
+  bound a parameter positionally must still bind the same thing, so `keep_workspace` and
+  `workspace_limits` keep their places after `executor_factory` and `options` sits last;
+  passing `options` together with either legacy argument raises `ValueError`.
+- **An unfilled scaffold is an authoring error, not a failure.** A case still containing
+  `TODO(skill-lens)` aborts the run (exit 2), checked in `cases/loader.py` before validation
+  so the message names the field. The rule is the loader's, so hand-written stubs get it too.
+- **`extra="forbid"` on every user-authored model.** `EvalCase` / `AssertionSpec` / `ToolSpec`
+  / `TrajectorySpec` / `BudgetSpec` / `Config` / `RunResult`. Without it a typo like
+  `assertion:` yields a vacuously-passing case. On `RunResult` it also makes writing the
+  derived `tokens` field a loud error rather than a total that silently disagrees with the
+  input/output split it was priced from.
 - **All file IO pins `encoding="utf-8"`** and re-raises as a typed parse error
   (`SkillParseError` / `CaseParseError` / `ConfigError`) naming the file and field.
 - **YAML goes through `yaml_loading.safe_load`**, never `yaml.safe_load`. The custom loader
-  stops YAML 1.1 from turning bare `yes`/`no`/`on`/`off` into booleans.
+  stops YAML 1.1 from turning bare `yes`/`no`/`on`/`off` into booleans. The same hazard in the
+  skill loader: a `version:` that YAML does not parse as a string is a `SkillParseError`
+  (exit 2), because `1.20` and `1.2` resolve to one float and would compare equal under
+  `--baseline previous`; three-part semver (`1.0.0`) is already a string and needs no quoting.
 - **Secrets come from environment variables only** — never from `skill-lens.toml`.
 - **A base URL is config; a key is environment** (issue #54). `base_url` / `judge_base_url`
   in the file, `--base-url` on the flag: flag > file > the provider's own variable
@@ -118,7 +130,7 @@ form, that file is the explanation.
   narrower test pins the exact lines history produced, so a commit subject written after the
   rename that carries the old name still fails.
 - **`FakeRunner.run` returns `model_copy(deep=True)`** so a caller cannot corrupt scripted state.
-- **No agent-framework type may appear outside the four adapter modules** —
+- **Agent-framework imports appear in exactly four modules** —
   `runners/pydantic_ai.py`, `judges/pydantic_ai.py`, `runners/langchain.py`,
   `judges/langchain.py`. `runners/tools.py` builds framework-neutral `AgentTool`s (name +
   JSON schema + callable); `runners/prompting.py` and `runners/retry.py` hold the prompt and
@@ -128,8 +140,6 @@ form, that file is the explanation.
   them imports nothing from the project. `tests/test_framework_isolation.py`
   guards this: it asserts no other module under `src/skill_lens/` imports `pydantic_ai`,
   `langchain*` or `langgraph` at the top level.
-- **`RunResult.tokens` is derived**, not stored — `extra="forbid"` makes writing it a loud
-  error rather than a total that silently disagrees with the input/output split it was priced from.
 - **Cost lookup degrades, never raises.** An unpriced model yields `cost_usd = 0.0` plus a
   `cost_note`; pricing is reporting metadata and must never be why a run errors. An unpriceable
   `max_cost_usd` is skipped in `BudgetEvaluator` — not counted as passed, recorded as a failing
@@ -144,14 +154,11 @@ form, that file is the explanation.
 - **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act;
   a missing cassette skips rather than fails, but a mismatched request fails rather than
   reaching the network.
-- **An errored *evaluator* errors the case.** `errored` ≠ `failed` now applies to evaluators
-  too: a judge endpoint returning 500 must not read as a skill that got worse.
-- **Judges never raise for provider failures** — they set `JudgeVerdict.error`.
-- **skill-lens derives `passed` and `score` from per-check verdicts.** The judge is never
-  asked for a blended number, and a check that passes without evidence is recorded as a
-  failure.
-- **An unscripted `FakeJudge` errors rather than passing.** That is what makes
-  `judge = "fake"` safe as the built-in default: an unchecked rubric is never a green case.
+- **Nothing scores a vacuous pass.** skill-lens derives `passed` and `score` from per-check
+  verdicts — the judge is never asked for a blended number — a check that passes without
+  evidence is recorded as a failure, and an unscripted `FakeJudge` errors rather than passing.
+  That last one is what makes `judge = "fake"` safe as the built-in default: an unchecked
+  rubric is never a green case.
 - **Judge spend never enters `RunResult`.** It lives on `EvalScore.cost_usd` and is reported
   as judge overhead; `budget:` measures the skill, not the harness.
 - **A rubric entry phrased against a mock tool's `returns:` is an authoring error** (exit 2,
@@ -165,52 +172,60 @@ form, that file is the explanation.
   `SYSTEM_PROMPT` is the second layer: it tells the judge what it was not shown and that a
   check decidable only against that is a fail, so a line the vocabulary misses fails
   honestly instead of passing unread.
-- **A `version:` that YAML does not parse as a string is an authoring error.** `SkillParseError`,
-  exit 2. YAML resolves `1.20` and `1.2` to the same float, so two genuinely different versions
-  would silently compare equal under `--baseline previous`; three-part semver (`1.0.0`) is
-  already a string and needs no quoting.
-- **Absent `--baseline`, behavior is identical to the single-arm run.** `none` is a *kind* of
+- **Absent `--baseline`, what runs is identical to a single-arm run.** `none` is a *kind* of
   baseline; the flag being unset — not `--baseline none` — is what turns comparison off.
-- **Baseline outcomes never count toward the gate's pass rate or `errored`.** Every
+- **Baseline outcomes never count toward the gate**, and never toward `errored`. Every
   `RunReport` aggregate reads `candidate_outcomes`; `baseline_outcomes` / `baseline_errored`
   surface the comparison side apart from them.
-- **The baseline arm never receives the skill's name under `--baseline none`.** A skill with
-  both `description` and `instructions` empty gets `BASELINE_PREAMBLE` instead of the normal
-  `# {name}` header, keyed on emptiness rather than on which arm is running.
-- **An unresolvable baseline is reported, never assumed to be "no change".** `resolve_previous`
-  returns `BaselineUnavailable`; treating silence as "no change" would let a repo pass
-  `--min-delta` forever by deleting its git history.
-- **The delta is paired: a case excluded from one arm is excluded from both.** Keeping the
+- **The baseline arm never receives the skill's name, description or instructions** under
+  `--baseline none`. A skill with both `description` and `instructions` empty gets
+  `BASELINE_PREAMBLE` instead of the normal `# {name}` header, keyed on emptiness rather
+  than on which arm is running.
+- **A baseline that cannot be resolved is reported, never assumed to be "no change".**
+  `resolve_previous` returns `BaselineUnavailable`; treating silence as "no change" would let
+  a repo pass `--min-delta` forever by deleting its git history.
+- **The delta is paired**: a case excluded from one arm is excluded from both. Keeping the
   surviving half of a broken pair would bias the aggregate with an unmeasured comparison.
-- **`--min-delta` without a baseline is a user error (exit 2); gating on a delta with nothing
-  comparable fails.** Both are the vacuous-pass rejection this project applies everywhere else.
+- **`--min-delta` without `--baseline` is a user error (exit 2)**, and gating on a delta with
+  nothing comparable fails. Both are the vacuous-pass rejection this project applies
+  everywhere else.
 - **Low-signal and high-variance flags never change the exit code.** They are diagnostics
   about the eval suite, not verdicts on the skill.
 - **`resolve_previous` never raises for environmental failures** — no `git`, no repo, an
   untracked `SKILL.md`, an exhausted history window all come back as `BaselineUnavailable`.
-- **JUnit reports the candidate arm only, and `<failure>`/`<error>` mirror `failed`/`errored`.**
-  A failing baseline is evidence the skill helped, not a red build. `errored` covers a runner
-  that raised *and* an evaluator that did — `_error_body` reads `RunResult.error` first and
-  falls back to an errored evaluator's own `detail`, so a judge endpoint returning 500 is never
-  misreported as the runner's fault.
+- **Deterministic evaluators emit per-check verdicts.** Ids come from the case, never the
+  result, so the same id names the same check in both arms: `{kind}[{index}]` for assertions,
+  `called:{tool}` / `forbidden:{tool}` / `order` / `max_calls` / `skill_triggered` /
+  `call_args[{index}]` for trajectory, and the three limit names for budget.
+- **JUnit reports the candidate arm only.** A failing baseline is evidence the skill helped,
+  not a red build.
+- **`<failure>` is `failed`; `<error>` is `errored`.** `errored` covers a runner that raised
+  *and* an evaluator that did — `_error_body` reads `RunResult.error` first and falls back to
+  an errored evaluator's own `detail`, so a judge endpoint returning 500 is never misreported
+  as the runner's fault.
 - **JUnit output is always well-formed XML.** `ElementTree` emits control characters raw, so
-  illegal characters are stripped before they reach the tree. A zero-case run emits an
-  `<error>`, never an empty `tests="0"` suite that would render green against exit code 1.
-- **Markdown truncation gives up detail before it gives up meaning.** Optional blocks are
-  dropped first; if gate reasons still overflow the budget they are elided behind a truthful
-  `+N more reasons` count rather than cut silently, so a clipped comment can never imply the
-  reasons it shows were all of them; only a budget too small to hold the verdict itself falls
-  back to a hard character cut. It lives in the renderer, because only the renderer knows where
-  a `<details>` block ends or a count line would be cut in half.
+  illegal characters are stripped before they reach the tree.
+- **A zero-case run produces a JUnit `<error>`, not an empty green suite.** An empty
+  `tests="0"` suite would render green against exit code 1.
+- **Markdown truncation gives up detail before it gives up meaning, and never hides how much
+  it gave up.** Optional blocks are dropped first; if gate reasons still overflow the budget
+  they are elided behind a truthful `+N more reasons` count rather than cut silently, so a
+  clipped comment can never imply the reasons it shows were all of them; only a budget too
+  small to hold the verdict itself falls back to a hard character cut. It lives in the
+  renderer, because only the renderer knows where a `<details>` block ends or a count line
+  would be cut in half.
 - **Reporters never do IO to a service.** The tool renders; the workflow posts.
-- **`--concurrency 1` constructs no executor** and runs the plain sequential loop; outcome
-  order is submission order rather than completion order at every concurrency level. An
-  authoring error still aborts the run deterministically: only the futures queued *after* the
-  failure are cancelled, the executor always shuts down with `cancel_futures=True` (including
-  when `submit` itself raises), and a result list shorter than the work list is a raised error,
-  never a quiet partial run. Discovery is now always a separate sequential pass ahead of
-  execution, so a malformed eval file anywhere aborts before any case runs. Runners, judges and
-  evaluators must have no mutable state touched by `run`/`evaluate`/`judge`.
+- **`--concurrency 1` constructs no executor** and runs the plain sequential loop. Discovery
+  is always a separate sequential pass ahead of execution, so a malformed eval file anywhere
+  aborts before any case runs.
+- **Outcome order is submission order, never completion order** — at every concurrency level,
+  so identical runs do not churn their output.
+- **Concurrency never turns an authoring error into a case failure, and the surfaced error is
+  deterministic.** Only the futures queued *after* the failure are cancelled, the executor
+  always shuts down with `cancel_futures=True` (including when `submit` itself raises), and a
+  result list shorter than the work list is a raised error, never a quiet partial run.
+- **Runners, judges and evaluators must be safe to share across threads** — no mutable state
+  touched by `run`/`evaluate`/`judge`.
 - **The action fails closed.** `shell: bash` already runs under `-e`; the run step captures the
   CLI's exit code itself (`code=0; skill-lens run ... || code=$?`) before `-e` can discard it,
   every later step carries `if: always()`, and the final step re-raises with `exit
@@ -231,8 +246,8 @@ form, that file is the explanation.
   `bumped` output `publish` reads gate on `steps.push.outputs.pushed`, never on the bump alone,
   and the script takes the version from `env`, not a `${{ }}` expression, so the tests can run
   it verbatim.
-- **The pushed release tag is annotated, and the job verifies the tag on `origin` is this
-  run's before building.** `git push --follow-tags` pushes only annotated tags, so
+- **The pushed release tag is annotated, and the job proves the tag on `origin` is this
+  run's.** `git push --follow-tags` pushes only annotated tags, so
   `[tool.commitizen] annotated_tag = true` exists specifically to make Commitizen create one
   instead of its default lightweight tag — without it, the bump commit would reach `main`
   while the tag stayed on the runner and vanished. Because `publish` is reached through
@@ -242,7 +257,7 @@ form, that file is the explanation.
   rejects, a same-named tag already on origin, so the check reads `refs/tags/<tag>^{}` (the
   peeled commit; a lightweight tag's ref is the commit itself) and requires it to equal the
   commit just pushed. The version reaches that script through `env`, like the push step's.
-- **The version in `action.yml` always equals the package version**, and the pairing between a
+  **The version in `action.yml` always equals the package version**, and the pairing between a
   version spelling and a `version_files` pattern is guarded in *both* directions — every
   spelling has a pattern that rewrites it, and every pattern still rewrites a line carrying the
   current version. All of it lives in `tests/test_release_config.py`. The second direction is
@@ -254,21 +269,22 @@ form, that file is the explanation.
   and the second aborts the release if it has no other line. **Every version spelling gets a
   line of its own.** A further test requires every spelled version to *be* the current one;
   a branch cut before a release and merged after it adds lines at the old version that
-  `cz bump` would otherwise leave stale forever.
-- **The tag prefix is derived, not duplicated.** `release.yml` reconstructs the tag to look it
-  up after pushing, and `tests/test_release_workflow.py` requires that spelling to match
+  `cz bump` would otherwise leave stale forever. **The tag prefix is derived, not
+  duplicated**: `release.yml` reconstructs the tag to look it up after pushing, and
+  `tests/test_release_workflow.py` requires that spelling to match
   `[tool.commitizen] tag_format`. Changing the format alone would leave the release correctly
   tagged but the lookup wrong — failing *after* the push, which spends a version that can
   never be published.
 - **No long-lived publishing credential exists.** Trusted Publishing only.
-- **A cassette refresh re-records with `--record-mode=rewrite`, never `once`** — `once` only
-  fills in a missing cassette and write-protects one already loaded, so it cannot refresh an
-  existing recording, which is the workflow's whole purpose. It then stages the recordings
+- **A cassette refresh proves its recordings replay, and checks them for secrets, before
+  pushing.** It re-records with `--record-mode=rewrite`, never `once` — `once` only fills in a
+  missing cassette and write-protects one already loaded, so it cannot refresh an existing
+  recording, which is the workflow's whole purpose. It then stages the recordings
   (`git add -A -- tests/cassettes`) before either check that follows, because `git diff` can't
   see an untracked file and a freshly re-recorded cassette is exactly that; proves the new
   recordings replay under `--record-mode=none`; and checks the staged diff for secrets —
   all before pushing, and it never opens a pull request that CI has not run on.
-- **A built-in workspace tool never raises; it returns a message the model can read.**
+- **A built-in tool never raises; it returns a message the model can read.**
   `Workspace`'s own methods raise (`PathRefused`, `WorkspaceError`) for the loader and
   evaluators to catch as authoring/infra errors; `runners/tools.py` catches those same
   exceptions and turns them into ordinary tool results instead.
@@ -280,10 +296,10 @@ form, that file is the explanation.
   atomic; a shared directory would let the baseline arm read the candidate's output.
 - **The workspace preamble is byte-identical in both arms and never names the skill** —
   otherwise `--min-delta` measures the preamble instead of the skill.
-- **`RunResult.workspace` is non-null only while the directory exists**, and the orchestrator
-  stamps it unconditionally after every run so a non-conforming runner cannot smuggle a path
-  of its own into the report.
-- **Workspace cleanup never changes a verdict**, and lives in a `finally` so an authoring
+- **`RunResult.workspace` is non-null only while the directory exists, and the orchestrator
+  stamps it unconditionally** after every run, so a non-conforming runner cannot smuggle a
+  path of its own into the report.
+- **Workspace cleanup never changes a verdict, and lives in a `finally`** so an authoring
   error raised by an evaluator still deletes the directory on its way out.
 - **A workspace creation or seeding failure is `errored`, never `failed`.** A full disk or a
   half-seeded directory says nothing about the skill.
@@ -293,7 +309,7 @@ form, that file is the explanation.
   opposite of the response fence's rule, because each artifact block is closed immediately.
 - **`file:` or `judge.artifacts` in a case with no `workspace:` block is an authoring error**
   (exit 2), and so is a `judge.artifacts` entry that could never be produced.
-- **Judge artifact bytes are capped and truncation is visible**; a sentinel never consumes
+- **Judge artifact bytes are capped, and truncation is visible**; a sentinel never consumes
   the content budget, because the cap bounds untrusted model content and a sentinel is fixed
   harness text.
 - **An unknown assertion kind is caught at load time**, before any case runs and before any
@@ -302,25 +318,32 @@ form, that file is the explanation.
   the way through the orchestrator would leave the default silently in force.
 - **Every kept directory is printed, however keeping was turned on** — `--keep-workspace` or
   the config key. A persistent setting with no visible output would fill a disk silently.
-- **Output is expanded only under non-passing candidate outcomes, and a cut is never silent.**
-  `reporters/failure_context.py` computes one excerpt for all three reporters; passing and
-  baseline outcomes are never expanded, and a truncated output states the exact count removed.
-- **A `--case` matching nothing fails the gate** — the fourth zero-cases cause. `--case` has
-  no config key: a filter that lived in the file would let a green run measure less than the
-  repository declares.
+- **Output is expanded only under non-passing candidate outcomes.** Passing outcomes and
+  baseline outcomes are never expanded, so fifty green cases stay fifty lines.
+- **A cut to the failure excerpt is never silent** — a truncated output states the exact
+  count removed.
+- **The three reporters render one `FailureContext`.** `reporters/failure_context.py`
+  computes one excerpt for console, Markdown and JUnit; two computed separately would drift
+  the first time one of them changed.
+- **A `--case` matching nothing fails the gate** — the fourth zero-cases cause, beside no
+  skills, no cases and `--tag`.
+- **`--case` has no config key**: a filter that lived in the file would let a green run
+  measure less than the repository declares.
 - **Every candidate `(skill, case, runner)` outcome counts toward the gate, and none counts
   twice.** A runner named twice — on the flag or in `default_runner` — is a user error (exit
   2), not de-duplicated: under `--repeat` and `--baseline` a duplicate would weight one
   framework's vote double. An empty `default_runner` list is a config error naming the field.
-- **`--runner` replaces `default_runner` wholesale; it never appends.** Every other flag
-  replaces its key, and an appending flag would make "only LangChain, this once" impossible
-  from a repository whose `skill-lens.toml` lists both runners.
+  `--runner` replaces `default_runner` wholesale and never appends: every other flag replaces
+  its key, and an appending flag would make "only LangChain, this once" impossible from a
+  repository whose `skill-lens.toml` lists both runners.
 - **`init` never creates an `evals/` directory beside existing `*.eval.yaml` files**
-  (`scaffold_target`), and **batch `init` never overwrites** — a skill with any eval file is
-  skipped and `--force` in batch mode is a user error.
+  (`scaffold_target`) — discovery prefers `evals/` when it exists, so creating it would hide
+  the files already there from every later run.
+- **Batch `init` never overwrites** — a skill with any eval file is skipped, and `--force` in
+  batch mode is a user error.
 - **The unfilled-scaffold scan covers mapping keys as well as values.**
-- **`examples/greeting` stays at `1.1.0` or later.** The bump is what makes `--baseline
-  previous` resolvable from a checkout; `tests/test_examples.py` pins it.
+- **`examples/greeting` stays at `1.1.0` or later, with `1.0.0` in history.** The bump is what
+  makes `--baseline previous` resolvable from a checkout; `tests/test_examples.py` pins it.
 - **An imported mock is the server's schema verbatim, and `returns` is never invented.**
   `mcp-import` copies `name` and `inputSchema` into `input_schema:` byte-for-byte and writes
   the `TODO(skill-lens)` sentinel for `returns` (and a missing `description`); a pasted block
@@ -330,7 +353,7 @@ form, that file is the explanation.
 - **The shorthand is closed; a declared schema is open.** `build_mock_tool` injects
   `additionalProperties: false` only for `parameters:`; an `input_schema` is deep copied
   and passed as written.
-- **A tool name is `^[A-Za-z0-9_-]{1,64}$`** — what providers accept — never rewritten.
+- **A tool name is what providers accept** — `^[A-Za-z0-9_-]{1,64}$`, never rewritten.
   `skill_tool_name` (the offered-skill tool) is the one rewrite, total over the same rule:
   non-`[A-Za-z0-9_]` → `_` (hyphen too — the cassettes pin `order_support`), leading digit
   → `skill_`, then cut to 64. A Python identifier was not enough (`café`).
@@ -341,79 +364,91 @@ form, that file is the explanation.
   a bool only ever equals a bool (`True == 1` in Python would let `limit: 1` pass on `true`).
   No runner changed — every adapter and trace parser already fills `ToolCall.arguments`; a
   `_raw` payload never matches and shows in the evidence.
-- **A tool that was never called fails `call_args`, under `every: true` too.** An entry
-  carries exactly one of `contains` / `equals`; `contains: {}` is refused (it is `called:`
-  spelled longer) and `equals: {}` is kept (called with no arguments). The shape rules are a
-  `model_validator` on `CallArgsSpec`, so a programmatic case gets them; the declared-`tool`
-  rule is the runner's, in `check_trajectory_names` beside `called` / `forbidden` / `order`
-  (see the preflight bullet below). Ids are positional
-  `call_args[{index}]`; a failing check's evidence renders the arguments seen and announces
-  a cut.
-- **`returns:` has three shapes, and the shape says which rule applies.** A string answers
-  every call; a `list[str]` is a sequence consumed in call order, its **last entry
-  repeating** once used up (`trajectory.max_calls` is the check for a loop that should have
-  stopped); a `list[ToolResponse]` (`when:`/`value:`) is a lookup answered by the first
-  entry whose `when:` keys all equal the call's arguments, an entry with no `when:` being
-  the fallback. An empty list or a mixed list is refused by `ToolSpec` itself;
-  `ToolRef.returns` takes the same three shapes and nothing else.
-- **A sequence's counter lives in the built tool, never on the runner, and a retried
-  attempt gets fresh tools.** `build_mock_tool` keeps a locked counter in a closure, so each
-  arm, attempt and work item starts from the top and parallel calls from one model turn
-  each consume one entry; both keyed adapters build the agent *inside* the retried
-  callable, or a transient 429 would hand the retry's first call the second entry.
-- **A lookup entry that could never fire is an authoring error** (exit 2, load time, for an
-  inline tool, a library tool and a `ref:` override alike): a `when:` key the tool's closed
-  schema can never carry (`parameters:`, or an `input_schema` with `additionalProperties:
-  false` and listed `properties`; an open schema may key on anything), an empty `when: {}`,
-  or an entry an earlier entry already answers (a fallback above it, the same `when:`, or a
-  `when:` it only narrows) — `check_tool_returns` uses `ToolResponse.matches` itself, so
-  "unreachable" means what the runtime would do.
-- **A call no lookup entry answers gets `NO_RESPONSE_SCRIPTED`, never an exception** — the
-  tool's name and the arguments as sorted JSON with `default=str`. A `when:` matches by the
-  `call_args.contains` rule through the one matcher, `matching.structural_match` (a subset
-  at every level, a bool only ever equal to a bool): a YAML `true` never answers a model's
-  `1`, and `when:` and `call_args` can never drift apart.
-- **`EvalCase.tools` holds only `ToolSpec`; a `ref:` is resolved by the case loader on the
-  raw mapping before validation.** No runner, evaluator, reporter or product preflight ever
+- **A tool that was never called fails `call_args`, under `every: true` too.** "At least one
+  call matched" and "every call matched" are both false over zero calls, and a vacuous pass
+  is refused here as everywhere else.
+- **One subject per `call_args` entry.** An entry carries exactly one of `contains` /
+  `equals`; `contains: {}` is refused (it is `called:` spelled longer) and `equals: {}` is
+  kept (called with no arguments). The shape rules are a `model_validator` on `CallArgsSpec`,
+  so a programmatic case gets them; the declared-`tool` rule is the runner's, in
+  `check_trajectory_names` beside `called` / `forbidden` / `order`.
+- **Ids are positional, `call_args[{index}]`**, because two entries may name one tool, and
+  derived from the case so both arms pair; a failing check's evidence renders the arguments
+  seen and announces a cut.
+- **`returns:` takes three shapes, and the shape says which rule applies.** A string answers
+  every call; a `list[str]` is a sequence consumed in call order; a `list[ToolResponse]`
+  (`when:`/`value:`) is a lookup answered by the first entry whose `when:` keys all equal the
+  call's arguments, an entry with no `when:` being the fallback. An empty list or a mixed list
+  is refused by `ToolSpec` itself; `ToolRef.returns` takes the same three shapes and nothing
+  else.
+- **A sequence repeats its last entry once used up** — the steady state a skill that keeps
+  calling should see, with `trajectory.max_calls` as the check for a loop that should have
+  stopped. The counter lives in the built tool, never on the runner (`build_mock_tool` keeps
+  a locked counter in a closure), so each arm, attempt and work item starts from the top and
+  parallel calls from one model turn each consume one entry.
+- **A retried attempt gets fresh tools.** Both keyed adapters build the agent *inside* the
+  retried callable, or a transient 429 would hand the retry's first call the second entry.
+- **A lookup entry that could never answer a call is an authoring error** (exit 2, load time,
+  for an inline tool, a library tool and a `ref:` override alike): a `when:` key the tool's
+  closed schema can never carry (`parameters:`, or an `input_schema` with
+  `additionalProperties: false` and listed `properties`; an open schema may key on anything),
+  an empty `when: {}`, or an entry an earlier entry already answers (a fallback above it, the
+  same `when:`, or a `when:` it only narrows) — `check_tool_returns` uses
+  `ToolResponse.matches` itself, so "unreachable" means what the runtime would do.
+- **A call no lookup entry answers gets a message, never an exception** — the model reads
+  `NO_RESPONSE_SCRIPTED` with the tool's name and the arguments as sorted JSON with
+  `default=str`, and the transcript shows it.
+- **A `when:` matches by the `call_args.contains` rule, through the one matcher**,
+  `matching.structural_match` (a subset at every level, a bool only ever equal to a bool): a
+  YAML `true` never answers a model's `1`, and `when:` and `call_args` can never drift apart.
+- **`EvalCase.tools` holds only `ToolSpec`**; a `ref:` is resolved by the case loader on the
+  raw mapping before validation. No runner, evaluator, reporter or product preflight ever
   sees a reference; the product `tools:` refusal, the duplicate-name, built-in-name,
   offered-skill and trajectory checks all read the resolved tool.
 - **A `ref:` may set `returns:` and nothing else** — the library owns the contract, the
   case owns the scenario. `ToolRef` is `extra="forbid"`.
 - **An unresolvable `ref:` is an authoring error at load time** (exit 2): no
   `tool_libraries:` key, an unknown name (the message lists the declared names), a missing,
-  unreadable or malformed library. A name two imported files declare is refused naming
-  both; so is one file declaring a name twice or imported twice.
-- **Library paths are relative to the eval file, never the working directory, never
-  absolute**; `..` is allowed. A library is a top-level `tools:` list and nothing else, and
-  is checked as an eval file is (sentinel, name rule, unknown keys, schema), each refusal
-  naming the library file and the tool's position. The resolver never mutates parsed YAML.
+  unreadable or malformed library. Never an errored or failed case.
+- **A name two imported libraries declare is refused naming both files** — never resolved by
+  position; so are one file declaring a name twice and one file imported twice.
+- **Library paths are relative to the eval file, never the working directory, and never
+  absolute**; `..` is allowed, because the library sits above the skill by design.
+- **A library is checked as an eval file is** — the sentinel, the name rule, unknown keys and
+  schema validity — each refusal naming the library file and the tool's position.
+- **A library is a top-level `tools:` list and nothing else**, which is the block
+  `mcp-import` prints.
+- **The resolver never mutates parsed YAML.** An anchored `tools:` list aliased into two
+  cases resolves in both, because the resolver returns a new mapping with a new list.
 - **The product sees `SKILL.md` verbatim (its text as written; line endings are
   normalised).** `Skill.markdown` is the file; only the loader
   and the baseline resolver set it; `--baseline none` has none, so no directory is written.
   Beside it go `scripts/`, `references/` and `assets/` and nothing else.
-- **A product runner's prompt is the task verbatim; the baseline-none arm never sees the
-  skill's name.** `loaded` invokes the skill by the product's own spelling; `offered` sends
-  the bare task and reads the product's load signal — Copilot's `skill` tool request (its
-  `skill.invoked` event is the slash invocation's only), Claude Code's `Skill` call — and a
-  product without one (`cli`) makes `offered` an authoring error, never a silent `false`.
+- **The prompt is the task verbatim, and the baseline-none arm never sees the skill's name.**
+  The product owns its system prompt; anything skill-lens added would be part of what
+  `--min-delta` measures. `loaded` invokes the skill by the product's own spelling; `offered`
+  sends the bare task; the baseline arm gets the bare task in both modes.
+- **`skill_triggered` comes only from the product's own load signal** — Copilot's `skill` tool
+  request (its `skill.invoked` event is the slash invocation's only), Claude Code's `Skill`
+  call. A product without one (`cli`) makes `offered` an authoring error, never a silent
+  `false`, which would pass every negative control.
 - **A limit the product cannot measure fails, it never passes.** `RunResult.usage_note` for
   tokens mirrors `cost_note` for cost in `BudgetEvaluator`: a declared `max_tokens` under a
   non-empty `usage_note` is a failing *not evaluated* check, excluded from `score`'s divisor.
-- **A truncated product trace is `RunResult.error`, never a partial parse**; a complete
+- **A truncated trace is `RunResult.error`, never a partial parse**; a complete
   trace carrying the product's own error message wins over the exit code.
 - **Naming a product runner is the trust decision, and the report says so.** Prompts
   disabled, full environment, no sandbox; `allow_scripts` governs only `run_script`.
   `TRUST_NOTE` lives on `ProductStatus.trust`, on the model, so the three reporters cannot
   drift.
-- **Product preflight spends nothing**: executable found on `PATH` and, for the two
+- **Preflight spends nothing**: executable found on `PATH` and, for the two
   presets, executed (`--version`; `cli` has no version command), skill names checked,
   `tools:` refused under `cli` and under a preset whose `command` names another executable,
-  `trajectory:`/`offered` refused under `cli`, and — when a planned case declares `tools:` —
-  the MCP bridge started once with `--check` and `--available-tools` refused in
-  `[runners.copilot]`, all before the first case; only the candidate-arm cases that will run
-  are inspected, once each.
-- **The declared-name rule for `trajectory:` is the runner's, made in preflight — never the
-  loader's.** `fake`, `pydantic-ai` and `langchain` refuse (`UndeclaredTool`, exit 2, before
+  and `trajectory:`/`offered` refused under `cli`, all before the first case; only the
+  candidate-arm cases that will run are inspected, once each.
+- **Which tools a case has is the runner's to know, so the declared-name rule for
+  `trajectory:` is made in preflight, per runner — never in the loader.** `fake`,
+  `pydantic-ai` and `langchain` refuse (`UndeclaredTool`, exit 2, before
   any case runs) a `called` / `forbidden` / `order` / `call_args` name that is not one of the case's
   `tools:` or, with a `workspace:`, a built-in; a product preset refuses no name, because a
   product's tools (`Bash`) cannot be listed — under it a name is either one of the case's
@@ -422,28 +457,44 @@ form, that file is the explanation.
   cannot know the runner — one invocation may run one case through both kinds — so
   `skill-lens list` accepts any name. `check_trajectory_names` in `runners/preflight.py` is
   the one implementation, and its message names the runner.
-- **A case's `tools:` reach a preset product through the MCP bridge, and the product starts
-  it.** `runners/mcp.py` writes the spec and the config into a fresh directory (never the
-  working directory), appends the config flag as the *last* argv element, one element with
-  `=` (Claude Code's `--mcp-config` is variadic), and deletes the directory in a `finally`.
-  `mcp_bridge.py` imports only `matching` from the project (a `when:` matches by the one
-  rule), answers `returns:` in all three shapes, and writes only JSON to stdout. No opt-in:
-  a mock returns canned text and executes nothing, so `TRUST_NOTE` is unchanged. The trace
-  names the tool the product's way and `restore_tool_names` maps each declared tool back by
-  its exact spelling; other calls keep the product's name. Tool calls still come from the
-  trace, never from the bridge's record. A product that ran but never listed the bridge's
-  tools (the record's `list` event) is `RunResult.error`, never a failed `called:`; a trace
-  error wins over that check. `Config.product` drops `mcp` with `judge_args` and the version
-  probe when `command` names another executable. The product judge never gets a bridge.
+- **A case's `tools:` reach a preset product through a stdio MCP server skill-lens ships, and
+  the product starts it.** `runners/mcp.py` writes the spec and the config into a fresh
+  directory (never the working directory), appends the config flag as the *last* argv element,
+  one element with `=` (Claude Code's `--mcp-config` is variadic), and deletes the directory in
+  a `finally`. `mcp_bridge.py` imports only `matching` from the project (a `when:` matches by
+  the one rule), answers `returns:` in all three shapes, and writes only JSON to stdout. No
+  new dependency: four JSON-RPC methods do not need an SDK.
+- **Mock tools under a product need no new opt-in.** A mock returns canned text and executes
+  nothing, so `TRUST_NOTE` is unchanged and both modes and both arms run as they do under a
+  framework runner.
+- **The trace names the tool the product's way; the result names it the case's way.** The
+  trace reports `mcp__skill-lens__<name>` or `skill-lens-<name>` and `restore_tool_names`
+  maps each declared tool back by its exact spelling; other calls keep the product's name.
+  Tool calls still come from the trace, never from the bridge's record.
+- **A product that ran but never asked the bridge for its tools is `errored`, never a failed
+  `called:`.** The server appends a `list` event to a record file on every `tools/list`, and
+  `Bridge.connected` reads it after the run; a trace error wins over that check.
+- **Preflight proves the bridge starts and refuses what would hide it, before any quota is
+  spent.** When a planned case declares `tools:`, the bridge is started once with `--check`,
+  and `--available-tools` is refused in `[runners.copilot]`. `Config.product` drops `mcp`
+  along with `judge_args` and the version probe when `command` names another executable. The
+  product judge never gets a bridge.
 - **`ProductRunner.run` never raises for a product failure.** Timeout, non-zero exit,
   product-reported failure, truncated trace, over-size prompt, missing executable at run
-  time, a delivery `ProductSetupError`, a bridge directory that cannot be written and a
-  `tools:` case reaching a product with no `mcp` are all `RunResult.error`;
+  time and a delivery `ProductSetupError` are all `RunResult.error`;
   `ProductSetupError` propagates only from `preflight`, where `cli.py` makes it exit 2.
-- **`--model` / `--judge-model` with nothing that reads them are user errors** (exit 2).
+- **`ProductRunner.run` still never raises** once the bridge exists: a bridge directory that
+  cannot be written, and a `tools:` case reaching a product with no `mcp` (a caller that
+  skipped preflight), are both `RunResult.error`.
+- **`--model` with nothing to read it is a user error, and so is `--judge-model`** (exit 2).
   `--model` is read by a keyed runner, or by a keyed judge whose `judge_model` is unset;
   `--judge-model` by a keyed judge only, so under a product judge it is refused; a
   product's model is set with `[runners.<name>] args`.
+- **`tools:` under a product that cannot take the MCP bridge is an authoring error**, not a
+  silently emptier run: `cli` has no known flag, and a preset whose `command` names another
+  executable is not known to take the preset's. Ignoring the block would make
+  `trajectory: called:` fail for a reason that says nothing about the skill, and `forbidden:`
+  pass vacuously.
 - **`command` replaces the argv; `args` appends; presets forbid `skills_dir` and `invoke`.**
   `command` holds exactly one `{prompt}` element, never in the executable slot, substituted
   whole and never through a shell; `args` may not contain it; `[runners.<name>]` holds no
@@ -475,17 +526,20 @@ form, that file is the explanation.
   and `runners/product.py` both import it, and it imports nothing from the project.
 - **Script execution is off unless the run turned it on** (`allow_scripts` /
   `--allow-scripts`); nothing in an eval file or a `SKILL.md` can enable it. Reading the
-  bundle needs no opt-in.
+  bundle needs no opt-in. `skill-lens.toml` is inside the trust boundary: in a
+  `pull_request` workflow the checkout is the PR, so the file can turn scripts on for
+  itself; the action's `allow-scripts` input is unset by default so the file decides, and
+  `pull_request_target`, collaborator-PR and self-hosted workflows should pass
+  `allow-scripts: false` explicitly. Docs-only: `docs/security.md`, `docs/ci.md`.
 - **The bundle is `scripts/`, `references/`, `assets/` and nothing else** — an eval file
   beside `SKILL.md` is never readable by the agent.
-- **`Skill.bundle_root` defaults to `None`; only the loader and the baseline resolver set
-  it**, so the `--baseline none` skill never carries the candidate's scripts.
-- **A script's environment is an allowlist, never `os.environ` minus keys**; `shell=False`
-  always; output is read from files through the descriptors the harness opened before the
-  process started — never by re-opening the path — capped, and a cut is never silent.
-- **The allowlist stops inheritance only; a same-user script can read the harness's
-  environment through the OS unless something hides it, and the report says whether
-  something did.** On Linux `harden_process` (`prctl(PR_SET_DUMPABLE, 0)`, called from
+- **`Skill.bundle_root` defaults to `None`, and only the loader and the baseline resolver
+  set it**, so the `--baseline none` skill never carries the candidate's scripts.
+- **A script's environment is built from an allowlist, never inherited.** The key that pays
+  for the run is absent by construction, not by remembering to delete it.
+- **The allowlist stops inheritance; hiding the harness's own environment is the OS's job,
+  and the report says whether it was done.** On Linux `harden_process`
+  (`prctl(PR_SET_DUMPABLE, 0)`, called from
   `preflight` after the checks that can abort, best effort, never raises; root ignores it;
   `bwrap` moots it) closes `/proc/<pid>/environ`, and its note rides
   `ScriptRuntime.hardening` → `ScriptStatus.hardening` → every reporter. On macOS the read
@@ -494,6 +548,8 @@ form, that file is the explanation.
   it closed. The docs say the key is exposed there and recommend `script_sandbox =
   "required"` wherever a key is present. A test of this must spawn its target with the
   secret in the exec-time environment; `monkeypatch.setenv` can never be seen by the kernel.
+- **A script runs with `shell=False`, its arguments as argv, always.** Nothing the model
+  sends is joined into a command line.
 - **The process group is killed after every exit, not only a timeout**, in the order
   observe (`waitid` + `WNOWAIT`), `killpg(process.pid)`, reap — so the leader's pid is
   still held when the kill runs — where `os.waitid` exists (Linux; macOS on 3.13+; CPython
@@ -503,6 +559,8 @@ form, that file is the explanation.
   `getpgid`, which fails after the reap. A script that calls `os.setsid()` escapes
   `os.killpg` on every POSIX platform; only the `bwrap` backend closes that. On Windows
   `taskkill /T` after a normal exit finds no tree; the docs say so.
+- **Script output is read from files, capped, and a cut is never silent** — read through the
+  descriptors the harness opened before the process started, never by re-opening the path.
 - **Only a regular file or a directory is ever resolved, and reads are capped.**
   `resolve_under` and `stat_regular` in `workspace.py` serve both `Workspace` and
   `SkillBundle`: a FIFO, a device or a symlink loop (a `RuntimeError` from `resolve()` on
@@ -510,36 +568,42 @@ form, that file is the explanation.
   `open` that would block; `read` refuses `st_size > max_file_bytes` before reading a byte,
   so a sparse file of any apparent size never reaches memory. Every FIFO test runs the read
   in a thread with a join timeout.
-- **The author's path is an authoring error; the run's target is a failed check.**
+- **The author's path and the run's target are judged separately.**
   `AssertionEvaluator` runs `check_relative_path` on the `file:` first and raises for that;
   a `PathRefused` from `resolve`/`read` afterwards (a script-planted symlink, FIFO, loop or
   over-size file) is a failed `CheckResult` with the refusal as evidence, never exit 2.
 - **`run_script` never raises, and an unrunnable script is never `RunResult.error`.**
-- **The sandbox decision is made once per run, in preflight, and appears on every report.**
-  `required` without a backend and a missing interpreter abort with exit 2 before any case
-  runs; the backend is executed, not merely found. Preflight and the "execution is off"
-  notes cover every *discovered* skill, including ones `--tag`/`--case` filter out or that
-  have no cases. The probe fails closed on a temp-dir path holding a double quote.
-- **The sandbox denies reads under the system temp directory, then re-allows the workspace,
-  the scratch directory and the bundle** — the bundle explicitly, because a `--baseline
-  previous` bundle is extracted under the temp dir. Reads elsewhere are allowed; say so.
+- **The sandbox decision is made once per run and appears on the report.** It is made in
+  preflight: `required` without a backend and a missing interpreter abort with exit 2 before
+  any case runs; the backend is executed, not merely found. Preflight and the "execution is
+  off" notes cover every *discovered* skill, including ones `--tag`/`--case` filter out or
+  that have no cases. The probe fails closed on a temp-dir path holding a double quote.
+- **The sandbox hides other skill-lens temporary directories, and re-allows the bundle
+  explicitly.** It denies reads under the system temp directory, then re-allows the
+  workspace, the scratch directory and the bundle — the bundle explicitly, because a
+  `--baseline previous` bundle is extracted under the temp dir. Reads elsewhere are allowed;
+  say so. `bwrap` does not block Unix-domain sockets (`/var/run/docker.sock`); macOS's
+  `(deny network*)` does, as the Linux row and the guarantee paragraph in the docs record.
 - **A previous baseline carries its own bundle** from the commit that last edited `SKILL.md`
   at the previous version (`git archive <sha> -- .` from the skill directory — `<sha>:./`
   yields an empty archive; `tarfile`'s `data` filter, hence `requires-python >= 3.11.4`), or
   none. A bundle-only commit after that edit is invisible; a giant `assets/` hitting the
-  10 s git timeout is a `BaselineNote`, not an error. Baseline bundle directories are deleted
-  in a `finally`, and `--keep-workspace` does not keep them.
-- **Bundle tools require a `workspace:` block; all six built-in names are reserved in
-  every workspace case; the workspace preamble is unchanged.** Both bundled adapters
-  (`runners/pydantic_ai.py`, `runners/langchain.py`) take `scripts=` and register the same
-  six tools under the same conditions, offered mode included.
-- **`skill-lens.toml` is inside the trust boundary.** In a `pull_request` workflow the
-  checkout is the PR, so the file can turn scripts on for itself; the action's
-  `allow-scripts` input is unset by default so the file decides, and `pull_request_target`,
-  collaborator-PR and self-hosted workflows should pass `allow-scripts: false` explicitly.
-  Docs-only: `docs/security.md`, `docs/ci.md`.
-- **`bwrap` does not block Unix-domain sockets** (`/var/run/docker.sock`); macOS's
-  `(deny network*)` does. Documented in the Linux row and the guarantee paragraph.
+  10 s git timeout is a `BaselineNote`, not an error.
+- **Baseline bundle directories are deleted when the run ends, however it ends** — in a
+  `finally` around execution, and `--keep-workspace` does not keep them.
+- **Bundle tools require a `workspace:` block, and their names are reserved in every
+  workspace case.** All six built-in names are reserved; both bundled adapters
+  (`runners/pydantic_ai.py`, `runners/langchain.py`) register the same six tools under the
+  same conditions, offered mode included.
+- **The workspace preamble is unchanged by the bundle tools** — byte-identical in both arms
+  and naming no skill, exactly as it was before they existed.
+- **A script's temporary files never enter the workspace.** `TMPDIR` points at a per-call
+  scratch directory outside it, deleted afterwards, so `list_files`, `file-produced` and the
+  judge's artifacts see only what the agent and the script deliberately produced.
+- **`scripts=` reaches a runner only when execution is on.** `_run_one` passes the keyword
+  only when the runtime is set, so a third-party runner written against a version without
+  bundled scripts keeps working until someone turns scripts on — at which point the
+  `TypeError` is loud rather than the scripts silently never running.
 - **The dependency audit is one command, spelled identically in three places, and its
   exceptions live in one table.** `uv audit --preview-features audit --locked` runs in
   `security.yml` (every PR, every push to `main`, weekly on a schedule, and on demand), in
