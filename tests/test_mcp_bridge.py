@@ -42,7 +42,12 @@ def _spec(record: Path | None = None) -> dict:
                 "input_schema": SCHEMA,
                 "returns": '{"status": "shipped"}',
             },
-            {"name": "issue_refund", "description": "", "input_schema": SCHEMA, "returns": "ok"},
+            {
+                "name": "issue_refund",
+                "description": "",
+                "input_schema": SCHEMA,
+                "returns": ["ok", "again"],
+            },
         ],
     }
 
@@ -100,6 +105,58 @@ def test_tools_call_returns_the_canned_text_whatever_the_arguments():
             _request("tools/call", {"name": "lookup_order", "arguments": arguments})
         )
         assert reply["result"] == {"content": [{"type": "text", "text": '{"status": "shipped"}'}]}
+
+
+def _call(bridge: Bridge, name: str, arguments=None) -> str:
+    reply = bridge.handle(_request("tools/call", {"name": name, "arguments": arguments}))
+    return reply["result"]["content"][0]["text"]
+
+
+def _with_returns(returns) -> dict:
+    return {
+        **_spec(),
+        "no_match": "no response is scripted for {name} with arguments {arguments}",
+        "tools": [{"name": "t", "description": "", "input_schema": SCHEMA, "returns": returns}],
+    }
+
+
+def test_a_sequence_is_consumed_in_call_order_and_the_last_entry_repeats():
+    bridge = Bridge(_with_returns(["first", "second"]))
+    assert [_call(bridge, "t") for _ in range(4)] == ["first", "second", "second", "second"]
+    # Each server process starts its sequence from the top.
+    assert _call(Bridge(_with_returns(["first", "second"])), "t") == "first"
+
+
+def test_a_lookup_answers_the_first_entry_whose_when_matches_the_arguments():
+    bridge = Bridge(
+        _with_returns(
+            [
+                {"when": {"order_id": "A-17", "verbose": True}, "value": "verbose A-17"},
+                {"when": {"order_id": "A-17"}, "value": "A-17"},
+                {"when": {"nested": {"a": 1}}, "value": "nested"},
+                {"when": None, "value": "fallback"},
+            ]
+        )
+    )
+    assert _call(bridge, "t", {"order_id": "A-17", "verbose": True, "extra": 1}) == "verbose A-17"
+    assert _call(bridge, "t", {"order_id": "A-17", "verbose": False}) == "A-17"
+    # A bool only ever matches a bool, and a nested mapping is a subset.
+    assert _call(bridge, "t", {"order_id": "A-17", "verbose": 1}) == "A-17"
+    assert _call(bridge, "t", {"nested": {"a": 1, "b": 2}}) == "nested"
+    assert _call(bridge, "t", {"order_id": "B-2"}) == "fallback"
+    assert _call(bridge, "t", None) == "fallback"
+
+
+def test_a_lookup_with_no_matching_entry_answers_the_no_match_message():
+    bridge = Bridge(_with_returns([{"when": {"order_id": "A-17"}, "value": "A-17"}]))
+    assert (
+        _call(bridge, "t", {"z": 1, "a": object})
+        == 'no response is scripted for t with arguments {"a": "<class \'object\'>", "z": 1}'
+    )
+    # A spec with no `no_match` template still answers, never raises.
+    spec = {**_with_returns([{"when": {"x": 1}, "value": "v"}])}
+    del spec["no_match"]
+    assert "no response is scripted for t" in _call(Bridge(spec), "t", {"x": 2})
 
 
 def test_tools_call_on_an_unknown_tool_is_invalid_params():
@@ -240,6 +297,8 @@ def test_the_module_serves_as_a_subprocess_under_this_interpreter(tmp_path):
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         _request("tools/list", None, 2),
         _request("tools/call", {"name": "lookup_order", "arguments": {"order_id": "A-17"}}, 3),
+        _request("tools/call", {"name": "issue_refund", "arguments": {}}, 4),
+        _request("tools/call", {"name": "issue_refund", "arguments": {}}, 5),
     ]
     completed = subprocess.run(
         [sys.executable, "-m", "skill_lens.mcp_bridge", str(path)],
@@ -250,20 +309,35 @@ def test_the_module_serves_as_a_subprocess_under_this_interpreter(tmp_path):
     )
     assert completed.returncode == 0, completed.stderr
     replies = [json.loads(line) for line in completed.stdout.decode().splitlines()]
-    assert [reply["id"] for reply in replies] == [1, 2, 3]
+    assert [reply["id"] for reply in replies] == [1, 2, 3, 4, 5]
     assert replies[2]["result"]["content"] == [{"type": "text", "text": '{"status": "shipped"}'}]
+    # `issue_refund` is a sequence: the counter lives in the server process.
+    assert [reply["result"]["content"][0]["text"] for reply in replies[3:]] == ["ok", "again"]
     assert _events(record) == [
         {"event": "list"},
         {"event": "call", "name": "lookup_order", "arguments": {"order_id": "A-17"}},
+        {"event": "call", "name": "issue_refund", "arguments": {}},
+        {"event": "call", "name": "issue_refund", "arguments": {}},
     ]
     # Stdin closed, so the server exited on its own -- what lets a product
     # that never killed it leave nothing behind.
 
 
-def test_the_module_imports_nothing_from_the_project():
+def test_the_module_imports_only_the_matcher_from_the_project():
     """The product starts this module in its own child process; the fewer
-    imports, the fewer ways that start can fail."""
+    imports, the fewer ways that start can fail. `matching` is the one
+    exception -- a `when:` must match by the rule every other runner uses,
+    and that module imports nothing from the project itself."""
     source = Path(__import__("skill_lens.mcp_bridge", fromlist=["x"]).__file__).read_text(
         encoding="utf-8"
     )
-    assert "from skill_lens" not in source and "import skill_lens" not in source
+    imports = [
+        line.strip()
+        for line in source.splitlines()
+        if line.startswith(("from skill_lens", "import skill_lens"))
+    ]
+    assert imports == ["from skill_lens.matching import structural_match"]
+    matching = Path(__import__("skill_lens.matching", fromlist=["x"]).__file__).read_text(
+        encoding="utf-8"
+    )
+    assert "from skill_lens" not in matching and "import skill_lens" not in matching

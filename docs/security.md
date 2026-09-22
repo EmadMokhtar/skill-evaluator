@@ -270,8 +270,9 @@ through the product's own tools`), and the JSON report's `products` entries and 
 block under `copilot` or `claude-code` is served by `python -m skill_lens.mcp_bridge`, a
 stdio server the product starts as a child process, with the product's environment, from a
 config the runner writes into a temporary directory of its own. The bridge is skill-lens's
-code, not the skill's: it lists the tools the case declared and answers every call with
-the case's `returns` text, verbatim, whatever the arguments — nothing from the eval file
+code, not the skill's: it lists the tools the case declared and answers every call from
+the case's `returns:` — one value, a sequence, or a `when:` lookup, by the rules every
+runner applies — whatever the arguments; nothing from the eval file
 or the skill executes, and the server exits when the product closes its pipe. It adds no
 capability the product did not already have; what it adds is a fixed, known answer to a
 tool the skill under test may call. The trust sentence on the report is unchanged, because

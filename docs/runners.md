@@ -180,8 +180,10 @@ bridge is the only MCP server the run sees; `--additional-mcp-config=@<file>` un
 Copilot, where it is added beside the built-in GitHub server and whatever
 `~/.copilot/mcp-config.json` configures (the hermetic recipe above keeps those out). The
 product starts the bridge itself, lists its tools, and calls them as it would any MCP
-server's; a call returns `returns` verbatim whatever the arguments were, as under every
-other runner, and nothing executes. The directory is deleted after every run,
+server's; a call is answered from `returns:` by the same rules as under every other
+runner — one value for every call, a sequence in call order, or a `when:` lookup by
+argument, a call no entry answers getting the same "no response is scripted" message — and
+nothing executes. The directory is deleted after every run,
 `--keep-workspace` or not.
 
 **Tool names.** The product shows the model each tool under its own spelling for an MCP

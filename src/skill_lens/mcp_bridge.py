@@ -10,17 +10,23 @@ JSON-RPC 2.0 to it over stdin/stdout, one message per line.
 
 The server does exactly what a mock tool does everywhere else: `tools/list`
 returns the declared names, descriptions and schemas verbatim, and
-`tools/call` returns `returns` verbatim whatever the arguments were -- a
-model that passed the wrong arguments is an eval signal, not a reason to
+`tools/call` answers `returns` by the rules `runners/tools.py` applies --
+one string for every call; a list of strings consumed in call order, the
+last repeating; a list of `when`/`value` entries matched against the
+arguments, first match winning, a call no entry answers getting the
+`no_match` message the spec carries -- whatever the arguments were, because
+a model that passed the wrong arguments is an eval signal, not a reason to
 raise. Every `tools/list` and `tools/call` is appended to the record file
 the spec names, so the runner can tell a product that never connected from
 a model that never called.
 
-Imports nothing from the rest of the project on purpose: the product starts
-this module in its own child process, and the less it needs the fewer ways
-that start can fail. `--check` exercises the request handlers in-process,
-which is how preflight proves this module starts under `sys.executable`
-before any case spends quota.
+Imports only `matching` from the rest of the project, on purpose: the
+product starts this module in its own child process, and the less it needs
+the fewer ways that start can fail; `matching` imports nothing from the
+project itself, and a `when:` must match by the one rule every runner uses.
+`--check` exercises the request handlers in-process, which is how preflight
+proves this module starts under `sys.executable` before any case spends
+quota.
 """
 
 from __future__ import annotations
@@ -30,11 +36,17 @@ import sys
 from pathlib import Path
 from typing import IO, Any
 
+from skill_lens.matching import structural_match
+
 # The MCP protocol revisions this server speaks. It only serves tools, whose
 # wire shape is identical across all three, so the client's revision is
 # echoed back when it is one of these and the newest is offered otherwise.
 PROTOCOL_VERSIONS: tuple[str, ...] = ("2024-11-05", "2025-03-26", "2025-06-18")
 SERVER_NAME = "skill-lens"
+
+# What a lookup answers when no entry matches and the spec carries no
+# template of its own; the runner writes the shared wording into the spec.
+DEFAULT_NO_MATCH = "no response is scripted for {name} with arguments {arguments}"
 
 # JSON-RPC 2.0 error codes.
 PARSE_ERROR = -32700
@@ -60,6 +72,34 @@ class Bridge:
         record = spec.get("record")
         self._record = Path(record) if isinstance(record, str) and record else None
         self._version = str(spec.get("version", ""))
+        no_match = spec.get("no_match")
+        self._no_match = no_match if isinstance(no_match, str) and no_match else DEFAULT_NO_MATCH
+        # One counter per sequence-shaped tool: the product starts one server
+        # per invocation, so every arm and repetition starts from the top.
+        self._calls: dict[str, int] = {}
+
+    def _answer(self, tool: dict[str, Any], arguments: dict[str, Any]) -> str:
+        """`returns` for this call, by the shape it has -- the same three
+        rules as `runners/tools.py`'s `_canned`."""
+        returns = tool.get("returns", "")
+        if not isinstance(returns, list):
+            return str(returns)
+        if not returns:
+            return ""
+        if isinstance(returns[0], dict):
+            for entry in returns:
+                if not isinstance(entry, dict):
+                    continue
+                when = entry.get("when")
+                if structural_match(when if isinstance(when, dict) else {}, arguments, exact=False):
+                    return str(entry.get("value", ""))
+            return self._no_match.format(
+                name=tool["name"],
+                arguments=json.dumps(arguments, sort_keys=True, default=str),
+            )
+        index = self._calls.get(tool["name"], 0)
+        self._calls[tool["name"]] = index + 1
+        return str(returns[min(index, len(returns) - 1)])
 
     def _note(self, event: dict[str, Any]) -> None:
         """Append one line to the record file. Best effort: a record that
@@ -119,17 +159,12 @@ class Bridge:
             tool = self._tools.get(name) if isinstance(name, str) else None
             if tool is None:
                 return _error(request_id, INVALID_PARAMS, f"unknown tool: {name!r}")
-            arguments = params.get("arguments")
-            self._note(
-                {
-                    "event": "call",
-                    "name": name,
-                    "arguments": arguments if isinstance(arguments, dict) else {},
-                }
-            )
+            raw = params.get("arguments")
+            arguments = raw if isinstance(raw, dict) else {}
+            self._note({"event": "call", "name": name, "arguments": arguments})
             return _result(
                 request_id,
-                {"content": [{"type": "text", "text": str(tool.get("returns", ""))}]},
+                {"content": [{"type": "text", "text": self._answer(tool, arguments)}]},
             )
         return _error(request_id, METHOD_NOT_FOUND, f"method not found: {method}")
 

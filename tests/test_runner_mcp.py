@@ -11,7 +11,7 @@ import pytest
 
 from skill_lens import __version__
 from skill_lens.mcp_bridge import SERVER_NAME
-from skill_lens.models import ToolCall, ToolSpec
+from skill_lens.models import ToolCall, ToolResponse, ToolSpec
 from skill_lens.runners import mcp
 from skill_lens.runners.mcp import (
     CLAUDE_CODE_MCP,
@@ -88,7 +88,29 @@ def test_bridge_spec_carries_the_schemas_build_mock_tool_registers(tmp_path):
     }
     assert declared["input_schema"] == {"type": "object", "properties": {"body": {}}}
     assert declared["returns"] == "written"
+    assert spec["no_match"] == "no response is scripted for {name} with arguments {arguments}"
     assert bridge_spec([], None)["record"] == ""
+
+
+def test_bridge_spec_writes_every_returns_shape_as_plain_json():
+    tools = [
+        ToolSpec(name="seq", returns=["first", "second"]),
+        ToolSpec(
+            name="lookup",
+            parameters={"id": "string"},
+            returns=[
+                ToolResponse(when={"id": "A"}, value="a"),
+                ToolResponse(value="fallback"),
+            ],
+        ),
+    ]
+    seq, lookup = bridge_spec(tools, None)["tools"]
+    assert seq["returns"] == ["first", "second"]
+    assert lookup["returns"] == [
+        {"when": {"id": "A"}, "value": "a"},
+        {"when": None, "value": "fallback"},
+    ]
+    json.dumps(bridge_spec(tools, None))  # nothing the server cannot read
 
 
 def test_bridge_config_names_this_interpreter_and_the_products_extra_keys(tmp_path):

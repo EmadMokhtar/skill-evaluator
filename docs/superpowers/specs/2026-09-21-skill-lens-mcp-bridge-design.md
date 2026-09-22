@@ -23,8 +23,9 @@ through a stdio MCP server`):
 - **`mcp_bridge.py`**, a stdio MCP server in the package: `python -m skill_lens.mcp_bridge
   <spec>` reads a JSON spec listing the case's tools and answers `initialize`, `ping`,
   `tools/list` and `tools/call` over JSON-RPC 2.0, one message per line. A call returns
-  `returns` verbatim whatever the arguments — exactly what a mock does under every other
-  runner. Every list and call is appended to a record file the spec names. `--check` drives
+  `returns` by the rules `runners/tools.py` applies — one value; a sequence in call order;
+  a `when:` lookup through `matching.structural_match`, the no-match wording carried in the
+  spec — whatever the arguments, exactly what a mock does under every other runner. Every list and call is appended to a record file the spec names. `--check` drives
   the handlers in-process and exits.
 - **`runners/mcp.py`**, the runner's side: `McpSupport` (each product's config flag, tool
   spelling, config-entry keys and hiding flags), `write_bridge` (the spec and the product's
@@ -57,7 +58,7 @@ through a stdio MCP server`):
 | Decision | Why |
 | --- | --- |
 | **The product starts the bridge; skill-lens only writes the config.** | That is how both products take an MCP server: a config naming a command. Starting the server ourselves would leave no way to tell the product about it. |
-| **`sys.executable -m skill_lens.mcp_bridge`, and the module imports nothing from the project.** | The interpreter running skill-lens can import the package with no environment of its own, and the product inherits our environment anyway. The fewer things a child the product starts needs, the fewer ways that start can fail. |
+| **`sys.executable -P -m skill_lens.mcp_bridge`, and the module imports only `matching` from the project.** | The interpreter running skill-lens can import the package with no environment of its own, and the product inherits our environment anyway. The fewer things a child the product starts needs, the fewer ways that start can fail; `matching` imports nothing from the project itself, and a `when:` must match by the one rule every runner uses (#60). `-P` keeps the product's working directory — the case's workspace — off the child's import path. |
 | **The config flag is one argv element with `=`, appended last.** | Claude Code's `--mcp-config <configs...>` is variadic; a two-element spelling after a table's `args` could swallow whatever came next, and nothing may come after the bridge. Verified: `--mcp-config=<file>` and `--additional-mcp-config=@<file>` (Copilot's `@` marks a file path) both work. |
 | **The bridge's files live in a fresh directory of their own, never the working directory.** | The product can list its working directory, `list_files` under a workspace case lists it, and a `file-produced` assertion reads it. A config file there would be an input the case never declared. Deleted in the run's `finally`; `--keep-workspace` does not keep it — it is an input, not an output. |
 | **The spec carries the schema `build_mock_tool` registers.** | One rule for every runner: a `parameters:` shorthand is closed, an `input_schema` is passed verbatim. The server does not rebuild anything. |

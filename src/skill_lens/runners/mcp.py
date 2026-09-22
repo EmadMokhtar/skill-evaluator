@@ -28,8 +28,8 @@ from typing import Any
 
 from skill_lens import __version__
 from skill_lens.mcp_bridge import SERVER_NAME
-from skill_lens.models import ToolCall, ToolSpec
-from skill_lens.runners.tools import build_mock_tool
+from skill_lens.models import ToolCall, ToolResponse, ToolSpec
+from skill_lens.runners.tools import NO_RESPONSE_SCRIPTED, build_mock_tool
 
 BRIDGE_PREFIX = "skill-lens-mcp-"
 BRIDGE_MODULE = "skill_lens.mcp_bridge"
@@ -105,9 +105,22 @@ def bridge_command() -> list[str]:
     return [sys.executable, "-P", "-m", BRIDGE_MODULE]
 
 
+def _returns_json(returns: str | list[str] | list[ToolResponse]) -> Any:
+    """`returns` as the server reads it: a string, a list of strings, or a
+    list of `{"when", "value"}` objects -- the three shapes, as plain JSON."""
+    if isinstance(returns, str):
+        return returns
+    return [
+        {"when": entry.when, "value": entry.value} if isinstance(entry, ToolResponse) else entry
+        for entry in returns
+    ]
+
+
 def bridge_spec(tools: Iterable[ToolSpec], record: Path | None) -> dict[str, Any]:
     """The spec the server reads: every tool's name, description, the schema
-    `build_mock_tool` would register, and `returns`."""
+    `build_mock_tool` would register, and `returns` in whichever shape it
+    has, plus the wording a lookup answers with when no entry matches --
+    written here so the message is byte-identical under every runner."""
     entries = []
     for spec in tools:
         tool = build_mock_tool(spec)
@@ -116,10 +129,15 @@ def bridge_spec(tools: Iterable[ToolSpec], record: Path | None) -> dict[str, Any
                 "name": tool.name,
                 "description": tool.description,
                 "input_schema": tool.json_schema,
-                "returns": spec.returns,
+                "returns": _returns_json(spec.returns),
             }
         )
-    return {"version": __version__, "record": str(record) if record else "", "tools": entries}
+    return {
+        "version": __version__,
+        "record": str(record) if record else "",
+        "no_match": NO_RESPONSE_SCRIPTED,
+        "tools": entries,
+    }
 
 
 def bridge_config(support: McpSupport, spec_path: Path) -> dict[str, Any]:

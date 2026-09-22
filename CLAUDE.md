@@ -468,7 +468,8 @@ form, that file is the explanation.
   it.** `runners/mcp.py` writes the spec and the config into a fresh directory (never the
   working directory), appends the config flag as the *last* argv element, one element with
   `=` (Claude Code's `--mcp-config` is variadic), and deletes the directory in a `finally`.
-  `mcp_bridge.py` imports nothing from the project and writes only JSON to stdout. No opt-in:
+  `mcp_bridge.py` imports only `matching` from the project (a `when:` matches by the one
+  rule), answers `returns:` in all three shapes, and writes only JSON to stdout. No opt-in:
   a mock returns canned text and executes nothing, so `TRUST_NOTE` is unchanged. The trace
   names the tool the product's way and `restore_tool_names` maps each declared tool back by
   its exact spelling; other calls keep the product's name. Tool calls still come from the

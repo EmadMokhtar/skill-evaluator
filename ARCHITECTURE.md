@@ -1257,10 +1257,17 @@ directory, which the product can list and a `file-produced` assertion can read; 
 travels as the last argv element (`--mcp-config=<file>` for Claude Code, beside the
 preset's `--strict-mcp-config`; `--additional-mcp-config=@<file>` for Copilot), one element
 with `=` so Claude Code's variadic option can never swallow what follows. The directory is
-deleted in the run's `finally`, kept by nothing. The bridge imports nothing from the
-project, because the fewer things a child the product starts needs, the fewer ways that
-start can fail, and it writes nothing but JSON to stdout, because stdout is the protocol.
-No dependency was added: four JSON-RPC methods do not need an SDK.
+deleted in the run's `finally`, kept by nothing. The bridge is started with `-P`, so the
+product's working directory — the case's workspace — never enters its import path, and it
+imports only `matching` from the project, because the fewer things a child the product
+starts needs, the fewer ways that start can fail: a `when:` must match by the one rule
+every runner uses, and `matching` itself imports nothing from the project. It answers
+`returns:` in all three shapes by the rules `runners/tools.py` applies — one value; a
+sequence in call order, its counter in the server process, so every invocation starts from
+the top; a `when:` lookup, a call no entry answers getting the `NO_RESPONSE_SCRIPTED`
+wording the runner writes into the spec — and it writes nothing but JSON to stdout,
+because stdout is the protocol. No dependency was added: four JSON-RPC methods do not need
+an SDK.
 
 **No new opt-in.** A mock returns canned text and executes nothing — it adds a fixed
 answer to a tool the skill may call, not a capability the product lacked — so a case with
