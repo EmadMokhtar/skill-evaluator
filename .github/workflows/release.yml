@@ -130,12 +130,14 @@ jobs:
       - name: Push the bump commit and its tag
         id: push
         # --atomic makes the commit and the tag one update: if either ref is
-        # rejected (main moved under us, the tag already exists), neither
+        # rejected (main moved under us, a branch rule refused it), neither
         # lands. Without it git pushes the refs independently, so a rejected
         # tag would leave the bump commit on main with no tag -- and the
         # ls-remote check below, guarded by the implicit success() of the
         # step before it, would be skipped in exactly the state it exists to
-        # report.
+        # report. A tag of this name already on origin is not a rejection at
+        # all: `--follow-tags` skips it and the commit lands; that check is
+        # what catches it.
         #
         # Every later step and the `publish` job read this step's `pushed`,
         # not the bump step's `bumped`: a version that was cut but never
@@ -185,24 +187,40 @@ jobs:
           echo "git push was rejected (exit $code), and main has not simply moved ahead of ${GITHUB_SHA:0:7} (it is at ${tip:0:7}). No later run is known to carry this commit. Check origin by hand before re-running anything." >&2
           exit "$code"
 
-      - name: Verify the tag reached origin
+      - name: Verify the tag on origin is this run's tag
         # `--follow-tags` pushes only annotated tags. `annotated_tag = true`
         # in [tool.commitizen] makes cz create one, but if that setting were
         # ever removed, or the push otherwise dropped the tag, the failure
         # would be silent: the `publish` job (added in a later task) is
         # reached through `needs:`, not through the tag, so nothing else
         # would stop a release with no reproducible tag from reaching PyPI.
+        #
+        # It also sends only the tags origin does *not* already have. A tag
+        # of this name already on origin -- pushed by hand, pointing at some
+        # other commit -- is not rejected: it is silently skipped, the bump
+        # commit lands on main, and the tag now names code that was never
+        # released. So the check reads what the tag points at on origin and
+        # requires it to be the commit this job just pushed; existence alone
+        # would pass exactly that case.
         if: steps.push.outputs.pushed == 'true'
         shell: bash
+        env:
+          # An environment variable, not a `${{ }}` expression in the
+          # script, for the reason the push step gives.
+          VERSION: ${{ steps.bump.outputs.version }}
         run: |
           set -eu
-          tag="v${{ steps.bump.outputs.version }}"
+          tag="v$VERSION"
           # The lookup's exit status is checked separately from its output. A
           # failed `git ls-remote` (network fault, auth) also prints nothing,
           # so testing emptiness alone would report "the tag is missing" for a
           # tag that is very likely there, and send a maintainer to re-tag by
           # hand over a transient error.
-          if ! remote_refs="$(git ls-remote --tags origin "refs/tags/$tag")"; then
+          #
+          # Two patterns: `refs/tags/<tag>` lists the tag object, and
+          # `refs/tags/<tag>^{}` the commit an annotated tag points at. A
+          # lightweight tag has no `^{}` line, and its ref *is* the commit.
+          if ! remote_refs="$(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")"; then
             echo "git ls-remote failed, so whether tag $tag reached origin is unknown. Check origin by hand before re-running anything." >&2
             exit 1
           fi
@@ -210,7 +228,15 @@ jobs:
             echo "Tag $tag was pushed but is not on origin. The bump commit may now be on main with no matching tag, which makes this release unreproducible." >&2
             exit 1
           fi
-          echo "Confirmed tag $tag reached origin." >> "$GITHUB_STEP_SUMMARY"
+          peeled="$(printf '%s\n' "$remote_refs" | awk -v ref="refs/tags/$tag^{}" '$2 == ref { print $1 }')"
+          plain="$(printf '%s\n' "$remote_refs" | awk -v ref="refs/tags/$tag" '$2 == ref { print $1 }')"
+          target="${peeled:-$plain}"
+          pushed="$(git rev-parse HEAD)"
+          if [ "$target" != "$pushed" ]; then
+            echo "Tag $tag exists on origin but points at ${target:0:7}, not at the bump commit ${pushed:0:7} that is now on main. The tag was there before this run pushed, so nothing in this workflow created it. The version is spent: see 'Recovering a failure after the tag but before the artifact' in docs/releasing.md." >&2
+            exit 1
+          fi
+          echo "Confirmed tag $tag reached origin and points at ${pushed:0:7}." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Write the release notes
         # The changelog section for exactly this version, generated from the

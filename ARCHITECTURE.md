@@ -464,13 +464,19 @@ published. `tests/test_release_workflow.py` runs the step's script verbatim agai
 bare origin for each of these cases, which is also why the version reaches the script as an
 environment variable rather than a `${{ }}` expression.
 
-**The pushed release tag is annotated, and the job proves it reached `origin`.**
+**The pushed release tag is annotated, and the job proves the tag on `origin` is this run's.**
 `git push --follow-tags` pushes only *annotated* tags, and Commitizen creates a lightweight one
 unless told otherwise, so `annotated_tag = true` is what stops the bump commit reaching `main`
 while its tag dies on the runner. Because `publish` is reached through `needs:` and not through
 the tag, that loss would not stop a release: a `git ls-remote` check runs right after the push
-and fails loudly instead. The push is `--atomic` so the commit and tag land together or not at
-all, and `cz bump --check-consistency` aborts before writing anything if a file listed in
+and fails loudly instead. That check compares targets, not existence: `--follow-tags` also
+sends only the tags origin does *not* already have, so a same-named tag already on origin —
+pushed by hand, pointing elsewhere — is not rejected but silently skipped, and the bump commit
+lands under a tag that names unreleased code. The step lists `refs/tags/<tag>` and
+`refs/tags/<tag>^{}` (the peeled commit; a lightweight tag has no peeled line and its ref is
+the commit) and requires the target to be the commit it just pushed; `tests/test_release_workflow.py`
+runs that script verbatim against a local origin holding such a tag. The push is `--atomic` so
+the commit and tag land together or not at all, and `cz bump --check-consistency` aborts before writing anything if a file listed in
 `version_files` no longer contains the current version — a flag on the command, because
 Commitizen reads it only from the CLI and never from `pyproject.toml`. That abort is the last
 line rather than the first: `tests/test_release_config.py` asserts the same property on every

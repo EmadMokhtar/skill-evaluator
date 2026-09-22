@@ -286,14 +286,17 @@ form, that file is the explanation.
   `bumped` output `publish` reads gate on `steps.push.outputs.pushed`, never on the bump alone,
   and the script takes the version from `env`, not a `${{ }}` expression, so the tests can run
   it verbatim.
-- **The pushed release tag is annotated, and the job verifies it actually reached `origin`
-  before building.** `git push --follow-tags` pushes only annotated tags, so
+- **The pushed release tag is annotated, and the job verifies the tag on `origin` is this
+  run's before building.** `git push --follow-tags` pushes only annotated tags, so
   `[tool.commitizen] annotated_tag = true` exists specifically to make Commitizen create one
   instead of its default lightweight tag — without it, the bump commit would reach `main`
   while the tag stayed on the runner and vanished. Because `publish` is reached through
   `needs:`, not through the tag, a silently dropped tag would otherwise go unnoticed all the
   way to PyPI; `release` runs `git ls-remote --tags origin` right after the push and fails
-  loudly if the tag is missing.
+  loudly if the tag is missing — **or points elsewhere**: `--follow-tags` also skips, never
+  rejects, a same-named tag already on origin, so the check reads `refs/tags/<tag>^{}` (the
+  peeled commit; a lightweight tag's ref is the commit itself) and requires it to equal the
+  commit just pushed. The version reaches that script through `env`, like the push step's.
 - **The version in `action.yml` always equals the package version**, and the pairing between a
   version spelling and a `version_files` pattern is guarded in *both* directions — every
   spelling has a pattern that rewrites it, and every pattern still rewrites a line carrying the
