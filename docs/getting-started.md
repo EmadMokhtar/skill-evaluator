@@ -79,9 +79,10 @@ cases:
 ```
 
 Mock tools execute nothing: calling one records the call and returns `returns` verbatim,
-so the trajectory is genuinely the model's choice. The full field reference is
-[Eval files](eval-files.md); deciding *which* cases a skill needs is
-[Writing evals](writing-evals.md).
+so the trajectory is genuinely the model's choice. Case, mock tool, trajectory, assertion —
+[Concepts](concepts.md) defines every term this page uses without stopping to explain it.
+The full field reference is [Eval files](eval-files.md); deciding *which* cases a skill
+needs is [Writing evals](writing-evals.md).
 
 ## 4. Validate for free
 
