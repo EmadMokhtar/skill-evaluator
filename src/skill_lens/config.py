@@ -167,16 +167,28 @@ class Config(BaseModel):
 
     `default_runner` (`--runner`, a string or a list of names -- every case
     runs through each; the flag, repeated, replaces the whole list), `model`
-    (`--model`), `judge_model` (`--judge-model`) and `min_pass_rate`
-    (`--min-pass-rate`) can be overridden by a CLI flag; the rest can only be
-    set here. Secrets are never read from
+    (`--model`), `base_url` (`--base-url`), `judge_model` (`--judge-model`)
+    and `min_pass_rate` (`--min-pass-rate`) can be overridden by a CLI flag;
+    the rest can only be set here. Secrets are never read from
     this file -- API keys come from the environment only.
+
+    `base_url` is the one endpoint-shaped value that does belong here: a
+    self-hosted, OpenAI-compatible server is not a secret and is the same for
+    every contributor. Empty means the provider reads its own variable
+    (`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`) or its default -- a fallback, never
+    an override of the file. `validate_base_url` refuses anything but a bare
+    `http(s)://host[...]`, and in particular a `user:secret@` part, which is a
+    credential in a committed file.
 
     `judge` defaults to "fake" for the same reason `default_runner` does:
     upgrading must never start spending money on its own. An unscripted
     FakeJudge errors rather than passing, so that default cannot turn an
     unchecked rubric into a green case. An empty `judge_model` falls back to
-    `model`.
+    `model`, and an empty `judge_base_url` follows it: the judge inherits
+    `base_url` exactly when it inherits `model`, so a judge with a model of
+    its own is never pointed at the runner's local server by accident. The
+    CLI resolves that pairing, because only it knows whether `--judge-model`
+    was passed.
 
     `judge_temperature` is deliberately separate from `temperature` and
     defaults to `0.0` for determinism: the judge grades a fixed rubric and

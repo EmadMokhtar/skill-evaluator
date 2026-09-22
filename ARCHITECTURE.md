@@ -104,7 +104,7 @@ judge is one entry on `RunReport.products`.
 | `runners/product.py` | The product runner: a `Product` value (argv template, skill directory, invocation spelling, trace parser, version command, how it takes the MCP bridge), the two presets, skill delivery into the product's working directory, the subprocess invocation — with the bridge's config appended last when the case declares `tools:` — the connection check and the tool-name mapping afterwards, and the once-per-run `preflight`. Imports no agent framework. |
 | `runners/mcp.py` | The runner's side of the MCP bridge: `McpSupport` (each product's config flag, tool spelling, config-entry keys and hiding flags, as verified against the product), `write_bridge` (the spec — each tool's schema and its `returns:` in whichever shape — and the product's config in a fresh directory), `Bridge.connected` (the record's `list` event), `restore_tool_names` (the product's spelling back to the case's) and `probe_bridge` (the once-per-run `--check`). Imports no agent framework. |
 | `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block — one canned value, a sequence consumed in call order, or a lookup by argument — the built-in workspace tools, and the bundle tools (`list_skill_files`, `read_skill_file`, and `run_script` when the bundle has scripts and the run enabled them). Owns the six-name `BUILTIN_TOOL_NAMES` the case loader reads. |
-| `runners/preflight.py` | What a framework runner verifies before any spend: the provider API key, and that every `trajectory:` name is a tool the case will have (`check_trajectory_names`, called from the three framework runners' `preflight`). |
+| `runners/preflight.py` | What a framework runner verifies before any spend: the provider API key, that every `trajectory:` name is a tool the case will have (`check_trajectory_names`, called from the three framework runners' `preflight`), and the `UnsupportedBaseURL` the two keyed adapters raise for a `base_url` their provider cannot take. |
 | `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
 | `evaluators/base.py` | The `Evaluator` protocol. |
 | `evaluators/assertion.py` | Rule-based scoring of the final output text. |
@@ -240,6 +240,43 @@ the string.
 
 **Secrets come from environment variables only** — never from `skill-lens.toml`. A config
 file is committed; a key must not be.
+
+**A base URL is config; a key is environment** (issue #54). A self-hosted endpoint is
+not a secret and is the same for every contributor, so `base_url` and `judge_base_url`
+live in the file and `--base-url` overrides the first, in the order every other key
+follows: flag > file > the provider's own variable (`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`,
+which the framework reads when skill-lens passes nothing) > the provider's default. The
+variable is a fallback, never an override — an override would break the documented
+order, and would need skill-lens to keep a per-provider table of variable names. Three
+rules keep the value honest:
+
+- **`validate_base_url` is the one check**, called by the field validator and by the
+  flag: a bare `http(s)://host[...]`, and never a userinfo part (`user:secret@host`),
+  which is a credential in a committed file — refused with the secrets message. A
+  malformed URL is refused at load time (exit 2) because the client library would
+  otherwise surface it from the first case as a connection error: an *errored* case,
+  when the mistake is in the file.
+- **The endpoint travels with the model.** `judge_base_url` empty means the judge uses
+  `base_url` exactly when it uses `model` — `judge_model` unset and no `--judge-model`.
+  A judge with a model of its own gets its provider's default unless `judge_base_url`
+  names one, so a cloud judge under a local runner is never pointed at `localhost`. An
+  unconditional fallback would do exactly that; no fallback at all would make the
+  common case — one local model for both seats — two lines instead of one. `--base-url`
+  is read wherever `--model` is and refused wherever `--model` is (exit 2): a product
+  reaches its own endpoint.
+- **A provider that cannot take the endpoint is refused in preflight**, before any spend,
+  never silently ignored. Under PydanticAI, `resolve_model` builds the provider with
+  `infer_model(model, provider_factory=...)` and raises `UnsupportedBaseURL` when the
+  provider class's constructor has no `base_url` parameter (`deepseek`, `azure`,
+  `openrouter`, ...) or when the model is an object that already carries a client; under
+  LangChain, `check_base_url` builds the chat model once with `base_url=` and reports any
+  refusal under the seat (`runner langchain`, `judge langchain`). Both keyed judges gained
+  a no-argument `preflight()` for it, returning `None` — no product status. With no
+  `base_url` nothing is checked and nothing changes: the string reaches the framework
+  untouched, so the pre-issue behaviour is the fallback by construction, not by a second
+  code path. The API-key check is unchanged: `ollama:` needs none, and `openai:` at a
+  local server still needs `OPENAI_API_KEY` exported, because the provider's client
+  requires one. The value is never printed in a report.
 
 **Agent-framework imports appear in exactly four modules** — `runners/pydantic_ai.py`,
 `judges/pydantic_ai.py`, `runners/langchain.py` and `judges/langchain.py`. `runners/tools.py`

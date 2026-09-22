@@ -50,6 +50,17 @@ the same in both; other providers differ (PydanticAI `google-gla:`, LangChain
 `google_genai:`) and need their provider package installed beside the extra
 (`pip install langchain-google-genai`, or `pydantic-ai-slim[google]`).
 
+A self-hosted, OpenAI-compatible server (Ollama, vLLM, LM Studio, a gateway) is reached
+through `base_url` in `skill-lens.toml` or `--base-url`, so the endpoint is committed
+beside `model` rather than exported in every shell; with neither set, the provider's own
+variable (`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`) is the fallback, as before. Under
+`pydantic-ai` the provider is built with the endpoint (`openai:`, `ollama:` and
+`anthropic:` take one; a hosted-only prefix such as `deepseek:` or `azure:` does not and is
+refused in preflight, before any spend); under `langchain` it reaches the chat model as
+`base_url=`. The judge inherits the endpoint exactly when it inherits the model — see
+[Self-hosted endpoints](configuration.md#self-hosted-endpoints) for `judge_base_url`, the
+load-time checks and why the API-key check is unchanged.
+
 Per turn, LangChain reports token usage on each model response and the served model
 name in the response metadata; the runner sums the former and reads the latter from the
 last response that carries one. A LangChain judge that returns a structured verdict the
