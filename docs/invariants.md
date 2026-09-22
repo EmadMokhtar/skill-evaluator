@@ -51,8 +51,9 @@ list; and one invocation may run the same case through both. So `FakeRunner`,
 `call_args` name outside their set (`UndeclaredTool`, exit 2, for the cases planned for that
 runner, before any case runs and before any spend), `ProductRunner` refuses no name, `cli`
 refuses `trajectory:` outright, and the loader — hence `skill-lens list` — accepts any name.
-The earlier loader check made the documented product combination unwritable: `tools:` is
-refused under a product, and the loader refused a `trajectory:` naming anything else.
+The earlier loader check made the documented product combination unwritable: under a product
+a `trajectory:` may name the product's own tools, which no case declares, and the loader
+refused every name it did not find in `tools:`.
 `check_trajectory_names` in `runners/preflight.py` is the one implementation; the message
 names the runner, so a multi-runner invocation says which one refused.
 
@@ -1286,8 +1287,12 @@ a human reads.
 *executes* its `--version` (a `copilot` that cannot start is exit 2 up front, not thirty
 errored cases — the same rule as the sandbox probe; `cli` has no version command, so only
 the `PATH` lookup applies to it), checks every skill name is one directory entry, and
-refuses `tools:` under any product and `trajectory:` or `mode: offered` under `cli`, all
-before the first case. It checks no `trajectory:` name against anything: under a product the
+refuses `tools:` under `cli` and under a preset whose `command` names another executable —
+the products that cannot take the [MCP bridge](#a-cases-tools-reach-a-preset-product-through-a-stdio-mcp-server-skill-lens-ships-and-the-product-starts-it),
+never under a preset that can — and `trajectory:` or `mode: offered` under `cli`, all
+before the first case; when a planned case declares `tools:` under a preset that serves
+them, it starts the bridge once with `--check` instead. It checks no `trajectory:` name
+against anything: under a product the
 names are the product's own tools, which skill-lens cannot enumerate (a translation table
 would be a third moving target), so that rule belongs to the framework runners' preflight —
 see the invariant above. The orchestrator hands it only the candidate-arm `(skill, case)`

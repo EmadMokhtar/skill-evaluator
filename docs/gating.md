@@ -24,7 +24,8 @@ flowchart TD
 ```
 
 Exit `2` also covers a [product runner](runners.md#product-runners) that cannot run here —
-its executable not on `PATH`, a preset's `--version` failing, a case with `tools:`, or
+its executable not on `PATH`, a preset's `--version` failing, a case with `tools:` under a
+product that cannot take the [MCP bridge](runners.md#mock-tools-under-a-product), or
 `trajectory:` / `mode: offered` under `cli` — all found in preflight before any case runs;
 a `trajectory:` naming a tool the case does not declare under `fake`, `pydantic-ai` or
 `langchain`, found in those runners' preflight (a product's tool names are not checked; see
