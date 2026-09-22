@@ -13,7 +13,9 @@ reporting the difference.
 Every case can run in two **arms**:
 
 - **candidate** — the skill under test, exactly as it runs today. This is the only arm a run
-  without `--baseline` produces, and it is the only arm the gate reads.
+  without `--baseline` produces, and the only arm `min_pass_rate`, `per_skill_min`,
+  `fail_on_error` and the zero-cases check ever read. [`--min-delta`](#-min-delta) is the one
+  gate rule that reads both, because the delta it gates on is built from both.
 - **baseline** — a comparison point, selected with `--baseline`:
   - `none` — an **empty skill**: same name, no description, no instructions. This isolates
     what the skill's text contributes, as opposed to what the model would do unprompted.
@@ -65,7 +67,7 @@ flowchart TD
     BR --> PAIR
     PAIR -->|"no: skipped, unresolvable, or every repetition errored"| DROP["Excluded from BOTH halves of the delta"]
     PAIR -->|yes| DELTA["Delta: pass rate, tokens, cost, latency"]
-    CR --> GATE["The gate reads the candidate arm only"]
+    CR --> GATE["The gate: candidate outcomes, plus the delta under --min-delta"]
     DELTA -->|"--min-delta, when set"| GATE
 ```
 

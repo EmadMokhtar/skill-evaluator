@@ -285,9 +285,15 @@ Delta vs baseline (previous)
   tokens     -60   (negative is better)
 ```
 
-Only the candidate arm feeds the gate: a strong baseline means the skill was unnecessary, not
-that the build should go red. Omitting `--baseline` is what turns comparison off — `none` is a
-kind of baseline, not the absence of one.
+The pass rate, the per-skill minimums and the errored check all read the candidate arm only:
+a strong baseline means the skill was unnecessary, not that the build should go red. Omitting
+`--baseline` is what turns comparison off — `none` is a kind of baseline, not the absence of
+one.
+
+`--min-delta` is the one gate rule that reads both arms. It names the smallest improvement
+you will accept — `--min-delta 0.2` fails the run unless the candidate's pass rate is at
+least 20 percentage points above the baseline's — so it gates on the delta rather than on
+either arm's own number. It needs `--baseline`; passing it alone is exit `2`.
 
 See [Comparative evals](comparative-evals.md).
 
@@ -298,7 +304,7 @@ The gate turns the whole run into one number a pipeline can act on.
 | Code | Meaning |
 | --- | --- |
 | `0` | The gate passed |
-| `1` | The gate failed — the pass rate was below `min_pass_rate`, a per-skill minimum was missed, or some case errored |
+| `1` | The gate failed — the pass rate was below `min_pass_rate`, a per-skill minimum was missed, some case errored, or `--min-delta` was set and the delta fell short of it |
 | `2` | Something about your setup is wrong — your files, your flags or your environment: a bad path, malformed YAML, an unknown assertion kind, an unfilled `TODO(skill-lens)`, an unset API key, a product's executable not on `PATH` |
 
 Exit `2` is deliberately not a gate failure. A mistake in your setup says nothing about the
@@ -321,7 +327,7 @@ See [Gating and exit codes](gating.md).
 | Baseline | What the candidate is measured against: an empty skill (`none`) or the previous version (`previous`). |
 | Budget | A limit on tokens, cost or latency that a case declares and the run checks. |
 | Bundle | The `scripts/`, `references/` and `assets/` directories beside a `SKILL.md`. |
-| Candidate | The arm running the skill under test. The only arm the gate reads. |
+| Candidate | The arm running the skill under test. Every gate rule but `--min-delta` reads this arm only. |
 | Case | One task plus what you expect of it, written in YAML beside the skill. |
 | Cassette | A recorded provider response replayed in tests, so the suite runs offline. |
 | Check | One pass-or-fail verdict with its evidence, emitted by an evaluator. |
@@ -332,6 +338,7 @@ See [Gating and exit codes](gating.md).
 | Gate | The rule that turns a whole run into one exit code. |
 | Judge | A model that grades output quality against a rubric you write, check by check. |
 | `loaded` / `offered` | Whether the agent is handed the skill, or left to reach for it. |
+| `--min-delta` | The smallest delta the gate will accept. The one gate rule that reads both arms, so it requires `--baseline`. |
 | Mock tool | A tool whose answer you write yourself, so a case is deterministic and free. |
 | Outcome | The result of one (skill, case, runner, arm, repetition): passed, failed or errored. |
 | Preflight | Checks run once before any case, so a run refuses what it cannot serve before spending. |
