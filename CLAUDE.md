@@ -379,7 +379,8 @@ form, that file is the explanation.
   carries exactly one of `contains` / `equals`; `contains: {}` is refused (it is `called:`
   spelled longer) and `equals: {}` is kept (called with no arguments). The shape rules are a
   `model_validator` on `CallArgsSpec`, so a programmatic case gets them; the declared-`tool`
-  rule is the loader's, beside `called` / `forbidden` / `order`. Ids are positional
+  rule is the runner's, in `check_trajectory_names` beside `called` / `forbidden` / `order`
+  (see the preflight bullet below). Ids are positional
   `call_args[{index}]`; a failing check's evidence renders the arguments seen and announces
   a cut.
 - **`EvalCase.tools` holds only `ToolSpec`; a `ref:` is resolved by the case loader on the
@@ -421,6 +422,16 @@ form, that file is the explanation.
   the MCP bridge started once with `--check` and `--available-tools` refused in
   `[runners.copilot]`, all before the first case; only the candidate-arm cases that will run
   are inspected, once each.
+- **The declared-name rule for `trajectory:` is the runner's, made in preflight — never the
+  loader's.** `fake`, `pydantic-ai` and `langchain` refuse (`UndeclaredTool`, exit 2, before
+  any case runs) a `called` / `forbidden` / `order` / `call_args` name that is not one of the case's
+  `tools:` or, with a `workspace:`, a built-in; a product preset refuses no name, because a
+  product's tools (`Bash`) cannot be listed — under it a name is either one of the case's
+  `tools:`, mapped back from the product's spelling, or the product's own, as the product
+  spells it; `cli` refuses `trajectory:` outright. The loader
+  cannot know the runner — one invocation may run one case through both kinds — so
+  `skill-lens list` accepts any name. `check_trajectory_names` in `runners/preflight.py` is
+  the one implementation, and its message names the runner.
 - **A case's `tools:` reach a preset product through the MCP bridge, and the product starts
   it.** `runners/mcp.py` writes the spec and the config into a fresh directory (never the
   working directory), appends the config flag as the *last* argv element, one element with

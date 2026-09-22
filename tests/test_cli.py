@@ -1229,3 +1229,30 @@ def test_model_with_a_product_judge_and_the_fake_runner_is_a_user_error(tmp_path
     )
     assert result.exit_code == 2
     assert "--model is read by pydantic-ai and langchain only" in plain(result.output)
+
+
+UNDECLARED_YAML = """cases:
+  - name: order lookup
+    task: look up order 1234
+    tools:
+      - name: lookup_order
+    trajectory:
+      called: [lookup_ordr]
+"""
+
+
+def test_run_exits_two_when_a_trajectory_names_a_tool_the_runner_cannot_offer(tmp_path):
+    _make_skill(tmp_path, cases=UNDECLARED_YAML)
+    result = runner.invoke(app, ["run", str(tmp_path)])
+    assert result.exit_code == 2, result.output
+    assert "runner fake: case 'order lookup' of skill 'pdf'" in plain(result.output)
+    assert "trajectory.called names 'lookup_ordr'" in plain(result.output)
+    assert "Traceback" not in result.output
+
+
+def test_list_accepts_a_trajectory_name_only_a_runner_can_judge(tmp_path):
+    # `list` calls no runner, and the rule is the runner's.
+    _make_skill(tmp_path, cases=UNDECLARED_YAML)
+    result = runner.invoke(app, ["list", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert "1 case(s)" in plain(result.output)

@@ -36,7 +36,7 @@ from skill_lens.reporters.markdown import render_markdown
 from skill_lens.runners.base import Runner, RunnerDependencyError
 from skill_lens.runners.fake import FakeRunner
 from skill_lens.runners.langchain import LangChainRunner
-from skill_lens.runners.preflight import MissingAPIKey, check_api_key
+from skill_lens.runners.preflight import MissingAPIKey, UndeclaredTool, check_api_key
 from skill_lens.runners.product import ProductRunner, ProductSetupError
 from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.scaffold import render_scaffold, scaffold_target
@@ -66,6 +66,9 @@ _AUTHORING_ERRORS = (
     UnknownAssertionKind,
     InvalidAssertionValue,
     MissingAPIKey,
+    # a trajectory: naming a tool the runner cannot offer the case, found in
+    # the framework runners' preflight
+    UndeclaredTool,
     RunnerDependencyError,
     # scripts enabled but cannot run here: a missing interpreter, or a
     # required sandbox that is absent

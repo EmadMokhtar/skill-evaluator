@@ -652,3 +652,14 @@ def test_a_model_running_a_missing_script_is_refused_not_errored(tmp_path):
     result = runner.run(_bundled_skill(tmp_path), case(), workspace=workspace, scripts=RUNTIME)
     assert result.error is None
     assert "refused" in str(result.transcript)
+
+
+def test_preflight_refuses_a_trajectory_naming_a_tool_the_case_does_not_declare():
+    from skill_lens.models import TrajectorySpec
+    from skill_lens.runners.preflight import UndeclaredTool
+
+    case_ = EvalCase(name="c", task="t", trajectory=TrajectorySpec(called=["Bash"]))
+    runner = PydanticAIRunner(model=scripted(text("x")))
+    with pytest.raises(UndeclaredTool, match=r"runner pydantic-ai: case 'c' of skill 's'"):
+        runner.preflight([], {"s": [case_]})
+    assert runner.preflight([], {"s": [EvalCase(name="c", task="t")]}) is None

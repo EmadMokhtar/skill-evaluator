@@ -203,3 +203,29 @@ def test_a_referenced_tool_is_refused_like_an_inline_one(tmp_path):
         ProductSetupError, match="case 'uses tools' of skill 'ping' declares tools:"
     ):
         ProductRunner(_product()).preflight([_skill()], {"ping": [case]})
+
+
+def test_a_product_tool_name_reaches_a_preset_from_yaml_beside_a_workspace(tmp_path):
+    # The documented combination: no `tools:` (a product refuses them), a
+    # `workspace:` (the product's working directory), and a trajectory naming
+    # the product's own tool. The loader must let it through and the preset
+    # must accept it -- skill-lens cannot list a product's tools, so it does
+    # not pretend to check the name.
+    from skill_lens.cases.loader import parse_cases_file
+
+    path = tmp_path / "p.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: greps\n"
+        "    task: count the errors in app.log\n"
+        "    workspace:\n"
+        "      files:\n"
+        "        app.log: 'ERROR x'\n"
+        "    trajectory:\n"
+        "      called: [Bash]\n"
+        "      forbidden: [Write]\n",
+        encoding="utf-8",
+    )
+    cases = parse_cases_file(path)
+    status = ProductRunner(_product()).preflight([_skill()], {"ping": cases})
+    assert status.name == "claude-code"
