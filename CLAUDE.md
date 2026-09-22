@@ -276,6 +276,16 @@ form, that file is the explanation.
   re-upload of a version that already exists.
 - **A merge with no releasable commit publishes nothing and fails nothing.** `cz bump` exit
   codes 21 and 3 are no-ops, not errors.
+- **A run that `main` outran publishes nothing and fails nothing.** The `concurrency` group
+  never cancels a run but does not keep one alone from start to finish (it is checked per job),
+  and a merge that lands during `verify` moves `main` anyway; the earlier run's `--atomic` push
+  is then rejected with nothing landed. The push step fetches `main` and, when this run's
+  commit is a *strict ancestor* of the new tip, records `pushed=false` and exits 0 — the later
+  push's run reads every commit since the last tag, this one included. Any other rejection
+  (`main` unmoved, or rewritten without this commit) still fails. Every later step and the
+  `bumped` output `publish` reads gate on `steps.push.outputs.pushed`, never on the bump alone,
+  and the script takes the version from `env`, not a `${{ }}` expression, so the tests can run
+  it verbatim.
 - **The pushed release tag is annotated, and the job verifies it actually reached `origin`
   before building.** `git push --follow-tags` pushes only annotated tags, so
   `[tool.commitizen] annotated_tag = true` exists specifically to make Commitizen create one

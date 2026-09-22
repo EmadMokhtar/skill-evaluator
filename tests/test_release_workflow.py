@@ -10,7 +10,9 @@ Task 5 adds the `publish` job and its own tests for it; this file covers the
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -79,7 +81,7 @@ def test_the_pushed_tag_is_verified_before_the_build(workflow):
     """
     steps = workflow["jobs"]["release"]["steps"]
     verify_step = next(step for step in steps if "ls-remote" in str(step.get("run", "")))
-    assert verify_step["if"] == "steps.bump.outputs.bumped == 'true'"
+    assert verify_step["if"] == "steps.push.outputs.pushed == 'true'"
 
 
 def test_the_verification_spells_the_tag_the_way_commitizen_does(workflow):
@@ -208,7 +210,7 @@ def test_the_sbom_describes_what_an_installer_gets(workflow):
     assert "--frozen" in run, "the export must read uv.lock as-is, not re-resolve"
     assert "--all-extras" in run
     assert "--no-default-groups" in run
-    assert step["if"] == "steps.bump.outputs.bumped == 'true'"
+    assert step["if"] == "steps.push.outputs.pushed == 'true'"
 
 
 def test_the_sbom_never_enters_the_pypi_upload(workflow):
@@ -260,7 +262,7 @@ def test_the_release_notes_are_the_changelog_section_for_that_version(workflow):
     history and the tools, and handed on as an artifact."""
     notes = _release_step(workflow, "cz changelog")
     assert "--dry-run" in notes["run"]
-    assert notes["if"] == "steps.bump.outputs.bumped == 'true'"
+    assert notes["if"] == "steps.push.outputs.pushed == 'true'"
     uploads = {
         step["with"]["name"]
         for step in workflow["jobs"]["release"]["steps"]
@@ -296,3 +298,178 @@ def test_the_release_builds_with_the_audited_backend(workflow):
     flags, constraints = export.group(1), export.group(2)
     assert "--frozen" in flags and "--only-group build" in flags, flags
     assert f"uv build --build-constraint {constraints}" in run, run
+
+
+# --- A run that main outran -------------------------------------------------
+#
+# Two merges close together each start a release run. The concurrency group
+# keeps a run from being cancelled; it does not keep one from being overtaken
+# between its jobs, and a merge that lands during `verify` moves main just
+# the same. The earlier run's `cz bump` then rests on a commit that is no
+# longer main's tip, and its push is rejected as a non-fast-forward. The
+# later push has a run of its own whose `cz bump` reads every commit since
+# the last tag -- the earlier commit included -- so the earlier run has
+# nothing left to release: the same no-op as cz's exit 21 and 3, not a
+# failure. The push step's script decides this, so these tests run that
+# script, as GitHub would, against a local bare origin.
+
+
+def _git(*args: str, cwd: Path) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _clone(origin: Path, into: Path) -> Path:
+    """A clone with a committer identity, so commits succeed in CI."""
+    subprocess.run(["git", "clone", "-q", str(origin), str(into)], check=True)
+    _git("config", "user.email", "t@example.com", cwd=into)
+    _git("config", "user.name", "Test", cwd=into)
+    return into
+
+
+def _commit(repo: Path, message: str) -> str:
+    (repo / "file.txt").write_text(message + "\n", encoding="utf-8")
+    _git("add", "file.txt", cwd=repo)
+    _git("commit", "-q", "-m", message, cwd=repo)
+    return _git("rev-parse", "HEAD", cwd=repo)
+
+
+def _runner(tmp_path: Path) -> tuple[Path, Path, str]:
+    """The release job's checkout after `cz bump`: main at the pushed commit
+    (`GITHUB_SHA`), the bump commit on top of it, and an annotated tag."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    seed = _clone(origin, tmp_path / "seed")
+    _commit(seed, "feat: the merge this run is for")
+    _git("push", "-q", "origin", "HEAD:main", cwd=seed)
+    work = _clone(origin, tmp_path / "work")
+    github_sha = _git("rev-parse", "HEAD", cwd=work)
+    _commit(work, "bump: version 0.0.0 → 9.9.9 [skip ci]")
+    _git("tag", "-a", "v9.9.9", "-m", "9.9.9", cwd=work)
+    return origin, work, github_sha
+
+
+def _run_push_step(
+    workflow: dict, work: Path, github_sha: str, tmp_path: Path
+) -> tuple[subprocess.CompletedProcess, str, str]:
+    """Run the push step's script the way `shell: bash` does."""
+    step = _release_step(workflow, "git push")
+    assert step.get("id") == "push", "the push step must be addressable as steps.push"
+    assert step.get("shell") == "bash"
+    output = tmp_path / "github_output"
+    summary = tmp_path / "github_step_summary"
+    output.touch()
+    summary.touch()
+    env = {
+        **os.environ,
+        "GITHUB_SHA": github_sha,
+        "GITHUB_OUTPUT": str(output),
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "VERSION": "9.9.9",
+    }
+    proc = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+        cwd=work,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    return proc, output.read_text(encoding="utf-8"), summary.read_text(encoding="utf-8")
+
+
+def _origin_tags(origin: Path) -> str:
+    return _git("tag", "--list", cwd=origin)
+
+
+def test_a_push_that_lands_reports_it(workflow, tmp_path):
+    origin, work, github_sha = _runner(tmp_path)
+
+    proc, output, summary = _run_push_step(workflow, work, github_sha, tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "pushed=true" in output
+    assert "9.9.9" in summary
+    assert _git("rev-parse", "main", cwd=origin) == _git("rev-parse", "HEAD", cwd=work)
+    assert _origin_tags(origin) == "v9.9.9"
+
+
+def test_a_run_that_main_outran_publishes_nothing_and_fails_nothing(workflow, tmp_path):
+    """The failure this guards against: a `fix:` merged, and a `feat:` merged
+    three minutes later released both as one minor version while the first
+    run's `release` job was still queued. That job's push was rejected and
+    the run turned red over a release that had already happened."""
+    origin, work, github_sha = _runner(tmp_path)
+    other = _clone(origin, tmp_path / "other")
+    later = _commit(other, "feat: the merge that overtook this run")
+    _git("push", "-q", "origin", "HEAD:main", cwd=other)
+
+    proc, output, summary = _run_push_step(workflow, work, github_sha, tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "pushed=false" in output
+    assert "pushed=true" not in output
+    assert later[:7] in summary, summary
+    assert "since the last tag" in summary, summary
+    # Nothing landed: --atomic held the commit and the tag back together.
+    assert _git("rev-parse", "main", cwd=origin) == later
+    assert _origin_tags(origin) == ""
+
+
+def test_a_rejected_push_that_main_did_not_outrun_still_fails(workflow, tmp_path):
+    """main is where this run left it, yet the push is rejected -- a branch
+    protection rule, say, played here by a pre-receive hook. No later run
+    carries this commit, so this is not the documented no-op, and reporting
+    it as one would leave a releasable commit unreleased in silence."""
+    origin, work, github_sha = _runner(tmp_path)
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho 'refused by the origin' >&2\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+
+    proc, output, _ = _run_push_step(workflow, work, github_sha, tmp_path)
+
+    assert proc.returncode != 0
+    assert "pushed=true" not in output
+    assert "pushed=false" not in output
+    assert github_sha[:7] in proc.stderr, proc.stderr
+
+
+def test_a_rewritten_main_is_not_a_run_that_was_outrun(workflow, tmp_path):
+    """main moved, but not past this run's commit: it was force-pushed to a
+    history that does not contain it. No later run carries this commit, so
+    silence here would be the vacuous pass the workflow refuses elsewhere."""
+    origin, work, github_sha = _runner(tmp_path)
+    other = _clone(origin, tmp_path / "other")
+    _git("checkout", "-q", "--orphan", "rewritten", cwd=other)
+    _commit(other, "chore: a history without this run's commit")
+    _git("push", "-q", "--force", "origin", "HEAD:main", cwd=other)
+
+    proc, output, _ = _run_push_step(workflow, work, github_sha, tmp_path)
+
+    assert proc.returncode != 0
+    assert "pushed=" not in output
+
+
+def test_everything_after_the_push_waits_for_it_to_land(workflow):
+    """A run that main outran has cut a version it never pushed, so `bumped`
+    alone would send the ls-remote check, the build and `publish` after a
+    tag that is not on origin. Every later step, and the job output the
+    `publish` job reads, gate on the push step instead."""
+    steps = workflow["jobs"]["release"]["steps"]
+    push_index = next(i for i, step in enumerate(steps) if step.get("id") == "push")
+    assert steps[push_index]["if"] == "steps.bump.outputs.bumped == 'true'"
+    for step in steps[push_index + 1 :]:
+        assert step.get("if") == "steps.push.outputs.pushed == 'true'", step.get("name")
+    outputs = workflow["jobs"]["release"]["outputs"]
+    assert outputs["bumped"] == "${{ steps.push.outputs.pushed }}"
+    assert outputs["version"] == "${{ steps.bump.outputs.version }}"
+
+
+def test_the_push_step_reads_the_version_from_its_environment(workflow):
+    """The step's script is run verbatim by the tests above. A `${{ }}`
+    expression inside it would be a bash syntax error there and, more to the
+    point, an injection surface on the runner; the version arrives as an
+    environment variable instead."""
+    step = _release_step(workflow, "git push")
+    assert "${{" not in step["run"], step["run"]
+    assert step["env"]["VERSION"] == "${{ steps.bump.outputs.version }}"

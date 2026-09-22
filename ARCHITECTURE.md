@@ -445,6 +445,25 @@ locally bumped and pushed tag produces a run with nothing to release.
 (`NoCommitsFoundError`) — so the bump step deliberately runs without `set -e`, which would
 discard the code before it could be read, and checks every other command by hand instead.
 
+**A run that `main` outran publishes nothing and fails nothing.** Two merges a few minutes
+apart each start a release run, and the `concurrency` group does not keep one alone from start
+to finish — GitHub checks the group when a *job* starts, so a run between its `verify` and
+`release` jobs can be overtaken; and a merge that lands during `verify` has moved `main`
+regardless. The earlier run's `cz bump` then rests on a commit that is no longer the tip, and
+its `--atomic` push is rejected as a non-fast-forward with nothing landed. The push step treats
+that as the same no-op as cz's exit `21` and `3`: it fetches `main`, and if this run's commit
+is a *strict ancestor* of the new tip it records `pushed=false` and exits `0`, naming the
+commit that overtook it in the summary. That is sound because the later push has a run of its
+own whose `cz bump` reads every commit since the last tag, the earlier commit included. The
+ancestor test is what keeps it from being a vacuous pass: `main` unmoved but the push refused,
+or `main` rewritten to a history without this commit, still fail with the push's own exit code,
+because no later run is known to carry the commit. Every step after the push, and the
+`bumped` output `publish` reads, gate on the push step's `pushed` rather than on the bump
+step's `bumped`, so a version that was cut but never pushed is never verified, built or
+published. `tests/test_release_workflow.py` runs the step's script verbatim against a local
+bare origin for each of these cases, which is also why the version reaches the script as an
+environment variable rather than a `${{ }}` expression.
+
 **The pushed release tag is annotated, and the job proves it reached `origin`.**
 `git push --follow-tags` pushes only *annotated* tags, and Commitizen creates a lightweight one
 unless told otherwise, so `annotated_tag = true` is what stops the bump commit reaching `main`

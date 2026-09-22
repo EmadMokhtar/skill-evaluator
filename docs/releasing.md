@@ -10,11 +10,12 @@ publishes to PyPI. Nobody types a release command.
 | --- | --- | --- |
 | `verify` | ruff (including the `S` security rules), format check, the full offline suite, `uv audit` on the lockfile | every push to `main` |
 | `release` | `cz bump`, push the commit and its tag, verify the tag reached `origin`, write the release notes, `uv build`, export the SBOM, upload the artifacts | `verify` passed |
-| `publish` | download the artifact, upload to PyPI with attestations | a version was actually cut |
+| `publish` | download the artifact, upload to PyPI with attestations | a version was cut *and* its commit and tag reached `origin` |
 | `github-release` | download the three artifacts and hand them to `gh`: create the GitHub Release for the tag with the notes; attach the wheel, the sdist and the SBOM. No checkout, no install | `publish` succeeded |
 
 A merge whose commits do not warrant a release is a no-op: `cz bump` exits `21` or `3`, the
-job records "nothing to release" in its summary, and `publish` is skipped.
+job records "nothing to release" in its summary, and `publish` is skipped. So is a merge whose
+run `main` outran — see [Two merges close together](#two-merges-close-together).
 
 `verify` re-runs the dependency audit on the commit being released rather than trusting the
 pull request's green check: an advisory can be published between the merge and the tag, and
@@ -52,13 +53,48 @@ pushes only **annotated** tags. Commitizen creates a lightweight tag unless told
 `main` while its tag stayed on the ephemeral runner and vanished when the job ended.
 
 The push is `--atomic`, so the commit and the tag are one update: if either ref is rejected —
-`main` moved under the job, the tag already exists — neither lands, and there is no half-pushed
-state to reason about afterwards.
+`main` moved under the job, a branch rule refused it — neither lands, and there is no half-pushed
+state to reason about afterwards. Whether that rejection is a failure depends on *why* `main`
+moved, which is the next section.
+
+### Two merges close together
+
+Two pull requests merged a few minutes apart each start a release run, and the second can
+finish before the first. The workflow's `concurrency` group only promises that a run in
+progress is never *cancelled* (a cancelled release could leave a tag pushed and nothing built);
+it does not keep one run alone from start to finish. GitHub checks the group when a *job*
+starts, so a run that is between its `verify` and `release` jobs can be overtaken by the next
+run, which then goes all the way to PyPI first. And even with the runs perfectly serialised,
+a merge that lands while `verify` is running has already moved `main`.
+
+Whichever way it happens, the earlier run's `release` job then finds itself on a commit that is
+no longer the tip of `main`. Its `cz bump` rests on that commit, and the `--atomic` push of the
+bump commit and tag is rejected as a non-fast-forward (the remote branch holds commits the job's
+branch does not). Nothing landed: no tag, no bump commit.
+
+The run is not a failure, and the job says so. The push step fetches `main`, and if this run's
+commit is a strict ancestor of the new tip — `main` moved *past* it, rather than away from it —
+it records `pushed=false`, writes "Nothing released: main moved on to `<sha>` while this run was
+in progress" to the summary, and exits `0`; `publish` is skipped just as after a `cz bump` exit
+`21` or `3`. That is safe because the later push has a run of its own, and its `cz bump` reads
+**every commit since the last tag**, the earlier run's commit included: a `fix:` merged first
+and a `feat:` merged three minutes later come out as one minor version that contains both. The
+earlier run's commit is released; only the version it would have cut on its own never exists,
+which is the same cosmetic gap as any other skipped number.
+
+Any other rejection still fails the job with the push's own exit code: `main` unmoved but the
+push refused (a branch rule), `main` rewritten to a history that does not contain this commit
+(a force push), or a fetch that fails. In each of those no later run is known to carry the
+commit, so silence would be the vacuous pass this project refuses everywhere else.
+
+If the run for the later push should itself fail, the earlier commit is still not lost: the next
+merge that warrants a release computes its increment from every commit since the last tag.
 
 Because a silently dropped tag would otherwise be invisible — the `publish` job is reached
 through `needs:`, not through the tag itself, so nothing downstream would notice — the
-`release` job runs a `git ls-remote --tags origin` check right after the push and fails loudly
-if the tag is not there. That check tests the command's exit status separately from its output:
+`release` job runs a `git ls-remote --tags origin` check right after a push that landed
+(every step after the push, and `publish`, are gated on the push step's `pushed` output rather
+than on the bump having been computed) and fails loudly if the tag is not there. That check tests the command's exit status separately from its output:
 a failed lookup prints nothing, exactly like a missing tag, so treating "no output" as the only
 signal would report a missing tag for one that is very likely present. If you ever see the
 "is not on origin" message, it means the bump commit reached `main` but its tag did not: the
