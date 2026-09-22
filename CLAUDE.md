@@ -71,9 +71,8 @@ fails if the two drift apart — so a new invariant is added in both places or n
 
 - **`errored` is not `failed`.** `failed` = the case ran and scored below bar (an eval
   signal). `errored` = the runner itself blew up (an infra signal). Runners must **never
-  raise** for provider failures — set `RunResult.error` instead; judges do the same with
-  `JudgeVerdict.error`, and an errored *evaluator* errors the case, so a judge endpoint
-  returning 500 never reads as a skill that got worse. Errored cases fail the gate by default.
+  raise** for provider failures — set `RunResult.error` instead. Errored cases fail the gate
+  by default.
 - **A run executing zero cases fails the gate.** "Nothing ran" is a broken run, not a pass.
   `gating.evaluate_gate` distinguishes the causes (no skills found / all skipped for having
   no cases / all filtered out by `--tag`).
@@ -99,10 +98,7 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **All file IO pins `encoding="utf-8"`** and re-raises as a typed parse error
   (`SkillParseError` / `CaseParseError` / `ConfigError`) naming the file and field.
 - **YAML goes through `yaml_loading.safe_load`**, never `yaml.safe_load`. The custom loader
-  stops YAML 1.1 from turning bare `yes`/`no`/`on`/`off` into booleans. The same hazard in the
-  skill loader: a `version:` that YAML does not parse as a string is a `SkillParseError`
-  (exit 2), because `1.20` and `1.2` resolve to one float and would compare equal under
-  `--baseline previous`; three-part semver (`1.0.0`) is already a string and needs no quoting.
+  stops YAML 1.1 from turning bare `yes`/`no`/`on`/`off` into booleans.
 - **Secrets come from environment variables only** — never from `skill-lens.toml`.
 - **A base URL is config; a key is environment** (issue #54). `base_url` / `judge_base_url`
   in the file, `--base-url` on the flag: flag > file > the provider's own variable
@@ -154,11 +150,17 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act;
   a missing cassette skips rather than fails, but a mismatched request fails rather than
   reaching the network.
-- **Nothing scores a vacuous pass.** skill-lens derives `passed` and `score` from per-check
-  verdicts — the judge is never asked for a blended number — a check that passes without
-  evidence is recorded as a failure, and an unscripted `FakeJudge` errors rather than passing.
-  That last one is what makes `judge = "fake"` safe as the built-in default: an unchecked
-  rubric is never a green case.
+- **An errored *evaluator* errors the case.** `errored` is not `failed` applies to evaluators
+  too: a judge endpoint returning 500 must not read as a skill that got worse.
+- **Judges never raise for provider failures** — they set `JudgeVerdict.error`.
+- **Nothing scores a vacuous pass.** The rule that an unpriceable budget limit fails rather
+  than passing generalises: an unsupported PASS is an LLM judge's characteristic failure
+  mode, so it gets a mechanical defence rather than a prompt asking nicely.
+- **skill-lens derives `passed` and `score` from per-check verdicts.** The judge is never
+  asked for a blended number, and a check that passes without evidence is recorded as a
+  failure.
+- **An unscripted `FakeJudge` errors rather than passing.** That is what makes
+  `judge = "fake"` safe as the built-in default: an unchecked rubric is never a green case.
 - **Judge spend never enters `RunResult`.** It lives on `EvalScore.cost_usd` and is reported
   as judge overhead; `budget:` measures the skill, not the harness.
 - **A rubric entry phrased against a mock tool's `returns:` is an authoring error** (exit 2,
@@ -172,6 +174,10 @@ fails if the two drift apart — so a new invariant is added in both places or n
   `SYSTEM_PROMPT` is the second layer: it tells the judge what it was not shown and that a
   check decidable only against that is a fail, so a line the vocabulary misses fails
   honestly instead of passing unread.
+- **A `version:` that YAML does not parse as a string is an authoring error.**
+  `SkillParseError`, exit 2. YAML resolves `1.20` and `1.2` to the same float, so two
+  genuinely different versions would silently compare equal under `--baseline previous`;
+  three-part semver (`1.0.0`) is already a string and needs no quoting.
 - **Absent `--baseline`, what runs is identical to a single-arm run.** `none` is a *kind* of
   baseline; the flag being unset — not `--baseline none` — is what turns comparison off.
 - **Baseline outcomes never count toward the gate**, and never toward `errored`. Every
@@ -526,11 +532,12 @@ fails if the two drift apart — so a new invariant is added in both places or n
   and `runners/product.py` both import it, and it imports nothing from the project.
 - **Script execution is off unless the run turned it on** (`allow_scripts` /
   `--allow-scripts`); nothing in an eval file or a `SKILL.md` can enable it. Reading the
-  bundle needs no opt-in. `skill-lens.toml` is inside the trust boundary: in a
-  `pull_request` workflow the checkout is the PR, so the file can turn scripts on for
-  itself; the action's `allow-scripts` input is unset by default so the file decides, and
-  `pull_request_target`, collaborator-PR and self-hosted workflows should pass
-  `allow-scripts: false` explicitly. Docs-only: `docs/security.md`, `docs/ci.md`.
+  bundle needs no opt-in.
+- **`skill-lens.toml` is inside the trust boundary.** In a `pull_request` workflow the
+  checkout is the PR, so the file can turn scripts on for itself; the action's
+  `allow-scripts` input is unset by default so the file decides, and `pull_request_target`,
+  collaborator-PR and self-hosted workflows should pass `allow-scripts: false` explicitly.
+  Docs-only: `docs/security.md`, `docs/ci.md`.
 - **The bundle is `scripts/`, `references/`, `assets/` and nothing else** — an eval file
   beside `SKILL.md` is never readable by the agent.
 - **`Skill.bundle_root` defaults to `None`, and only the loader and the baseline resolver
@@ -582,8 +589,9 @@ fails if the two drift apart — so a new invariant is added in both places or n
   explicitly.** It denies reads under the system temp directory, then re-allows the
   workspace, the scratch directory and the bundle — the bundle explicitly, because a
   `--baseline previous` bundle is extracted under the temp dir. Reads elsewhere are allowed;
-  say so. `bwrap` does not block Unix-domain sockets (`/var/run/docker.sock`); macOS's
-  `(deny network*)` does, as the Linux row and the guarantee paragraph in the docs record.
+  say so.
+- **`bwrap` does not block Unix-domain sockets** (`/var/run/docker.sock`); macOS's
+  `(deny network*)` does. Documented in the Linux row and the guarantee paragraph.
 - **A previous baseline carries its own bundle** from the commit that last edited `SKILL.md`
   at the previous version (`git archive <sha> -- .` from the skill directory — `<sha>:./`
   yields an empty archive; `tarfile`'s `data` filter, hence `requires-python >= 3.11.4`), or

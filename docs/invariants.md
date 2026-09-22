@@ -17,6 +17,16 @@ them makes a broken API key look like a bad skill. Runners therefore **never rai
 provider failures; they set `RunResult.error`. Errored cases fail the gate by default so CI
 never goes green on a run that did not actually happen.
 
+### An errored *evaluator* errors the case
+
+`errored` is not `failed` applies to evaluators too: a judge endpoint returning 500 must not
+read as a skill that got worse. The case is reported as `errored`, with the evaluator's own
+diagnostic on `EvalScore.detail`.
+
+### Judges never raise for provider failures
+
+They set `JudgeVerdict.error`, the same way runners set `RunResult.error`.
+
 ### A run executing zero cases fails the gate
 
 "Nothing ran" is a broken run, not a pass — otherwise a mistyped path reports success
@@ -169,6 +179,16 @@ with no configured judge is *errored*, and a judge check that passes without cit
 is recorded as a *failure*. An unsupported PASS is an LLM judge's characteristic failure
 mode, so it gets a mechanical defence rather than a prompt asking nicely.
 
+### skill-lens derives `passed` and `score` from per-check verdicts
+
+The judge is never asked for a blended number. It returns a verdict per check, and a check
+that passes without citing evidence is recorded as a failure.
+
+### An unscripted `FakeJudge` errors rather than passing
+
+That is what makes `judge = "fake"` safe as the built-in default: an unchecked rubric is
+never a green case.
+
 ### A rubric entry phrased against a mock tool's `returns:` is an authoring error
 
 A rubric entry phrased against a mock tool's `returns:` is an authoring error (exit 2, load
@@ -286,6 +306,12 @@ untracked `SKILL.md`, an exhausted history window. Each comes back as a
 `BaselineUnavailable` with a reason, the same discipline runners and judges follow for
 provider failures. Subprocesses run without a shell, decode as UTF-8, and carry a timeout,
 so a hung `git` cannot hang CI.
+
+### A `version:` that YAML does not parse as a string is an authoring error
+
+`SkillParseError`, exit 2. YAML resolves `1.20` and `1.2` to the same float, so two
+genuinely different versions would silently compare equal under `--baseline previous`.
+Three-part semver (`1.0.0`) is already a string and needs no quoting.
 
 ### Deterministic evaluators emit per-check verdicts
 
@@ -706,6 +732,13 @@ vetted, and the person who writes the eval is usually the person who wrote the s
 Reading the bundle needs no opt-in: reading a file the repository already contains changes
 nothing.
 
+### `skill-lens.toml` is inside the trust boundary
+
+In a `pull_request` workflow the checkout is the pull request, so the file can turn scripts
+on for itself. The action's `allow-scripts` input is unset by default, so the file decides;
+`pull_request_target`, collaborator-pull-request and self-hosted workflows should pass
+`allow-scripts: false` explicitly. [Security](security.md) and [CI](ci.md) say so.
+
 ### The bundle is `scripts/`, `references/`, `assets/` and nothing else
 
 `SkillBundle` refuses any other first path component, so `*.eval.yaml` and `evals/` — the
@@ -813,6 +846,12 @@ binds the same three back in (the bundle read-only). The bundle must be re-allow
 denial is a `subpath`, not a regex: an escaped path in a regex literal would silently stop
 matching on any metacharacter — a fail-open the blanket `subpath` cannot have. Reads
 elsewhere are allowed; the docs say so rather than pretend otherwise.
+
+### `bwrap` does not block Unix-domain sockets
+
+`bwrap` does not block a Unix-domain socket such as `/var/run/docker.sock`; macOS's
+`(deny network*)` does. [Security](security.md) records the difference with the rest of the
+backend's limits.
 
 ### A previous baseline carries its own bundle
 
