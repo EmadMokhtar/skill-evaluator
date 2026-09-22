@@ -4,101 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`skill-lens` is a standalone CLI + library that runs evaluations on Anthropic-style Agent
+`skill-lens` is a standalone CLI and library that runs evaluations on Anthropic-style Agent
 Skills (`SKILL.md` files). Skills under test and their eval cases are **inputs** — nothing
-about a skill-under-test is vendored here. The tool is meant to run as a CI gate (exit code
-is the contract) or on demand.
+about a skill under test is vendored here. It is meant to run as a CI gate, where the exit
+code is the contract, or on demand.
 
-Currently at **M9 complete**, with **M6 part 2** shipped after M7: the
-pipeline runs real agents through `PydanticAIRunner`
-(provider-flexible, via PydanticAI), scores tool use and efficiency as well as
-output text, and is tested against recorded provider traffic. `FakeRunner`
-remains the default and the backbone of the zero-cost test tier. M3 adds a
-rubric-based LLM judge that scores output quality with per-check evidence, and
-an `offered` case mode that measures whether the agent chose to trigger the
-skill at all, negative controls included. M4 makes every measurement
-comparative: each case can run in a candidate arm and a baseline arm
-(`--baseline none` or `--baseline previous`, resolved from git), optionally
-sampled `--repeat N` times, with the report gaining a delta and `--min-delta`
-gating on it. M5 part 1 makes a run legible to CI: `--junit-output` and
-`--markdown-output` reporters, `--concurrency N` over the work matrix, and a
-composite GitHub Action with example workflows. M5 part 2 automates releasing
-itself: a merge to `main` verifies, bumps the version from the commit history
-with `cz bump`, tags it, and publishes to PyPI over Trusted Publishing, with a
-manual workflow to refresh the recorded provider traffic. See
-[Releasing](docs/releasing.md). M6 part 1 gives a case a contained workspace
-with `list_files`/`read_file`/`write_file`, `file-produced` and `json-schema`
-assertions, a `file:` modifier and `judge: artifacts:`. M7 makes a failing
-case explain itself (output and tool calls in every reporter, `--full-output`),
-adds `--case`, brings `init` up to M6 with a workspace case and a batch mode,
-and ships a versioned comparative example, an annotated config and an
-end-to-end quickstart. M8 part 1 adds a LangChain runner and judge behind the same
-protocols, installable as the `[langchain]` extra, with the prompt rules and retry loop
-extracted into `runners/prompting.py` and `runners/retry.py`. M8 part 2 makes
-`--runner` repeatable and `default_runner` a string or list, so one invocation runs every
-case through every named framework. M9 part 1 adds product runners: `--runner copilot`
-and `--runner claude-code` start GitHub Copilot CLI or Claude Code in non-interactive
-mode with `SKILL.md` and its bundle delivered verbatim (its text as written; line endings
-are normalised) into the product's own skill directory, and read output, tool calls,
-tokens and the skill-load signal from the
-product's trace; `--runner cli` does the same for a command a `[runners.cli]` table names,
-with stdout as the output. No provider key is involved. A once-per-run `preflight` hook
-on the `Runner` protocol refuses what the product cannot serve before any quota is spent,
-`RunReport.products` puts the product, its version and its trust sentence on every
-report, `RunResult.usage_note` makes an unmeasurable token limit a failing check, and a
-`--model`/`--judge-model` nothing reads is a user error. M9 part 2 adds the product judge:
-`judge = "copilot"`, `"claude-code"` or `"cli"` grades every `judge:` block through the
-product named in `[runners.<name>]` (`judges/product.py`), sending the shared judge prompt
-as one text turn closed by a JSON-only line from an empty directory with no skill, reading
-the first balanced JSON object in the reply as the verdict, with `--tools ""` under Claude
-Code and `--available-tools=skill-lens-none` under Copilot; the orchestrator calls the
-judge's no-argument `preflight()` beside the runners' and
-lists a product serving as both once. M6 part 2 lets the
-agent read the files a skill ships beside `SKILL.md` (`scripts/`, `references/`,
-`assets/`) through `list_skill_files`/`read_skill_file`, and — only under
-`allow_scripts` / `--allow-scripts` — run a bundled script through `run_script`,
-under portable guards everywhere and an OS sandbox where one exists
-(`sandbox-exec` on macOS, `bwrap` on Linux), with the report saying which
-applied; `--baseline previous` pairs the previous `SKILL.md` with its own
-bundle. `mcp-import` (issue #43) turns a saved MCP `tools/list` response into a pasteable `tools:`
-block carrying the server's schema verbatim in the new `ToolSpec.input_schema`, and
-`ToolSpec.name` now accepts what providers accept (`^[A-Za-z0-9_-]{1,64}$`). Its design is
-in `docs/superpowers/specs/2026-09-17-skill-lens-mcp-import-design.md`. Tool libraries (issue #42)
-let a YAML file with one top-level `tools:` list — the block `mcp-import` prints — be imported by
-any eval file with `tool_libraries:` (paths relative to the eval file) and named in a case with
-`- ref: <name>`, which may set only `returns:`; the loader resolves every ref before validation,
-so `EvalCase.tools` still holds only `ToolSpec`. Its design is in
-`docs/superpowers/specs/2026-09-17-skill-lens-tool-libraries-design.md`. `trajectory.call_args`
-(issue #40) asserts on the arguments a tool was called with: each entry names a declared
-`tool` and either `contains:` (a structural subset) or `equals:` (the whole argument dict),
-holding when at least one call matched or, with `every: true`, when every call did; ids are
-`call_args[{index}]`. Its design is in
-`docs/superpowers/specs/2026-09-21-skill-lens-call-args-design.md`. Per-call mock returns
-(issue #41) let `returns:` be a list of strings consumed in call order (the last repeating) or
-a list of `when:`/`value:` entries matched against the call's arguments (first match wins, an
-entry with no `when:` the fallback), so one case can exercise a loop-until or
-branch-on-result skill; `ToolResponse` carries an entry, `cases/checks.check_tool_returns`
-refuses an entry that could never fire, and both keyed adapters rebuild the agent per retry
-attempt. Its design is in `docs/superpowers/specs/2026-09-21-skill-lens-per-call-returns-design.md`.
-The MCP bridge (issue #53)
-serves a case's `tools:` under `copilot` and `claude-code`: `runners/mcp.py` writes the tools
-and an MCP config into a fresh directory, hands the config to the product as its last argument
-(`--mcp-config=`, `--additional-mcp-config=@`), the product starts `python -m
-skill_lens.mcp_bridge` — a stdio MCP server in the package, no new dependency, answering
-`returns:` in all three shapes by the same rules — and the runner
-maps the product's spelling of a tool (`mcp__skill-lens__<name>`, `skill-lens-<name>`) back to
-the case's name. Its design is in
-`docs/superpowers/specs/2026-09-21-skill-lens-mcp-bridge-design.md`. Milestones are defined in
-`docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
-in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
-is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
-design is in `docs/superpowers/specs/2026-08-03-skill-eval-m4-design.md`, the
-M5 design is in `docs/superpowers/specs/2026-08-05-skill-eval-m5-design.md`,
-the M6 part 1 design is in `docs/superpowers/specs/2026-09-10-skill-lens-m6-design.md`,
-the M6 part 2 design is in `docs/superpowers/specs/2026-09-12-skill-lens-m6-part2-design.md`,
-the M7 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m7-design.md`, the
-M8 design is in `docs/superpowers/specs/2026-09-11-skill-lens-m8-design.md`, and the M9
-design is in `docs/superpowers/specs/2026-09-17-skill-lens-m9-design.md`.
+A run discovers skills, loads the eval cases beside them, runs each case through one or more
+runners, scores the result with the assertion, trajectory, budget and judge evaluators, and
+turns the whole run into one exit code.
+
+- How it is built: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- The decided behaviours and what enforces each: [`docs/invariants.md`](docs/invariants.md)
+- What is shipped and what is planned: [`docs/roadmap.md`](docs/roadmap.md)
+- Design specs, per feature: `docs/superpowers/specs/`
 
 ## Commands
 
