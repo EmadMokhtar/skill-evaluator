@@ -70,3 +70,30 @@ def test_neither_side_repeats_a_claim():
     for name, claims in (("docs/invariants.md", _page_claims()), ("CLAUDE.md", _claude_claims())):
         duplicates = sorted({claim for claim in claims if claims.count(claim) > 1})
         assert not duplicates, f"{name} states the same claim twice:\n  " + "\n  ".join(duplicates)
+
+
+# The three tests above all compare set differences, so two *empty* lists
+# satisfy every one of them. This floor is what stops that.
+#
+# It guards the parse, not the count. If a heading level changes, if
+# CLAUDE_SECTION is renamed, or if either regex stops matching, both sides
+# collapse to nothing, all three differences are empty, and the suite reports
+# that the two copies agree -- because neither was read. That is the vacuous
+# pass this project rejects everywhere else: a run executing zero cases fails
+# the gate, an unscripted judge errors rather than passing, and the test
+# guarding those rules must not be the one place that goes green on nothing.
+#
+# There were 144 invariants when this floor was written and the list only
+# grows, so a floor well under that never needs revisiting. Falling below it
+# means either a broken parse or someone deleting a third of the project's
+# decided behaviours -- and both of those should be looked at.
+MINIMUM_INVARIANTS = 100
+
+
+def test_neither_side_parses_to_nothing():
+    for name, claims in (("docs/invariants.md", _page_claims()), ("CLAUDE.md", _claude_claims())):
+        assert len(claims) >= MINIMUM_INVARIANTS, (
+            f"{name} yielded only {len(claims)} invariant(s), below the floor of "
+            f"{MINIMUM_INVARIANTS}. Either the list shrank drastically, or this file's "
+            "parse broke and the drift tests above are passing on nothing."
+        )
