@@ -327,8 +327,8 @@ Three things to know:
 
 - The offered tool call lands in the trajectory like any other, so it counts toward
   `max_calls`.
-- Check it with `skill_triggered`, not by naming it in `called:` — that list only accepts
-  tools the case itself declares.
+- Check it with `skill_triggered`, not by naming it in `called:` — under `fake`,
+  `pydantic-ai` and `langchain` that list only accepts tools the case itself declares.
 - The tool name is the skill's name normalised to what providers accept — ASCII letters,
   digits and `_`, at most 64 characters (`order-support` becomes `order_support`, `café`
   becomes `caf_`). A case tool that collides with it is an authoring error. This
@@ -351,7 +351,7 @@ under that runner, never a silent `false` that would pass every negative control
 | --- | --- | --- | --- | --- |
 | `assertions:` | yes | yes | yes | yes |
 | `tools:` (mock tools) | yes | yes | authoring error | authoring error |
-| `trajectory:` | yes | yes | yes, the product's tool names | authoring error |
+| `trajectory:` | yes — names must be the case's own tools | yes — names must be the case's own tools | yes, the product's tool names, unchecked | authoring error |
 | `mode: offered` | yes | yes | yes | authoring error |
 | `budget:` | yes | yes | see [Product runners](runners.md#product-runners) | latency only |
 | `workspace:` | yes | yes | yes — the product's working directory | yes |

@@ -64,9 +64,9 @@ def test_a_fresh_scaffold_refuses_to_load(tmp_path):
 )
 def test_a_filled_scaffold_loads_clean(tmp_path, replacement):
     # Substituting any real text for the placeholder must be all it takes: if
-    # the generated file were malformed in some other way -- a trajectory
-    # naming an undeclared tool, `skill_triggered` on a loaded case -- the
-    # cross-reference checks would catch it here. Real authors type
+    # the generated file were malformed in some other way -- a duplicate
+    # tool name, `skill_triggered` on a loaded case -- the cross-reference
+    # checks would catch it here. Real authors type
     # apostrophes, quotes, and colons far more often than anything exotic, so
     # those are exactly the characters the template must survive.
     path = tmp_path / "order-support.eval.yaml"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from skill_lens.models import EvalCase, RunResult, Skill
+from skill_lens.runners.preflight import check_trajectory_names
 from skill_lens.workspace import Workspace
 
 
@@ -42,6 +43,14 @@ class FakeRunner:
         if skill.variant == "baseline" and case.task in self._baseline_writes:
             return self._baseline_writes[case.task]
         return self._writes.get(case.task, {})
+
+    def preflight(self, skills: list[Skill], cases_by_skill: dict[str, list[EvalCase]]) -> None:
+        """Refuse a `trajectory:` naming a tool this runner cannot offer, before any spend.
+
+        This runner offers a case its mock tools and, with a workspace, the
+        built-ins -- so the check is `check_trajectory_names` and nothing more.
+        """
+        check_trajectory_names(self.name, cases_by_skill)
 
     def run(
         self,

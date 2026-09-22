@@ -1,3 +1,9 @@
+## v0.12.0 (2026-09-22)
+
+### Feat
+
+- assert on the arguments a tool was called with (#56)
+
 ## v0.11.0 (2026-09-18)
 
 ### Feat

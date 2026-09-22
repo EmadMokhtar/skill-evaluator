@@ -22,10 +22,11 @@ def test_every_example_skill_is_discovered():
 
 
 def test_every_example_skill_has_at_least_one_case():
-    # This call also exercises the loader's cross-reference validation (an
-    # undeclared trajectory tool or a duplicate tool name raises CaseParseError
-    # -- see tests/test_case_loader.py), so a regression here surfaces as this
-    # test erroring rather than needing its own dedicated example-only check.
+    # This call also exercises the loader's cross-reference validation (a
+    # duplicate tool name or a built-in collision raises CaseParseError -- see
+    # tests/test_case_loader.py), so a regression here surfaces as this test
+    # erroring rather than needing its own dedicated example-only check. A
+    # trajectory name is the runner's to check, in preflight.
     for skill in load_skills(EXAMPLES):
         assert load_cases_for_skill(skill), f"{skill.name} has no eval cases"
 
