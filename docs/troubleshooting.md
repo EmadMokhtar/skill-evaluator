@@ -21,14 +21,22 @@ signal about your setup, not about the skill. Errored cases fail the gate by def
 invariant [`errored` is not `failed`](invariants.md#errored-is-not-failed).
 
 Messages below are quoted as the code spells them. Where a message is assembled from
-parts, the parts that vary are written as `<placeholders>` and named underneath. A message
-caused by a command-line flag reaches you inside the command-line parser's own error box,
-prefixed with `Invalid value:`; the quoted text is what follows that prefix.
+parts, the parts that vary are written as `<placeholders>` and named underneath.
+
+Some of them arrive wrapped. skill-lens reports a bad *value* — whether it came from a flag
+or from `skill-lens.toml` — through the command-line parser, which draws its own error box
+and prefixes the text with `Invalid value:`. So `unknown judge: nope`, which can only come
+from the config file, still reaches you as `Invalid value: unknown judge: nope`. Everything
+else — a malformed eval file, a missing key, a product that cannot run here — is printed as
+a plain line with no box and no prefix. Either way the quoted text below is the part to
+search for.
 
 ## Exit code 2: something in your own files is wrong
 
-**What you see.** The run stops before any case result is printed. One line of text says
-what is wrong, usually naming the file and the field. The process exits `2`.
+**What you see.** The run stops before any case result is printed, and the process exits
+`2`. Most of these messages are a single line naming the file and the field. The unknown-key
+message is the exception: it ends with Pydantic's own report, which runs to four lines — the
+field, `Extra inputs are not permitted`, and a documentation link.
 
 **What it means.** A mistake in your eval files is not a verdict on the skill. A case that
 cannot be read says nothing about the skill under test, so skill-lens aborts the run
@@ -219,7 +227,7 @@ The notes you can meet, verbatim:
 | --- | --- |
 | `copilot did not report token usage` | The `copilot` product runner ran, and its trace carried no usage block |
 | `claude-code did not report token usage` | The `claude-code` product runner ran, and its trace carried no usage block |
-| `the cli product does not report token usage` | The `cli` product runner, which reads plain output and has no trace to read usage from. `cli` is the product name here; it comes from the `[runners.<name>]` table |
+| `the cli product does not report token usage` | The `cli` product runner, which reads plain standard output and has no trace to read usage from. `cli` is the runner's name — one of the three fixed names, beside `copilot` and `claude-code`. The `[runners.cli]` table is *keyed* by that name; it does not set it, and you cannot rename it |
 
 **What to do.** Remove `max_tokens:` from the `budget:` block for cases you run through that
 product, or run those cases through `pydantic-ai` or `langchain`, which do report a token
@@ -263,8 +271,13 @@ One consequence is worth stating plainly: **a budget block whose other limits al
 fails the case if it also declares an unpriceable `max_cost_usd`.**
 
 **What to do.** Drop `max_cost_usd` from the `budget:` block for that provider. Do not rely
-on the skip being silent — it is not. `max_tokens` and `max_latency_ms` still work and are
-still evaluated normally. See [Budget limits and pricing](runners.md#budget-limits-and-pricing).
+on the skip being silent — it is not.
+
+`max_latency_ms` is always evaluated: it is measured by skill-lens itself, so no provider
+can leave it unmeasured. `max_tokens` usually survives too — but not under `cli`, which sets
+a `cost_note` and a `usage_note` together, so both limits fail there for the same reason.
+See [A token limit that was not evaluated](#a-token-limit-that-was-not-evaluated) above and
+[Budget limits and pricing](runners.md#budget-limits-and-pricing).
 
 ## NO_RESPONSE_SCRIPTED
 
@@ -278,8 +291,9 @@ For example, `no response is scripted for get_work_item with arguments {"id": "C
 arguments are rendered as JSON with the keys sorted, so the line is stable.
 
 skill-lens does not print this itself — the *model* reads it. You usually meet it in the
-agent's own output under a failing case (the agent reports that it could not find
-something), next to the tool call that triggered it in that case's tool-call list.
+agent's own output under a failing case, where the agent reports that it could not find
+something. A failing case also lists the tool calls it made, as `<name>(<argument>=<value>)`
+— the call that triggered this, but not the text it got back.
 
 **What it means.** The tool's `returns:` is a **lookup** — a list of `when:` / `value:`
 entries — and the agent called the tool with arguments that no entry answers. The first

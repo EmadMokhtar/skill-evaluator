@@ -335,7 +335,7 @@ See [Gating and exit codes](gating.md).
 | Mock tool | A tool whose answer you write yourself, so a case is deterministic and free. |
 | Outcome | The result of one (skill, case, runner, arm, repetition): passed, failed or errored. |
 | Preflight | Checks run once before any case, so a run refuses what it cannot serve before spending. |
-| Product runner | An installed agent product — GitHub Copilot CLI, Claude Code — driven as the runner. |
+| Product runner | An installed agent product driven as the runner: GitHub Copilot CLI, Claude Code, or a command you name yourself. |
 | Rubric | The list of `judge:` checks a judge grades the output against. |
 | Runner | The thing that actually runs a case and returns a result. |
 | Skill | Short for Agent Skill: the directory under test. |
