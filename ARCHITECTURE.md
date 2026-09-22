@@ -447,14 +447,14 @@ workflow posts comments. A GitHub client inside a reporter would put token scope
 failure inside a pure function.
 
 **`--concurrency 1` constructs no executor.** The plain sequential loop it falls back to
-produces the same ordering and the same exception propagation as any other concurrency level
-reading its futures in submission order, and it is what lets the cassette tier (vcrpy is
-order-sensitive and not thread-safe) still match requests. It is not, though, a literal replay
-of the sequential behaviour in every respect: discovery is now always a separate, sequential pass that
-loads every skill's cases before any of them run, so a malformed eval file anywhere aborts the
-whole run before a single case runs — where once discovery and execution were interleaved
-per skill, and an earlier skill's cases could complete (and be paid for) before a later skill's
-bad file was even read.
+produces the same ordering and the same exception propagation as any other concurrency
+level reading its futures in submission order, and it is what lets the cassette tier
+(vcrpy is order-sensitive and not thread-safe) still match requests. It is not, though, a
+literal replay of the pre-concurrency behaviour in every respect: discovery is now always
+a separate, sequential pass that loads every skill's cases before any of them run, so a
+malformed eval file anywhere aborts the whole run before a single case runs — where once
+discovery and execution were interleaved per skill, and an earlier skill's cases could
+complete (and be paid for) before a later skill's bad file was even read.
 
 **Outcome order is submission order, never completion order.** `render_console` iterates
 `report.outcomes` and `build_delta` groups by insertion order, so completion-order results
@@ -860,12 +860,12 @@ consumes the artifact content budget — and `runners/tools.py` turns every one 
 a tool-result string.
 
 **`scripts=` reaches a runner only when execution is on.** `_run_one` passes the keyword
-only when the runtime is set, so a third-party runner written against a version without bundled scripts keeps
-working until the day someone turns scripts on — at which point the `TypeError` names
-`run()` as the method that cannot take the keyword and escapes `run_evals` as an uncaught
-traceback (exit 1), rather than the scripts silently never running. Both bundled adapters,
-PydanticAI and LangChain, take it and register the same six built-in tools under the same
-conditions.
+only when the runtime is set, so a third-party runner written against a version without
+bundled scripts keeps working until the day someone turns scripts on — at which point the
+`TypeError` names `run()` as the method that cannot take the keyword and escapes
+`run_evals` as an uncaught traceback (exit 1), rather than the scripts silently never
+running. Both bundled adapters, PydanticAI and LangChain, take it and register the same
+six built-in tools under the same conditions.
 
 ### Failure context and the run matrix
 
