@@ -402,9 +402,10 @@ form, that file is the explanation.
   `when:` it only narrows) — `check_tool_returns` uses `ToolResponse.matches` itself, so
   "unreachable" means what the runtime would do.
 - **A call no lookup entry answers gets `NO_RESPONSE_SCRIPTED`, never an exception** — the
-  tool's name and the arguments as sorted JSON with `default=str`. A `when:` value matches
-  by parsed value, and a boolean is only ever equal to a boolean (`_same` in `models.py`):
-  a YAML `true` never answers a model's `1`.
+  tool's name and the arguments as sorted JSON with `default=str`. A `when:` matches by the
+  `call_args.contains` rule through the one matcher, `matching.structural_match` (a subset
+  at every level, a bool only ever equal to a bool): a YAML `true` never answers a model's
+  `1`, and `when:` and `call_args` can never drift apart.
 - **`EvalCase.tools` holds only `ToolSpec`; a `ref:` is resolved by the case loader on the
   raw mapping before validation.** No runner, evaluator, reporter or product preflight ever
   sees a reference; the product `tools:` refusal, the duplicate-name, built-in-name,

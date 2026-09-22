@@ -90,6 +90,7 @@ judge is one entry on `RunReport.products`.
 | `bundle.py` | A read-only view of the three Agent Skills directories beside `SKILL.md` (`scripts/`, `references/`, `assets/`) and nothing else — an eval file beside `SKILL.md` is never readable by the agent. Same "methods raise, tools catch" split as `workspace.py`. |
 | `scripts.py` | Runs a bundled script: the policy, the once-per-run preflight (interpreters on `PATH`, the sandbox probe), the allowlisted environment, the scratch directory, the process-group timeout and the capped output read through the harness's own descriptors (both via `process.py`), and the `sandbox-exec` / `bwrap` wrapping. Never raises for a script that will not run; raises `ScriptSetupError` only from preflight. |
 | `process.py` | Starts a child in its own process group, waits with a timeout, kills the group after every exit, and reads output through the harness's own handle. Shared by `scripts.py` and `runners/product.py`; imports nothing from the rest of the project. |
+| `matching.py` | `structural_match`: one author's mapping against a call's recorded arguments — a subset at every level, or exact under `exact=True`; lists element by element at equal length; a bool only ever equals a bool. Shared by `trajectory.call_args` (`evaluators/trajectory.py`) and a mock's `when:` (`ToolResponse.matches` in `models.py`); imports nothing from the rest of the project. |
 | `runners/base.py` | The `Runner` protocol. `run` takes optional `workspace=` and `scripts=` keywords, both additive with a default, so a runner written against an earlier milestone keeps working. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/prompting.py` | The three preambles and the system-prompt builder every runner calls. Framework-free, so the rules `--min-delta` measures against exist once. |
@@ -890,8 +891,8 @@ cases resolves in both; the resolver returns a new mapping with a new list.
 
 ### Call arguments
 
-**`call_args` matches structurally and coerces nothing.** `_matches` in
-`evaluators/trajectory.py` walks the entry against the argument dict the runner recorded —
+**`call_args` matches structurally and coerces nothing.** `structural_match` in
+`matching.py` walks the entry against the argument dict the runner recorded —
 never a serialised string, so key order and whitespace cannot matter. `contains` ignores
 keys it does not name at every level; `equals` requires exactly the named keys; a list
 matches element by element at equal length; a scalar must be equal — and a bool only ever
@@ -965,10 +966,11 @@ an argument the author did not script — an eval signal — so the model reads
 an unencodable value cannot make a mock raise) and the transcript shows it. An entry with
 no `when:` is the fallback for authors who want a real error payload instead.
 
-**A `when:` value matches by parsed value, and a boolean is only ever equal to a boolean.**
-YAML's `1` and the model's JSON `1` are both integers; `"1"` is a string on both sides.
-Python says `True == 1`, so `ToolResponse.matches` compares through `_same`, which keeps a
-YAML `true` from answering a model's `1` (and recurses into lists and mappings). The loader's
+**A `when:` matches by the `call_args.contains` rule, through the one matcher.**
+`ToolResponse.matches` is `matching.structural_match(when, arguments, exact=False)`: a
+subset at every level, a list element by element at equal length, `"1"` never `1`, and a
+bool only ever equal to a bool — the same function `evaluators/trajectory.py` runs, so an
+author learns one rule for naming arguments and the two can never drift. The loader's
 reachability check uses the same `matches`, so "unreachable" means exactly what the runtime
 would do.
 

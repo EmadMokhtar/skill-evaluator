@@ -49,7 +49,7 @@ call`):
 | A call no entry answers gets a fixed message, never an exception | A mock tool never raises (the invariant every adapter relies on). The unscripted argument is an eval signal: the transcript shows what the skill asked for. |
 | An unreachable entry is an authoring error | An entry an earlier entry already answers is a check that could never fire — the vacuous case this project refuses everywhere. Detected with `ToolResponse.matches` itself, so "unreachable" means what the runtime would do. |
 | A `when:` key the closed schema can never carry is an authoring error; an open schema may key on anything | The `parameters:` shorthand and an `input_schema` with `additionalProperties: false` describe every key a call can have. An open schema stands in for a server that accepts keys it does not list, and the author may know one. |
-| `when:` values compare by parsed value, and a boolean only equals a boolean | YAML and JSON agree that `1` is an integer and `"1"` a string. Python's `True == 1` would let a YAML `true` answer a model's `1` — an invisible mistake, so `_same` guards it and recurses into lists and mappings. |
+| `when:` matches by the `call_args.contains` rule, through one matcher | `trajectory.call_args` (#40) landed on `main` while this was in review with the same structural rule (subset at every level, bool only equals bool, `"1"` is not `1`). One function, `matching.structural_match`, now serves both, so an author learns one rule for naming arguments and the two cannot drift. |
 | The sequence counter lives in the built tool, locked | Runners hold no mutable state touched by `run`. A closure per `build_mock_tool` means each arm, attempt and work item starts from the top; the lock is for a framework that runs one turn's parallel calls in threads. |
 | Both adapters build the agent per attempt | The retry loop starts a fresh conversation; an agent reused across attempts would hand the retry's first call the sequence's second entry, and a transient 429 would silently change what the skill was shown. |
 | The resolver copies a ref's raw `returns:`, not the validated model | The resolved mapping stays plain data for `EvalCase.model_validate`, and `_validate_tools` then checks a lookup's `when:` keys against the contract the library declared. |
@@ -86,7 +86,7 @@ outside a closed schema; `when: {}`; an entry after a fallback, one repeating an
 - `ToolReturns = str | list[str] | list[ToolResponse]`; `ToolSpec.returns: ToolReturns =
   ""`; `ToolRef.returns: ToolReturns | None = None`; both run `_check_returns_shape` in a
   `mode="before"` validator (empty list, mixed list).
-- `_same(expected, actual)`: `==` with the boolean guard, recursive.
+- `matches` delegates to `matching.structural_match(when, arguments, exact=False)` — the module `evaluators/trajectory.py` also uses for `call_args`; it imports nothing from the project.
 
 ## 5. `cases/checks.py`
 

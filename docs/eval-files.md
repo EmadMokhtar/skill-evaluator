@@ -167,9 +167,12 @@ the fallback.
           - value: '{"error": "not found"}'   # no when: -- every other call lands here
 ```
 
-Values are compared as YAML and JSON parse them: `when: {id: 1}` matches a call with the
-integer `1`, `when: {id: "1"}` a call with the string `"1"`, and a `true` matches only a
-boolean — never a `1`. Without a fallback, a call that matches nothing gets the fixed reply
+`when:` matches by the same rule as [`call_args`
+`contains:`](runners.md#what-a-tool-was-called-with): a subset at every level (a nested
+mapping may name only the keys that matter), a list element by element at equal length,
+and values as YAML and JSON parse them — `when: {id: 1}` matches a call with the integer
+`1`, `when: {id: "1"}` a call with the string `"1"`, and a `true` matches only a boolean,
+never a `1`. Without a fallback, a call that matches nothing gets the fixed reply
 `no response is scripted for get_work_item with arguments {"id": "C"}` (the arguments as
 sorted JSON): the skill asked for something the case did not anticipate, which the
 transcript then shows, and a mock tool never raises.

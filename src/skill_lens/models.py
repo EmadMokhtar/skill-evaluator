@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from skill_lens.matching import structural_match
+
 CaseStatus = Literal["passed", "failed", "errored"]
 ToolParamType = Literal["string", "integer", "number", "boolean"]
 CaseMode = Literal["loaded", "offered"]
@@ -224,31 +226,14 @@ class AssertionSpec(BaseModel):
     json_schema: dict[str, Any] | None = None
 
 
-def _same(expected: Any, actual: Any) -> bool:
-    """Whether a `when:` value and a call's argument are the same value.
-
-    Plain `==`, except that a boolean is only ever equal to a boolean: Python
-    says `True == 1`, but a YAML `true` and a model's `1` are different
-    arguments, and a match on the wrong one would be an invisible mistake.
-    Recurses so the rule holds inside lists and mappings too.
-    """
-    if isinstance(expected, bool) or isinstance(actual, bool):
-        return isinstance(expected, bool) and isinstance(actual, bool) and expected is actual
-    if isinstance(expected, dict) and isinstance(actual, dict):
-        return expected.keys() == actual.keys() and all(
-            _same(value, actual[key]) for key, value in expected.items()
-        )
-    if isinstance(expected, list) and isinstance(actual, list):
-        return len(expected) == len(actual) and all(map(_same, expected, actual))
-    return bool(expected == actual)
-
-
 class ToolResponse(BaseModel):
     """One entry of a `returns:` lookup: what a mock tool hands back when the
     call's arguments carry every key in `when:` with the same value.
 
-    A call may carry more arguments than `when:` names -- matching is on the
-    subset the author keyed on. An entry with no `when:` matches every call,
+    A call may carry more arguments than `when:` names -- matching is the
+    structural subset `trajectory.call_args` calls `contains:`, at every
+    level, and by the same rule (`matching.structural_match`), so an author
+    learns one rule for both. An entry with no `when:` matches every call,
     which makes it the fallback; the loader refuses one that a later entry
     could never get past.
     """
@@ -260,10 +245,7 @@ class ToolResponse(BaseModel):
 
     def matches(self, arguments: Mapping[str, Any]) -> bool:
         """Whether a call with `arguments` is one this entry answers."""
-        return all(
-            key in arguments and _same(value, arguments[key])
-            for key, value in (self.when or {}).items()
-        )
+        return structural_match(self.when or {}, dict(arguments), exact=False)
 
 
 # What a mock tool's `returns:` may be: one value for every call; a list of

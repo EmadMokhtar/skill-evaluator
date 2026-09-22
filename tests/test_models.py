@@ -587,6 +587,19 @@ def test_a_tool_response_without_when_matches_every_call():
     assert ToolResponse(value="x").matches({"anything": "at all"}) is True
 
 
+def test_a_tool_response_matches_a_nested_mapping_as_a_subset_like_call_args_contains():
+    # One rule for naming arguments: `when:` is `call_args.contains`, so a
+    # nested mapping may name only the keys that matter, while a list must
+    # match element by element at equal length.
+    response = ToolResponse(when={"filter": {"status": "active"}}, value="x")
+    assert response.matches({"filter": {"status": "active", "page": 2}}) is True
+    assert response.matches({"filter": {"status": "closed"}}) is False
+    assert response.matches({"filter": "active"}) is False
+    labels = ToolResponse(when={"labels": ["bug"]}, value="x")
+    assert labels.matches({"labels": ["bug"]}) is True
+    assert labels.matches({"labels": ["bug", "urgent"]}) is False
+
+
 def test_a_tool_response_never_confuses_a_boolean_with_a_number():
     # Python says True == 1; a YAML `true` and a model's `1` are different
     # arguments, and a match on the wrong one would be an invisible mistake.
