@@ -36,8 +36,13 @@ theme:
 markdown_extensions:
   - admonition
   - tables
+  # toc_depth keeps the invariant headings on invariants.md out of the
+  # sidebar, which would otherwise list every one of them instead of the nine
+  # groups. Python-Markdown still gives each heading an `id` and a permalink,
+  # so a link to #the-delta-is-paired resolves.
   - toc:
       permalink: true
+      toc_depth: 2
   - pymdownx.superfences
   # base_path reaches the repo root so docs/architecture.md can include the
   # root-level ARCHITECTURE.md instead of duplicating it.
@@ -60,5 +65,6 @@ nav:
       - Releasing: releasing.md
   - Roadmap: roadmap.md
   - Architecture: architecture.md
+  - Invariants: invariants.md
   - Security: security.md
   - Contributing: contributing.md
