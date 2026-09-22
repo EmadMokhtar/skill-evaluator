@@ -6,6 +6,12 @@ on:
 
 # A release must never be cancelled halfway: the tag may already be pushed
 # while the build is not. Queue instead.
+#
+# Queueing is all this buys. The group is checked when a job starts, not
+# held for a whole run, so a run that is between its jobs can be overtaken
+# by the next one -- and a merge that lands during `verify` moves main
+# either way. The push step below is what turns a run that main outran
+# into a no-op rather than a failure.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -51,7 +57,10 @@ jobs:
     permissions:
       contents: write
     outputs:
-      bumped: ${{ steps.bump.outputs.bumped }}
+      # `bumped` is read from the push step, not the bump step: a run that
+      # main outran cuts a version it never pushes, and `publish` must not
+      # hear about it.
+      bumped: ${{ steps.push.outputs.pushed }}
       version: ${{ steps.bump.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -117,9 +126,9 @@ jobs:
           fi
           echo "bumped=true" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Released version $version." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Push the bump commit and its tag
+        id: push
         # --atomic makes the commit and the tag one update: if either ref is
         # rejected (main moved under us, the tag already exists), neither
         # lands. Without it git pushes the refs independently, so a rejected
@@ -127,8 +136,54 @@ jobs:
         # ls-remote check below, guarded by the implicit success() of the
         # step before it, would be skipped in exactly the state it exists to
         # report.
+        #
+        # Every later step and the `publish` job read this step's `pushed`,
+        # not the bump step's `bumped`: a version that was cut but never
+        # pushed must not be verified, built or published.
         if: steps.bump.outputs.bumped == 'true'
-        run: git push --atomic --follow-tags origin HEAD:main
+        shell: bash
+        env:
+          # As an environment variable, not a `${{ }}` expression in the
+          # script: tests run this script verbatim, and an expression in a
+          # run block is an injection surface on the runner.
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          set -u
+          # `set -e` is deliberately not used, for the reason the bump step
+          # gives: the push's exit code is read, not discarded.
+          code=0
+          git push --atomic --follow-tags origin HEAD:main || code=$?
+          if [ "$code" = "0" ]; then
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            echo "Released version $VERSION." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Rejected. The one expected cause is a merge that reached main
+          # while this run was in progress: the concurrency group keeps a
+          # run from being cancelled, not from being overtaken, and a merge
+          # that lands during `verify` moves main either way. That later
+          # push has a run of its own, and its `cz bump` reads every commit
+          # since the last tag -- this run's commit included -- so this run
+          # has nothing left to release. It is the same no-op as cz's exit
+          # 21 and 3, not a failure: `pushed=false`, exit 0, and the summary
+          # names the commit that overtook it. The test is that this run's
+          # commit is a strict ancestor of main's new tip. Anything else --
+          # main unmoved and the push refused by a branch rule, main rewritten
+          # to a history without this commit, a fetch that fails -- still fails,
+          # with the push's own exit code, because no later run is known to
+          # carry this commit.
+          if ! git fetch --quiet origin main; then
+            echo "git push was rejected (exit $code), and fetching main to find out why failed as well. Check origin by hand before re-running anything." >&2
+            exit "$code"
+          fi
+          tip="$(git rev-parse FETCH_HEAD)"
+          if [ "$tip" != "$GITHUB_SHA" ] && git merge-base --is-ancestor "$GITHUB_SHA" "$tip"; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing released: main moved on to ${tip:0:7} while this run was in progress. The run for that push computes its release from every commit since the last tag, this run's commit ${GITHUB_SHA:0:7} included." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "git push was rejected (exit $code), and main has not simply moved ahead of ${GITHUB_SHA:0:7} (it is at ${tip:0:7}). No later run is known to carry this commit. Check origin by hand before re-running anything." >&2
+          exit "$code"
 
       - name: Verify the tag reached origin
         # `--follow-tags` pushes only annotated tags. `annotated_tag = true`
@@ -137,7 +192,7 @@ jobs:
         # would be silent: the `publish` job (added in a later task) is
         # reached through `needs:`, not through the tag, so nothing else
         # would stop a release with no reproducible tag from reaching PyPI.
-        if: steps.bump.outputs.bumped == 'true'
+        if: steps.push.outputs.pushed == 'true'
         shell: bash
         run: |
           set -eu
@@ -163,7 +218,7 @@ jobs:
         # instead of rewriting CHANGELOG.md, which the bump already did. It is
         # written here, where the checkout, the history and the tools already
         # are, so the job that publishes it later needs none of them.
-        if: steps.bump.outputs.bumped == 'true'
+        if: steps.push.outputs.pushed == 'true'
         run: uv run cz changelog "${{ steps.bump.outputs.version }}" --dry-run > notes.md
 
       - name: Build the distributions
@@ -174,7 +229,7 @@ jobs:
         # in uv.lock; exporting that group as a constraint file and handing it
         # to the build pins the backend and its own dependencies to exactly
         # the audited versions. `--frozen` reads the lockfile as-is.
-        if: steps.bump.outputs.bumped == 'true'
+        if: steps.push.outputs.pushed == 'true'
         run: |
           uv export --frozen --only-group build --no-hashes -o build-constraints.txt
           uv build --build-constraint build-constraints.txt
@@ -188,14 +243,14 @@ jobs:
         # It is written outside dist/ on purpose: `publish` uploads every file
         # in the dist artifact, PyPI would reject an SBOM, and a rejected file
         # fails the upload after the tag is already pushed.
-        if: steps.bump.outputs.bumped == 'true'
+        if: steps.push.outputs.pushed == 'true'
         run: |
           mkdir -p sbom
           uv export --format cyclonedx1.5 --frozen --all-extras --no-default-groups \
             -o "sbom/skill-lens-${{ steps.bump.outputs.version }}.cdx.json"
 
       - name: Upload the distributions
-        if: steps.bump.outputs.bumped == 'true'
+        if: steps.push.outputs.pushed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: dist
@@ -203,7 +258,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload the SBOM
-        if: steps.bump.outputs.bumped == 'true'
+        if: steps.push.outputs.pushed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: sbom
@@ -211,7 +266,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload the release notes
-        if: steps.bump.outputs.bumped == 'true'
+        if: steps.push.outputs.pushed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: release-notes
