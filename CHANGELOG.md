@@ -1,3 +1,9 @@
+## v0.14.1 (2026-09-22)
+
+### Fix
+
+- **release**: treat a run that main outran as a no-op, not a failure (#62)
+
 ## v0.14.0 (2026-09-22)
 
 ### Feat
