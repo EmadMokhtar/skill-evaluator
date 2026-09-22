@@ -1,3 +1,9 @@
+## v0.14.0 (2026-09-22)
+
+### Feat
+
+- serve mock tools to product runners through a stdio MCP server (#57)
+
 ## v0.13.0 (2026-09-22)
 
 ### Feat
