@@ -243,6 +243,9 @@ cases:
       forbidden: [issue_refund]     # none of these ran
       order: [lookup_order]         # ran in this relative order
       max_calls: 3                  # no looping
+      call_args:                    # and what a call carried
+        - tool: lookup_order
+          contains: {order_id: "1234"}
     budget:
       max_tokens: 2000
       max_cost_usd: 0.01
@@ -254,6 +257,52 @@ cases:
 
 `order` is a relative subsequence: unrelated calls may appear in between, but the
 listed tools must not appear out of sequence.
+
+### What a tool was called with
+
+`called` proves a tool ran; `call_args` proves what it ran *with* — the difference between
+a skill that asked for `status: active` and one that fetched everything and filtered
+afterwards, which `called` alone cannot see. Each entry names one declared tool and one
+expected argument shape:
+
+```yaml
+    trajectory:
+      call_args:
+        - tool: list_pull_request_threads
+          contains: {status: active}       # a subset: these keys, with these values
+          every: true                      # on every call, not just one
+        - tool: reply_to_thread
+          equals: {thread_id: 42, body_file: reply.md}   # the whole argument dict
+```
+
+The match is structural, against the argument dict the runner recorded — never against a
+serialised string, so key order and whitespace cannot matter:
+
+- **`contains` is a subset at every level.** A mapping matches when every key the entry
+  names is present with a matching value; keys the call carried but the entry did not name
+  are ignored. A list matches element by element at the same length — `[bug]` does not
+  match `[bug, urgent]`. Anything else is a scalar and must be equal.
+- **`equals` is the same comparison, except a mapping must carry exactly the keys the entry
+  names.** `equals: {}` asserts the tool was called with no arguments at all.
+- **Nothing is coerced.** `"1"` never equals `1`, and a boolean never equals a number —
+  Python would say `True == 1`, and an author who wrote `limit: 1` must not pass on a call
+  that sent `true`. Bare `yes` / `no` / `on` / `off` stay strings, as everywhere in an eval
+  file.
+
+By default an entry holds when **at least one** call to the tool matched. `every: true`
+requires every call to match — "it never fetched unfiltered" rather than "it eventually
+filtered". Under either, a tool that was never called fails the check: "every call
+matched" over zero calls would be a pass nobody verified. An entry carries exactly one of
+`contains` and `equals`, and `contains: {}` is refused — it matches every call, which is
+`called:` spelled longer. Both are authoring errors (exit `2`), caught at load time.
+
+Each entry is its own check — `call_args[0]`, `call_args[1]`, … in file order — so two
+entries may name the same tool. A failing check's evidence shows the arguments every call to
+that tool carried, as one line of JSON cut at a fixed length with the number of characters
+removed stated; the full calls are in the failure excerpt every reporter prints for a
+non-passing case. Arguments a runner could not parse sit under a `_raw` key and never match
+a structural check, with the raw text in the evidence — a capture problem reads as a failed
+check that shows the payload, never as a pass.
 
 A tool declares its arguments with the `parameters:` shorthand shown above, or with a full
 `input_schema:` when it must match a real server's declared JSON Schema; see [Mock
@@ -280,9 +329,9 @@ from the top of the sequence too, so the retried attempt is shown exactly what t
 one was. A sequence's counter is locked, so a framework that runs several calls from one
 model turn in parallel still hands out each entry once — in whichever order it ran them.
 
-Every tool name in `called`, `forbidden`, or `order` must be declared in that case's
-`tools:` — including `forbidden`, since forbidding a tool the agent was never offered in
-the first place is a check that can never fire. A name that isn't declared is an
+Every tool name in `called`, `forbidden`, `order` or a `call_args` entry's `tool` must be
+declared in that case's `tools:` — including `forbidden`, since forbidding a tool the agent
+was never offered in the first place is a check that can never fire. A name that isn't declared is an
 authoring error (the run aborts, exit `2`), not a failing case, because a check that can
 never pass tells you nothing about the skill.
 

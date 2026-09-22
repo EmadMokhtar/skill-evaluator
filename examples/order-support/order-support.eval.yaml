@@ -1,8 +1,8 @@
 # Six cases on the same skill, covering three concerns:
 #   - trajectory: did it look the order up before deciding -- one case where
-#     the policy forbids a refund, one where it allows it, and one with two
-#     orders where the mock answers by argument. Invisible to an output
-#     assertion.
+#     the policy forbids a refund, one where it allows it, one with two orders
+#     where the mock answers by argument -- and did it look up *this* order
+#     (`call_args`), not one it guessed. Invisible to an output assertion.
 #   - judge: "explains it plainly" is not a substring, so a rubric-based
 #     LLM judge grades it instead.
 #   - triggering (`mode: offered`): does the agent even reach for the skill,
@@ -25,6 +25,9 @@ cases:
       called: [lookup_order]
       forbidden: [issue_refund]
       max_calls: 3
+      call_args:
+        - tool: lookup_order
+          contains: {order_id: "1234"}   # the id the customer gave, not a guess
     budget:
       max_tokens: 2000
       max_cost_usd: 0.01

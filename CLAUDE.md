@@ -68,7 +68,12 @@ let a YAML file with one top-level `tools:` list — the block `mcp-import` prin
 any eval file with `tool_libraries:` (paths relative to the eval file) and named in a case with
 `- ref: <name>`, which may set only `returns:`; the loader resolves every ref before validation,
 so `EvalCase.tools` still holds only `ToolSpec`. Its design is in
-`docs/superpowers/specs/2026-09-17-skill-lens-tool-libraries-design.md`. Per-call mock returns
+`docs/superpowers/specs/2026-09-17-skill-lens-tool-libraries-design.md`. `trajectory.call_args`
+(issue #40) asserts on the arguments a tool was called with: each entry names a declared
+`tool` and either `contains:` (a structural subset) or `equals:` (the whole argument dict),
+holding when at least one call matched or, with `every: true`, when every call did; ids are
+`call_args[{index}]`. Its design is in
+`docs/superpowers/specs/2026-09-21-skill-lens-call-args-design.md`. Per-call mock returns
 (issue #41) let `returns:` be a list of strings consumed in call order (the last repeating) or
 a list of `when:`/`value:` entries matched against the call's arguments (first match wins, an
 entry with no `when:` the fallback), so one case can exercise a loop-until or
@@ -364,6 +369,19 @@ form, that file is the explanation.
   non-`[A-Za-z0-9_]` → `_` (hyphen too — the cassettes pin `order_support`), leading digit
   → `skill_`, then cut to 64. A Python identifier was not enough (`café`).
 - **`mcp-import` never touches the network.** `SOURCE` is a file or `-`.
+- **`call_args` matches structurally and coerces nothing.** Never a comparison of serialised
+  strings: `contains` ignores keys it does not name at every level, `equals` requires exactly
+  the named keys, lists match element by element at equal length, `"1"` never equals `1`, and
+  a bool only ever equals a bool (`True == 1` in Python would let `limit: 1` pass on `true`).
+  No runner changed — every adapter and trace parser already fills `ToolCall.arguments`; a
+  `_raw` payload never matches and shows in the evidence.
+- **A tool that was never called fails `call_args`, under `every: true` too.** An entry
+  carries exactly one of `contains` / `equals`; `contains: {}` is refused (it is `called:`
+  spelled longer) and `equals: {}` is kept (called with no arguments). The shape rules are a
+  `model_validator` on `CallArgsSpec`, so a programmatic case gets them; the declared-`tool`
+  rule is the loader's, beside `called` / `forbidden` / `order`. Ids are positional
+  `call_args[{index}]`; a failing check's evidence renders the arguments seen and announces
+  a cut.
 - **`returns:` has three shapes, and the shape says which rule applies.** A string answers
   every call; a `list[str]` is a sequence consumed in call order, its **last entry
   repeating** once used up (`trajectory.max_calls` is the check for a loop that should have

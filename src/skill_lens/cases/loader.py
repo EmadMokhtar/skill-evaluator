@@ -354,6 +354,7 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
         ("called", case.trajectory.called),
         ("forbidden", case.trajectory.forbidden),
         ("order", case.trajectory.order),
+        ("call_args", [entry.tool for entry in case.trajectory.call_args]),
     ):
         for name in names:
             if name not in declared:

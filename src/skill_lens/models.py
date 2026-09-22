@@ -358,6 +358,47 @@ class ToolRef(BaseModel):
         return _check_returns_shape(value)
 
 
+class CallArgsSpec(BaseModel):
+    """One check on the arguments a tool was called with.
+
+    `contains` is a structural subset: every key it names must be present in
+    the call's arguments with a matching value, and keys it does not name
+    are ignored. `equals` is the whole argument dict, exactly. An entry
+    carries one or the other -- neither would pass on any call at all, which
+    is `called:` spelled longer, and both is two checks wearing one id.
+
+    `every` widens the check from "at least one call to `tool` matched" to
+    "every call did": what catches an agent that fetched everything first and
+    only then re-fetched with the filter the skill asked for. A tool that was
+    never called fails either way.
+
+    An empty `contains` is refused because `{}` is a subset of every dict, so
+    the check could never fail. An empty `equals` is kept: it asserts the
+    tool was called with no arguments, which a call can fail.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: str
+    contains: dict[str, Any] | None = None
+    equals: dict[str, Any] | None = None
+    every: bool = False
+
+    @model_validator(mode="after")
+    def _one_subject(self) -> CallArgsSpec:
+        if (self.contains is None) == (self.equals is None):
+            raise ValueError(
+                f"a call_args entry for tool {self.tool!r} needs exactly one of contains or equals"
+            )
+        if self.contains is not None and not self.contains:
+            raise ValueError(
+                f"a call_args entry for tool {self.tool!r} has an empty contains: block. "
+                f"Every call matches an empty subset, so the check could never fail; name "
+                f"the arguments the call must carry, or use called: instead."
+            )
+        return self
+
+
 class TrajectorySpec(BaseModel):
     """What the agent should (and should not) have done to get its answer."""
 
@@ -368,6 +409,7 @@ class TrajectorySpec(BaseModel):
     order: list[str] = Field(default_factory=list)
     max_calls: int | None = None
     skill_triggered: bool | None = None
+    call_args: list[CallArgsSpec] = Field(default_factory=list)
 
 
 class BudgetSpec(BaseModel):

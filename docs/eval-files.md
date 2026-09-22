@@ -13,7 +13,7 @@ files](#sharing-tools-across-eval-files).
 | `assertions` | no | Scoring rules; a case with none passes |
 | `tags` | no | Labels for `--tag` filtering |
 | `tools` | no | Mock tools the agent may call — see [Mock tools](#mock-tools) |
-| `trajectory` | no | Which tools must/must not have been called, and in what order |
+| `trajectory` | no | Which tools must/must not have been called, in what order, and with what arguments — see [What a tool was called with](runners.md#what-a-tool-was-called-with) |
 | `budget` | no | Ceilings on tokens, cost, and latency |
 | `judge` | no | A rubric for an LLM judge — see [Judging output quality](#judging-output-quality) |
 | `workspace` | no | A temporary directory and the files it starts with |
@@ -434,6 +434,7 @@ candidate and baseline arms — including flagging one that passed either way as
 | `trajectory.order` | `order` | `order` |
 | `trajectory.max_calls` | `max_calls` | `max_calls` |
 | `trajectory.skill_triggered` | `skill_triggered` | `skill_triggered` |
+| `trajectory.call_args` | `call_args[{index}]` — positionally stable, so two entries may name one tool | `call_args[0]` |
 | `budget.max_tokens` | `max_tokens` | `max_tokens` |
 | `budget.max_cost_usd` | `max_cost_usd` | `max_cost_usd` |
 | `budget.max_latency_ms` | `max_latency_ms` | `max_latency_ms` |
