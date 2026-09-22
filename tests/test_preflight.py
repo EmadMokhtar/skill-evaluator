@@ -2,7 +2,7 @@
 
 import pytest
 
-from skill_lens.models import EvalCase, ToolSpec, TrajectorySpec, WorkspaceSpec
+from skill_lens.models import CallArgsSpec, EvalCase, ToolSpec, TrajectorySpec, WorkspaceSpec
 from skill_lens.runners.preflight import (
     MissingAPIKey,
     UndeclaredTool,
@@ -75,6 +75,17 @@ def test_an_undeclared_trajectory_name_is_refused_naming_everything(field):
     assert "case 'order lookup' of skill 'pdf'" in message
     assert f"trajectory.{field} names 'lookup_ordr'" in message
     assert "not declared in this case's tools" in message
+
+
+def test_a_call_args_entry_naming_an_undeclared_tool_is_refused_too():
+    case = _case(
+        tools=[ToolSpec(name="lookup_order")],
+        trajectory=TrajectorySpec(
+            call_args=[CallArgsSpec(tool="lookup_ordr", contains={"order_id": "1234"})]
+        ),
+    )
+    with pytest.raises(UndeclaredTool, match=r"trajectory\.call_args names 'lookup_ordr'"):
+        check_trajectory_names("fake", {"pdf": [case]})
 
 
 def test_declared_names_pass():

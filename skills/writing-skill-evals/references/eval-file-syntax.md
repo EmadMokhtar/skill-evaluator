@@ -12,7 +12,7 @@ vacuously.
 | `task` | yes | The prompt handed to the runner |
 | `assertions` | no | Output checks; a case with none passes vacuously |
 | `tools` | no | Mock tools the agent may call |
-| `trajectory` | no | Which tools must and must not have been called, and in what order |
+| `trajectory` | no | Which tools must and must not have been called, in what order, and with what arguments |
 | `budget` | no | Ceilings on tokens, cost, and latency |
 | `judge` | no | A rubric for an LLM judge |
 | `workspace` | no | A temporary directory and the files it starts with |
@@ -132,12 +132,25 @@ two libraries both declare, or an absolute path is an authoring error (exit 2).
       order: [lookup_order, issue_refund]   # relative order, not exhaustive
       max_calls: 3
       skill_triggered: true         # mode: offered only
+      call_args:                    # what a call carried, not just that it happened
+        - tool: lookup_order
+          contains: {order_id: "1234"}   # subset of the arguments, at every level
+          every: true                    # optional: every call, not just one
+        - tool: issue_refund
+          equals: {order_id: "5678"}     # the whole argument dict, exactly
 ```
 
-Under `fake`, `pydantic-ai` and `langchain`, every name in `called`, `forbidden` and `order`
-must be a tool the case itself declares (a built-in counts in a case with a `workspace:`);
-`run` refuses anything else before any case runs. Under `copilot` or `claude-code` the names
-are the product's own tools (`Bash`) and are not checked, so spell them as the product does.
+Under `fake`, `pydantic-ai` and `langchain`, every name in `called`, `forbidden`, `order`
+and a `call_args` entry's `tool` must be a tool the case itself declares (a built-in counts
+in a case with a `workspace:`); `run` refuses anything else before any case runs. Under
+`copilot` or `claude-code` the names are the product's own tools (`Bash`) and are not
+checked, so spell them as the product does.
+
+A `call_args` entry carries exactly one of `contains` / `equals` (`contains: {}` is refused;
+`equals: {}` means "called with no arguments"), matches structurally with no type coercion
+(`"1"` is not `1`, `true` is not `1`, `[bug]` is not `[bug, urgent]`), and fails when the
+tool was never called — under `every: true` too. Each entry is its own check,
+`call_args[0]`, `call_args[1]`, ….
 
 ## Budget
 

@@ -55,6 +55,8 @@ def check_api_key(model: str, environ: Mapping[str, str]) -> None:
 def check_trajectory_names(runner: str, cases_by_skill: Mapping[str, list[EvalCase]]) -> None:
     """Raise UndeclaredTool unless every trajectory name is a tool the case offers.
 
+    Covers `called`, `forbidden`, `order` and each `call_args` entry's `tool`.
+
     The rule is the runner's, not the loader's. A framework runner (`fake`,
     `pydantic-ai`, `langchain`) offers a case its mock `tools:` and, when
     the case has a `workspace:`, the six built-ins -- nothing else, so a
@@ -81,6 +83,7 @@ def check_trajectory_names(runner: str, cases_by_skill: Mapping[str, list[EvalCa
                 ("called", case.trajectory.called),
                 ("forbidden", case.trajectory.forbidden),
                 ("order", case.trajectory.order),
+                ("call_args", [entry.tool for entry in case.trajectory.call_args]),
             ):
                 for name in names:
                     if name in declared:

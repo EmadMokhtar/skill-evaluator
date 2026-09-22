@@ -343,7 +343,7 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
             f"could never be false -- set 'mode: offered'."
         )
 
-    # Whether a name in `called` / `forbidden` / `order` is a tool the case
+    # Whether a name in `called` / `forbidden` / `order` / `call_args` is a tool the case
     # will have is the runner's to say, not the loader's: a framework runner
     # offers the case's mock tools, a product runner offers the product's own
     # (`Bash`), and one invocation may run this case through both. Each

@@ -244,6 +244,48 @@ def test_a_runner_with_no_preflight_runs_the_case_and_scores_the_name_as_written
     assert [(c.id, c.passed) for c in trajectory.checks] == [("called:Bash", True)]
 
 
+def _call_args_skill(tmp_path):
+    skill_dir = tmp_path / "s"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("---\nname: s\n---\nbody\n", encoding="utf-8")
+    (skill_dir / "s.eval.yaml").write_text(
+        "cases:\n"
+        "  - name: c\n"
+        "    task: t\n"
+        "    tools:\n"
+        "      - name: lookup_order\n"
+        "    trajectory:\n"
+        "      call_args:\n"
+        "        - tool: lookup_order\n"
+        "          contains: {order_id: '1234'}\n",
+        encoding="utf-8",
+    )
+    return load_skills(skill_dir)
+
+
+def test_call_args_reaches_the_report_as_a_trajectory_check(tmp_path):
+    runner = FakeRunner(
+        default=RunResult(
+            tool_calls=[ToolCall(name="lookup_order", arguments={"order_id": "1234"})]
+        )
+    )
+    report = run_evals(_call_args_skill(tmp_path), [runner])
+    trajectory = next(s for s in report.outcomes[0].scores if s.evaluator == "trajectory")
+    assert [(c.id, c.passed) for c in trajectory.checks] == [("call_args[0]", True)]
+    assert report.outcomes[0].status == "passed"
+
+
+def test_a_call_with_the_wrong_arguments_fails_the_case_rather_than_erroring(tmp_path):
+    runner = FakeRunner(
+        default=RunResult(tool_calls=[ToolCall(name="lookup_order", arguments={"order_id": "9"})])
+    )
+    report = run_evals(_call_args_skill(tmp_path), [runner])
+    assert report.outcomes[0].status == "failed"
+    trajectory = next(s for s in report.outcomes[0].scores if s.evaluator == "trajectory")
+    assert trajectory.errored is False
+    assert "no call to lookup_order matched" in trajectory.checks[0].evidence
+
+
 class ErroringEvaluator:
     name = "boom"
 

@@ -229,6 +229,109 @@ def test_trajectory_referencing_only_declared_tools_is_fine(tmp_path):
     assert cases[0].trajectory.called == ["lookup_order"]
 
 
+def test_call_args_naming_an_undeclared_tool_is_the_runners_call_too(tmp_path):
+    # Same rule as called/forbidden/order, made in the same place: the
+    # runner's preflight (tests/test_preflight.py), not the loader.
+    path = tmp_path / "typo.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: order lookup\n"
+        "    task: look up order 1234\n"
+        "    tools:\n"
+        "      - name: lookup_order\n"
+        "    trajectory:\n"
+        "      call_args:\n"
+        "        - tool: lookup_ordr\n"
+        "          contains: {order_id: '1234'}\n"
+    )
+    (case,) = parse_cases_file(path)
+    assert case.trajectory.call_args[0].tool == "lookup_ordr"
+
+
+def test_call_args_on_a_declared_tool_parses_as_written(tmp_path):
+    path = tmp_path / "ok.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: threads\n"
+        "    task: list the open threads\n"
+        "    tools:\n"
+        "      - name: list_threads\n"
+        "      - name: reply\n"
+        "    trajectory:\n"
+        "      call_args:\n"
+        "        - tool: list_threads\n"
+        "          contains: {status: active, confirm: yes}\n"
+        "          every: true\n"
+        "        - tool: reply\n"
+        "          equals: {thread_id: 42}\n"
+    )
+    cases = parse_cases_file(path)
+    entries = cases[0].trajectory.call_args
+    # `yes` stays a string: the argument the provider records is text, and
+    # the YAML loader does not turn bare yes/no into booleans anywhere else.
+    assert entries[0].contains == {"status": "active", "confirm": "yes"}
+    assert entries[0].every is True
+    assert entries[1].equals == {"thread_id": 42}
+    assert entries[1].every is False
+
+
+def test_a_call_args_entry_with_no_subject_names_the_file(tmp_path):
+    path = tmp_path / "bare.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: threads\n"
+        "    task: t\n"
+        "    tools:\n"
+        "      - name: list_threads\n"
+        "    trajectory:\n"
+        "      call_args:\n"
+        "        - tool: list_threads\n"
+    )
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "bare.eval.yaml" in str(exc.value)
+    assert "exactly one of contains or equals" in str(exc.value)
+
+
+def test_an_empty_contains_names_the_file(tmp_path):
+    path = tmp_path / "empty.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: threads\n"
+        "    task: t\n"
+        "    tools:\n"
+        "      - name: list_threads\n"
+        "    trajectory:\n"
+        "      call_args:\n"
+        "        - tool: list_threads\n"
+        "          contains: {}\n"
+    )
+    with pytest.raises(CaseParseError) as exc:
+        parse_cases_file(path)
+    assert "empty.eval.yaml" in str(exc.value)
+    assert "empty contains" in str(exc.value)
+
+
+def test_call_args_may_name_a_builtin_with_or_without_a_workspace_at_load_time(tmp_path):
+    # Whether `write_file` exists for this case is the runner's to say, in
+    # preflight; the loader accepts the name either way.
+    body = (
+        "    trajectory:\n"
+        "      call_args:\n"
+        "        - tool: write_file\n"
+        "          contains: {path: report.md}\n"
+    )
+    with_workspace = tmp_path / "ws.eval.yaml"
+    with_workspace.write_text(
+        "cases:\n  - name: n\n    task: t\n    workspace:\n      files: {}\n" + body
+    )
+    assert parse_cases_file(with_workspace)[0].trajectory.call_args[0].tool == "write_file"
+
+    without = tmp_path / "nows.eval.yaml"
+    without.write_text("cases:\n  - name: n\n    task: t\n" + body)
+    assert parse_cases_file(without)[0].trajectory.call_args[0].tool == "write_file"
+
+
 def test_duplicate_tool_names_in_one_case_raise(tmp_path):
     # Two ToolSpec entries with the same name reach the adapter as
     # "UserError: Tool name conflicts with existing tool" -- an errored case
