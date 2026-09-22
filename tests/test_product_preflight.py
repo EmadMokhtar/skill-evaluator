@@ -9,6 +9,8 @@ import pytest
 
 from skill_lens.cases.loader import parse_cases_file
 from skill_lens.models import EvalCase, Skill, ToolSpec, TrajectorySpec
+from skill_lens.runners import product as product_module
+from skill_lens.runners.mcp import CLAUDE_CODE_MCP, COPILOT_MCP, BridgeSetupError
 from skill_lens.runners.product import TRUST_NOTE, Product, ProductRunner, ProductSetupError
 from skill_lens.runners.traces import parse_claude_code
 
@@ -81,12 +83,87 @@ def test_a_skill_name_that_is_not_one_directory_name_is_refused(name):
         ProductRunner(_product()).preflight([_skill(name)], {name: [_case()]})
 
 
-def test_a_case_with_mock_tools_is_refused_naming_case_and_runner():
+def test_a_case_with_mock_tools_is_refused_where_no_bridge_can_reach():
     case = _case(name="uses tools", tools=[ToolSpec(name="lookup")])
+    # A preset whose `command` names another executable: `mcp` is None.
     with pytest.raises(ProductSetupError) as info:
         ProductRunner(_product()).preflight([_skill()], {"ping": [case]})
     assert "case 'uses tools' of skill 'ping' declares tools:" in str(info.value)
     assert "claude-code runner cannot provide" in str(info.value)
+    assert "[runners.claude-code] command names another executable" in str(info.value)
+    assert "--mcp-config" in str(info.value)
+    # The generic product has no flag at all.
+    product = _product(name="cli", parse=None, version_command=None)
+    with pytest.raises(ProductSetupError) as info:
+        ProductRunner(product).preflight([_skill()], {"ping": [case]})
+    assert "cli runner cannot provide -- the cli runner has no flag" in str(info.value)
+    assert "use a preset (copilot, claude-code)" in str(info.value)
+
+
+def test_a_case_with_mock_tools_is_accepted_under_a_bridged_product_and_the_bridge_is_probed(
+    monkeypatch,
+):
+    probed: list[bool] = []
+    monkeypatch.setattr(product_module, "probe_bridge", lambda: probed.append(True))
+    case = _case(name="uses tools", tools=[ToolSpec(name="lookup")])
+    status = ProductRunner(_product(mcp=CLAUDE_CODE_MCP)).preflight([_skill()], {"ping": [case]})
+    assert status.name == "claude-code"
+    assert probed == [True]  # once, however many cases declare tools
+    ProductRunner(_product(mcp=CLAUDE_CODE_MCP)).preflight(
+        [_skill()], {"ping": [case, _case(name="also", tools=[ToolSpec(name="x")])]}
+    )
+    assert probed == [True, True]
+
+
+def test_the_bridge_really_starts_in_preflight():
+    case = _case(tools=[ToolSpec(name="lookup")])
+    ProductRunner(_product(mcp=CLAUDE_CODE_MCP)).preflight([_skill()], {"ping": [case]})
+
+
+def test_the_bridge_is_not_probed_when_no_case_declares_tools(monkeypatch):
+    def explode() -> None:
+        raise BridgeSetupError("must not run")
+
+    monkeypatch.setattr(product_module, "probe_bridge", explode)
+    ProductRunner(_product(mcp=CLAUDE_CODE_MCP)).preflight([_skill()], {"ping": [_case()]})
+
+
+def test_a_bridge_that_does_not_start_is_a_setup_error_naming_the_runner(monkeypatch):
+    def explode() -> None:
+        raise BridgeSetupError("the MCP bridge does not start under /x: boom")
+
+    monkeypatch.setattr(product_module, "probe_bridge", explode)
+    case = _case(tools=[ToolSpec(name="lookup")])
+    with pytest.raises(
+        ProductSetupError, match=r"runner claude-code: the MCP bridge does not start under /x: boom"
+    ):
+        ProductRunner(_product(mcp=CLAUDE_CODE_MCP)).preflight([_skill()], {"ping": [case]})
+
+
+@pytest.mark.parametrize("element", ["--available-tools", "--available-tools=bash"])
+def test_a_table_flag_that_hides_mcp_tools_is_refused_when_a_case_declares_tools(
+    element, monkeypatch
+):
+    monkeypatch.setattr(product_module, "probe_bridge", lambda: None)
+    product = _product(
+        name="copilot", argv=(sys.executable, str(FAKE), "-p", "{prompt}", element), mcp=COPILOT_MCP
+    )
+    case = _case(tools=[ToolSpec(name="lookup")])
+    with pytest.raises(ProductSetupError) as info:
+        ProductRunner(product).preflight([_skill()], {"ping": [case]})
+    assert f"runner copilot: {element!r} in [runners.copilot] would hide" in str(info.value)
+    # Without a tools case the flag is the user's business.
+    ProductRunner(product).preflight([_skill()], {"ping": [_case()]})
+
+
+def test_claude_codes_tools_flag_does_not_hide_mcp_tools_so_it_is_not_refused(monkeypatch):
+    # Verified: `claude --tools ""` still lists the MCP tool in its init event.
+    monkeypatch.setattr(product_module, "probe_bridge", lambda: None)
+    product = _product(
+        argv=(sys.executable, str(FAKE), "-p", "{prompt}", "--tools", ""), mcp=CLAUDE_CODE_MCP
+    )
+    case = _case(tools=[ToolSpec(name="lookup")])
+    ProductRunner(product).preflight([_skill()], {"ping": [case]})
 
 
 def test_a_generic_product_refuses_trajectory_and_offered():
@@ -112,7 +189,8 @@ def test_only_the_cases_given_are_inspected():
 
 def test_a_referenced_tool_is_refused_like_an_inline_one(tmp_path):
     # `ref:` resolves in the case loader, so preflight sees a ToolSpec and
-    # refuses it with the same message -- nothing product-specific to add.
+    # treats it like an inline one -- refused here because this product
+    # cannot take the bridge; nothing product-specific to add.
     (tmp_path / "lib.yaml").write_text("tools:\n  - name: lookup\n", encoding="utf-8")
     path = tmp_path / "ping.eval.yaml"
     path.write_text(

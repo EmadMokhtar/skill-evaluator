@@ -1,0 +1,14 @@
+{"type":"session.mcp_server_status_changed","data":{"serverName":"skill-lens","status":"connected"}}
+{"type":"session.mcp_servers_loaded","data":{"servers":[{"name":"skill-lens","status":"connected"},{"name":"github-mcp-server","status":"connected","source":"builtin"}]}}
+{"type":"session.skills_loaded","data":{"skills":[{"name":"ping","description":"Use when asked to ping.","source":"project","userInvocable":true,"enabled":true,"path":"/work/.agents/skills/ping/SKILL.md"}]}}
+{"type":"session.tools_updated","data":{"model":"gpt-5.4"}}
+{"type":"user.message","data":{"content":"/ping Please ping.","attachments":[]}}
+{"type":"assistant.turn_start","data":{"turnId":"0"}}
+{"type":"skill.invoked","data":{"name":"ping","description":"Use when asked to ping.","path":"/work/.agents/skills/ping/SKILL.md","content":"# ping"}}
+{"type":"assistant.message","data":{"messageId":"m1","content":"","toolRequests":[{"toolCallId":"c1","name":"skill-lens-lookup_order","arguments":{"order_id":"A-17"},"type":"function"}]}}
+{"type":"tool.execution_start","data":{"toolCallId":"c1","toolName":"skill-lens-lookup_order","arguments":{"order_id":"A-17"}}}
+{"type":"tool.execution_complete","data":{"toolCallId":"c1","success":true,"result":{"content":"{\"order_id\": \"A-17\", \"status\": \"shipped\"}"},"toolTelemetry":{}}}
+{"type":"assistant.message","data":{"messageId":"m2","content":"Order A-17 is shipped.","toolRequests":[]}}
+{"type":"assistant.turn_end","data":{"turnId":"0"}}
+{"type":"session.shutdown","data":{"currentModel":"gpt-5.4","conversationTokens":1300,"totalPremiumRequests":1,"modelMetrics":{"gpt-5.4":{"requests":{"count":2,"cost":1},"usage":{"inputTokens":1100,"outputTokens":40,"cacheReadTokens":200,"cacheWriteTokens":100,"reasoningTokens":0}}}}}
+{"type":"result"}

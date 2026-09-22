@@ -146,10 +146,11 @@ mechanics (process-group kill, capped read through the harness's own handle) mov
 and [Security](security.md#product-runners).
 
 Part 2 grades rubrics through the same product; see
-[What M9 part 2 shipped](#what-m9-part-2-shipped). Deferred: mock tools under a product
-through an MCP bridge, a per-case timeout, an automated hermetic Copilot run (one that
-loads nothing from the user's personal setup), and tool-name normalisation across products.
-See the
+[What M9 part 2 shipped](#what-m9-part-2-shipped). Mock tools under a product, deferred by
+the M9 design, shipped afterwards through an MCP bridge; see
+[What the MCP bridge shipped](#what-the-mcp-bridge-shipped). Still deferred: a per-case
+timeout, an automated hermetic Copilot run (one that loads nothing from the user's personal
+setup), and tool-name normalisation across products. See the
 [M9 design](https://github.com/EmadMokhtar/skill-evaluator/blob/main/docs/superpowers/specs/2026-09-17-skill-lens-m9-design.md).
 
 ## What M9 part 2 shipped
@@ -169,6 +170,26 @@ a skill. `judge_model` and `judge_temperature` are not read by a product judge, 
 `--judge-model` with one is a user error. Full detail is in
 [Judging with a product](runners.md#judging-with-a-product),
 [Configuration](configuration.md#judging) and [Security](security.md#product-runners).
+
+## What the MCP bridge shipped
+
+A case's `tools:` under `copilot` and `claude-code`, the one case feature a product runner
+could not serve: the runner writes the case's mock tools and an MCP config into a temporary
+directory, hands the config to the product on its command line (`--mcp-config=` under
+Claude Code, `--additional-mcp-config=@` under Copilot), and the product starts
+`python -m skill_lens.mcp_bridge` — a stdio MCP server shipped in the package, with no
+new dependency — lists its tools and calls them; every call answers with `returns`
+verbatim. The trace names the tool the product's way (`mcp__skill-lens__<name>`,
+`skill-lens-<name>`), and the runner maps every declared tool back to the case's name, so a
+`trajectory:` reads the same under every runner. Preflight starts the bridge once
+(`--check`) when a case declares `tools:` and refuses a `[runners.copilot]`
+`--available-tools` that would hide the mocks; a product that ran but never listed the
+bridge's tools is an errored case, never a failed `called:`. `cli`, and a preset whose
+`command` names another executable, still refuse `tools:` in preflight. With this, a suite
+that mocks a real MCP server's tools (`mcp-import`, `tool_libraries:`) runs entirely
+through a product seat, with no provider API key and no self-hosted model. Full detail is
+in [Mock tools under a product](runners.md#mock-tools-under-a-product); the design is in the
+[MCP bridge design](https://github.com/EmadMokhtar/skill-evaluator/blob/main/docs/superpowers/specs/2026-09-21-skill-lens-mcp-bridge-design.md).
 
 ## The rename to skill-lens
 
