@@ -55,8 +55,11 @@ Every `skill-lens run` flag is available as a kebab-cased input (`--min-pass-rat
 `claude-code` or `cli` — or a comma-separated list to run every case through each
 (`runner: pydantic-ai,langchain`). Install every framework named:
 `install-spec: skill-lens[pydantic-ai,langchain]==…`; a product runner needs the product
-installed instead, see [Running under a product](#running-under-a-product). Three more
-inputs are about the environment rather than the run:
+installed instead, see [Running under a product](#running-under-a-product). `base-url`
+points a keyed runner at a self-hosted endpoint the job can reach — a self-hosted GitHub
+runner beside the model server, typically — and is usually better committed as `base_url`
+in `skill-lens.toml` (see [Self-hosted endpoints](configuration.md#self-hosted-endpoints))
+than passed per job. Three more inputs are about the environment rather than the run:
 
 | Input | Default | Purpose |
 | --- | --- | --- |

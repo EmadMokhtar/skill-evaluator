@@ -174,6 +174,22 @@ form, that file is the explanation.
 - **YAML goes through `yaml_loading.safe_load`**, never `yaml.safe_load`. The custom loader
   stops YAML 1.1 from turning bare `yes`/`no`/`on`/`off` into booleans.
 - **Secrets come from environment variables only** — never from `skill-lens.toml`.
+- **A base URL is config; a key is environment** (issue #54). `base_url` / `judge_base_url`
+  in the file, `--base-url` on the flag: flag > file > the provider's own variable
+  (`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, read by the framework when skill-lens passes
+  nothing) > default. The variable is a fallback, never an override. `validate_base_url`
+  is the one check, shared by the field validator and the flag: a bare `http(s)://host`,
+  no `user:secret@` (a credential in a committed file, refused with the secrets message).
+  **The endpoint travels with the model**: empty `judge_base_url` inherits `base_url`
+  exactly when `judge_model` is empty and no `--judge-model` is passed, so a cloud judge
+  under a local runner is never pointed at `localhost`. `--base-url` is read wherever
+  `--model` is and refused wherever `--model` is. **A provider that cannot take the
+  endpoint is `UnsupportedBaseURL` in preflight** (exit 2, before any spend), never
+  silently ignored: PydanticAI's `resolve_model` refuses a provider class with no
+  `base_url` parameter and a model object; LangChain's `check_base_url` builds the chat
+  model once. Both keyed judges have a no-argument `preflight()` returning `None`. With
+  no `base_url` the string reaches the framework untouched. The API-key check is
+  unchanged (`openai:` at a local server still needs `OPENAI_API_KEY` exported).
 - **`skill_lens` (underscore) never appears in user-facing output.** The user-facing name is
   `skill-lens` everywhere: command, config file, distribution. The GitHub repository keeps its
   older name, `skill-evaluator`, so `uses: EmadMokhtar/skill-evaluator@v<version>` installing

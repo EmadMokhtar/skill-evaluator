@@ -19,7 +19,7 @@ from typing import Any
 from skill_lens.bundle import SkillBundle
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
 from skill_lens.runners.base import RunnerDependencyError
-from skill_lens.runners.preflight import check_trajectory_names
+from skill_lens.runners.preflight import UnsupportedBaseURL, check_trajectory_names
 from skill_lens.runners.pricing import calculate_cost, provider_of
 from skill_lens.runners.prompting import instructions
 from skill_lens.runners.retry import run_with_retries, transient_status
@@ -70,18 +70,59 @@ def _is_transient(exc: Exception) -> bool:
     return type(exc).__name__.endswith(_TRANSIENT_NAME_SUFFIXES)
 
 
-def _chat_model(model: Any, temperature: float | str) -> Any:
+def _chat_model(model: Any, temperature: float | str, base_url: str = "") -> Any:
     """A `provider:model` string becomes a chat model; an instance is used as-is.
 
     Reasoning models reject any temperature but 1, so 'unset' sends none.
+
+    A `base_url` is handed to the chat model's constructor as `base_url=`,
+    which `ChatOpenAI` and `ChatAnthropic` take; with none, nothing is
+    passed and the provider reads its own environment variable
+    (`OPENAI_BASE_URL`) or its default, exactly as before this argument
+    existed. A model *instance* already carries its client, so a `base_url`
+    beside one is `UnsupportedBaseURL` rather than a URL silently dropped.
     """
     if not isinstance(model, str):
+        if base_url:
+            raise UnsupportedBaseURL(
+                f"base_url {base_url!r} cannot apply to a model object "
+                f"({type(model).__name__}); it takes a provider:model string"
+            )
         return model
-    from langchain.chat_models import init_chat_model
+    import langchain.chat_models
 
-    if temperature == "unset":
-        return init_chat_model(model)
-    return init_chat_model(model, temperature=float(temperature))
+    kwargs: dict[str, Any] = {}
+    if temperature != "unset":
+        kwargs["temperature"] = float(temperature)
+    if base_url:
+        kwargs["base_url"] = base_url
+    # Looked up on the module at call time so the one framework call that
+    # could refuse a `base_url` can be stood in for offline.
+    return langchain.chat_models.init_chat_model(model, **kwargs)
+
+
+def check_base_url(seat: str, model: Any, temperature: float | str, base_url: str) -> None:
+    """Raise `UnsupportedBaseURL` unless `base_url` can be applied to `model`.
+
+    Called from preflight, before any spend. Building the chat model is the
+    check itself -- constructing a client touches no network -- and any
+    refusal the constructor makes is reported under the seat (`runner
+    langchain`, `judge langchain`) that would otherwise have surfaced it from
+    the first case as an errored run. Without a `base_url` there is nothing
+    to check, and the model is not built here.
+    """
+    if not base_url:
+        return
+    _require_langchain()
+    try:
+        _chat_model(model, temperature, base_url)
+    except UnsupportedBaseURL as exc:
+        raise UnsupportedBaseURL(f"{seat}: {exc}") from exc
+    except Exception as exc:
+        raise UnsupportedBaseURL(
+            f"{seat}: base_url {base_url!r} cannot apply to model {model!r}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def _structured_tools(built: list[AgentTool]) -> list[Any]:
@@ -193,12 +234,14 @@ class LangChainRunner:
         retries: int = 2,
         retry_backoff_seconds: float = 1.0,
         sleep: Callable[[float], None] = time.sleep,
+        base_url: str = "",
     ) -> None:
         self._model = model
         self._temperature = temperature
         self._retries = retries
         self._retry_backoff_seconds = retry_backoff_seconds
         self._sleep = sleep
+        self._base_url = base_url
 
     def _build_agent(
         self,
@@ -222,7 +265,7 @@ class LangChainRunner:
             if skill.bundle_root is not None:
                 built.extend(build_bundle_tools(SkillBundle(skill.bundle_root), workspace, scripts))
         return create_agent(
-            _chat_model(self._model, self._temperature),
+            _chat_model(self._model, self._temperature, self._base_url),
             tools=_structured_tools(built),
             system_prompt=instructions(skill, case, workspace is not None),
         )
@@ -247,12 +290,15 @@ class LangChainRunner:
         return list(state["messages"])
 
     def preflight(self, skills: list[Skill], cases_by_skill: dict[str, list[EvalCase]]) -> None:
-        """Refuse a `trajectory:` naming a tool this runner cannot offer, before any spend.
+        """Refuse, before any spend, a `trajectory:` naming a tool this runner
+        cannot offer, and a `base_url` its chat model cannot take.
 
         This runner offers a case its mock tools and, with a workspace, the
-        built-ins -- so the check is `check_trajectory_names` and nothing more.
+        built-ins -- so the first check is `check_trajectory_names`; the
+        second is `check_base_url`.
         """
         check_trajectory_names(self.name, cases_by_skill)
+        check_base_url(f"runner {self.name}", self._model, self._temperature, self._base_url)
 
     def run(
         self,

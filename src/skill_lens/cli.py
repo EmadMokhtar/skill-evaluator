@@ -17,7 +17,13 @@ from skill_lens.cases.loader import (
     load_cases_for_skill,
 )
 from skill_lens.comparison import build_delta
-from skill_lens.config import PRODUCT_NAMES, Config, ConfigError, load_config
+from skill_lens.config import (
+    PRODUCT_NAMES,
+    Config,
+    ConfigError,
+    load_config,
+    validate_base_url,
+)
 from skill_lens.evaluators.assertion import InvalidAssertionValue, UnknownAssertionKind
 from skill_lens.gating import EXIT_OK, evaluate_gate
 from skill_lens.judges.base import Judge
@@ -36,7 +42,12 @@ from skill_lens.reporters.markdown import render_markdown
 from skill_lens.runners.base import Runner, RunnerDependencyError
 from skill_lens.runners.fake import FakeRunner
 from skill_lens.runners.langchain import LangChainRunner
-from skill_lens.runners.preflight import MissingAPIKey, UndeclaredTool, check_api_key
+from skill_lens.runners.preflight import (
+    MissingAPIKey,
+    UndeclaredTool,
+    UnsupportedBaseURL,
+    check_api_key,
+)
 from skill_lens.runners.product import ProductRunner, ProductSetupError
 from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.scaffold import render_scaffold, scaffold_target
@@ -69,6 +80,9 @@ _AUTHORING_ERRORS = (
     # a trajectory: naming a tool the runner cannot offer the case, found in
     # the framework runners' preflight
     UndeclaredTool,
+    # a base_url set for a provider that takes no endpoint, found in the
+    # framework runners' and judges' preflight
+    UnsupportedBaseURL,
     RunnerDependencyError,
     # scripts enabled but cannot run here: a missing interpreter, or a
     # required sandbox that is absent
@@ -142,9 +156,9 @@ def _resolve_runners(flag: list[str] | None, configured: str | list[str]) -> lis
     return names
 
 
-def _build_runner(name: str, settings: Config, model_name: str) -> Runner:
+def _build_runner(name: str, settings: Config, model_name: str, base_url: str = "") -> Runner:
     """One runner by name: `fake` takes nothing, a keyed runner takes the shared
-    model, a product runner takes its `[runners.<name>]` table."""
+    model and endpoint, a product runner takes its `[runners.<name>]` table."""
     if name == "fake":
         return FakeRunner()
     if name in _KEYED_RUNNERS:
@@ -153,11 +167,12 @@ def _build_runner(name: str, settings: Config, model_name: str) -> Runner:
             temperature=settings.temperature,
             retries=settings.retries,
             retry_backoff_seconds=settings.retry_backoff_seconds,
+            base_url=base_url,
         )
     return ProductRunner(settings.product(name))
 
 
-def _build_judge(name: str, settings: Config, model_name: str) -> Judge:
+def _build_judge(name: str, settings: Config, model_name: str, base_url: str = "") -> Judge:
     """One judge by name, the way `_build_runner` builds a runner."""
     if name == "fake":
         return FakeJudge()
@@ -167,6 +182,7 @@ def _build_judge(name: str, settings: Config, model_name: str) -> Judge:
             temperature=settings.judge_temperature,
             retries=settings.retries,
             retry_backoff_seconds=settings.retry_backoff_seconds,
+            base_url=base_url,
         )
     return ProductJudge(settings.product(name))
 
@@ -183,6 +199,13 @@ def run(
         ),
     ] = None,
     model: Annotated[str | None, typer.Option(help="Model id, e.g. openai:gpt-4o-mini.")] = None,
+    base_url: Annotated[
+        str | None,
+        typer.Option(
+            help="Endpoint for the model's provider, e.g. http://localhost:11434/v1 for a "
+            "self-hosted OpenAI-compatible server; overrides base_url in skill-lens.toml."
+        ),
+    ] = None,
     judge_model: Annotated[
         str | None,
         typer.Option(help='Model id for the judge; judge = "..." in skill-lens.toml picks it.'),
@@ -301,6 +324,19 @@ def run(
                 "neither; a product's model is set with "
                 '[runners.<name>] args = ["--model", "..."] in skill-lens.toml'
             )
+        # `--base-url` travels with `--model`: it is read wherever `--model` is,
+        # and nowhere else -- a product's endpoint is the product's own business.
+        if base_url is not None and not model_is_read:
+            raise typer.BadParameter(
+                "--base-url is read by pydantic-ai and langchain only, and this run names "
+                "neither; a product reaches its own endpoint"
+            )
+        if base_url is not None:
+            try:
+                base_url = validate_base_url(base_url)
+            except ValueError as exc:
+                raise typer.BadParameter(f"--base-url {exc}") from exc
+        resolved_base_url = base_url if base_url is not None else settings.base_url
         if judge_model is not None and not judge_needs_key:
             raise typer.BadParameter(
                 '--judge-model is read by judge = "pydantic-ai" or "langchain" only; '
@@ -310,16 +346,28 @@ def run(
             # Once for the whole matrix: every keyed runner shares one model.
             _require_a_model("--model", model_name)
             check_api_key(model_name, os.environ)
-        active_runners = [_build_runner(name, settings, model_name) for name in runner_names]
+        active_runners = [
+            _build_runner(name, settings, model_name, resolved_base_url) for name in runner_names
+        ]
         # An empty judge_model means "grade with the same model you run with",
         # so a project opting into real judging only has to name one model.
+        judge_inherits_model = judge_model is None and not settings.judge_model
         resolved_judge_model = (
             judge_model if judge_model is not None else (settings.judge_model or model_name)
+        )
+        # The endpoint travels with the model: a judge that inherits `model`
+        # inherits its `base_url` too, and one with a model of its own gets
+        # the provider's default unless `judge_base_url` says otherwise --
+        # so a cloud judge under a local runner is never pointed at localhost.
+        resolved_judge_base_url = settings.judge_base_url or (
+            resolved_base_url if judge_inherits_model else ""
         )
         if judge_needs_key:
             _require_a_model("--judge-model", resolved_judge_model)
             check_api_key(resolved_judge_model, os.environ)
-        active_judge = _build_judge(judge_name, settings, resolved_judge_model)
+        active_judge = _build_judge(
+            judge_name, settings, resolved_judge_model, resolved_judge_base_url
+        )
         if needs_key or uses_product:
             # A ceiling, not a forecast. Printed for keyed and product
             # runners alike: both spend. The tag and case filters are applied

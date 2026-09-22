@@ -24,6 +24,12 @@ default_runner = "pydantic-ai"
 # (OPENAI_API_KEY here).
 model = "openai:gpt-4o-mini"
 
+# Endpoint for a self-hosted, OpenAI-compatible server (Ollama, vLLM, a
+# gateway). Empty means the provider's own variable (OPENAI_BASE_URL,
+# OLLAMA_BASE_URL), then its default. Not a secret, so it belongs here; a
+# URL carrying user:password@ is refused. --base-url overrides it.
+# base_url = "http://localhost:11434/v1"
+
 # Sampling temperature, or the string "unset" for reasoning models that
 # reject an explicit one.
 # temperature = 0.0
@@ -40,6 +46,10 @@ judge = "pydantic-ai"
 
 # Model for the judge; empty means "the same model as `model`".
 # judge_model = ""
+# Endpoint for the judge. Empty inherits `base_url` exactly when
+# `judge_model` is empty; a judge with its own model gets its provider's
+# default unless this names one.
+# judge_base_url = ""
 # judge_temperature = 0.0
 
 # The gate. 1.0 means every case must pass.

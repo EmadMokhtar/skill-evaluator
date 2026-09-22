@@ -2,7 +2,8 @@
 
 ```
 skill-lens run <path> [--evals <path>] [--runner <name>]... [--model <name>]
-                      [--judge-model <name>] [--tag <tag>] [--case <text>]
+                      [--base-url <url>] [--judge-model <name>] [--tag <tag>]
+                      [--case <text>]
                       [--min-pass-rate <float>]
                       [--json-output <path>] [--junit-output <path>]
                       [--markdown-output <path>] [--markdown-max-chars <int>]
@@ -31,6 +32,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--evals <path>` | discovery | An explicit eval file or directory, overriding discovery |
 | `--runner <name>` | `fake` | `fake`, `pydantic-ai`, `langchain`, `copilot`, `claude-code` or `cli`; repeatable — every case then runs through each runner named. `copilot`, `claude-code` and `cli` start an installed agent product and need no API key; see [Runners](runners.md) and [Product runners](runners.md#product-runners) |
 | `--model <name>` | `openai:gpt-4o-mini` | Model id. Read by `pydantic-ai` and `langchain` (and by a keyed judge, `judge = "pydantic-ai"` or `"langchain"`, whose `judge_model` is unset). Passing it to a run where nothing reads it — `--runner fake`, or only product runners, with no keyed judge falling back to it — is a user error (exit 2): a flag that looks honoured while the product runs its own default model would be a mistake that is easy to miss. A product's model is set with `[runners.<name>] args` in `skill-lens.toml` |
+| `--base-url <url>` | `base_url` in `skill-lens.toml`, else the provider's own variable | Endpoint for the model's provider — `http://localhost:11434/v1` for a self-hosted OpenAI-compatible server. Read wherever `--model` is, and refused where it is not (exit 2); must be a bare `http://` or `https://` URL naming a host, with no user name or password in it. Reaches the judge too when the judge inherits `--model`; a judge with a model of its own takes `judge_base_url` from the file instead. See [Self-hosted endpoints](configuration.md#self-hosted-endpoints) |
 | `--judge-model <name>` | falls back to `--model` | Model id for the LLM judge. Read by `judge = "pydantic-ai"` or `"langchain"` only; passing it under any other judge — the default `"fake"`, or a product judge (`"copilot"`, `"claude-code"`, `"cli"`), whose model is set with `[runners.<name>] args` — is a user error (exit 2) |
 | `--tag <tag>` | none | Only run cases carrying this tag |
 | `--case <text>` | none | Only run cases whose name contains `<text>`, case-insensitively — copy any distinctive part of a case name out of a CI log to rerun just that case. Combined with `--tag`, both must hold. No config key: a filter is a property of one invocation |
@@ -91,7 +93,9 @@ keyed judge whose `judge_model` is unset; a run that names neither — `--runner
 product runners only — refuses it, and a product's model is set with `[runners.<name>] args`
 in [`skill-lens.toml`](configuration.md#product-runners) instead, for the runner and the
 judge alike. A blank model id is rejected as a user error (exit 2) rather than reaching a
-provider.
+provider. `--base-url` is read wherever `--model` is and refused wherever `--model` is —
+a product reaches its own endpoint — and follows the judge the same way: a judge that
+inherits `--model` inherits the endpoint with it; one with a model of its own does not.
 
 ## `list`
 

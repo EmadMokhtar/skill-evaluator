@@ -7,6 +7,7 @@ import tomllib
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -39,6 +40,34 @@ PRODUCT_NAMES: tuple[str, ...] = (*PRESETS, "cli")
 
 class ConfigError(Exception):
     """Raised when a config file is missing or invalid."""
+
+
+def validate_base_url(value: str) -> str:
+    """Return `value` stripped if it is a bare `http(s)://host[...]`; raise ValueError.
+
+    Shared by the `base_url` / `judge_base_url` field validators and the
+    `--base-url` flag, so a value is checked the same way wherever it came
+    from. An empty value means "not set" and passes through. The scheme and
+    host are checked here, at load time, because a URL the client library
+    cannot even parse would otherwise surface from the first case as a
+    connection error -- an *errored* case, when the mistake is in the file.
+    A userinfo part (`user:secret@host`) is refused for the same reason an
+    API key is: it is a credential, and this file is committed.
+    """
+    if value == "":
+        return value
+    parts = urlsplit(value.strip())
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(
+            f"must be an http:// or https:// URL naming a host, e.g. "
+            f'"http://localhost:11434/v1"; got {value!r}'
+        )
+    if parts.username is not None or parts.password is not None:
+        raise ValueError(
+            "must not carry a user name or password; skill-lens never reads secrets "
+            "from skill-lens.toml -- put credentials in the provider's environment variable"
+        )
+    return value.strip()
 
 
 class ProductSettings(BaseModel):
@@ -138,16 +167,28 @@ class Config(BaseModel):
 
     `default_runner` (`--runner`, a string or a list of names -- every case
     runs through each; the flag, repeated, replaces the whole list), `model`
-    (`--model`), `judge_model` (`--judge-model`) and `min_pass_rate`
-    (`--min-pass-rate`) can be overridden by a CLI flag; the rest can only be
-    set here. Secrets are never read from
+    (`--model`), `base_url` (`--base-url`), `judge_model` (`--judge-model`)
+    and `min_pass_rate` (`--min-pass-rate`) can be overridden by a CLI flag;
+    the rest can only be set here. Secrets are never read from
     this file -- API keys come from the environment only.
+
+    `base_url` is the one endpoint-shaped value that does belong here: a
+    self-hosted, OpenAI-compatible server is not a secret and is the same for
+    every contributor. Empty means the provider reads its own variable
+    (`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`) or its default -- a fallback, never
+    an override of the file. `validate_base_url` refuses anything but a bare
+    `http(s)://host[...]`, and in particular a `user:secret@` part, which is a
+    credential in a committed file.
 
     `judge` defaults to "fake" for the same reason `default_runner` does:
     upgrading must never start spending money on its own. An unscripted
     FakeJudge errors rather than passing, so that default cannot turn an
     unchecked rubric into a green case. An empty `judge_model` falls back to
-    `model`.
+    `model`, and an empty `judge_base_url` follows it: the judge inherits
+    `base_url` exactly when it inherits `model`, so a judge with a model of
+    its own is never pointed at the runner's local server by accident. The
+    CLI resolves that pairing, because only it knows whether `--judge-model`
+    was passed.
 
     `judge_temperature` is deliberately separate from `temperature` and
     defaults to `0.0` for determinism: the judge grades a fixed rubric and
@@ -216,11 +257,13 @@ class Config(BaseModel):
 
     default_runner: str | list[str] = "fake"
     model: str = DEFAULT_MODEL
+    base_url: str = ""
     temperature: float | Literal["unset"] = 0.0
     retries: int = 2
     retry_backoff_seconds: float = 1.0
     judge: str = "fake"
     judge_model: str = ""
+    judge_base_url: str = ""
     judge_temperature: float | Literal["unset"] = 0.0
     min_pass_rate: float = 1.0
     fail_on_error: bool = True
@@ -246,6 +289,12 @@ class Config(BaseModel):
         default_factory=lambda: {ext: list(argv) for ext, argv in DEFAULT_INTERPRETERS.items()}
     )
     runners: dict[str, ProductSettings] = Field(default_factory=dict)
+
+    @field_validator("base_url", "judge_base_url")
+    @classmethod
+    def _is_a_plain_http_url(cls, value: str) -> str:
+        """An empty value means "not set"; anything else is a bare `http(s)://host[...]`."""
+        return validate_base_url(value)
 
     @field_validator("default_runner")
     @classmethod

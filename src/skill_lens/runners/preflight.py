@@ -27,6 +27,16 @@ class MissingAPIKey(Exception):
     """Raised when the environment variable a model needs is unset."""
 
 
+class UnsupportedBaseURL(Exception):
+    """Raised when a `base_url` is set for a model that cannot take one.
+
+    A setup error, refused in the adapter's preflight before any spend: the
+    provider's client has no endpoint to point at (or the model is an object
+    the caller already built), so the URL would be silently ignored and the
+    run would look local while spending against the provider's default.
+    """
+
+
 class UndeclaredTool(Exception):
     """Raised when a `trajectory:` names a tool the runner cannot offer the case.
 
