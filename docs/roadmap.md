@@ -3,21 +3,6 @@
 What `skill-lens` does today, what is being considered next, and what it will
 deliberately not do.
 
-## Development milestones
-
-| Milestone | Contents | Status |
-| --- | --- | --- |
-| M0 | Scaffolding, config, CLI skeleton, release plumbing | shipped |
-| M1 | Loaders, protocols, `FakeRunner`, assertion evaluator, orchestrator, console + JSON reporters, gating | shipped |
-| M2 | PydanticAI runner, trajectory + budget evaluators, cost/latency capture, cassette test tier | shipped |
-| M3 | LLM-as-judge evaluator (per-check verdicts), triggering evals with negative controls | shipped |
-| M4 | Comparative evals: `--baseline`/`--repeat`, delta reporting, `--min-delta` gating | shipped |
-| M5 | CI/CD polish: JUnit XML + Markdown reporters, GitHub Action, bounded concurrency | shipped |
-| M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions, bundled files and `run_script` | shipped |
-| M7 | DX: failing cases explain themselves, `--case`, `init` batch mode and workspace case, versioned example, quickstart | shipped |
-| M8 | LangChain runner and judge (`[langchain]` extra); runner matrix | shipped |
-| M9 | Product runners: `copilot`, `claude-code`, a configured `cli`; product judge | shipped |
-
 ## What's shipped
 
 Organised by what it does, not by when it arrived. For the change-by-change history, see
@@ -26,7 +11,7 @@ which `cz bump` generates from the commit history.
 
 | Capability | Where it is documented |
 | --- | --- |
-| Skill discovery, eval cases, assertion kinds and per-check scoring | [Eval files](eval-files.md) |
+| Skill discovery, eval cases, assertion kinds and per-check scoring | [CLI](cli.md), [Eval files](eval-files.md) |
 | The gate, its exit codes, the JSON report, and what a failing case shows | [Gating and exit codes](gating.md) |
 | Real agents through PydanticAI and LangChain, one run through both | [Runners](runners.md) |
 | Installed products as the runner and as the judge, with no API key | [Product runners](runners.md#product-runners) |
@@ -70,6 +55,21 @@ Nothing here is committed to a date.
   stated non-goals: the tool is a CI gate whose contract is an exit code, and the skills it
   measures stay inputs to it. See
   [Scope and non-goals](architecture.md#scope-and-non-goals).
+
+## Development milestones
+
+| Milestone | Contents | Status |
+| --- | --- | --- |
+| M0 | Scaffolding, config, CLI skeleton, release plumbing | shipped |
+| M1 | Loaders, protocols, `FakeRunner`, assertion evaluator, orchestrator, console + JSON reporters, gating | shipped |
+| M2 | PydanticAI runner, trajectory + budget evaluators, cost/latency capture, cassette test tier | shipped |
+| M3 | LLM-as-judge evaluator (per-check verdicts), triggering evals with negative controls | shipped |
+| M4 | Comparative evals: `--baseline`/`--repeat`, delta reporting, `--min-delta` gating | shipped |
+| M5 | CI/CD polish: JUnit XML + Markdown reporters, GitHub Action, bounded concurrency | shipped |
+| M6 | Real-execution tools: sandboxed built-in toolset, `file-produced`/`json-schema` assertions, bundled files and `run_script` | shipped |
+| M7 | DX: failing cases explain themselves, `--case`, `init` batch mode and workspace case, versioned example, quickstart | shipped |
+| M8 | LangChain runner and judge (`[langchain]` extra); runner matrix | shipped |
+| M9 | Product runners: `copilot`, `claude-code`, a configured `cli`; product judge | shipped |
 
 ## The rename to skill-lens
 
