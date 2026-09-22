@@ -153,6 +153,32 @@ only a fixture that is *supposed* to go red can catch a regression in how red ge
 --8<-- "examples/ci/skill-lens.yml"
 ```
 
+## Gating on the delta
+
+The complete workflow above is already comparative: `baseline: previous` re-runs every case
+against the skill's previous version, and `repeat: 3` samples each arm three times. Both are
+ordinary inputs, and `min-delta` is the third — it turns the delta the report carries into a
+verdict:
+
+```yaml
+      - uses: EmadMokhtar/skill-evaluator@v0.16.0
+        with:
+          path: ./skills
+          runner: pydantic-ai
+          model: openai:gpt-4o-mini
+          baseline: previous      # none, or previous resolved from git
+          repeat: 3               # sample each arm three times
+          min-delta: "0.0"        # must not regress
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+`baseline: previous` reads git history, so the checkout must be unshallow —
+`fetch-depth: 0`, as in the workflow above. `min-delta` without `baseline` is a user error
+(exit `2`), and a delta gate with nothing comparable fails rather than passing vacuously:
+the rules are in [Comparative evals](comparative-evals.md#-min-delta). Two arms sampled
+three times is six runs per case — see [Concurrency and cost](#concurrency-and-cost).
+
 ## Running the matrix
 
 One job, one report, every case through both frameworks:
