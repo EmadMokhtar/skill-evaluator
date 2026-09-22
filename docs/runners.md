@@ -18,6 +18,31 @@ skill-lens run ./skills --runner pydantic-ai --runner langchain --model openai:g
 From a checkout instead, the extra comes from `uv sync --extra pydantic-ai` (or
 `--extra langchain`) and every command runs as `uv run skill-lens ...`.
 
+## Choosing a runner
+
+| Runner | What it costs | Needs | Measures |
+| --- | --- | --- | --- |
+| `fake` | Nothing. Offline, scripted, deterministic | Nothing | The pipeline itself — discovery, scoring, gating, reporting. Use it to check a suite is wired up before you spend anything |
+| `pydantic-ai` | Provider tokens | The `pydantic-ai` extra and an API key in the environment | Output, mock tools, `trajectory:`, `mode: offered`, the workspace, tokens, cost, latency |
+| `langchain` | Provider tokens | The `langchain` extra and an API key in the environment | The same as `pydantic-ai`, through a second framework |
+| `copilot` | Your GitHub Copilot quota, billed per premium request rather than per token | GitHub Copilot CLI installed; it uses its own auth, so no API key | Output, mock tools through the [MCP bridge](#mock-tools-under-a-product), `trajectory:`, `mode: offered` from the product's own skill-load signal, the workspace, latency, and tokens when the trace reports them. Never `budget: max_cost_usd` |
+| `claude-code` | Your Claude Code quota | Claude Code installed; it uses its own auth, so no API key | The same as `copilot`, plus `budget: max_cost_usd` — this product reports its own cost |
+| `cli` | Whatever the command you name costs | A `[runners.cli]` table whose `command` names that command; without one, `cli` cannot be named at all | Output, the workspace, and latency. `tools:`, `trajectory:` and `mode: offered` are authoring errors under it |
+
+A feature-by-feature version of the last column is in [Which runners serve which case
+features](eval-files.md#which-runners-serve-which-case-features), and the per-limit budget
+detail is under [Product runners](#product-runners).
+
+Two rules worth knowing before you choose:
+
+- **`--runner` is repeatable**, so one invocation can run every case through several
+  runners and produce one report. The flag replaces `default_runner` wholesale rather than
+  appending to it, and the same runner named twice is a user error (exit `2`), not silently
+  de-duplicated.
+- **Naming a product runner is a trust decision.** The product runs with its permission
+  prompts disabled, your whole environment inherited, and no skill-lens sandbox. Every
+  report says so — see [Security](security.md#product-runners).
+
 ## Two frameworks, one measurement
 
 | Runner | Extra | Agent loop | Bundled providers |

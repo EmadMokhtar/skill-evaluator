@@ -19,6 +19,37 @@ files](#sharing-tools-across-eval-files).
 | `workspace` | no | A temporary directory and the files it starts with |
 | `mode` | no | `loaded` (default) or `offered` — see [Did the agent reach for the skill?](#did-the-agent-reach-for-the-skill) |
 
+## Choosing a check
+
+Four kinds of check, and each answers a different question.
+
+| Use | When you want to know | Costs |
+| --- | --- | --- |
+| `assertions:` | Did the output — or a file the agent wrote — contain the right text, match a pattern, or validate against a JSON schema? | Nothing |
+| `trajectory:` | Did the agent reach for the skill, and call the right tools — in the right order, with the right arguments, no more often than it should? | Nothing |
+| `budget:` | Did it stay inside a token, cost or latency limit? | Nothing |
+| `judge:` | Is the output *good* — complete, correctly reasoned, in the right tone? | One judge call per case that carries a rubric |
+
+Reach for the cheapest one that answers your question. An `assertions:` entry is exact and
+free; a `judge:` rubric is the only thing that can grade quality, and every case carrying
+one spends a judge call — so it has to be turned on, because the default `judge = "fake"`
+grades nothing and reports such a case as **errored**. A skill whose job is to *call
+something* is measured by `trajectory:`, not by what it said about calling it.
+
+Some rules that catch people out:
+
+- A rubric entry phrased against a mock tool's `returns:` is an authoring error. The judge
+  never sees a tool's return, so that entry is unverifiable — reword it, or name a
+  `workspace:` file under `judge.artifacts`.
+- **In a `judge:` rubric only**, a check the judge passes without citing evidence is
+  recorded as a failure. Assertion, trajectory and budget checks build their evidence from
+  the same comparison that produced the verdict, so the rule does not apply to them — see
+  [Per-check results](#per-check-results).
+- A `trajectory:` naming a tool the case does not declare is refused before any case runs,
+  under `fake`, `pydantic-ai` and `langchain`. A product's own tools cannot be listed, so
+  `copilot` and `claude-code` refuse no name, and `cli` refuses a `trajectory:` block
+  outright.
+
 ## Workspaces
 
 A `workspace:` block gives one case a real, contained temporary directory: created fresh
