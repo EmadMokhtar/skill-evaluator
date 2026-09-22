@@ -66,6 +66,14 @@ class PydanticAIJudge:
             resolve_model(self._model, self._base_url)
         except UnsupportedBaseURL as exc:
             raise UnsupportedBaseURL(f"judge {self.name}: {exc}") from exc
+        except Exception as exc:
+            # The framework's own refusal -- an unknown provider prefix, a
+            # model id with no prefix -- has no RunResult to land in here, so
+            # it becomes the setup error rather than a traceback.
+            raise UnsupportedBaseURL(
+                f"judge {self.name}: base_url {self._base_url!r} cannot apply to model "
+                f"{self._model!r}: {type(exc).__name__}: {exc}"
+            ) from exc
 
     def _model_settings(self) -> Any:
         """Temperature 0 for determinism; 'unset' for models that reject it."""

@@ -561,3 +561,17 @@ def test_a_credential_in_a_base_url_is_refused_with_the_secrets_rule(tmp_path):
     path.write_text('base_url = "http://user:secret@localhost:11434/v1"\n')
     with pytest.raises(ConfigError, match="never reads secrets"):
         load_config(path=path)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("  http://localhost:11434/v1  ", "http://localhost:11434/v1"),
+        ("http://localhost:11434/v1/", "http://localhost:11434/v1/"),
+        ("https://gpu-box.internal:8000", "https://gpu-box.internal:8000"),
+    ],
+)
+def test_a_well_formed_base_url_is_kept_with_only_the_whitespace_removed(tmp_path, value, expected):
+    path = tmp_path / "skill-lens.toml"
+    path.write_text(f'base_url = "{value}"\n')
+    assert load_config(path=path).base_url == expected

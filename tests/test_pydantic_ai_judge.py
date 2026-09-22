@@ -216,3 +216,10 @@ def test_the_judge_refuses_an_unsupported_provider_in_preflight_before_any_spend
 
 def test_the_judge_preflight_returns_no_product_status():
     assert PydanticAIJudge(model="openai:gpt-4o-mini", base_url=LOCAL).preflight() is None
+
+
+def test_an_unknown_provider_beside_a_base_url_is_refused_in_preflight_not_a_traceback():
+    judge = PydanticAIJudge(model="badprovider:foo", base_url=LOCAL)
+    with pytest.raises(UnsupportedBaseURL, match="judge pydantic-ai") as caught:
+        judge.preflight()
+    assert "badprovider" in str(caught.value)

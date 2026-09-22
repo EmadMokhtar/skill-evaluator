@@ -794,3 +794,13 @@ def test_no_base_url_touches_no_framework_import(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", no_pydantic_ai)
     assert resolve_model("openai:gpt-4o-mini", "") == "openai:gpt-4o-mini"
+
+
+def test_an_unknown_provider_beside_a_base_url_is_refused_in_preflight_not_a_traceback():
+    # PydanticAI raises its own ValueError for a prefix it has never heard of;
+    # with a base_url that has to become the setup error (exit 2), because
+    # preflight has no RunResult to land in.
+    runner = PydanticAIRunner(model="badprovider:foo", base_url=LOCAL)
+    with pytest.raises(UnsupportedBaseURL, match="runner pydantic-ai") as caught:
+        runner.preflight([SKILL], {SKILL.name: [case()]})
+    assert "badprovider" in str(caught.value)
