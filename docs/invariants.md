@@ -1291,10 +1291,10 @@ refuses `tools:` under `cli` and under a preset whose `command` names another ex
 the products that cannot take the [MCP bridge](#a-cases-tools-reach-a-preset-product-through-a-stdio-mcp-server-skill-lens-ships-and-the-product-starts-it),
 never under a preset that can — and `trajectory:` or `mode: offered` under `cli`, all
 before the first case; when a planned case declares `tools:` under a preset that serves
-them, it starts the bridge once with `--check` instead. It checks no `trajectory:` name
-against anything: under a product the
-names are the product's own tools, which skill-lens cannot enumerate (a translation table
-would be a third moving target), so that rule belongs to the framework runners' preflight —
+them, it starts the bridge once with `--check` rather than refusing. It checks no
+`trajectory:` name against anything: under a product the names are the product's own tools,
+which skill-lens cannot enumerate (a translation table would be a third moving target), so
+that rule belongs to the framework runners' preflight —
 see the invariant above. The orchestrator hands it only the candidate-arm `(skill, case)`
 pairs planned for that runner, once each: compatibility is a property of `(case, runner)`,
 so a case `--tag` or `--case` filtered out is not its concern, and neither arm nor repeat
