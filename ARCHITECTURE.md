@@ -71,6 +71,17 @@ judge has no cases to inspect — called in the same pass, right after the runne
 one a runner already returned is not added again, so a product serving as both runner and
 judge is one entry on `RunReport.products`.
 
+```mermaid
+flowchart LR
+    ORCH["orchestrator.run_evals"]
+    ORCH --> RP["Runner<br/>run(skill, case) -> RunResult"]
+    ORCH --> EP["Evaluator<br/>evaluate(case, result) -> EvalScore"]
+    EP --> JP["Judge<br/>judge(request) -> JudgeVerdict"]
+    RP --- RI["fake · pydantic-ai · langchain<br/>copilot · claude-code · cli"]
+    EP --- EI["assertion · trajectory<br/>budget · judge"]
+    JP --- JI["fake · pydantic-ai<br/>langchain · product"]
+```
+
 ## Module map
 
 | Module | Responsibility |

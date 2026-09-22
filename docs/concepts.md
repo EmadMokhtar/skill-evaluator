@@ -9,6 +9,23 @@ to an exit code. Each section ends with a link to the page that covers it in ful
 
 One run, from a directory of skills to a single exit code.
 
+```mermaid
+flowchart TD
+    P["A path you pass to skill-lens"] --> D["Discovery: walk for SKILL.md"]
+    D --> S["Skill"]
+    S --> C["Cases: evals/ or *.eval.yaml"]
+    C --> M["The matrix: skill x case x runner x arm x repeat"]
+    M --> R["Runner.run"]
+    R --> RR["RunResult: output, tool calls, tokens, cost, latency"]
+    RR --> E["Evaluators: assertion, trajectory, budget, judge"]
+    E --> SC["EvalScore, with one check per declared item"]
+    SC --> O["Outcome: passed, failed or errored"]
+    O --> AG["RunReport"]
+    AG --> REP["Reporters: console, JSON, JUnit, Markdown"]
+    AG --> G["The gate"]
+    G --> X["One exit code"]
+```
+
 ## Skill
 
 A skill is a directory containing a `SKILL.md` file: instructions an agent loads to do one
@@ -62,6 +79,34 @@ See [Eval files](eval-files.md).
 ## A case, end to end
 
 What happens to one case, from its task to its verdict.
+
+```mermaid
+flowchart LR
+    subgraph W["What you write"]
+        T["task:"]
+        TO["tools:"]
+        A["assertions:"]
+        TR["trajectory:"]
+        B["budget:"]
+        J["judge:"]
+    end
+    T --> RUN["Runner"]
+    TO --> RUN
+    RUN --> RES["RunResult"]
+    RES --> AE["Assertion evaluator"]
+    RES --> TE["Trajectory evaluator"]
+    RES --> BE["Budget evaluator"]
+    RES --> JE["Judge evaluator"]
+    A --> AE
+    TR --> TE
+    B --> BE
+    J --> JE
+    AE --> CH["Checks, each with evidence"]
+    TE --> CH
+    BE --> CH
+    JE --> CH
+    CH --> OUT["Outcome"]
+```
 
 ## Task and mode
 

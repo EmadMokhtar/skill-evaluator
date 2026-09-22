@@ -8,6 +8,21 @@ Exit codes are the CI contract:
 | `1` | Gate failed |
 | `2` | User or authoring error (bad path, malformed YAML, unknown assertion kind) |
 
+```mermaid
+flowchart TD
+    START["skill-lens run"] --> AUTH{"Are your files and flags valid?"}
+    AUTH -->|"no: unknown assertion kind, bad regex, unfilled TODO, a product that cannot run here"| E2["exit 2 - fix your own files"]
+    AUTH -->|yes| RAN{"Did any candidate case run?"}
+    RAN -->|"no: no skills, no cases, --tag or --case matched nothing"| E1["exit 1 - gate failed"]
+    RAN -->|yes| ERR{"Did any candidate case error?"}
+    ERR -->|"yes, and fail_on_error is on"| E1
+    ERR -->|"no, or fail_on_error is off"| RATE{"Pass rate at or above min_pass_rate, and every per_skill_min met?"}
+    RATE -->|no| E1
+    RATE -->|yes| DELTA{"Is --min-delta set?"}
+    DELTA -->|"yes, and the delta is below it, nothing was comparable, or a baseline couldn't be resolved"| E1
+    DELTA -->|"no, or none of those hold"| E0["exit 0 - gate passed"]
+```
+
 Exit `2` also covers a [product runner](runners.md#product-runners) that cannot run here —
 its executable not on `PATH`, a preset's `--version` failing, a case with `tools:`, or
 `trajectory:` / `mode: offered` under `cli` — all found in preflight before any case runs;

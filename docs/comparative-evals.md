@@ -55,6 +55,20 @@ A case's mock tools (`tools:`) are unaffected by the arm. They are the environme
 declares, not part of the skill, so both arms see the same tools and the comparison stays
 honest.
 
+```mermaid
+flowchart TD
+    CASE["One eval case"] --> CAND["Candidate arm: SKILL.md as it is now"]
+    CASE --> BASE["Baseline arm: --baseline none or previous"]
+    CAND --> CR["Run it --repeat N times"]
+    BASE --> BR["Run it --repeat N times"]
+    CR --> PAIR{"Can both arms be honestly compared?"}
+    BR --> PAIR
+    PAIR -->|"no: skipped, unresolvable, or every repetition errored"| DROP["Excluded from BOTH halves of the delta"]
+    PAIR -->|yes| DELTA["Delta: pass rate, tokens, cost, latency"]
+    CR --> GATE["The gate reads the candidate arm only"]
+    DELTA -->|"--min-delta, when set"| GATE
+```
+
 ## How `previous` is resolved
 
 `--baseline previous` walks the skill's own git history, rooted at its directory:
