@@ -71,6 +71,7 @@ nav:
       - Comparative evals: comparative-evals.md
       - CI integration: ci.md
       - Releasing: releasing.md
+      - Troubleshooting: troubleshooting.md
   - Roadmap: roadmap.md
   - Architecture: architecture.md
   - Invariants: invariants.md
