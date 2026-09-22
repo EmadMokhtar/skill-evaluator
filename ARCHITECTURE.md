@@ -79,7 +79,7 @@ flowchart LR
     EP --> JP["Judge<br/>judge(request) -> JudgeVerdict"]
     RP --- RI["fake · pydantic-ai · langchain<br/>copilot · claude-code · cli"]
     EP --- EI["assertion · trajectory<br/>budget · judge"]
-    JP --- JI["fake · pydantic-ai<br/>langchain · product"]
+    JP --- JI["fake · pydantic-ai · langchain<br/>copilot · claude-code · cli"]
 ```
 
 ## Module map

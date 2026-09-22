@@ -19,7 +19,7 @@ flowchart TD
     ERR -->|"no, or fail_on_error is off"| RATE{"Pass rate at or above min_pass_rate, and every per_skill_min met?"}
     RATE -->|no| E1
     RATE -->|yes| DELTA{"Is --min-delta set?"}
-    DELTA -->|"yes, and the delta is below it, nothing was comparable, or a baseline couldn't be resolved"| E1
+    DELTA -->|"yes: no baseline arm ran, nothing was comparable, the delta is below the bar, or a baseline couldn't be resolved"| E1
     DELTA -->|"no, or none of those hold"| E0["exit 0 - gate passed"]
 ```
 
@@ -85,9 +85,12 @@ measured over the whole matrix. There is no per-runner threshold.
 
 ## Gating on the delta (`--min-delta`)
 
-`--min-delta <float>` adds three more gate rules, all evaluated against the
+`--min-delta <float>` adds four more gate rules, all evaluated against the
 [delta](comparative-evals.md#the-delta-block) between the candidate and baseline arms:
 
+- **no baseline arm ran at all** — every case's baseline was skipped (for example, an
+  all-`offered` suite under `--baseline none`), so there is nothing to build a delta from in
+  the first place;
 - the pass-rate delta is below `min_delta`;
 - **no case was comparable** — a delta gate that verified nothing must never report a pass,
   the same principle that fails a run executing zero cases;
@@ -98,7 +101,9 @@ measured over the whole matrix. There is no per-runner threshold.
 `--min-delta` requires `--baseline`; passing one without the other is a user/authoring error
 (exit `2`), not a gate failure, since the configuration is rejected before any case runs. A
 deliberately skipped baseline (an `offered` case under `--baseline none`) is not, on its own,
-a gate reason — nothing went wrong there. See
+a gate reason — nothing went wrong there. But that is only true for *some* cases skipping
+their baseline: if *every* case's baseline is skipped this way, there is no baseline arm left
+to compare against, and the first rule above fires instead. See
 [Comparative evals](comparative-evals.md#-min-delta) for the full picture, including how the
 delta is paired and what makes a case comparable.
 
