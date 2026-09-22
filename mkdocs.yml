@@ -59,21 +59,23 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Getting started: getting-started.md
-  - Concepts: concepts.md
+  - Guides:
+      - Getting started: getting-started.md
+      - Concepts: concepts.md
+      - Writing evals: writing-evals.md
+      - CI integration: ci.md
+      - Troubleshooting: troubleshooting.md
   - Reference:
       - Eval files: eval-files.md
-      - Writing evals: writing-evals.md
       - CLI: cli.md
       - Configuration: configuration.md
       - Runners: runners.md
       - Gating and exit codes: gating.md
       - Comparative evals: comparative-evals.md
-      - CI integration: ci.md
+  - Internals:
+      - Architecture: architecture.md
+      - Invariants: invariants.md
+      - Security: security.md
       - Releasing: releasing.md
-      - Troubleshooting: troubleshooting.md
+      - Contributing: contributing.md
   - Roadmap: roadmap.md
-  - Architecture: architecture.md
-  - Invariants: invariants.md
-  - Security: security.md
-  - Contributing: contributing.md

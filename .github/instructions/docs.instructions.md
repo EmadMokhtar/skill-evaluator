@@ -16,6 +16,10 @@ applyTo: "docs/**,*.md,mkdocs.yml"
   a relative link can pass the test and still fail `mkdocs build --strict`.
 - **A new page must be added to `nav:` in `mkdocs.yml`.** `tests/test_docs.py` fails on an
   orphan page, and `mkdocs build --strict` fails on a nav entry with no file.
+- **The nav has four sections, and a new page belongs to one of them.** *Guides* is read
+  start to finish. *Reference* is looked things up in. *Internals* is for people working on
+  skill-lens itself. *Roadmap* stands alone. A page that fits none of them probably belongs
+  inside an existing page as a section.
 - **`docs/superpowers/` is a historical archive** of specs and plans. It is excluded from
   the built site and does not count as documenting a change. Its contents were superseded by
   what shipped — read `src/` as the source of truth.
