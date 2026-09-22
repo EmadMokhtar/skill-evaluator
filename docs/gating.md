@@ -91,9 +91,9 @@ measured over the whole matrix. There is no per-runner threshold.
 - **no baseline arm ran at all** — every case's baseline was skipped (for example, an
   all-`offered` suite under `--baseline none`), so there is nothing to build a delta from in
   the first place;
-- the pass-rate delta is below `min_delta`;
 - **no case was comparable** — a delta gate that verified nothing must never report a pass,
   the same principle that fails a run executing zero cases;
+- the pass-rate delta is below `min_delta`;
 - a skill's baseline **could not be resolved** — named, with the reason — because treating an
   unresolvable baseline as "no change" would let a repository pass this gate forever by
   deleting its git history.
