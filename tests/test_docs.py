@@ -118,6 +118,23 @@ def test_the_no_match_reply_is_quoted_as_the_code_spells_it():
     assert f"`{expected}`" in text, f"docs/eval-files.md does not quote {expected!r}"
 
 
+def test_the_hidden_data_examples_agree_with_the_check():
+    # docs/eval-files.md shows one rubric line the loader refuses and one it
+    # accepts. Pinning both to `find_hidden_data_reference` keeps the page
+    # from promising a refusal (or a pass) the code no longer makes.
+    from skill_lens.cases.checks import find_hidden_data_reference
+
+    text = _page("eval-files.md")
+    lines = re.findall(r"^\s+- (The summary [^\n]+)$", text, flags=re.MULTILINE)
+    refused = [line for line in lines if "mocked data" in line]
+    accepted = [line for line in lines if "threads.json" in line]
+    assert refused and accepted, "the refused/accepted rubric examples are missing"
+    for line in refused:
+        assert find_hidden_data_reference(line) is not None, line
+    for line in accepted:
+        assert find_hidden_data_reference(line) is None, line
+
+
 def test_every_page_is_reachable_from_the_nav():
     orphans = _site_pages() - _nav_pages()
     assert not orphans, f"pages not in the mkdocs.yml nav: {sorted(orphans)}"

@@ -413,6 +413,78 @@ cases:
         parse_cases_file(path)
 
 
+def test_a_rubric_entry_naming_hidden_mock_data_is_an_authoring_error(tmp_path):
+    # The judge sees the task, `expected`, the response and any named
+    # artifacts -- never what a mock tool returned. A check phrased against
+    # that data can only pass under a judge that ignores its own "fail when
+    # ambiguous" rule, so it is refused before any judge is asked.
+    path = write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    tools:
+      - name: threads
+        description: d
+        returns: '{"author": "Alex Chen"}'
+    judge:
+      rubric:
+        - The reply names each reviewer
+        - The summary does not invent any detail not present in the mocked data
+""",
+    )
+    with pytest.raises(CaseParseError) as excinfo:
+        parse_cases_file(path)
+    message = str(excinfo.value)
+    assert str(path) in message
+    assert "case 'c'" in message
+    assert "rubric entry 2" in message
+    assert "'mocked data'" in message
+    assert "artifacts" in message
+
+
+def test_a_rubric_entry_naming_hidden_data_is_refused_without_tools_too(tmp_path):
+    # The judge never sees tool returns in any case, so the rule does not
+    # depend on whether this one declares `tools:`.
+    path = write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    judge:
+      rubric:
+        - The reply repeats what the tool returned
+""",
+    )
+    with pytest.raises(CaseParseError, match="rubric entry 1"):
+        parse_cases_file(path)
+
+
+def test_a_rubric_graded_against_a_named_artifact_loads(tmp_path):
+    # The documented fix: put the data in a workspace file the judge can read
+    # and phrase the check against that file.
+    path = write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    workspace:
+      files:
+        threads.json: '{"author": "Alex Chen"}'
+    judge:
+      rubric:
+        - The summary names no reviewer absent from threads.json
+      artifacts: [threads.json]
+""",
+    )
+    cases = parse_cases_file(path)
+    assert cases[0].judge is not None
+    assert cases[0].judge.artifacts == ["threads.json"]
+
+
 def test_skill_triggered_on_a_loaded_case_is_an_authoring_error(tmp_path):
     # A loaded skill is always in force, so the check could never be false.
     path = write(

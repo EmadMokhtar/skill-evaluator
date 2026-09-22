@@ -208,7 +208,10 @@ nothing was verified.
 
 One verdict per rubric entry, each with its evidence; skill-lens derives pass and score
 from those. A check that passes without evidence is recorded as a failure. An empty
-rubric, or a blank entry, is an authoring error. Judging costs money and is opted into
+rubric, or a blank entry, is an authoring error; so is an entry phrased against a mock
+tool's `returns:` ("the mocked data", "what the tool returned") — the judge is shown the
+task, `expected`, the response and any named `artifacts`, never a tool's return, so the
+check could not be verified. Judging costs money and is opted into
 with `judge = "pydantic-ai"` in `skill-lens.toml`; the default `judge = "fake"` reports a
 judged case as **errored** rather than passing a rubric nobody checked.
 
