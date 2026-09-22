@@ -110,7 +110,8 @@ def test_the_verification_spells_the_tag_the_way_commitizen_does(workflow):
 
     steps = workflow["jobs"]["release"]["steps"]
     verify_step = next(step for step in steps if "ls-remote" in str(step.get("run", "")))
-    expected = 'tag="' + prefix + '${{ steps.bump.outputs.version }}"'
+    assert verify_step["env"]["VERSION"] == "${{ steps.bump.outputs.version }}"
+    expected = 'tag="' + prefix + '$VERSION"'
     assert expected in verify_step["run"], (
         f"tag_format is {tag_format!r}, so the verification step must build {expected!r}"
     )
@@ -473,3 +474,94 @@ def test_the_push_step_reads_the_version_from_its_environment(workflow):
     step = _release_step(workflow, "git push")
     assert "${{" not in step["run"], step["run"]
     assert step["env"]["VERSION"] == "${{ steps.bump.outputs.version }}"
+
+
+# --- The tag on origin must be this run's tag ---------------------------------
+#
+# `--follow-tags` sends only the annotated tags origin does not already have.
+# A same-named tag already on origin -- pushed by hand, pointing at another
+# commit -- is therefore not rejected: it is silently skipped, and the bump
+# commit lands on main under a tag that means something else. A check that
+# only asks whether the tag exists passes that. The step must compare what
+# the tag points at on origin with the commit it just pushed.
+
+
+def _run_verify_tag_step(
+    workflow: dict, work: Path, tmp_path: Path
+) -> tuple[subprocess.CompletedProcess, str]:
+    """Run the ls-remote step's script the way `shell: bash` does."""
+    step = _release_step(workflow, "ls-remote")
+    assert step.get("shell") == "bash"
+    summary = tmp_path / "verify_step_summary"
+    summary.touch()
+    env = {**os.environ, "GITHUB_STEP_SUMMARY": str(summary), "VERSION": "9.9.9"}
+    proc = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+        cwd=work,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    return proc, summary.read_text(encoding="utf-8")
+
+
+def test_a_tag_already_on_origin_pointing_elsewhere_fails_the_check(workflow, tmp_path):
+    origin, work, github_sha = _runner(tmp_path)
+    other = _clone(origin, tmp_path / "other")
+    _git("tag", "-a", "v9.9.9", "-m", "pushed by hand", cwd=other)
+    _git("push", "-q", "origin", "v9.9.9", cwd=other)
+
+    proc, output, _ = _run_push_step(workflow, work, github_sha, tmp_path)
+
+    # What git does, pinned so the reason for the check below stays visible:
+    # the push is not rejected, the commit lands, the tag is left as it was.
+    assert proc.returncode == 0, proc.stderr
+    assert "pushed=true" in output
+    assert _git("rev-parse", "main", cwd=origin) == _git("rev-parse", "HEAD", cwd=work)
+    assert _git("rev-parse", "v9.9.9^{commit}", cwd=origin) == github_sha
+
+    proc, summary = _run_verify_tag_step(workflow, work, tmp_path)
+
+    assert proc.returncode != 0
+    assert "points at" in proc.stderr, proc.stderr
+    assert github_sha[:7] in proc.stderr, proc.stderr
+    assert "Confirmed" not in summary
+
+
+def test_a_landed_tag_that_points_at_the_bump_commit_passes_the_check(workflow, tmp_path):
+    origin, work, github_sha = _runner(tmp_path)
+    proc, _, _ = _run_push_step(workflow, work, github_sha, tmp_path)
+    assert proc.returncode == 0, proc.stderr
+
+    proc, summary = _run_verify_tag_step(workflow, work, tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "Confirmed tag v9.9.9" in summary
+
+
+def test_a_tag_that_never_reached_origin_fails_the_check(workflow, tmp_path):
+    """The case the step was written for: the bump commit is on main and the
+    tag stayed on the runner (a lightweight tag `--follow-tags` never sends)."""
+    origin, work, _ = _runner(tmp_path)
+    _git("push", "-q", "origin", "HEAD:main", cwd=work)
+    assert _origin_tags(origin) == ""
+
+    proc, summary = _run_verify_tag_step(workflow, work, tmp_path)
+
+    assert proc.returncode != 0
+    assert "is not on origin" in proc.stderr, proc.stderr
+    assert "Confirmed" not in summary
+
+
+def test_a_lookup_that_fails_is_reported_as_unknown_not_as_missing(workflow, tmp_path):
+    """A failed `git ls-remote` prints nothing, exactly like a missing tag.
+    The two must not be confused: one sends a maintainer to re-tag by hand
+    over a network fault."""
+    _, work, github_sha = _runner(tmp_path)
+    _git("remote", "set-url", "origin", str(tmp_path / "gone.git"), cwd=work)
+
+    proc, _ = _run_verify_tag_step(workflow, work, tmp_path)
+
+    assert proc.returncode != 0
+    assert "unknown" in proc.stderr, proc.stderr
+    assert "is not on origin" not in proc.stderr

@@ -44,7 +44,7 @@ rule here — it is the input to versioning. `fix:` gives a patch, `feat:` a min
 or a `BREAKING CHANGE:` footer a breaking change. Because `major_version_zero = true`, a
 breaking change stays inside `0.x` rather than promoting the project to `1.0.0`.
 
-### The tag is annotated, and the job proves it landed
+### The tag is annotated, and the job proves it is the one that landed
 
 `git push --follow-tags` — what `release` uses to push the bump commit and its tag together —
 pushes only **annotated** tags. Commitizen creates a lightweight tag unless told otherwise, so
@@ -100,6 +100,21 @@ signal would report a missing tag for one that is very likely present. If you ev
 "is not on origin" message, it means the bump commit reached `main` but its tag did not: the
 release is not reproducible from a tag, and the fix is to re-tag and re-push by hand rather
 than re-run the job (which would try to bump again).
+
+The check asks what the tag **points at**, not only whether it exists. `--follow-tags` sends
+only the annotated tags origin does not already have, so a tag of the release's name that is
+already on origin — pushed by hand, pointing at some other commit — is not a rejection: the
+push skips it, the bump commit lands on `main`, and the tag now names code that was never
+released. Existence alone would pass that. The step therefore lists both `refs/tags/vX.Y.Z`
+and `refs/tags/vX.Y.Z^{}` (the commit an annotated tag points at; a lightweight tag has no
+`^{}` line and its ref *is* the commit) and requires the target to equal the commit it just
+pushed. If you see the "exists on origin but points at" message, the bump commit is on `main`
+under a tag that means something else, and nothing in this workflow created that tag. Treat the
+version as spent, exactly as in
+[Recovering a failure after the tag but before the artifact](#recovering-a-failure-after-the-tag-but-before-the-artifact):
+the next merge that warrants a release computes its increment from the commits after the tag,
+`pip install` never sees `X.Y.Z`, and the tag is left where its author put it rather than moved.
+Find out who pushed it; a hand-pushed tag in the release's namespace is the thing to stop.
 
 ### A pin that stops matching aborts the bump
 
