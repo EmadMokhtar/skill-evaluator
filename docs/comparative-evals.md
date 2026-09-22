@@ -221,19 +221,23 @@ least this much better than the baseline's.
 exits `2` — the alternative is a gate that silently checks nothing, which is the same
 vacuous-pass failure mode every other gate rule in this project rejects.
 
-With a baseline set, `--min-delta` fails the gate for three reasons:
+With a baseline set, `--min-delta` fails the gate for four reasons, checked in this order:
 
-1. **The delta is below the bar** — `pass_rate_delta < min_delta`.
+1. **No baseline arm ran at all** — every case's baseline was skipped, so there is nothing to
+   build a delta from in the first place. A suite made entirely of skipped-baseline `offered`
+   cases under `--baseline none` fails through *this* rule, not the next one: those cases
+   produce no baseline outcomes at all, so there is no delta to look inside.
 2. **No case was comparable** — mirroring "a run executing zero cases fails the gate": a gate
-   that verified nothing must never report a pass. A suite made entirely of skipped-baseline
-   `offered` cases under `--baseline none` fails through this rule, which is the honest reason
-   even though no individual baseline "failed".
-3. **A skill's baseline could not be resolved** — naming the skill and the reason. Otherwise a
+   that verified nothing must never report a pass. This is the rule for a delta that was
+   built and then emptied — some baseline did run, but every pair was dropped.
+3. **The delta is below the bar** — `pass_rate_delta < min_delta`.
+4. **A skill's baseline could not be resolved** — naming the skill and the reason. Otherwise a
    repository could pass `--min-delta` forever by deleting its git history.
 
 A *deliberately* skipped baseline (an `offered` case under `--baseline none`) is, on its own,
-**not** a gate reason — nothing went wrong. It only becomes one indirectly, through rule 2, if
-it leaves nothing comparable behind.
+**not** a gate reason — nothing went wrong. It becomes one only indirectly: through rule 1 if
+*every* case skips its baseline, or through rule 2 if the pairs that do run leave nothing
+comparable behind.
 
 **Baseline outcomes never count toward the gate.** Every other gate rule — `min_pass_rate`,
 `per_skill_min`, `fail_on_error`, the zero-cases check — reads the **candidate** arm only. A
