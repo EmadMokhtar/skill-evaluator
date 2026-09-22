@@ -60,6 +60,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
+  - Concepts: concepts.md
   - Reference:
       - Eval files: eval-files.md
       - Writing evals: writing-evals.md

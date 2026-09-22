@@ -43,6 +43,7 @@ uv sync                      # add --extra pydantic-ai for the real-agent runner
 | If you want to | Read |
 | --- | --- |
 | Write your first eval and run it | [Getting started](getting-started.md) |
+| Learn the vocabulary — case, runner, judge, arm, gate | [Concepts](concepts.md) |
 | Look up an eval YAML field or assertion kind | [Eval files](eval-files.md) |
 | Look up a command or flag | [CLI](cli.md) |
 | Configure defaults for a repo | [Configuration](configuration.md) |

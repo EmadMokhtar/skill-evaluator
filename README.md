@@ -237,6 +237,7 @@ The full list, with the reasoning behind each, is in [ARCHITECTURE.md](https://g
 | Topic | Page |
 | --- | --- |
 | First eval, end to end | [Getting started](https://emadmokhtar.github.io/skill-evaluator/getting-started/) |
+| The vocabulary, with a glossary | [Concepts](https://emadmokhtar.github.io/skill-evaluator/concepts/) |
 | Deciding what to test | [Writing evals](https://emadmokhtar.github.io/skill-evaluator/writing-evals/) |
 | Eval YAML reference | [Eval files](https://emadmokhtar.github.io/skill-evaluator/eval-files/) |
 | Commands and flags | [CLI](https://emadmokhtar.github.io/skill-evaluator/cli/) |
