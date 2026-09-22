@@ -21,6 +21,7 @@ from skill_lens.cli import app
 from skill_lens.config import Config
 from skill_lens.evaluators.assertion import ASSERTION_KINDS
 from skill_lens.models import EvalCase
+from skill_lens.runners.tools import NO_RESPONSE_SCRIPTED
 from skill_lens.yaml_loading import safe_load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -107,6 +108,14 @@ def test_every_assertion_kind_is_documented():
     text = _page("eval-files.md")
     for kind in ASSERTION_KINDS:
         assert f"`{kind}`" in text, f"assertion kind {kind!r} is not in docs/eval-files.md"
+
+
+def test_the_no_match_reply_is_quoted_as_the_code_spells_it():
+    """An author reading a transcript searches the docs for the exact line
+    the mock handed back; a reworded constant would leave that search empty."""
+    text = _page("eval-files.md")
+    expected = NO_RESPONSE_SCRIPTED.format(name="get_work_item", arguments='{"id": "C"}')
+    assert f"`{expected}`" in text, f"docs/eval-files.md does not quote {expected!r}"
 
 
 def test_every_page_is_reachable_from_the_nav():

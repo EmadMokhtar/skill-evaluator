@@ -103,6 +103,35 @@ written and must be a valid JSON Schema of `type: object`. For a tool a real MCP
 exposes, `skill-lens mcp-import tools.json` writes the `input_schema:` block from the
 server's `tools/list` listing — `returns:` still has to be filled in by hand.
 
+`returns:` may answer differently per call, and the shape says which rule applies. A
+list of strings is consumed in call order, the last entry repeating once used up (pair it
+with `max_calls`); a list of `when:`/`value:` mappings is answered by the first entry whose
+`when:` keys all equal the call's arguments, an entry with no `when:` being the fallback:
+
+```yaml
+      - name: get_work_item
+        parameters:
+          id: string
+        returns:                        # by call order: A, then B, then B again
+          - '{"id": "A", "parent": "B"}'
+          - '{"id": "B", "parent": null}'
+      - name: lookup_order
+        parameters:
+          order_id: string
+        returns:                        # by argument: first match wins
+          - when: {order_id: "1234"}
+            value: '{"id": "1234", "days_since_delivery": 45}'
+          - when: {order_id: "5678"}
+            value: '{"id": "5678", "days_since_delivery": 3}'
+          - value: '{"error": "not found"}'
+```
+
+Values compare as parsed (`1` is an integer, `"1"` a string, `true` matches only a
+boolean). A call no entry answers gets `no response is scripted for <tool> with arguments
+{...}`. An empty list, a list mixing strings and mappings, a `when:` key the tool never
+carries, an empty `when: {}`, or an entry an earlier entry already answers is an authoring
+error (exit 2).
+
 A tool several skills share is declared once in a **tool library** — a YAML file with a
 top-level `tools:` list, the block above, which is also what `mcp-import` prints. The eval
 file imports it with `tool_libraries:` (paths relative to the eval file; a directory
@@ -120,8 +149,9 @@ cases:
         returns: '{"id": "1234", "days_since_delivery": 45}'   # this case's scenario
 ```
 
-A `ref:` may carry `returns:` and nothing else. An unknown name, a missing library, a name
-two libraries both declare, or an absolute path is an authoring error (exit 2).
+A `ref:` may carry `returns:` — in any of its three shapes — and nothing else. An unknown
+name, a missing library, a name two libraries both declare, or an absolute path is an
+authoring error (exit 2).
 
 ## Trajectory
 

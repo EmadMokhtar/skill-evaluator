@@ -10,7 +10,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from pydantic import ValidationError
 
-from skill_lens.cases.checks import UNFILLED_SENTINEL, check_tool_schema, find_unfilled
+from skill_lens.cases.checks import UNFILLED_SENTINEL, check_tool, find_unfilled
 from skill_lens.cases.tool_libraries import (
     EMPTY_LIBRARY,
     TOOL_LIBRARIES_KEY,
@@ -105,7 +105,11 @@ def _resolve_tool_refs(path: Path, index: int, raw: object, library: ToolLibrary
             raise CaseParseError(f"{where} {exc}") from exc
         resolved = copy.deepcopy(spec.model_dump())
         if ref.returns is not None:
-            resolved["returns"] = ref.returns
+            # The raw YAML value, not the validated model: the resolved
+            # mapping stays plain data for `EvalCase.model_validate`, and a
+            # lookup's entries are checked against the library's contract by
+            # `_validate_tools` once the case is built.
+            resolved["returns"] = copy.deepcopy(entry["returns"])
         tools.append(resolved)
     return {**raw, "tools": tools}
 
@@ -216,16 +220,17 @@ def _validate_assertions(path: Path, case: EvalCase) -> None:
 
 
 def _validate_tools(path: Path, case: EvalCase) -> None:
-    """Check each mock tool's declared schema at load time.
+    """Check each mock tool's declared schema and its `returns:` at load time.
 
-    The rules are `checks.check_tool_schema`'s, shared with tool libraries;
-    here each refusal names the file, the case and the tool. All three
-    mistakes are the author's, so they abort before any case runs rather than
-    surface as an errored case.
+    The rules are `checks.check_tool`'s, shared with tool libraries; here
+    each refusal names the file, the case and the tool. Every one of them is
+    the author's mistake, so it aborts before any case runs rather than
+    surface as an errored case. A `ref:` is already resolved by now, so its
+    `returns:` is checked against the contract the library declared.
     """
     for tool in case.tools:
         try:
-            check_tool_schema(tool)
+            check_tool(tool)
         except ValueError as exc:
             raise CaseParseError(f"{path}: case {case.name!r} tool {tool.name!r} {exc}") from exc
 

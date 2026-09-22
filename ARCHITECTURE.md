@@ -84,7 +84,7 @@ judge is one entry on `RunReport.products`.
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
 | `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous`, and extracts that same commit's bundle (`git archive`, `tarfile` with the `data` filter) so the old instructions are paired with the old scripts. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
 | `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models; imports the file's `tool_libraries:` and resolves every `- ref:` into the library's `ToolSpec` on the raw mapping, before validation. |
-| `cases/checks.py` | The checks an eval file and a tool library share: the `TODO(skill-lens)` sentinel walk (`find_unfilled`, keys and values, cycle-safe) and `check_tool_schema` (`parameters`/`input_schema` exclusive, `check_schema`, top-level `type: object`). Below both loaders so neither imports the other. |
+| `cases/checks.py` | The checks an eval file and a tool library share: the `TODO(skill-lens)` sentinel walk (`find_unfilled`, keys and values, cycle-safe), `check_tool_schema` (`parameters`/`input_schema` exclusive, `check_schema`, top-level `type: object`) and `check_tool_returns` (a `returns:` lookup's `when:` keys the tool can carry, no entry unreachable), which `check_tool` runs together. Below both loaders so neither imports the other. |
 | `cases/tool_libraries.py` | A tool library is a YAML file with one top-level `tools:` list — the block `mcp-import` prints. `parse_tool_library` checks each tool as the case loader would and names the file and position in every refusal; `load_tool_libraries` resolves an eval file's `tool_libraries:` entries against the eval file's directory (file or directory, never absolute) into one `ToolLibrary` that refuses a name declared twice; `ToolLibrary.resolve` turns a `ref:` into its `ToolSpec` or says what to fix. Raises `ToolLibraryError`; the case loader wraps it with the importing file. |
 | `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. `scaffold_target` decides where `init` writes. |
 | `mcp_import.py` | Turns a saved MCP `tools/list` response into mock-tool YAML: `parse_tools_list` (three accepted shapes, every refusal a `McpImportError`) and `render_tool_mocks` (a pasteable `tools:` block). Pure: text in, text out; `cli.py` reads the file or stdin. Never touches the network. |
@@ -92,6 +92,7 @@ judge is one entry on `RunReport.products`.
 | `bundle.py` | A read-only view of the three Agent Skills directories beside `SKILL.md` (`scripts/`, `references/`, `assets/`) and nothing else — an eval file beside `SKILL.md` is never readable by the agent. Same "methods raise, tools catch" split as `workspace.py`. |
 | `scripts.py` | Runs a bundled script: the policy, the once-per-run preflight (interpreters on `PATH`, the sandbox probe), the allowlisted environment, the scratch directory, the process-group timeout and the capped output read through the harness's own descriptors (both via `process.py`), and the `sandbox-exec` / `bwrap` wrapping. Never raises for a script that will not run; raises `ScriptSetupError` only from preflight. |
 | `process.py` | Starts a child in its own process group, waits with a timeout, kills the group after every exit, and reads output through the harness's own handle. Shared by `scripts.py` and `runners/product.py`; imports nothing from the rest of the project. |
+| `matching.py` | `structural_match`: one author's mapping against a call's recorded arguments — a subset at every level, or exact under `exact=True`; lists element by element at equal length; a bool only ever equals a bool. Shared by `trajectory.call_args` (`evaluators/trajectory.py`) and a mock's `when:` (`ToolResponse.matches` in `models.py`); imports nothing from the rest of the project. |
 | `runners/base.py` | The `Runner` protocol. `run` takes optional `workspace=` and `scripts=` keywords, both additive with a default, so a runner written against an earlier milestone keeps working. |
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/prompting.py` | The three preambles and the system-prompt builder every runner calls. Framework-free, so the rules `--min-delta` measures against exist once. |
@@ -100,7 +101,7 @@ judge is one entry on `RunReport.products`.
 | `runners/langchain.py` | The LangChain runner adapter. **One of the four modules that import an agent framework.** |
 | `runners/traces.py` | The Copilot JSONL and Claude Code `stream-json` parsers, each producing one `Trace`. Pure functions; a structural problem is `Trace.error`, never a raise. |
 | `runners/product.py` | The product runner: a `Product` value (argv template, skill directory, invocation spelling, trace parser, version command), the two presets, skill delivery into the product's working directory, the subprocess invocation, and the once-per-run `preflight`. Imports no agent framework. |
-| `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block, the built-in workspace tools, and the bundle tools (`list_skill_files`, `read_skill_file`, and `run_script` when the bundle has scripts and the run enabled them). Owns the six-name `BUILTIN_TOOL_NAMES` the case loader reads. |
+| `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block — one canned value, a sequence consumed in call order, or a lookup by argument — the built-in workspace tools, and the bundle tools (`list_skill_files`, `read_skill_file`, and `run_script` when the bundle has scripts and the run enabled them). Owns the six-name `BUILTIN_TOOL_NAMES` the case loader reads. |
 | `runners/preflight.py` | What a framework runner verifies before any spend: the provider API key, and that every `trajectory:` name is a tool the case will have (`check_trajectory_names`, called from the three framework runners' `preflight`). |
 | `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
 | `evaluators/base.py` | The `Evaluator` protocol. |
@@ -152,6 +153,7 @@ All live in `models.py`.
 | --- | --- |
 | `Skill` | name, description, instructions, `version` (declared frontmatter version, `""` if absent), path, `variant` (`"candidate"` or `"baseline"`), `bundle_root` (the directory whose `scripts/`, `references/` and `assets/` the agent may read; `None` when the skill ships none), `markdown` (the `SKILL.md` text verbatim — its text as written, though line endings are normalised — for a product runner to deliver; `""` for the `--baseline none` skill, so no directory is written) |
 | `EvalCase` | name, task, `tools`, `assertions`, `trajectory`, `budget`, `tags` |
+| `ToolSpec` | one mock tool: name, description, `parameters` or `input_schema`, and `returns` — a string for every call, a `list[str]` consumed in call order, or a `list[ToolResponse]` (`when:` argument subset → `value`) matched per call; `ToolRef` (`ref` + optional `returns` in the same shapes) is what a case writes to import one from a library |
 | `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, `usage_note` (why the token split is `0` when the runner could not count — a declared `max_tokens` then fails as not evaluated), model, `error` |
 | `CheckResult` | one check's `id`, `passed`, `evidence` — emitted by the judge and, since M4, by assertion/trajectory/budget too |
 | `EvalScore` | one evaluator's `passed` / `score` / `detail`, plus its `checks: list[CheckResult]` |
@@ -905,8 +907,8 @@ cases resolves in both; the resolver returns a new mapping with a new list.
 
 ### Call arguments
 
-**`call_args` matches structurally and coerces nothing.** `_matches` in
-`evaluators/trajectory.py` walks the entry against the argument dict the runner recorded —
+**`call_args` matches structurally and coerces nothing.** `structural_match` in
+`matching.py` walks the entry against the argument dict the runner recorded —
 never a serialised string, so key order and whitespace cannot matter. `contains` ignores
 keys it does not name at every level; `equals` requires exactly the named keys; a list
 matches element by element at equal length; a scalar must be equal — and a bool only ever
@@ -935,6 +937,59 @@ derived from the case so both arms pair. A failing check's evidence renders the 
 every call carried as sorted JSON and cuts at `_ARGUMENTS_LIMIT` with the removed count
 stated — a `write_file` call can carry a document — while the failure excerpt keeps the
 full calls.
+
+### Per-call mock returns (issue #41)
+
+A skill whose instructions loop over a tool — fetch item A, follow its parent link, fetch
+B, stop when there is none — cannot be exercised by a mock that hands back one fixed value.
+`returns:` therefore takes three shapes, and **the shape says which rule applies**: a string
+answers every call; a list of strings is a **sequence**, consumed in the order the calls
+arrive; a list of `when:`/`value:` mappings is a **lookup**, answered by the first entry
+whose `when:` keys all equal the call's arguments. A list that mixes the two, or an empty
+list, is refused by `ToolSpec` itself (`_check_returns_shape`, before Pydantic's union
+would report both branches), so an eval file can never be half one thing and half the
+other. `ToolRef.returns` takes the same three shapes: the case still owns the scenario and
+nothing else.
+
+**A sequence repeats its last entry once used up.** The last entry is the steady state a
+skill that keeps calling should see — the item with no parent, the job that is done — and
+`trajectory.max_calls` is the check for a loop that should have ended. A visible "no more
+entries" message would instead teach the model something about the harness. The counter
+lives in the built tool (a locked closure in `build_mock_tool`), never on the runner, so
+every build — each arm, each attempt, each work item under `--concurrency` — starts from
+the top, and a framework running several calls from one model turn in parallel still hands
+out each entry exactly once. Which parallel call gets which entry is the framework's
+choice; where the argument, not the position, decides, the docs say to use a lookup.
+
+**A retried attempt gets fresh tools.** Both keyed adapters build the agent *inside* the
+retried callable (`_run_with_retries` / `_invoke` take a builder, not an agent). An agent
+reused across attempts would hand the second attempt's first call the sequence's second
+entry, and a transient 429 would silently change what the skill was shown.
+
+**A lookup entry that could never answer a call is an authoring error** (exit 2), caught
+by `check_tool_returns` in `cases/checks.py` at load time for an inline tool, a library
+tool and a `ref:` override alike — the ref's `returns:` is checked against the contract the
+library declared, because the resolver copies the raw value and `_validate_tools` reads the
+resolved tool. Three refusals: a `when:` key the tool's closed schema can never carry (the
+`parameters:` shorthand, or an `input_schema` with `additionalProperties: false` and listed
+`properties`; an open schema may key on anything), an empty `when:` (the fallback spelled
+confusingly — drop the key), and an entry an earlier entry already answers (a fallback
+above it, the same `when:`, or a `when:` it only narrows), since the first match wins. All
+three are checks that could never fire, the vacuous case this project refuses everywhere.
+
+**A call no lookup entry answers gets a message, never an exception.** The skill asked for
+an argument the author did not script — an eval signal — so the model reads
+`NO_RESPONSE_SCRIPTED` (the tool's name and the arguments as sorted JSON, `default=str` so
+an unencodable value cannot make a mock raise) and the transcript shows it. An entry with
+no `when:` is the fallback for authors who want a real error payload instead.
+
+**A `when:` matches by the `call_args.contains` rule, through the one matcher.**
+`ToolResponse.matches` is `matching.structural_match(when, arguments, exact=False)`: a
+subset at every level, a list element by element at equal length, `"1"` never `1`, and a
+bool only ever equal to a bool — the same function `evaluators/trajectory.py` runs, so an
+author learns one rule for naming arguments and the two can never drift. The loader's
+reachability check uses the same `matches`, so "unreachable" means exactly what the runtime
+would do.
 
 ### Security checks
 
@@ -1193,7 +1248,9 @@ and a trace grammar) is a `Product` preset in `runners/product.py`, listed throu
 `PRODUCT_NAMES` in `config.py`, and needs no new class. Never raise for a provider failure;
 return a `RunResult` with `error` set. Build the system prompt with
 `runners/prompting.instructions` and wrap provider calls in `runners/retry.run_with_retries`
-rather than writing either again — both adapters must measure the same thing. A runner that
+rather than writing either again — both adapters must measure the same thing — and build
+the agent, tools included, *inside* the retried callable, so a mock whose `returns:` is
+consumed in call order starts from the top on every attempt. A runner that
 must refuse a run before any case executes defines the optional `preflight` hook and raises
 an authoring error from it.
 

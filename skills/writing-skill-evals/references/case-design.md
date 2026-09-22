@@ -26,6 +26,7 @@ agent sees when deciding whether to reach for the skill.
 | --- | --- |
 | Policy skill (refunds, approvals) | `trajectory` proving it looked before deciding; `forbidden` on the destructive tool; both sides of the policy line |
 | Tool-using skill | `order` for a required sequence; `max_calls` against loops; `call_args` when correctness is in the arguments (a filter, an id, a path) — `called` alone cannot tell a filtered query from an unfiltered one; a case where the tool returns an error string |
+| Loop-until / branch-on-result skill (walk a parent chain, poll until done, act on each of several ids) | one case whose mock answers per call — a `returns:` list in call order, or `when:`/`value:` entries keyed by argument — so the whole loop runs; `max_calls` for the stop condition; `call_args` with `every: true` for the id each call must carry; a `contains` per item it should have reached |
 | Formatting skill | `regex` — but only on structure the skill actually promised; a judge for "reads plainly" |
 | Knowledge skill | `contains` on the fact; `not_contains` on the plausible wrong answer; a judge for reasoning |
 
