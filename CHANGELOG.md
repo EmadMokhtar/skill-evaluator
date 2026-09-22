@@ -1,3 +1,13 @@
+## v0.13.0 (2026-09-22)
+
+### Feat
+
+- let a mock tool answer differently per call (#60)
+
+### Fix
+
+- let a trajectory name a product runner's own tools (#58)
+
 ## v0.12.0 (2026-09-22)
 
 ### Feat

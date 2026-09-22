@@ -73,11 +73,19 @@ so `EvalCase.tools` still holds only `ToolSpec`. Its design is in
 `tool` and either `contains:` (a structural subset) or `equals:` (the whole argument dict),
 holding when at least one call matched or, with `every: true`, when every call did; ids are
 `call_args[{index}]`. Its design is in
-`docs/superpowers/specs/2026-09-21-skill-lens-call-args-design.md`. The MCP bridge (issue #53)
+`docs/superpowers/specs/2026-09-21-skill-lens-call-args-design.md`. Per-call mock returns
+(issue #41) let `returns:` be a list of strings consumed in call order (the last repeating) or
+a list of `when:`/`value:` entries matched against the call's arguments (first match wins, an
+entry with no `when:` the fallback), so one case can exercise a loop-until or
+branch-on-result skill; `ToolResponse` carries an entry, `cases/checks.check_tool_returns`
+refuses an entry that could never fire, and both keyed adapters rebuild the agent per retry
+attempt. Its design is in `docs/superpowers/specs/2026-09-21-skill-lens-per-call-returns-design.md`.
+The MCP bridge (issue #53)
 serves a case's `tools:` under `copilot` and `claude-code`: `runners/mcp.py` writes the tools
 and an MCP config into a fresh directory, hands the config to the product as its last argument
 (`--mcp-config=`, `--additional-mcp-config=@`), the product starts `python -m
-skill_lens.mcp_bridge` — a stdio MCP server in the package, no new dependency — and the runner
+skill_lens.mcp_bridge` — a stdio MCP server in the package, no new dependency, answering
+`returns:` in all three shapes by the same rules — and the runner
 maps the product's spelling of a tool (`mcp__skill-lens__<name>`, `skill-lens-<name>`) back to
 the case's name. Its design is in
 `docs/superpowers/specs/2026-09-21-skill-lens-mcp-bridge-design.md`. Milestones are defined in
@@ -383,6 +391,30 @@ form, that file is the explanation.
   (see the preflight bullet below). Ids are positional
   `call_args[{index}]`; a failing check's evidence renders the arguments seen and announces
   a cut.
+- **`returns:` has three shapes, and the shape says which rule applies.** A string answers
+  every call; a `list[str]` is a sequence consumed in call order, its **last entry
+  repeating** once used up (`trajectory.max_calls` is the check for a loop that should have
+  stopped); a `list[ToolResponse]` (`when:`/`value:`) is a lookup answered by the first
+  entry whose `when:` keys all equal the call's arguments, an entry with no `when:` being
+  the fallback. An empty list or a mixed list is refused by `ToolSpec` itself;
+  `ToolRef.returns` takes the same three shapes and nothing else.
+- **A sequence's counter lives in the built tool, never on the runner, and a retried
+  attempt gets fresh tools.** `build_mock_tool` keeps a locked counter in a closure, so each
+  arm, attempt and work item starts from the top and parallel calls from one model turn
+  each consume one entry; both keyed adapters build the agent *inside* the retried
+  callable, or a transient 429 would hand the retry's first call the second entry.
+- **A lookup entry that could never fire is an authoring error** (exit 2, load time, for an
+  inline tool, a library tool and a `ref:` override alike): a `when:` key the tool's closed
+  schema can never carry (`parameters:`, or an `input_schema` with `additionalProperties:
+  false` and listed `properties`; an open schema may key on anything), an empty `when: {}`,
+  or an entry an earlier entry already answers (a fallback above it, the same `when:`, or a
+  `when:` it only narrows) — `check_tool_returns` uses `ToolResponse.matches` itself, so
+  "unreachable" means what the runtime would do.
+- **A call no lookup entry answers gets `NO_RESPONSE_SCRIPTED`, never an exception** — the
+  tool's name and the arguments as sorted JSON with `default=str`. A `when:` matches by the
+  `call_args.contains` rule through the one matcher, `matching.structural_match` (a subset
+  at every level, a bool only ever equal to a bool): a YAML `true` never answers a model's
+  `1`, and `when:` and `call_args` can never drift apart.
 - **`EvalCase.tools` holds only `ToolSpec`; a `ref:` is resolved by the case loader on the
   raw mapping before validation.** No runner, evaluator, reporter or product preflight ever
   sees a reference; the product `tools:` refusal, the duplicate-name, built-in-name,

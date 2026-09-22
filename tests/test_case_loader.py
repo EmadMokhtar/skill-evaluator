@@ -1137,3 +1137,160 @@ def test_a_ref_that_is_not_a_name_is_refused_with_the_type_error(tmp_path, value
     path.write_text(REF_CASES.replace("ref: issue_refund", f"ref: {value}"), encoding="utf-8")
     with pytest.raises(CaseParseError, match=r"orders.yaml: case #1 tool #2: invalid ref: entry"):
         parse_cases_file(path)
+
+
+# --- returns: a sequence or a lookup, from YAML -------------------------------
+
+SEQUENCE_CASE = """cases:
+  - name: walks the parent chain
+    task: Summarise work item A and everything above it
+    tools:
+      - name: get_work_item
+        description: Fetch a work item by id
+        parameters:
+          id: string
+        returns:
+          - '{"id": "A", "parent": "B"}'
+          - '{"id": "B", "parent": null}'
+    trajectory:
+      called: [get_work_item]
+      max_calls: 2
+"""
+
+LOOKUP_CASE = """cases:
+  - name: walks the parent chain
+    task: Summarise work item A and everything above it
+    tools:
+      - name: get_work_item
+        description: Fetch a work item by id
+        parameters:
+          id: string
+        returns:
+          - when: {id: "A"}
+            value: '{"id": "A", "parent": "B"}'
+          - when: {id: "B"}
+            value: '{"id": "B", "parent": null}'
+          - value: '{"error": "not found"}'
+"""
+
+
+def test_a_sequence_of_returns_loads_in_file_order(tmp_path):
+    (case,) = parse_cases_file(_write(tmp_path, SEQUENCE_CASE))
+    assert case.tools[0].returns == ['{"id": "A", "parent": "B"}', '{"id": "B", "parent": null}']
+
+
+def test_a_lookup_of_returns_loads_with_its_when_mappings(tmp_path):
+    (case,) = parse_cases_file(_write(tmp_path, LOOKUP_CASE))
+    entries = case.tools[0].returns
+    assert [entry.when for entry in entries] == [{"id": "A"}, {"id": "B"}, None]
+    assert entries[2].value == '{"error": "not found"}'
+
+
+def test_a_when_value_keeps_its_yaml_type(tmp_path):
+    # A YAML `1` is an integer and `"1"` a string, exactly as the model's JSON
+    # would be parsed; the loader does not stringify either side.
+    body = LOOKUP_CASE.replace("id: string", "id: integer").replace(
+        'when: {id: "A"}', "when: {id: 1}"
+    )
+    (case,) = parse_cases_file(_write(tmp_path, body))
+    assert case.tools[0].returns[0].when == {"id": 1}
+
+
+def test_a_returns_list_mixing_strings_and_mappings_is_refused_naming_the_tool(tmp_path):
+    body = SEQUENCE_CASE.replace(
+        '          - \'{"id": "B", "parent": null}\'\n',
+        "          - when: {id: B}\n            value: x\n",
+    )
+    with pytest.raises(CaseParseError, match=r"(?s)case #1 invalid \(tools\).*not a mix"):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_an_empty_returns_list_is_refused(tmp_path):
+    body = "cases:\n  - name: n\n    task: t\n    tools:\n      - name: t\n        returns: []\n"
+    with pytest.raises(CaseParseError, match=r"(?s)case #1 invalid \(tools\).*empty list"):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_a_when_key_the_tool_never_carries_is_an_authoring_error(tmp_path):
+    body = LOOKUP_CASE.replace('when: {id: "B"}', 'when: {item_id: "B"}')
+    with pytest.raises(
+        CaseParseError,
+        match=r"case 'walks the parent chain' tool 'get_work_item' returns\[1\]\.when names "
+        r"'item_id'",
+    ):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_an_unreachable_lookup_entry_is_an_authoring_error(tmp_path):
+    body = LOOKUP_CASE.replace(
+        '          - value: \'{"error": "not found"}\'\n',
+        '          - value: \'{"error": "not found"}\'\n'
+        '          - when: {id: "C"}\n            value: \'{"id": "C"}\'\n',
+    )
+    with pytest.raises(
+        CaseParseError,
+        match=r"tool 'get_work_item' returns\[3\] can never be reached: returns\[2\]",
+    ):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_a_placeholder_inside_a_sequence_names_its_position(tmp_path):
+    body = SEQUENCE_CASE.replace(
+        '          - \'{"id": "B", "parent": null}\'\n',
+        "          - TODO(skill-lens) the second reply\n",
+    )
+    with pytest.raises(
+        CaseParseError, match=r"placeholder TODO\(skill-lens\) at tools\[0\]\.returns\[1\]"
+    ):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_a_placeholder_inside_a_lookup_value_names_its_field(tmp_path):
+    body = LOOKUP_CASE.replace(
+        '            value: \'{"id": "B", "parent": null}\'\n',
+        "            value: TODO(skill-lens) what B looks like\n",
+    )
+    with pytest.raises(
+        CaseParseError, match=r"placeholder TODO\(skill-lens\) at tools\[0\]\.returns\[1\]\.value"
+    ):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_a_ref_may_set_a_sequence_or_a_lookup(tmp_path):
+    path = _layout(tmp_path)
+    path.write_text(
+        REF_CASES.replace(
+            '        returns: \'{"id": "1234", "days_since_delivery": 45}\'\n',
+            "        returns:\n"
+            "          - when: {order_id: '1234'}\n"
+            '            value: \'{"id": "1234", "days_since_delivery": 45}\'\n'
+            "          - when: {order_id: '5678'}\n"
+            '            value: \'{"id": "5678", "days_since_delivery": 3}\'\n',
+        ).replace(
+            "      - ref: issue_refund\n",
+            "      - ref: issue_refund\n        returns: ['{\"ok\": true}', '{\"ok\": false}']\n",
+        ),
+        encoding="utf-8",
+    )
+    (case,) = parse_cases_file(path)
+    lookup, refund = case.tools
+    assert type(lookup) is ToolSpec
+    assert [entry.when for entry in lookup.returns] == [{"order_id": "1234"}, {"order_id": "5678"}]
+    assert refund.returns == ['{"ok": true}', '{"ok": false}']
+
+
+def test_a_ref_lookup_is_checked_against_the_library_contract(tmp_path):
+    # The library declares `order_id`; a case keying on `id` could never match.
+    path = _layout(tmp_path)
+    path.write_text(
+        REF_CASES.replace(
+            '        returns: \'{"id": "1234", "days_since_delivery": 45}\'\n',
+            "        returns:\n          - when: {id: '1234'}\n            value: x\n",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        CaseParseError,
+        match=r"tool 'lookup_order' returns\[0\]\.when names 'id'.*declares order_id",
+    ):
+        parse_cases_file(path)

@@ -93,7 +93,7 @@ skill-lens list ./examples
 csv-report	1 case(s)	examples/csv-report
 greeting	1 case(s)	examples/greeting
 log-triage	1 case(s)	examples/log-triage
-order-support	5 case(s)	examples/order-support
+order-support	6 case(s)	examples/order-support
 ```
 
 `list` discovers skills and validates every eval file without calling a runner: no API key,
@@ -180,7 +180,7 @@ Copilot CLI or Claude Code, with no API key. See
 ## Gate your pull requests
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v0.12.0
+- uses: EmadMokhtar/skill-evaluator@v0.13.0
   with:
     path: ./skills
     runner: pydantic-ai

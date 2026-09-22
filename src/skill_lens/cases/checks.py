@@ -1,9 +1,10 @@
 """Checks every eval-authoring file kind shares.
 
 An eval file and a tool library are both the author's input, and the same
-mistakes are refused in both: a scaffold placeholder left in place, and a
-mock tool whose declared schema no provider would register. `cases/loader.py`
-and `cases/tool_libraries.py` both import from here and this module imports
+mistakes are refused in both: a scaffold placeholder left in place, a mock
+tool whose declared schema no provider would register, and a `returns:`
+lookup with an entry that could never answer a call. `cases/loader.py` and
+`cases/tool_libraries.py` both import from here and this module imports
 neither, so the loader can import the library module without a cycle.
 """
 
@@ -12,7 +13,7 @@ from __future__ import annotations
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-from skill_lens.models import ToolSpec
+from skill_lens.models import ToolResponse, ToolSpec
 
 # The placeholder `skill-lens init` and `skill-lens mcp-import` write into
 # every field the author has to fill in. Living here rather than in
@@ -78,3 +79,75 @@ def check_tool_schema(tool: ToolSpec) -> None:
         raise ValueError(
             "input_schema must declare type: object; a tool's arguments are always an object."
         )
+
+
+def _closed_keys(tool: ToolSpec) -> frozenset[str] | None:
+    """The argument names a call to `tool` can carry, or None when the
+    schema is open and any name might arrive.
+
+    The `parameters:` shorthand is closed by construction. A declared
+    `input_schema` is closed only when it says `additionalProperties: false`
+    and lists its properties; otherwise the server it stands in for accepts
+    names it does not list, and so may the author's `when:`.
+    """
+    if tool.input_schema is None:
+        return frozenset(tool.parameters)
+    properties = tool.input_schema.get("properties")
+    if tool.input_schema.get("additionalProperties") is False and isinstance(properties, dict):
+        return frozenset(str(key) for key in properties)
+    return None
+
+
+def _lookup_entries(tool: ToolSpec) -> list[ToolResponse] | None:
+    """The tool's `returns:` as lookup entries, or None for the other two
+    shapes. `ToolSpec` already guarantees a list holds one kind of entry."""
+    if isinstance(tool.returns, list) and tool.returns:
+        return [entry for entry in tool.returns if isinstance(entry, ToolResponse)] or None
+    return None
+
+
+def check_tool_returns(tool: ToolSpec) -> None:
+    """Raise ValueError unless every entry of a `returns:` lookup could
+    answer some call.
+
+    Only the lookup shape has anything to check. A `when:` key the tool's
+    closed schema can never carry would never match, so it is a mistake
+    rather than a scenario; an empty `when:` is the fallback spelled
+    confusingly, so the author is told to drop the key; and an entry that an
+    earlier entry already answers -- a fallback above it, the same `when:`,
+    or a `when:` it only narrows -- can never be reached, because the first
+    match wins. The caller prefixes the message with where the tool was
+    declared, so the same text serves a case and a library.
+    """
+    entries = _lookup_entries(tool)
+    if entries is None:
+        return
+    allowed = _closed_keys(tool)
+    for position, entry in enumerate(entries):
+        if entry.when is not None and not entry.when:
+            raise ValueError(
+                f"returns[{position}].when is empty, which matches every call; drop the "
+                f"when: key to declare a fallback."
+            )
+        if allowed is not None:
+            for key in entry.when or {}:
+                if key not in allowed:
+                    declares = ", ".join(sorted(allowed)) or "no parameters"
+                    raise ValueError(
+                        f"returns[{position}].when names {key!r}, which a call to this "
+                        f"tool can never carry (it declares {declares}); the entry "
+                        f"could never match."
+                    )
+        for earlier, other in enumerate(entries[:position]):
+            if other.matches(entry.when or {}):
+                raise ValueError(
+                    f"returns[{position}] can never be reached: returns[{earlier}] "
+                    f"already answers every call it would match, and the first match "
+                    f"wins."
+                )
+
+
+def check_tool(tool: ToolSpec) -> None:
+    """Every load-time rule for one mock tool: its schema, then its returns."""
+    check_tool_schema(tool)
+    check_tool_returns(tool)

@@ -23,6 +23,7 @@ from skill_lens.models import (
     Skill,
     ToolCall,
     ToolRef,
+    ToolResponse,
     ToolSpec,
     TrajectorySpec,
     WorkspaceSpec,
@@ -518,3 +519,102 @@ def test_an_empty_contains_is_refused():
 
 def test_an_empty_equals_means_called_with_no_arguments():
     assert CallArgsSpec(tool="a", equals={}).equals == {}
+
+
+# --- returns: one value, a sequence, or a lookup by argument ------------------
+
+
+def test_tool_spec_returns_defaults_to_an_empty_string():
+    assert ToolSpec(name="ping").returns == ""
+
+
+def test_tool_spec_accepts_a_sequence_of_return_values():
+    spec = ToolSpec(name="get_work_item", returns=['{"id": "A"}', '{"id": "B"}'])
+    assert spec.returns == ['{"id": "A"}', '{"id": "B"}']
+
+
+def test_tool_spec_accepts_a_lookup_keyed_by_arguments():
+    spec = ToolSpec(
+        name="get_work_item",
+        returns=[
+            {"when": {"id": "A"}, "value": '{"id": "A", "parent": "B"}'},
+            {"when": {"id": "B"}, "value": '{"id": "B", "parent": null}'},
+            {"value": "not found"},
+        ],
+    )
+    assert [type(entry) for entry in spec.returns] == [ToolResponse] * 3
+    assert spec.returns[0].when == {"id": "A"}
+    assert spec.returns[0].value == '{"id": "A", "parent": "B"}'
+    assert spec.returns[2].when is None
+
+
+def test_tool_spec_rejects_an_empty_returns_list():
+    # A list with nothing in it has nothing to hand back on the first call;
+    # `returns: ""` is how an empty reply is spelled.
+    with pytest.raises(ValidationError, match="empty list"):
+        ToolSpec(name="ping", returns=[])
+
+
+def test_tool_spec_rejects_a_returns_list_that_mixes_strings_and_mappings():
+    # The shape says which rule applies -- strings are consumed in call
+    # order, mappings are matched by argument -- so one list cannot be both.
+    with pytest.raises(ValidationError, match="not a mix"):
+        ToolSpec(name="ping", returns=["pong", {"when": {"x": 1}, "value": "one"}])
+
+
+@pytest.mark.parametrize("bad", [42, {"when": {"x": 1}, "value": "one"}, [42], [None]])
+def test_tool_spec_rejects_returns_of_any_other_shape(bad):
+    with pytest.raises(ValidationError):
+        ToolSpec(name="ping", returns=bad)
+
+
+def test_a_tool_response_requires_a_value_and_forbids_unknown_keys():
+    with pytest.raises(ValidationError, match="value"):
+        ToolResponse(when={"id": "A"})
+    with pytest.raises(ValidationError, match="returns"):
+        ToolResponse(when={"id": "A"}, returns="x")
+
+
+def test_a_tool_response_matches_when_every_when_key_equals_the_argument():
+    response = ToolResponse(when={"id": "A", "expand": True}, value="x")
+    assert response.matches({"id": "A", "expand": True, "extra": 1}) is True
+    assert response.matches({"id": "A"}) is False
+    assert response.matches({"id": "B", "expand": True}) is False
+
+
+def test_a_tool_response_without_when_matches_every_call():
+    assert ToolResponse(value="x").matches({}) is True
+    assert ToolResponse(value="x").matches({"anything": "at all"}) is True
+
+
+def test_a_tool_response_matches_a_nested_mapping_as_a_subset_like_call_args_contains():
+    # One rule for naming arguments: `when:` is `call_args.contains`, so a
+    # nested mapping may name only the keys that matter, while a list must
+    # match element by element at equal length.
+    response = ToolResponse(when={"filter": {"status": "active"}}, value="x")
+    assert response.matches({"filter": {"status": "active", "page": 2}}) is True
+    assert response.matches({"filter": {"status": "closed"}}) is False
+    assert response.matches({"filter": "active"}) is False
+    labels = ToolResponse(when={"labels": ["bug"]}, value="x")
+    assert labels.matches({"labels": ["bug"]}) is True
+    assert labels.matches({"labels": ["bug", "urgent"]}) is False
+
+
+def test_a_tool_response_never_confuses_a_boolean_with_a_number():
+    # Python says True == 1; a YAML `true` and a model's `1` are different
+    # arguments, and a match on the wrong one would be an invisible mistake.
+    assert ToolResponse(when={"flag": True}, value="x").matches({"flag": 1}) is False
+    assert ToolResponse(when={"n": 1}, value="x").matches({"n": True}) is False
+    assert ToolResponse(when={"n": 1}, value="x").matches({"n": 1}) is True
+    assert ToolResponse(when={"ids": [1, True]}, value="x").matches({"ids": [1, 1]}) is False
+    assert ToolResponse(when={"ids": [1, True]}, value="x").matches({"ids": [1, True]}) is True
+
+
+def test_a_tool_ref_accepts_every_returns_shape():
+    assert ToolRef(ref="t", returns=["a", "b"]).returns == ["a", "b"]
+    lookup = ToolRef(ref="t", returns=[{"when": {"id": "A"}, "value": "a"}]).returns
+    assert lookup == [ToolResponse(when={"id": "A"}, value="a")]
+    with pytest.raises(ValidationError, match="empty list"):
+        ToolRef(ref="t", returns=[])
+    with pytest.raises(ValidationError, match="not a mix"):
+        ToolRef(ref="t", returns=["a", {"value": "b"}])
