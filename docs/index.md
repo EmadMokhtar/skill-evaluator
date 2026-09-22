@@ -49,5 +49,6 @@ uv sync                      # add --extra pydantic-ai for the real-agent runner
 | Configure defaults for a repo | [Configuration](configuration.md) |
 | Evaluate against a real agent, with tools and budgets | [Runners](runners.md) |
 | Understand exit codes and CI behavior | [Gating](gating.md) |
+| Look up an error message you are seeing | [Troubleshooting](troubleshooting.md) |
 | Understand how the tool is built | [Architecture](architecture.md) |
 | Work on skill-lens itself | [Contributing](contributing.md) |

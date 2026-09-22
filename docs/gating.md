@@ -34,6 +34,9 @@ a [product judge](runners.md#judging-with-a-product) whose executable is missing
 `--version` fails, found in the same preflight; and a `--model` or `--judge-model` that
 nothing in the run reads (see [CLI](cli.md#run)).
 
+When a message on your screen is not explained here, [Troubleshooting](troubleshooting.md)
+is keyed by the exact text a run prints — search it for the words you see.
+
 A run fails the gate when the overall pass rate is below `min_pass_rate`, when a configured
 per-skill minimum is not met, or when any case **errored**. Two distinctions matter:
 
