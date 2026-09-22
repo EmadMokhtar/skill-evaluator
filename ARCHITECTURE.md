@@ -197,8 +197,9 @@ reference, because they are looked up rather than read:
 
 **[Invariants](https://emadmokhtar.github.io/skill-evaluator/invariants/)**
 
-A change that breaks one of them should change that page in the same pull request, or it is
-not a decided behaviour any more.
+A change that breaks one of them should change that page **and** `CLAUDE.md`'s condensed
+list in the same pull request — `tests/test_invariants_sync.py` pins the two together — or
+it is not a decided behaviour any more.
 
 ## Extension points
 

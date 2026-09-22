@@ -671,7 +671,8 @@ Documentation ships **with** the change, never as a follow-up. Two CI jobs enfor
 | Runner behavior, tools, budgets, pricing | `docs/runners.md` |
 | Bundled files, `run_script`, the sandbox or its guarantees | `docs/runners.md` and `docs/security.md` |
 | Gate rules, exit codes, the JSON report | `docs/gating.md` |
-| A protocol, an invariant, or the module map | `ARCHITECTURE.md` |
+| A protocol or the module map | `ARCHITECTURE.md` |
+| An invariant | **both** `docs/invariants.md` (a heading) and this file's condensed list (a bold-led bullet), spelled the same byte for byte — `tests/test_invariants_sync.py` fails otherwise |
 | CI integration, the action, example workflows | `docs/ci.md` |
 | The release pipeline, its one-time setup, or the cassette-refresh workflow | `docs/releasing.md` |
 | The dependency audit, the `S` lint rules, the exception policy, action pinning, Dependabot, the SBOM, or attestations | `docs/security.md` (and `SECURITY.md` for how to report) |

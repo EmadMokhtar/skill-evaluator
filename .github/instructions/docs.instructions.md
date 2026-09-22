@@ -25,7 +25,11 @@ applyTo: "docs/**,*.md,mkdocs.yml"
   what shipped — read `src/` as the source of truth.
 - Documentation ships **with** the change: a new flag updates `docs/cli.md`, a new config
   key updates `docs/configuration.md`, a new assertion kind updates `docs/eval-files.md`, a
-  new invariant updates `ARCHITECTURE.md`.
+  new invariant updates **both** `docs/invariants.md` and `CLAUDE.md`.
+- **An invariant lives in two files, spelled identically.** Its `###` heading on
+  `docs/invariants.md` and its bold lead in `CLAUDE.md`'s condensed list must match byte for
+  byte — `tests/test_invariants_sync.py` fails if one side is missing or reworded.
+  `ARCHITECTURE.md` keeps the design and the module map, not the invariant list.
 - **`!!python/name:` tags in `mkdocs.yml` are fine**, as long as `tests/test_docs.py` parses
   the file with `_mkdocs_config()` — its tag-tolerant loader — rather than the project's
   `safe_load`, which refuses unknown tags. Mermaid's `custom_fences` entry needs one.
