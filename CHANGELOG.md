@@ -1,3 +1,9 @@
+## v0.14.2 (2026-09-22)
+
+### Fix
+
+- **release**: require the tag on origin to point at the pushed commit (#64)
+
 ## v0.14.1 (2026-09-22)
 
 ### Fix
