@@ -71,7 +71,8 @@ _HIDDEN_DATA_NOUNS = r"(?:data|responses?|results?|returns?|values?|outputs?|too
 _HIDDEN_DATA_REFERENCE = re.compile(
     r"\b(?:"
     rf"mock(?:ed|s)?\s+{_HIDDEN_DATA_NOUNS}"
-    r"|(?:tools?|mocks?)(?:'s)?\s+(?:returned|returns?(?:\s+values?)?|responses?|results?|outputs?)"
+    r"|(?:tools?|mocks?)(?:'s?)?\s+"
+    r"(?:returned|returns?(?:\s+values?)?|responses?|results?|outputs?|data|values?)"
     r"|returned\s+by\s+(?:the|a|any|each|every)\s+(?:tool|mock)"
     r")\b",
     re.IGNORECASE,

@@ -298,8 +298,9 @@ case that looks like a regression — and a lenient one passes it without lookin
 worse: a suite can stay green for months on a check no judge ever verified. skill-lens
 refuses the line at load time (exit `2`) when it names the harness's own vocabulary for that
 data: `mock`/`mocked` followed by `data`, `response`, `result`, `return`, `value`, `output` or
-`tool`; `tool`/`mock` (with or without `'s`) followed by `returned`, `returns`, `return value`,
-`response`, `result` or `output`; or `returned by the tool`/`mock`. A bare `mock` ("proposes a
+`tool`; `tool`/`mock` (with or without a possessive `'s` or `'`) followed by `returned`,
+`returns`, `return value`, `response`, `result`, `output`, `data` or `value`; or `returned by
+the tool`/`mock`. A bare `mock` ("proposes a
 mock for the HTTP client") or `tool` ("names the tool it would use") is not refused, so a
 rubric about a testing skill or about the response itself is untouched; if a line trips the
 rule for a reason of your own, reword it. The judge is told the same thing in its own

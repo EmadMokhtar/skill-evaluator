@@ -282,7 +282,8 @@ when ambiguous" rule turns it red, and one that does not passes it unread, which
 worse outcome because nothing in the report says the check was never verified.
 `cases/checks.find_hidden_data_reference` matches a fixed, documented vocabulary — `mock`
 or `mocked` before `data`/`response`/`result`/`return`/`value`/`output`/`tool`, `tool` or
-`mock` before `returned`/`returns`/`return value`/`response`/`result`/`output`, and
+`mock` (possessive or not) before `returned`/`returns`/`return value`/`response`/`result`/
+`output`/`data`/`value`, and
 `returned by the tool`/`mock` — each alternative needing a second word, so a rubric about a
 testing skill ("proposes a mock for the HTTP client") or about the response ("names the
 tool it would use") is not caught; the loader raises `CaseParseError` naming the entry and

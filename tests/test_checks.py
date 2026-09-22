@@ -206,6 +206,10 @@ def test_check_tool_runs_both_the_schema_and_the_returns_rules():
         "Lists every thread returned by the tool",
         "Lists every thread returned by the mock",
         "Uses the tool return value in the total",
+        "The summary invents no detail absent from the tool's data",
+        "Every field comes from the mock's data",
+        "Every figure matches the tools' response",
+        "Every figure matches the mocks' results",
     ],
 )
 def test_a_rubric_line_naming_hidden_mock_data_is_found(text):
