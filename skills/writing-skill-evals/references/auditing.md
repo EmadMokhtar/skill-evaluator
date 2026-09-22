@@ -17,6 +17,9 @@ user's suite unasked.
       promised; an assertion that would fail on a legitimately different good answer.
 - [ ] **Fixture assertions.** An assertion whose value comes from a mock tool's `returns`
       rather than from the skill's behavior.
+- [ ] **Arguments unchecked.** A `called:` on a tool whose correctness lives in what it was
+      asked — a filter, an id, a path — with no `call_args` entry. `called` cannot tell a
+      filtered query from an unfiltered one.
 - [ ] **Unevidenceable rubric entries.** Anything you could not prove by quoting the
       output ("is helpful", "is well structured"), or compound entries hiding which half
       failed.

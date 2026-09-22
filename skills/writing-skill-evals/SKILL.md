@@ -50,7 +50,7 @@ the eval was wrong. Everything here exists to prevent one of those.
 | --- | --- |
 | `assertions` | The check is mechanical and stable: an id appears, a traceback does not. |
 | `judge` | The claim is about quality, tone or reasoning. "Explains it plainly" is not a substring. |
-| `trajectory` | The failure is invisible in the output — deciding without looking the order up, calling the tool that was forbidden. |
+| `trajectory` | The failure is invisible in the output — deciding without looking the order up, calling the tool that was forbidden, calling it without the filter the skill demands (`call_args`). |
 | `budget` | Guarding against a regression into a tool-call loop or a runaway answer. |
 
 ## Assert on the artifact, not the sentence about it

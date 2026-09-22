@@ -68,7 +68,12 @@ let a YAML file with one top-level `tools:` list — the block `mcp-import` prin
 any eval file with `tool_libraries:` (paths relative to the eval file) and named in a case with
 `- ref: <name>`, which may set only `returns:`; the loader resolves every ref before validation,
 so `EvalCase.tools` still holds only `ToolSpec`. Its design is in
-`docs/superpowers/specs/2026-09-17-skill-lens-tool-libraries-design.md`. The MCP bridge (issue #53)
+`docs/superpowers/specs/2026-09-17-skill-lens-tool-libraries-design.md`. `trajectory.call_args`
+(issue #40) asserts on the arguments a tool was called with: each entry names a declared
+`tool` and either `contains:` (a structural subset) or `equals:` (the whole argument dict),
+holding when at least one call matched or, with `every: true`, when every call did; ids are
+`call_args[{index}]`. Its design is in
+`docs/superpowers/specs/2026-09-21-skill-lens-call-args-design.md`. The MCP bridge (issue #53)
 serves a case's `tools:` under `copilot` and `claude-code`: `runners/mcp.py` writes the tools
 and an MCP config into a fresh directory, hands the config to the product as its last argument
 (`--mcp-config=`, `--additional-mcp-config=@`), the product starts `python -m
@@ -364,6 +369,19 @@ form, that file is the explanation.
   non-`[A-Za-z0-9_]` → `_` (hyphen too — the cassettes pin `order_support`), leading digit
   → `skill_`, then cut to 64. A Python identifier was not enough (`café`).
 - **`mcp-import` never touches the network.** `SOURCE` is a file or `-`.
+- **`call_args` matches structurally and coerces nothing.** Never a comparison of serialised
+  strings: `contains` ignores keys it does not name at every level, `equals` requires exactly
+  the named keys, lists match element by element at equal length, `"1"` never equals `1`, and
+  a bool only ever equals a bool (`True == 1` in Python would let `limit: 1` pass on `true`).
+  No runner changed — every adapter and trace parser already fills `ToolCall.arguments`; a
+  `_raw` payload never matches and shows in the evidence.
+- **A tool that was never called fails `call_args`, under `every: true` too.** An entry
+  carries exactly one of `contains` / `equals`; `contains: {}` is refused (it is `called:`
+  spelled longer) and `equals: {}` is kept (called with no arguments). The shape rules are a
+  `model_validator` on `CallArgsSpec`, so a programmatic case gets them; the declared-`tool`
+  rule is the loader's, beside `called` / `forbidden` / `order`. Ids are positional
+  `call_args[{index}]`; a failing check's evidence renders the arguments seen and announces
+  a cut.
 - **`EvalCase.tools` holds only `ToolSpec`; a `ref:` is resolved by the case loader on the
   raw mapping before validation.** No runner, evaluator, reporter or product preflight ever
   sees a reference; the product `tools:` refusal, the duplicate-name, built-in-name,

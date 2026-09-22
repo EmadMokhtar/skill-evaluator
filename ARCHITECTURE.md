@@ -105,7 +105,7 @@ judge is one entry on `RunReport.products`.
 | `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
 | `evaluators/base.py` | The `Evaluator` protocol. |
 | `evaluators/assertion.py` | Rule-based scoring of the final output text. |
-| `evaluators/trajectory.py` | Scoring which tools were called, in what order, and how many times. |
+| `evaluators/trajectory.py` | Scoring which tools were called, in what order, how many times, and with what arguments. |
 | `evaluators/budget.py` | Scoring efficiency: tokens, cost, latency. |
 | `evaluators/judge.py` | Rubric scoring. Holds no framework code; takes a `Judge` by injection. |
 | `comparison.py` | Turns a two-armed `RunReport` into a `Delta`: pairing, sign conventions, low-signal checks, high-variance cases. Pure — no IO, no provider calls. |
@@ -331,8 +331,9 @@ hang CI.
 
 **Deterministic evaluators emit per-check verdicts**, ids derived from the case (never the
 result) so the same id names the same check in both arms: `{kind}[{index}]` for assertions,
-`called:{tool}` / `forbidden:{tool}` / `order` / `max_calls` / `skill_triggered` for
-trajectory, `max_tokens` / `max_cost_usd` / `max_latency_ms` for budget. This is what lets
+`called:{tool}` / `forbidden:{tool}` / `order` / `max_calls` / `skill_triggered` /
+`call_args[{index}]` for trajectory, `max_tokens` / `max_cost_usd` / `max_latency_ms` for
+budget. This is what lets
 `comparison.py` name a specific low-signal check rather than only flag a whole case.
 
 ### CI surfaces (M5)
@@ -888,6 +889,38 @@ prints, so `mcp-import tools.json > shared-tools/server.yaml` is the whole impor
 
 **The resolver never mutates parsed YAML.** An anchored `tools:` list aliased into two
 cases resolves in both; the resolver returns a new mapping with a new list.
+
+### Call arguments
+
+**`call_args` matches structurally and coerces nothing.** `_matches` in
+`evaluators/trajectory.py` walks the entry against the argument dict the runner recorded —
+never a serialised string, so key order and whitespace cannot matter. `contains` ignores
+keys it does not name at every level; `equals` requires exactly the named keys; a list
+matches element by element at equal length; a scalar must be equal — and a bool only ever
+equals a bool, because Python's `True == 1` would otherwise let `limit: 1` pass on a call
+that sent `true`. `"1"` never equals `1`. No runner changed: every adapter and both trace
+parsers already fill `ToolCall.arguments`, and a payload one could not parse sits under
+`_raw`, which never matches a structural check and appears in the evidence.
+
+**A tool that was never called fails `call_args`, under `every: true` too.** "At least one
+call matched" and "every call matched" are both false over zero calls; a pass there would be
+the vacuous pass this project refuses everywhere else. `every` exists because the issue's own
+example needs it: a skill told to fetch only active threads, that fetches everything first
+and re-fetches filtered, passes the default and fails `every`.
+
+**One subject per entry.** Exactly one of `contains` / `equals`; `contains: {}` is refused
+because `{}` is a subset of every dict — `called:` spelled longer — while `equals: {}` is kept
+because "called with no arguments" is something a call can fail. These are shape rules, so
+they live in a `model_validator` on `CallArgsSpec` and a programmatic `EvalCase` gets them
+too; the loader's existing `ValidationError` wrapping names the file and case. The
+declared-`tool` rule is the loader's, in the same loop as `called` / `forbidden` / `order`,
+built-ins included where a `workspace:` exists.
+
+**Ids are positional, `call_args[{index}]`,** because two entries may name one tool, and
+derived from the case so both arms pair. A failing check's evidence renders the arguments
+every call carried as sorted JSON and cuts at `_ARGUMENTS_LIMIT` with the removed count
+stated — a `write_file` call can carry a document — while the failure excerpt keeps the
+full calls.
 
 ### Security checks
 
