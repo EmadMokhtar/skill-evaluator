@@ -59,6 +59,9 @@ class PydanticAIJudge:
         lands here as a setup error rather than from the first rubric as an
         errored case. Returns None: a keyed judge has no product status.
         """
+        if not self._base_url:
+            return
+        _require_pydantic_ai()
         try:
             resolve_model(self._model, self._base_url)
         except UnsupportedBaseURL as exc:

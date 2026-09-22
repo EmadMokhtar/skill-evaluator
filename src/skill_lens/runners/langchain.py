@@ -113,6 +113,7 @@ def check_base_url(seat: str, model: Any, temperature: float | str, base_url: st
     """
     if not base_url:
         return
+    _require_langchain()
     try:
         _chat_model(model, temperature, base_url)
     except UnsupportedBaseURL as exc:

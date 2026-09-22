@@ -57,11 +57,13 @@ def resolve_model(model: Any, base_url: str) -> Any:
     it already carries a provider, and there is nothing to point elsewhere.
     No network is touched: a provider builds an HTTP client, nothing more.
     """
+    if not base_url:
+        # Before any framework import: this branch must behave exactly as
+        # the code did before `base_url` existed, missing extra included.
+        return model
     from pydantic_ai.models import infer_model
     from pydantic_ai.providers import infer_provider_class
 
-    if not base_url:
-        return model
     if not isinstance(model, str):
         raise UnsupportedBaseURL(
             f"base_url {base_url!r} cannot apply to a model object "
@@ -237,6 +239,9 @@ class PydanticAIRunner:
         first case as an errored run.
         """
         check_trajectory_names(self.name, cases_by_skill)
+        if not self._base_url:
+            return
+        _require_pydantic_ai()
         try:
             resolve_model(self._model, self._base_url)
         except UnsupportedBaseURL as exc:

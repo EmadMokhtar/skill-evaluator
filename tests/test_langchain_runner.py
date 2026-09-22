@@ -660,3 +660,15 @@ def test_the_runner_hands_its_base_url_to_the_agent_it_builds(monkeypatch):
         SKILL, case(), None, None
     )
     assert seen["base_url"] == LOCAL
+
+
+def test_preflight_reports_a_missing_extra_as_the_setup_error_not_a_raw_import_error(monkeypatch):
+    import skill_lens.runners.langchain as adapter
+
+    def explode() -> None:
+        raise adapter.RunnerDependencyError("the 'langchain' runner needs its optional extra")
+
+    monkeypatch.setattr(adapter, "_require_langchain", explode)
+    runner = LangChainRunner(model="openai:gpt-4o-mini", base_url=LOCAL)
+    with pytest.raises(adapter.RunnerDependencyError):
+        runner.preflight([SKILL], {SKILL.name: [case()]})

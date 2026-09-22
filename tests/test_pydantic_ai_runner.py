@@ -763,3 +763,34 @@ def test_the_runner_hands_its_base_url_to_the_agent_it_builds(monkeypatch):
     runner = PydanticAIRunner(model="openai:gpt-oss:latest", base_url=LOCAL)
     agent = runner._build_agent(SKILL, case(), None, None)
     assert agent.model.base_url.rstrip("/") == LOCAL
+
+
+def test_preflight_reports_a_missing_extra_as_the_setup_error_not_a_raw_import_error(monkeypatch):
+    # The extra is checked before the model is resolved: `run` already turns
+    # a missing framework into exit 2 with the install hint, and preflight
+    # is earlier still.
+    import skill_lens.runners.pydantic_ai as adapter
+
+    def explode() -> None:
+        raise adapter.RunnerDependencyError("the 'pydantic-ai' runner needs its optional extra")
+
+    monkeypatch.setattr(adapter, "_require_pydantic_ai", explode)
+    runner = PydanticAIRunner(model="openai:gpt-4o-mini", base_url=LOCAL)
+    with pytest.raises(adapter.RunnerDependencyError):
+        runner.preflight([SKILL], {SKILL.name: [case()]})
+
+
+def test_no_base_url_touches_no_framework_import(monkeypatch):
+    # The pre-issue path is the fallback by construction: with no base_url the
+    # string is returned before the framework is even imported.
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_pydantic_ai(name, *args, **kwargs):
+        if name.startswith("pydantic_ai"):
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_pydantic_ai)
+    assert resolve_model("openai:gpt-4o-mini", "") == "openai:gpt-4o-mini"
