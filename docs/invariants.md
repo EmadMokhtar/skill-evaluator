@@ -52,6 +52,16 @@ Gate passed `0`, gate failed `1`, user or authoring error `2`. In `cli.py`, a JS
 failure escalates to 2 only when the gate itself passed — a write problem must never mask an
 already-failing gate.
 
+### `run_evals` is library API: a new parameter is appended, never inserted
+
+A caller that bound a parameter positionally before a newer one existed must still bind the
+same thing. `keep_workspace` and `workspace_limits` therefore keep their positions after
+`executor_factory`, and `options` — added after both — sits last. The legacy pair still
+works (`keep_workspace=True` keeps the directory, `workspace_limits=` reaches the workspace)
+but can never enable scripts, which it predates; passing `options` together with either
+legacy argument raises `ValueError`, the same rejection `evaluators` with `judge` gets. The
+CLI passes `options` only. `tests/test_orchestrator.py` pins the order and both forms.
+
 ### An unfilled scaffold is an authoring error, not a failure
 
 `skill-lens init` writes `TODO(skill-lens)` into every field the author must supply, and
@@ -678,16 +688,6 @@ whole run before the first case, real or fake, is charged for.
 dropped somewhere on that path would leave the built-in default silently in force, and the
 only symptom would be a refusal message quoting a number the user never set.
 
-### `run_evals` is library API: a new parameter is appended, never inserted
-
-A caller that bound a parameter positionally before a newer one existed must still bind the
-same thing. `keep_workspace` and `workspace_limits` therefore keep their positions after
-`executor_factory`, and `options` — added after both — sits last. The legacy pair still
-works (`keep_workspace=True` keeps the directory, `workspace_limits=` reaches the workspace)
-but can never enable scripts, which it predates; passing `options` together with either
-legacy argument raises `ValueError`, the same rejection `evaluators` with `judge` gets. The
-CLI passes `options` only. `tests/test_orchestrator.py` pins the order and both forms.
-
 ### Every kept directory is printed, however keeping was turned on
 
 `_kept_workspaces` in `reporters/console.py` renders a `Kept workspaces` section whenever
@@ -839,7 +839,7 @@ rely on. The tools are registered in `mode: offered` too — an agent that decli
 has no reason to call them, and one that triggers it needs them exactly as a `loaded` case
 does.
 
-### The workspace preamble is unchanged
+### The workspace preamble is unchanged by the bundle tools
 
 The workspace preamble is unchanged — byte-identical in both arms, naming no skill. The
 bundle tools describe themselves; "run `scripts/count.py`" comes from `SKILL.md`, which is
@@ -858,16 +858,16 @@ reader refuses a file over `max_file_bytes` before opening it (next).
 
 ### Only a regular file or a directory is ever resolved, and reads are capped
 
-Part 1's `Workspace` assumed its only writer was `Workspace.write`, which creates regular
-files; a bundled script can create anything. `Workspace._inspect` and `SkillBundle._inspect`
-share two helpers in `workspace.py`: `resolve_under`, which turns a `Path.resolve()` failure
-into `PathRefused` (3.11 and 3.12 raise `RuntimeError` on a symlink loop; 3.13 stops
-resolving and the stat that follows raises `ELOOP` — both must become one refusal), and
-`stat_regular`, which refuses an existing target that is neither `S_ISREG` nor `S_ISDIR`.
-The check is `os.stat` on the resolved path (symlinks already followed), **never an open**:
-opening a FIFO blocks until a writer connects, which no reader in the harness is, so a FIFO
-a script planted under the name an assertion reads would hang the evaluator, the judge, and
-`read_file` inside the agent loop where no timeout applies. `Workspace.read` and
+An earlier version's `Workspace` assumed its only writer was `Workspace.write`, which
+creates regular files; a bundled script can create anything. `Workspace._inspect` and
+`SkillBundle._inspect` share two helpers in `workspace.py`: `resolve_under`, which turns a
+`Path.resolve()` failure into `PathRefused` (3.11 and 3.12 raise `RuntimeError` on a symlink
+loop; 3.13 stops resolving and the stat that follows raises `ELOOP` — both must become one
+refusal), and `stat_regular`, which refuses an existing target that is neither `S_ISREG` nor
+`S_ISDIR`. The check is `os.stat` on the resolved path (symlinks already followed), **never
+an open**: opening a FIFO blocks until a writer connects, which no reader in the harness is,
+so a FIFO a script planted under the name an assertion reads would hang the evaluator, the
+judge, and `read_file` inside the agent loop where no timeout applies. `Workspace.read` and
 `SkillBundle.read` then refuse `st_size > max_file_bytes` before reading a byte, naming the
 cap the way `write` does. The agent's `read_file` sees the configured value, because the
 orchestrator created that workspace with the repository's limits; the evaluators and the
@@ -904,7 +904,7 @@ and escapes `run_evals` as an uncaught traceback (exit 1), rather than the scrip
 never running. Both bundled adapters, PydanticAI and LangChain, take it and register the
 same six built-in tools under the same conditions.
 
-## Failure context and the run matrix
+## Failure context, the run matrix and scaffolding
 
 ### Output is expanded only under non-passing candidate outcomes
 
@@ -912,7 +912,7 @@ same six built-in tools under the same conditions.
 no result, and every reporter renders nothing on `None`. Fifty green cases stay fifty lines,
 and a baseline outcome — which is not the verdict — is never expanded.
 
-### A cut is never silent
+### A cut to the failure excerpt is never silent
 
 `FailureContext.cut` is the exact number of characters removed and `cut_note` states it,
 with the flag that lifts the cap. A truncated excerpt that looked complete would be worse
@@ -1078,7 +1078,7 @@ there would be the vacuous pass this project refuses everywhere else. `every` ex
 the issue's own example needs it: a skill told to fetch only active threads, that fetches
 everything first and re-fetches filtered, passes the default and fails `every`.
 
-### One subject per entry
+### One subject per `call_args` entry
 
 Exactly one of `contains` / `equals`; `contains: {}` is refused because `{}` is a subset of
 every dict — `called:` spelled longer — while `equals: {}` is kept because "called with no
@@ -1353,7 +1353,7 @@ call no entry answers getting the `NO_RESPONSE_SCRIPTED` wording the runner writ
 spec — and it writes nothing but JSON to stdout, because stdout is the protocol. No
 dependency was added: four JSON-RPC methods do not need an SDK.
 
-### No new opt-in
+### Mock tools under a product need no new opt-in
 
 A mock returns canned text and executes nothing — it adds a fixed answer to a tool the skill
 may call, not a capability the product lacked — so a case with `tools:` runs under a product
