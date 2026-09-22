@@ -289,7 +289,10 @@ tool it would use") is not caught; the loader raises `CaseParseError` naming the
 the phrase, with both fixes: reword against the response, or put the data in a `workspace:`
 file named under `judge.artifacts`. It is a heuristic, applied to every case whether or not
 it declares `tools:` (the judge never sees a return in any case), and rewording is the
-escape hatch.
+escape hatch. The second layer is the prompt: `SYSTEM_PROMPT` tells every judge — framework
+and product alike — what it was not shown (tool returns, tool calls, mock data) and that a
+check decidable only against those is a fail with the evidence saying so, so a line the
+vocabulary does not catch fails honestly rather than passing unread under a lenient model.
 
 **Judge spend never enters `RunResult`.** It lives on `EvalScore.cost_usd` and is reported
 as judge overhead. `budget:` measures the skill's efficiency, not the harness's.

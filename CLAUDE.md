@@ -228,6 +228,9 @@ form, that file is the explanation.
   `data`/`response`/…; `tool`/`mock` + `returned`/`response`/…; `returned by the tool`),
   each needing a second word so a bare `mock` or `tool` is not caught; every case, with or
   without `tools:`; rewording or a `workspace:` file named under `artifacts` is the fix.
+  `SYSTEM_PROMPT` is the second layer: it tells the judge what it was not shown and that a
+  check decidable only against that is a fail, so a line the vocabulary misses fails
+  honestly instead of passing unread.
 - **A `version:` that YAML does not parse as a string is an authoring error.** `SkillParseError`,
   exit 2. YAML resolves `1.20` and `1.2` to the same float, so two genuinely different versions
   would silently compare equal under `--baseline previous`; three-part semver (`1.0.0`) is

@@ -302,7 +302,10 @@ data: `mock`/`mocked` followed by `data`, `response`, `result`, `return`, `value
 `response`, `result` or `output`; or `returned by the tool`/`mock`. A bare `mock` ("proposes a
 mock for the HTTP client") or `tool` ("names the tool it would use") is not refused, so a
 rubric about a testing skill or about the response itself is untouched; if a line trips the
-rule for a reason of your own, reword it.
+rule for a reason of your own, reword it. The judge is told the same thing in its own
+instructions — that it was not shown what any tool returned, which tools were called, or
+any mock data, and that a check decidable only against those is a fail — so a line the
+vocabulary rule does not catch still fails honestly rather than passing unread.
 
 Two fixes, depending on what the check is really about. If it is about the response, phrase
 it against the response: "The summary names Alex Chen as the reviewer." If it is really a
