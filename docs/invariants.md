@@ -493,6 +493,18 @@ successfully, and break only the lookup, failing *after* the push: the one unrec
 here, since the version is spent, `publish` never became eligible to re-run, and a fresh run
 finds nothing to release.
 
+### The version in `action.yml` always equals the package version
+
+The action's `install-spec` input is what a workflow installs, and its default pins a
+version. That pin and the package version are two places that must agree: a release that
+changes one and not the other ships an action installing somebody else's version.
+`tests/test_release_config.py::test_the_action_pins_the_current_version` reads
+`inputs.install-spec.default` out of `action.yml`, requires it to be a pinned install spec
+(`skill-lens[<extras>]==<version>`) rather than an unpinned one, and requires that version to
+equal `skill_lens.__version__`. What keeps the two in step *at release time* — the
+`version_files` patterns, and the replay that proves each still rewrites a line — is the
+invariant above.
+
 ### No long-lived publishing credential exists
 
 PyPI accepts the upload because the job proves its identity with a short-lived token
