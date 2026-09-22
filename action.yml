@@ -16,6 +16,10 @@ inputs:
       Comma-separate names to run every case through each.
   model:
     description: Model id, e.g. openai:gpt-4o-mini.
+  base-url:
+    description: >-
+      Endpoint for the model's provider, e.g. http://localhost:11434/v1 for a
+      self-hosted OpenAI-compatible server. Overrides base_url in skill-lens.toml.
   judge-model:
     description: Model id for the LLM judge. Falls back to model.
   tag:
@@ -121,6 +125,7 @@ runs:
         SE_EVALS: ${{ inputs.evals }}
         SE_RUNNER: ${{ inputs.runner }}
         SE_MODEL: ${{ inputs.model }}
+        SE_BASE_URL: ${{ inputs.base-url }}
         SE_JUDGE_MODEL: ${{ inputs.judge-model }}
         SE_TAG: ${{ inputs.tag }}
         SE_CASE: ${{ inputs.case }}
@@ -166,6 +171,7 @@ runs:
         add --evals "$SE_EVALS"
         add_list --runner "$SE_RUNNER"
         add --model "$SE_MODEL"
+        add --base-url "$SE_BASE_URL"
         add --judge-model "$SE_JUDGE_MODEL"
         add --tag "$SE_TAG"
         add --case "$SE_CASE"

@@ -844,6 +844,7 @@ def test_allow_scripts_flags_override_the_config_in_both_directions(tmp_path):
 # --- the runner matrix -------------------------------------------------------
 
 from skill_lens import cli as cli_module  # noqa: E402
+from skill_lens.judges.fake import FakeJudge  # noqa: E402
 from skill_lens.runners.fake import FakeRunner  # noqa: E402
 
 
@@ -897,10 +898,10 @@ def test_every_case_runs_through_every_runner_and_each_outcome_names_its_runner(
     monkeypatch.setattr(cli_module, "_RUNNER_NAMES", (*cli_module._RUNNER_NAMES, "fake-2"))
     original_build_runner = cli_module._build_runner
 
-    def _build_runner(name, settings, model_name):
+    def _build_runner(name, settings, model_name, base_url=""):
         if name == "fake-2":
             return SecondFake()
-        return original_build_runner(name, settings, model_name)
+        return original_build_runner(name, settings, model_name, base_url)
 
     monkeypatch.setattr(cli_module, "_build_runner", _build_runner)
     skill_dir = _make_skill(tmp_path)
@@ -1256,3 +1257,176 @@ def test_list_accepts_a_trajectory_name_only_a_runner_can_judge(tmp_path):
     result = runner.invoke(app, ["list", str(tmp_path)])
     assert result.exit_code == 0, result.output
     assert "1 case(s)" in plain(result.output)
+
+
+# --- --base-url / base_url / judge_base_url ------------------------------------
+
+
+class _RecordingRunner(FakeRunner):
+    """Stands in for a keyed runner and records how the CLI constructed it."""
+
+    name = "pydantic-ai"
+    needs_api_key = True
+    built: list[dict] = []
+
+    def __init__(self, **kwargs):
+        super().__init__()
+        _RecordingRunner.built.append(kwargs)
+
+
+class _RecordingJudge(FakeJudge):
+    name = "pydantic-ai"
+    needs_api_key = True
+    built: list[dict] = []
+
+    def __init__(self, **kwargs):
+        super().__init__()
+        _RecordingJudge.built.append(kwargs)
+
+
+@pytest.fixture
+def recording(monkeypatch):
+    _RecordingRunner.built.clear()
+    _RecordingJudge.built.clear()
+    monkeypatch.setattr(cli_module, "_KEYED_RUNNERS", {"pydantic-ai": _RecordingRunner})
+    monkeypatch.setattr(cli_module, "_KEYED_JUDGES", {"pydantic-ai": _RecordingJudge})
+    # `ollama:` needs no key, and the provider's own variable must not be
+    # what the assertions see.
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    return _RecordingRunner, _RecordingJudge
+
+
+def _run_with(tmp_path, toml: str, *flags: str):
+    skill_dir = _make_skill(tmp_path)
+    config = tmp_path / "skill-lens.toml"
+    config.write_text(toml, encoding="utf-8")
+    return runner.invoke(app, ["run", str(skill_dir), "--config", str(config), *flags])
+
+
+def test_base_url_from_the_file_reaches_the_keyed_runner(tmp_path, recording):
+    result = _run_with(
+        tmp_path,
+        'default_runner = "pydantic-ai"\nmodel = "ollama:gpt-oss"\n'
+        'base_url = "http://from-file:1/v1"\n',
+    )
+    assert result.exit_code == 0, result.output
+    (built,) = _RecordingRunner.built
+    assert built["base_url"] == "http://from-file:1/v1"
+
+
+def test_the_flag_beats_the_file(tmp_path, recording):
+    result = _run_with(
+        tmp_path,
+        'default_runner = "pydantic-ai"\nmodel = "ollama:gpt-oss"\n'
+        'base_url = "http://from-file:1/v1"\n',
+        "--base-url",
+        "http://from-flag:1/v1",
+    )
+    assert result.exit_code == 0, result.output
+    assert _RecordingRunner.built[0]["base_url"] == "http://from-flag:1/v1"
+
+
+def test_no_base_url_anywhere_hands_the_runner_an_empty_string(tmp_path, recording):
+    # Empty, not None: the adapter then passes nothing and the provider reads
+    # its own environment variable, exactly as before the key existed.
+    result = _run_with(tmp_path, 'default_runner = "pydantic-ai"\nmodel = "ollama:gpt-oss"\n')
+    assert result.exit_code == 0, result.output
+    assert _RecordingRunner.built[0]["base_url"] == ""
+
+
+def test_base_url_flag_with_nothing_that_reads_it_is_a_user_error(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--runner", "fake", "--base-url", "http://localhost:1/v1"]
+    )
+    assert result.exit_code == 2
+    assert "--base-url is read by pydantic-ai and langchain only" in plain(result.output)
+
+
+def test_a_malformed_base_url_flag_is_a_user_error_naming_the_flag(tmp_path, recording):
+    result = _run_with(
+        tmp_path,
+        'default_runner = "pydantic-ai"\nmodel = "ollama:gpt-oss"\n',
+        "--base-url",
+        "localhost:11434/v1",
+    )
+    assert result.exit_code == 2
+    assert "--base-url" in plain(result.output)
+    assert "http:// or https://" in plain(result.output)
+    assert _RecordingRunner.built == []
+
+
+def test_the_judge_inherits_the_base_url_with_the_model(tmp_path, recording):
+    result = _run_with(
+        tmp_path,
+        'default_runner = "pydantic-ai"\nmodel = "ollama:gpt-oss"\n'
+        'base_url = "http://from-file:1/v1"\njudge = "pydantic-ai"\n',
+    )
+    assert result.exit_code == 0, result.output
+    (judge,) = _RecordingJudge.built
+    assert judge["model"] == "ollama:gpt-oss"
+    assert judge["base_url"] == "http://from-file:1/v1"
+
+
+def test_a_judge_with_its_own_model_does_not_inherit_the_base_url(tmp_path, recording):
+    result = _run_with(
+        tmp_path,
+        'default_runner = "pydantic-ai"\nmodel = "ollama:gpt-oss"\n'
+        'base_url = "http://from-file:1/v1"\njudge = "pydantic-ai"\n'
+        'judge_model = "ollama:qwen"\n',
+    )
+    assert result.exit_code == 0, result.output
+    (judge,) = _RecordingJudge.built
+    assert judge["model"] == "ollama:qwen"
+    assert judge["base_url"] == ""
+
+
+def test_a_judge_model_flag_also_stops_the_inheritance(tmp_path, recording):
+    result = _run_with(
+        tmp_path,
+        'default_runner = "pydantic-ai"\nmodel = "ollama:gpt-oss"\n'
+        'base_url = "http://from-file:1/v1"\njudge = "pydantic-ai"\n',
+        "--judge-model",
+        "ollama:qwen",
+    )
+    assert result.exit_code == 0, result.output
+    assert _RecordingJudge.built[0]["base_url"] == ""
+
+
+def test_judge_base_url_names_the_judge_endpoint_whatever_its_model(tmp_path, recording):
+    result = _run_with(
+        tmp_path,
+        'default_runner = "pydantic-ai"\nmodel = "ollama:gpt-oss"\n'
+        'base_url = "http://from-file:1/v1"\njudge = "pydantic-ai"\n'
+        'judge_model = "ollama:qwen"\njudge_base_url = "http://judge-box:1/v1"\n',
+    )
+    assert result.exit_code == 0, result.output
+    assert _RecordingJudge.built[0]["base_url"] == "http://judge-box:1/v1"
+    assert _RecordingRunner.built[0]["base_url"] == "http://from-file:1/v1"
+
+
+def test_base_url_flag_is_allowed_when_only_a_keyed_judge_inherits_it(tmp_path, recording):
+    result = _run_with(
+        tmp_path,
+        'model = "ollama:gpt-oss"\njudge = "pydantic-ai"\n',
+        "--runner",
+        "fake",
+        "--base-url",
+        "http://from-flag:1/v1",
+    )
+    assert result.exit_code == 0, result.output
+    assert _RecordingRunner.built == []
+    assert _RecordingJudge.built[0]["base_url"] == "http://from-flag:1/v1"
+
+
+def test_an_unsupported_base_url_is_a_user_error_not_an_errored_case(tmp_path, monkeypatch):
+    # The real adapter's preflight refuses a provider that takes no endpoint.
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
+    result = _run_with(
+        tmp_path,
+        'default_runner = "pydantic-ai"\nmodel = "deepseek:deepseek-chat"\n'
+        'base_url = "http://localhost:11434/v1"\n',
+    )
+    assert result.exit_code == 2, result.output
+    assert "runner pydantic-ai" in plain(result.output)
+    assert "deepseek" in plain(result.output)

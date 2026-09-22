@@ -7,6 +7,7 @@ import tomllib
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -39,6 +40,34 @@ PRODUCT_NAMES: tuple[str, ...] = (*PRESETS, "cli")
 
 class ConfigError(Exception):
     """Raised when a config file is missing or invalid."""
+
+
+def validate_base_url(value: str) -> str:
+    """Return `value` stripped if it is a bare `http(s)://host[...]`; raise ValueError.
+
+    Shared by the `base_url` / `judge_base_url` field validators and the
+    `--base-url` flag, so a value is checked the same way wherever it came
+    from. An empty value means "not set" and passes through. The scheme and
+    host are checked here, at load time, because a URL the client library
+    cannot even parse would otherwise surface from the first case as a
+    connection error -- an *errored* case, when the mistake is in the file.
+    A userinfo part (`user:secret@host`) is refused for the same reason an
+    API key is: it is a credential, and this file is committed.
+    """
+    if value == "":
+        return value
+    parts = urlsplit(value.strip())
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(
+            f"must be an http:// or https:// URL naming a host, e.g. "
+            f'"http://localhost:11434/v1"; got {value!r}'
+        )
+    if parts.username is not None or parts.password is not None:
+        raise ValueError(
+            "must not carry a user name or password; skill-lens never reads secrets "
+            "from skill-lens.toml -- put credentials in the provider's environment variable"
+        )
+    return value.strip()
 
 
 class ProductSettings(BaseModel):
@@ -216,11 +245,13 @@ class Config(BaseModel):
 
     default_runner: str | list[str] = "fake"
     model: str = DEFAULT_MODEL
+    base_url: str = ""
     temperature: float | Literal["unset"] = 0.0
     retries: int = 2
     retry_backoff_seconds: float = 1.0
     judge: str = "fake"
     judge_model: str = ""
+    judge_base_url: str = ""
     judge_temperature: float | Literal["unset"] = 0.0
     min_pass_rate: float = 1.0
     fail_on_error: bool = True
@@ -246,6 +277,12 @@ class Config(BaseModel):
         default_factory=lambda: {ext: list(argv) for ext, argv in DEFAULT_INTERPRETERS.items()}
     )
     runners: dict[str, ProductSettings] = Field(default_factory=dict)
+
+    @field_validator("base_url", "judge_base_url")
+    @classmethod
+    def _is_a_plain_http_url(cls, value: str) -> str:
+        """An empty value means "not set"; anything else is a bare `http(s)://host[...]`."""
+        return validate_base_url(value)
 
     @field_validator("default_runner")
     @classmethod

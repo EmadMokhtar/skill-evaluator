@@ -1,5 +1,6 @@
 """The real judge, exercised offline with a scripted model."""
 
+import pytest
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -7,6 +8,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from skill_lens.judges.base import Judge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.models import JudgeRequest, RubricCheck
+from skill_lens.runners.preflight import UnsupportedBaseURL
 
 REQUEST = JudgeRequest(
     task="Why can't I return this?",
@@ -192,3 +194,25 @@ def test_a_failure_while_capturing_the_result_is_reported_not_raised(monkeypatch
     verdict = judge.judge(REQUEST)
     assert verdict.errored is True
     assert "cost calc exploded" in verdict.error
+
+
+# --- base_url: a self-hosted OpenAI-compatible endpoint ------------------------
+
+LOCAL = "http://localhost:11434/v1"
+
+
+def test_the_judge_hands_its_base_url_to_the_agent_it_builds(monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    judge = PydanticAIJudge(model="openai:gpt-oss:latest", base_url=LOCAL)
+    assert judge._build_agent().model.base_url.rstrip("/") == LOCAL
+
+
+def test_the_judge_refuses_an_unsupported_provider_in_preflight_before_any_spend():
+    judge = PydanticAIJudge(model="deepseek:deepseek-chat", base_url=LOCAL)
+    with pytest.raises(UnsupportedBaseURL, match="judge pydantic-ai"):
+        judge.preflight()
+
+
+def test_the_judge_preflight_returns_no_product_status():
+    assert PydanticAIJudge(model="openai:gpt-4o-mini", base_url=LOCAL).preflight() is None

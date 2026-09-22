@@ -10,8 +10,9 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from skill_lens.models import EvalCase, Skill, ToolSpec
 from skill_lens.runners.base import Runner
+from skill_lens.runners.preflight import UnsupportedBaseURL
 from skill_lens.runners.prompting import BASELINE_PREAMBLE, OFFERED_PREAMBLE
-from skill_lens.runners.pydantic_ai import PydanticAIRunner
+from skill_lens.runners.pydantic_ai import PydanticAIRunner, resolve_model
 from skill_lens.runners.tools import (
     BUILTIN_TOOL_NAMES,
     BUNDLE_TOOL_NAMES,
@@ -711,3 +712,54 @@ def test_preflight_refuses_a_trajectory_naming_a_tool_the_case_does_not_declare(
     with pytest.raises(UndeclaredTool, match=r"runner pydantic-ai: case 'c' of skill 's'"):
         runner.preflight([], {"s": [case_]})
     assert runner.preflight([], {"s": [EvalCase(name="c", task="t")]}) is None
+
+
+# --- base_url: a self-hosted OpenAI-compatible endpoint ------------------------
+
+LOCAL = "http://localhost:11434/v1"
+
+
+@pytest.mark.parametrize("model", ["openai:gpt-oss:latest", "ollama:gpt-oss:latest"])
+def test_a_base_url_reaches_the_provider(model, monkeypatch):
+    # The provider's own variable is unset so the value can only have come from us.
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # The client normalises to a trailing slash; the host and path are what matter.
+    assert resolve_model(model, LOCAL).base_url.rstrip("/") == LOCAL
+
+
+def test_no_base_url_leaves_the_provider_reading_its_own_environment(monkeypatch):
+    from pydantic_ai.models import infer_model
+
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://from-the-shell:1/v1")
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    # Untouched: the string the Agent infers itself, so the provider's own
+    # variable is the fallback exactly as before `base_url` existed.
+    resolved = resolve_model("openai:gpt-4o-mini", "")
+    assert resolved == "openai:gpt-4o-mini"
+    assert infer_model(resolved).base_url.rstrip("/") == "http://from-the-shell:1/v1"
+
+
+def test_a_provider_that_takes_no_base_url_is_refused_by_name():
+    with pytest.raises(UnsupportedBaseURL, match="deepseek"):
+        resolve_model("deepseek:deepseek-chat", LOCAL)
+
+
+def test_a_base_url_cannot_apply_to_a_model_object():
+    with pytest.raises(UnsupportedBaseURL):
+        resolve_model(scripted(text("x")), LOCAL)
+
+
+def test_the_runner_refuses_an_unsupported_provider_in_preflight_before_any_spend():
+    runner = PydanticAIRunner(model="deepseek:deepseek-chat", base_url=LOCAL)
+    with pytest.raises(UnsupportedBaseURL, match="pydantic-ai"):
+        runner.preflight([SKILL], {SKILL.name: [case()]})
+
+
+def test_the_runner_hands_its_base_url_to_the_agent_it_builds(monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    runner = PydanticAIRunner(model="openai:gpt-oss:latest", base_url=LOCAL)
+    agent = runner._build_agent(SKILL, case(), None, None)
+    assert agent.model.base_url.rstrip("/") == LOCAL

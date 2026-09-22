@@ -7,6 +7,7 @@ problem (errored) apart from a low score (failed).
 
 from __future__ import annotations
 
+import inspect
 import json
 import time
 from collections.abc import Callable
@@ -15,7 +16,7 @@ from typing import Any
 from skill_lens.bundle import SkillBundle
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
 from skill_lens.runners.base import RunnerDependencyError
-from skill_lens.runners.preflight import check_trajectory_names
+from skill_lens.runners.preflight import UnsupportedBaseURL, check_trajectory_names
 from skill_lens.runners.pricing import calculate_cost, provider_of
 from skill_lens.runners.prompting import instructions
 from skill_lens.runners.retry import run_with_retries, transient_status
@@ -40,6 +41,44 @@ def _require_pydantic_ai() -> None:
             "the 'pydantic-ai' optional extra is required for this runner or judge: "
             "pip install 'skill-lens[pydantic-ai]'"
         ) from exc
+
+
+def resolve_model(model: Any, base_url: str) -> Any:
+    """The model PydanticAI will run: `model` as given, or, with a `base_url`,
+    the same `provider:name` served from that endpoint.
+
+    With no `base_url` the string goes to `infer_model` untouched, so the
+    provider reads its own environment variable (`OPENAI_BASE_URL`,
+    `OLLAMA_BASE_URL`) or its default exactly as before this argument
+    existed. With one, the provider is constructed here with `base_url=`,
+    which is why a provider whose constructor has no such parameter
+    (`deepseek`, `azure`, `openrouter`, ...) is `UnsupportedBaseURL` rather
+    than a URL that is silently dropped -- and why a model *object* is too:
+    it already carries a provider, and there is nothing to point elsewhere.
+    No network is touched: a provider builds an HTTP client, nothing more.
+    """
+    from pydantic_ai.models import infer_model
+    from pydantic_ai.providers import infer_provider_class
+
+    if not base_url:
+        return model
+    if not isinstance(model, str):
+        raise UnsupportedBaseURL(
+            f"base_url {base_url!r} cannot apply to a model object "
+            f"({type(model).__name__}); it takes a provider:model string"
+        )
+
+    def provider(name: str) -> Any:
+        cls = infer_provider_class(name)
+        if "base_url" not in inspect.signature(cls.__init__).parameters:
+            raise UnsupportedBaseURL(
+                f"base_url {base_url!r} cannot apply to model {model!r}: the {name!r} "
+                f"provider ({cls.__name__}) takes no endpoint; unset base_url and use "
+                f"the provider's own environment variable instead"
+            )
+        return cls(base_url=base_url)
+
+    return infer_model(model, provider_factory=provider)
 
 
 def _arguments(args: Any) -> dict[str, Any]:
@@ -117,12 +156,14 @@ class PydanticAIRunner:
         retries: int = 2,
         retry_backoff_seconds: float = 1.0,
         sleep: Callable[[float], None] = time.sleep,
+        base_url: str = "",
     ) -> None:
         self._model = model
         self._temperature = temperature
         self._retries = retries
         self._retry_backoff_seconds = retry_backoff_seconds
         self._sleep = sleep
+        self._base_url = base_url
 
     def _model_settings(self) -> Any:
         """Reasoning models reject any temperature but 1, so 'unset' sends none."""
@@ -163,7 +204,7 @@ class PydanticAIRunner:
             for agent_tool in built
         ]
         return Agent(
-            self._model,
+            resolve_model(self._model, self._base_url),
             instructions=instructions(skill, case, workspace is not None),
             tools=tools,
         )
@@ -186,12 +227,20 @@ class PydanticAIRunner:
         )
 
     def preflight(self, skills: list[Skill], cases_by_skill: dict[str, list[EvalCase]]) -> None:
-        """Refuse a `trajectory:` naming a tool this runner cannot offer, before any spend.
+        """Refuse, before any spend, a `trajectory:` naming a tool this runner
+        cannot offer, and a `base_url` its provider cannot take.
 
         This runner offers a case its mock tools and, with a workspace, the
-        built-ins -- so the check is `check_trajectory_names` and nothing more.
+        built-ins -- so the first check is `check_trajectory_names`. The
+        second resolves the model once, which builds a client and nothing
+        more, so an `UnsupportedBaseURL` is raised here rather than from the
+        first case as an errored run.
         """
         check_trajectory_names(self.name, cases_by_skill)
+        try:
+            resolve_model(self._model, self._base_url)
+        except UnsupportedBaseURL as exc:
+            raise UnsupportedBaseURL(f"runner {self.name}: {exc}") from exc
 
     def run(
         self,
