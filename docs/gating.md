@@ -29,8 +29,9 @@ flowchart TD
 Exit `2` is deliberately not a gate failure. A mistake in your setup says nothing about the
 skill, so the run stops instead of scoring it as evidence against the skill (see
 [Authoring errors abort the run; they never score as failures](invariants.md#authoring-errors-abort-the-run-they-never-score-as-failures)).
-Every cause below is found **before any case runs**, so none of them spends money — except
-the last one, which happens after the run.
+Every cause below is found **before any case runs**, so it spends no money — except two. A
+malformed regex is found when its assertion runs, so earlier cases may already have spent
+money. A report that cannot be written is found after the run.
 
 This list is complete. It follows `_AUTHORING_ERRORS` and the `typer.BadParameter` checks in
 `src/skill_lens/cli.py`; a new exit-2 cause is added here, and only here.
@@ -56,13 +57,16 @@ unreadable `SKILL.md`, malformed frontmatter, or a `version:` that YAML does not
 (see [the invariant](invariants.md#a-version-that-yaml-does-not-parse-as-a-string-is-an-authoring-error)).
 
 **An eval file that cannot be used** (`CaseParseError`), including a tool library it
-imports: malformed YAML, an unknown key, a leftover `TODO(skill-lens)`, `file:` or
+imports: malformed YAML, an unknown key, an unknown assertion `kind:`, a leftover
+`TODO(skill-lens)`, `file:` or
 `judge.artifacts` without a `workspace:` block, a rubric entry phrased against a mock
 tool's `returns:`, an invalid `input_schema`, a `when:` entry that could never answer a
 call, or a `ref:` that cannot be resolved. See [Eval files](eval-files.md).
 
-**An assertion that cannot be checked**: an unknown `kind:` (`UnknownAssertionKind`), or an
-invalid value such as a malformed regex (`InvalidAssertionValue`).
+**An assertion that cannot be checked** (`InvalidAssertionValue`): a malformed regex. It is
+found when the assertion runs, not when the file loads, so `skill-lens list` does not catch
+it. (`UnknownAssertionKind` is the same check for a case built in code, which skips the
+loader.)
 
 **A runner or judge that cannot run here**, found in preflight (the checks made after
 loading and before the first case):
