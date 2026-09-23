@@ -8,8 +8,24 @@ Exit codes are the CI contract:
 | `1` | Gate failed |
 | `2` | User or authoring error (bad path, malformed YAML, unknown assertion kind) |
 
+```mermaid
+flowchart TD
+    START["skill-lens run"] --> AUTH{"Are your files and flags valid?"}
+    AUTH -->|"no: unknown assertion kind, bad regex, unfilled TODO, a product that cannot run here"| E2["exit 2 - fix your own files"]
+    AUTH -->|yes| RAN{"Did any candidate case run?"}
+    RAN -->|"no: no skills, no cases, --tag or --case matched nothing"| E1["exit 1 - gate failed"]
+    RAN -->|yes| ERR{"Did any candidate case error?"}
+    ERR -->|"yes, and fail_on_error is on"| E1
+    ERR -->|"no, or fail_on_error is off"| RATE{"Pass rate at or above min_pass_rate, and every per_skill_min met?"}
+    RATE -->|no| E1
+    RATE -->|yes| DELTA{"Is --min-delta set?"}
+    DELTA -->|"yes: no baseline arm ran, nothing was comparable, the delta is below the bar, or a baseline couldn't be resolved"| E1
+    DELTA -->|"no, or none of those hold"| E0["exit 0 - gate passed"]
+```
+
 Exit `2` also covers a [product runner](runners.md#product-runners) that cannot run here —
-its executable not on `PATH`, a preset's `--version` failing, a case with `tools:`, or
+its executable not on `PATH`, a preset's `--version` failing, a case with `tools:` under a
+product that cannot take the [MCP bridge](runners.md#mock-tools-under-a-product), or
 `trajectory:` / `mode: offered` under `cli` — all found in preflight before any case runs;
 a `trajectory:` naming a tool the case does not declare under `fake`, `pydantic-ai` or
 `langchain`, found in those runners' preflight (a product's tool names are not checked; see
@@ -18,12 +34,15 @@ a [product judge](runners.md#judging-with-a-product) whose executable is missing
 `--version` fails, found in the same preflight; and a `--model` or `--judge-model` that
 nothing in the run reads (see [CLI](cli.md#run)).
 
+When a message on your screen is not explained here, [Troubleshooting](troubleshooting.md)
+is keyed by the exact text a run prints — search it for the words you see.
+
 A run fails the gate when the overall pass rate is below `min_pass_rate`, when a configured
 per-skill minimum is not met, or when any case **errored**. Two distinctions matter:
 
 - **failed** — the case ran and scored below the bar. An *eval* signal.
 - **errored** — something in the harness blew up rather than the skill scoring badly: the
-  runner (API error, timeout, missing key; a product that exited non-zero, timed out, or
+  runner (API error, timeout; a product that exited non-zero, timed out, or
   reported its own failure), or an evaluator (a judge endpoint returning 500,
   a judge verdict that does not match its rubric, a product judge whose reply holds no
   readable verdict, an offered case on a runner that does not support the mode). An *infra*
@@ -70,12 +89,15 @@ measured over the whole matrix. There is no per-runner threshold.
 
 ## Gating on the delta (`--min-delta`)
 
-`--min-delta <float>` adds three more gate rules, all evaluated against the
+`--min-delta <float>` adds four more gate rules, all evaluated against the
 [delta](comparative-evals.md#the-delta-block) between the candidate and baseline arms:
 
-- the pass-rate delta is below `min_delta`;
+- **no baseline arm ran at all** — every case's baseline was skipped (for example, an
+  all-`offered` suite under `--baseline none`), so there is nothing to build a delta from in
+  the first place;
 - **no case was comparable** — a delta gate that verified nothing must never report a pass,
   the same principle that fails a run executing zero cases;
+- the pass-rate delta is below `min_delta`;
 - a skill's baseline **could not be resolved** — named, with the reason — because treating an
   unresolvable baseline as "no change" would let a repository pass this gate forever by
   deleting its git history.
@@ -83,7 +105,9 @@ measured over the whole matrix. There is no per-runner threshold.
 `--min-delta` requires `--baseline`; passing one without the other is a user/authoring error
 (exit `2`), not a gate failure, since the configuration is rejected before any case runs. A
 deliberately skipped baseline (an `offered` case under `--baseline none`) is not, on its own,
-a gate reason — nothing went wrong there. See
+a gate reason — nothing went wrong there. But that is only true for *some* cases skipping
+their baseline: if *every* case's baseline is skipped this way, there is no baseline arm left
+to compare against, and the first rule above fires instead. See
 [Comparative evals](comparative-evals.md#-min-delta) for the full picture, including how the
 delta is paired and what makes a case comparable.
 
@@ -141,10 +165,10 @@ scripts clause to reach; empty when no product ran), and the `gate` decision wit
 reasons.
 
 Comparative evals changed this document additively, not by rewriting what was already there:
-every M3 field means what it always meant, and M4 only adds fields alongside them — `arm` and
-`repeat_index` on each outcome, `baseline_errored` in `summary`, and the top-level `delta`
-(`null` when no baseline arm ran) and `baseline_notes`. A tool reading only the M3 fields
-keeps working unmodified.
+every field that existed before them still means what it meant, and the comparison adds
+fields alongside them — `arm` and `repeat_index` on each outcome, `baseline_errored` in
+`summary`, and the top-level `delta` (`null` when no baseline arm ran) and `baseline_notes`.
+A tool that reads only the older fields keeps working unmodified.
 
 Each entry in `outcomes` carries `arm` (`"candidate"` or `"baseline"`) and `repeat_index`
 (0-based), so a comparative run's raw per-repetition results can be reconstructed from the

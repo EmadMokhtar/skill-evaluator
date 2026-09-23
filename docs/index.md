@@ -11,20 +11,9 @@ Skills and their eval cases are **inputs** to the tool. Nothing about a skill un
 test is vendored here, so any skill repository can adopt `skill-lens` without
 embedding it.
 
-!!! info "Status: M9"
-    The full pipeline — discovery, scoring, reporting, gating — runs offline against
-    `FakeRunner` (the default, scripted, free), against real agents through the
-    `pydantic-ai` and `langchain` frameworks, and through an installed agent product —
-    GitHub Copilot CLI or Claude Code — with no provider key at all. It scores output
-    text, tool-use trajectories, efficiency budgets and
-    the files a case produces in a contained workspace, plus output quality via a
-    rubric-based LLM judge with per-check evidence, graded through a framework or through
-    the same installed product. Each case can also run against a
-    baseline for comparative, delta-gated evals; JUnit/Markdown reporters and a composite
-    GitHub Action make a run CI-legible, and every failing case shows what the agent
-    actually did. Merging to `main` versions the change from its commit history and
-    publishes it to PyPI (see [Releasing](releasing.md)). This is `0.x`: a minor release
-    may still change behaviour, so pin what you depend on. See the [roadmap](roadmap.md).
+!!! info "Stability"
+    This is `0.x`. A minor release may still change behaviour, so pin what you depend on.
+    See the [roadmap](roadmap.md) for what is shipped and what is planned.
 
 ## Install
 
@@ -54,10 +43,12 @@ uv sync                      # add --extra pydantic-ai for the real-agent runner
 | If you want to | Read |
 | --- | --- |
 | Write your first eval and run it | [Getting started](getting-started.md) |
+| Learn the vocabulary — case, runner, judge, arm, gate | [Concepts](concepts.md) |
 | Look up an eval YAML field or assertion kind | [Eval files](eval-files.md) |
 | Look up a command or flag | [CLI](cli.md) |
 | Configure defaults for a repo | [Configuration](configuration.md) |
 | Evaluate against a real agent, with tools and budgets | [Runners](runners.md) |
 | Understand exit codes and CI behavior | [Gating](gating.md) |
+| Look up an error message you are seeing | [Troubleshooting](troubleshooting.md) |
 | Understand how the tool is built | [Architecture](architecture.md) |
 | Work on skill-lens itself | [Contributing](contributing.md) |

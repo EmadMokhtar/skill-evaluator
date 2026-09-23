@@ -79,9 +79,10 @@ cases:
 ```
 
 Mock tools execute nothing: calling one records the call and returns `returns` verbatim,
-so the trajectory is genuinely the model's choice. The full field reference is
-[Eval files](eval-files.md); deciding *which* cases a skill needs is
-[Writing evals](writing-evals.md).
+so the trajectory is genuinely the model's choice. Case, mock tool, trajectory, assertion —
+[Concepts](concepts.md) defines every term this page uses without stopping to explain it.
+The full field reference is [Eval files](eval-files.md); deciding *which* cases a skill
+needs is [Writing evals](writing-evals.md).
 
 ## 4. Validate for free
 
@@ -127,7 +128,9 @@ what the agent actually did: its `output:`, and a `tool calls:` list when there 
 way would fail for the same reason, and you would see the words it chose. Output is cut at
 500 characters; a cut is never silent, and `--full-output` prints all of it. Exit code `0`
 means the gate passed, `1` failed, `2` something in your own files is wrong — that is the
-whole contract with your pipeline. See [Gating](gating.md).
+whole contract with your pipeline. See [Gating](gating.md). When a run prints something this
+walkthrough does not explain, [Troubleshooting](troubleshooting.md) is keyed by the exact
+message.
 
 ## 6. Run against a real agent
 

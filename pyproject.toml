@@ -179,7 +179,6 @@ version_files = [
     "docs/ci.md:skill-lens\\[pydantic-ai\\]==",
     "docs/ci.md:skill-lens\\[pydantic-ai,langchain\\]==",
     "docs/getting-started.md:skill-evaluator@v",
-    "README.md:skill-evaluator@v",
     "examples/ci/skill-lens.yml:skill-evaluator@v",
 ]
 bump_message = "bump: version $current_version → $new_version [skip ci]"

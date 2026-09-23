@@ -12,8 +12,10 @@ reporting the difference.
 
 Every case can run in two **arms**:
 
-- **candidate** — the skill under test, exactly as it runs today. This is the only arm that
-  existed before M4, and it is the only arm the gate reads.
+- **candidate** — the skill under test, exactly as it runs today. This is the only arm a run
+  without `--baseline` produces, and the only arm `min_pass_rate`, `per_skill_min`,
+  `fail_on_error` and the zero-cases check ever read. [`--min-delta`](#-min-delta) is the one
+  gate rule that reads both, because the delta it gates on is built from both.
 - **baseline** — a comparison point, selected with `--baseline`:
   - `none` — an **empty skill**: same name, no description, no instructions. This isolates
     what the skill's text contributes, as opposed to what the model would do unprompted.
@@ -22,10 +24,10 @@ Every case can run in two **arms**:
 
 **Omitting `--baseline` is what turns comparison off.** `none` names a *kind* of baseline (an
 empty skill), not the absence of one — so leaving the flag unset, not passing `--baseline
-none`, is the only way to get a single-arm run. With no flag, `skill-lens run` keeps the same
-layout it had before M4: one arm, one line per outcome, no delta block. It is not
+none`, is the only way to get a single-arm run. With no flag, `skill-lens run` keeps the single-arm
+layout: one arm, one line per outcome, no delta block. It is not
 byte-identical, though — a failing case's assertion, trajectory and budget evaluators now
-emit per-check evidence (an M4 addition, previously only the judge evaluator did this), so a
+emit per-check evidence (once, only the judge evaluator did this), so a
 failing outcome prints one indented line per failed check where it printed none before. That
 is strictly more information, not a behavior change in what runs. Upgrading to a version of
 `skill-lens` that supports comparison must never silently double anyone's bill.
@@ -54,6 +56,20 @@ trusted to know — which arm it is serving.
 A case's mock tools (`tools:`) are unaffected by the arm. They are the environment the case
 declares, not part of the skill, so both arms see the same tools and the comparison stays
 honest.
+
+```mermaid
+flowchart TD
+    CASE["One eval case"] --> CAND["Candidate arm: SKILL.md as it is now"]
+    CASE --> BASE["Baseline arm: --baseline none or previous"]
+    CAND --> CR["Run it --repeat N times"]
+    BASE --> BR["Run it --repeat N times"]
+    CR --> PAIR{"Can both arms be honestly compared?"}
+    BR --> PAIR
+    PAIR -->|"no: skipped, unresolvable, or every repetition errored"| DROP["Excluded from BOTH halves of the delta"]
+    PAIR -->|yes| DELTA["Delta: pass rate, tokens, cost, latency"]
+    CR --> GATE["The gate: candidate outcomes, plus the delta under --min-delta"]
+    DELTA -->|"--min-delta, when set"| GATE
+```
 
 ## How `previous` is resolved
 
@@ -207,19 +223,23 @@ least this much better than the baseline's.
 exits `2` — the alternative is a gate that silently checks nothing, which is the same
 vacuous-pass failure mode every other gate rule in this project rejects.
 
-With a baseline set, `--min-delta` fails the gate for three reasons:
+With a baseline set, `--min-delta` fails the gate for four reasons, checked in this order:
 
-1. **The delta is below the bar** — `pass_rate_delta < min_delta`.
+1. **No baseline arm ran at all** — every case's baseline was skipped, so there is nothing to
+   build a delta from in the first place. A suite made entirely of skipped-baseline `offered`
+   cases under `--baseline none` fails through *this* rule, not the next one: those cases
+   produce no baseline outcomes at all, so there is no delta to look inside.
 2. **No case was comparable** — mirroring "a run executing zero cases fails the gate": a gate
-   that verified nothing must never report a pass. A suite made entirely of skipped-baseline
-   `offered` cases under `--baseline none` fails through this rule, which is the honest reason
-   even though no individual baseline "failed".
-3. **A skill's baseline could not be resolved** — naming the skill and the reason. Otherwise a
+   that verified nothing must never report a pass. This is the rule for a delta that was
+   built and then emptied — some baseline did run, but every pair was dropped.
+3. **The delta is below the bar** — `pass_rate_delta < min_delta`.
+4. **A skill's baseline could not be resolved** — naming the skill and the reason. Otherwise a
    repository could pass `--min-delta` forever by deleting its git history.
 
 A *deliberately* skipped baseline (an `offered` case under `--baseline none`) is, on its own,
-**not** a gate reason — nothing went wrong. It only becomes one indirectly, through rule 2, if
-it leaves nothing comparable behind.
+**not** a gate reason — nothing went wrong. It becomes one only indirectly: through rule 1 if
+*every* case skips its baseline, or through rule 2 if the pairs that do run leave nothing
+comparable behind.
 
 **Baseline outcomes never count toward the gate.** Every other gate rule — `min_pass_rate`,
 `per_skill_min`, `fail_on_error`, the zero-cases check — reads the **candidate** arm only. A

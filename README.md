@@ -39,81 +39,19 @@ without embedding it.
   against a baseline (no skill, or its previous version resolved from git), and gate on the
   delta.
 
-## Try it — free, offline, no API key
-
-```bash
-uv tool install "skill-lens[pydantic-ai]"
-```
-
-(`pip install "skill-lens[pydantic-ai]"` works too; `skill-lens[langchain]` gives you the
-LangChain runner instead, or as well. Drop the extra for the offline default runner alone.)
-
-That puts `skill-lens` on your `PATH`, so the commands below run as written.
-
-The walkthrough uses this repository's own example skills, so clone it too — or point
-`skill-lens` at your own directory of `SKILL.md` files instead:
-
-```bash
-git clone https://github.com/EmadMokhtar/skill-evaluator.git
-cd skill-evaluator
-```
-
-Working on `skill-lens` itself rather than using it? Run `uv sync` in that checkout for the
-development environment, and prefix the commands below with `uv run` — you can then skip the
-`uv tool install` above.
-
-A skill is any directory containing `SKILL.md`. Its eval cases live beside it — this
-repository ships four:
-
-```
-examples/
-  csv-report/
-    SKILL.md
-    csv-report.eval.yaml
-  greeting/
-    SKILL.md
-    greeting.eval.yaml
-  log-triage/
-    SKILL.md
-    log-triage.eval.yaml
-    references/report-format.md
-    scripts/count_levels.py
-  order-support/
-    SKILL.md
-    order-support.eval.yaml
-```
-
-Point the CLI at one skill directory or at a parent of many — discovery is recursive:
-
-```bash
-skill-lens list ./examples
-```
-
-```
-csv-report	1 case(s)	examples/csv-report
-greeting	1 case(s)	examples/greeting
-log-triage	1 case(s)	examples/log-triage
-order-support	6 case(s)	examples/order-support
-```
-
-`list` discovers skills and validates every eval file without calling a runner: no API key,
-no spend. Starting on your own skill? `skill-lens init ./skills/my-skill` writes a starter
-suite with the placeholders marked, so you fill in the blanks instead of starting from one;
-point it at a directory of skills and it scaffolds every one that has no suite.
-
-## A case is a few lines of YAML
+## What an eval looks like
 
 ```yaml
+# an eval file, beside the SKILL.md it tests
 cases:
   - name: refuses a refund outside the return window
     task: I want a refund for order 1234
-    tags: [smoke, refund]
     tools:
       - name: lookup_order
         description: Look up an order by its id
         parameters:
           order_id: string
-        returns: '{"id": "1234", "status": "delivered", "days_since_delivery": 45}'
+        returns: '{"id": "1234", "delivered_days_ago": 61}'
       - name: issue_refund
         description: Issue a refund for an order
         parameters:
@@ -122,121 +60,30 @@ cases:
     trajectory:
       called: [lookup_order]      # it must look the order up
       forbidden: [issue_refund]   # and must not refund this one
-    budget:
-      max_tokens: 2000
     assertions:
       - kind: contains
-        value: "1234"             # name the order you are talking about
-```
-
-A tool a real MCP server exposes need not be transcribed: `skill-lens mcp-import tools.json`
-writes the block from the server's own `tools/list` listing, schema and all. A tool several
-skills share is declared once, in a tool library any eval file imports with `tool_libraries:`
-and names with `- ref: <name>`.
-
-## A run reads like a test suite
-
-Your own repository follows the same layout — one directory per skill, eval cases beside the
-`SKILL.md`:
-
-```
-skills/
-  order-support/
-    SKILL.md
-    order-support.eval.yaml
+        value: "30-day"           # and cite the policy
 ```
 
 ```bash
-skill-lens run ./skills
+uv tool install "skill-lens[pydantic-ai]"   # drop the extra for the offline runner alone
+skill-lens run ./skills                     # exit 0 passed, 1 failed, 2 your files are wrong
 ```
 
-```
-[PASS] order-support :: names the order it is talking about (fake)
-[FAIL] order-support :: refuses a refund outside the return window (fake)
-        assertion: failed: contains('return window'): did not hold
-            contains[0]: contains('return window') did not hold
-        output: [fake] order-support handled: I want a refund for order 1234
-[PASS] order-support :: never leaks a stack trace to the customer (fake)
-
-2 passed, 1 failed, 0 errored — pass rate 67%
-
-Gate FAILED:
-  - pass rate 67% is below the required 100%
-```
-
-Every failing case shows what the agent actually said and which tools it called —
-`--case` reruns just that one.
-
-Exit code `0` means the gate passed, `1` means it failed, and `2` means something in your
-own files is wrong. That is the whole contract with your pipeline.
-
-The default runner is scripted and offline, so the pipeline above costs nothing to try. To
-score a real agent, pass `--runner pydantic-ai` — the `[pydantic-ai]` extra in the install
-above is what supplies it (from a checkout: `uv sync --extra pydantic-ai`) — or pass
-`--runner copilot` / `--runner claude-code` to run the skill through an installed GitHub
-Copilot CLI or Claude Code, with no API key. See
+That first run is free: the default runner is scripted and offline, so nothing is sent
+anywhere and no API key is read. `--runner pydantic-ai`, `--runner copilot` or
+`--runner claude-code` scores a real agent instead — see
 [Runners](https://emadmokhtar.github.io/skill-evaluator/runners/).
 
-## Gate your pull requests
-
-```yaml
-- uses: EmadMokhtar/skill-evaluator@v0.16.0
-  with:
-    path: ./skills
-    runner: pydantic-ai
-    model: openai:gpt-4o-mini
-  env:
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-```
-
-Pin an exact tag. Until 1.0 a minor release may change behaviour, so there is no
-floating `v0` tag to follow.
-
-The run publishes a JUnit XML report for your provider's test pane, a Markdown summary for
-the job summary or a pull-request comment, and a JSON report for anything else. `skill-lens`
-never calls the GitHub API itself — it renders files, your workflow decides where they go.
-Copy-pasteable workflows live in [`examples/ci/`](https://github.com/EmadMokhtar/skill-evaluator/tree/main/examples/ci) and in
-[CI integration](https://emadmokhtar.github.io/skill-evaluator/ci/).
-
-Once that is green, `baseline: previous` and `repeat: 3` turn the same job into a
-*comparative* one: each case runs with and without your edit, several times, and the report
-carries the delta —
-see [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparative-evals/).
-
-> **Running against an unreleased commit?** The action's default `install-spec` pins the
-> released version matching its own tag, so point both at the same commit and they cannot
-> drift apart:
->
-> ```yaml
-> - uses: EmadMokhtar/skill-evaluator@<commit-sha>
->   with:
->     path: ./skills
->     install-spec: "skill-lens[pydantic-ai] @ git+https://github.com/EmadMokhtar/skill-evaluator@<commit-sha>"
-> ```
-
-## Why a green run means something
-
-Eval tools are easy to fool — mostly by accident, and usually by yourself. These are
-deliberate design decisions, each with a test holding it in place:
-
-- **No vacuous passes.** A typo like `assertion:` is rejected rather than silently producing
-  a case that checks nothing. An unfilled `TODO(skill-lens)` scaffold stops the run. A judge
-  check that passes without citing evidence is recorded as a failure. A run that executed
-  zero cases fails the gate — "nothing ran" is a broken run, not a pass.
-- **`errored` is not `failed`.** A provider returning 500 is an infrastructure signal, not
-  evidence that your skill got worse. The two are counted, reported and gated separately.
-- **Nothing spends money behind your back.** The default runner is offline and scripted; the
-  LLM judge is off until you turn it on; a run that will cost money prints its plan first.
-- **Authoring mistakes stop the run.** A malformed regex or an unknown assertion kind is a
-  bug in your files, not a verdict on your skill — exit `2`, naming the file and the field.
-
-The full list, with the reasoning behind each, is in [ARCHITECTURE.md](https://github.com/EmadMokhtar/skill-evaluator/blob/main/ARCHITECTURE.md).
+Start at [Getting started](https://emadmokhtar.github.io/skill-evaluator/getting-started/),
+which takes one skill from nothing to a CI gate.
 
 ## Documentation
 
 | Topic | Page |
 | --- | --- |
 | First eval, end to end | [Getting started](https://emadmokhtar.github.io/skill-evaluator/getting-started/) |
+| The vocabulary, with a glossary | [Concepts](https://emadmokhtar.github.io/skill-evaluator/concepts/) |
 | Deciding what to test | [Writing evals](https://emadmokhtar.github.io/skill-evaluator/writing-evals/) |
 | Eval YAML reference | [Eval files](https://emadmokhtar.github.io/skill-evaluator/eval-files/) |
 | Commands and flags | [CLI](https://emadmokhtar.github.io/skill-evaluator/cli/) |
@@ -245,7 +92,9 @@ The full list, with the reasoning behind each, is in [ARCHITECTURE.md](https://g
 | Baselines, deltas, `--min-delta` | [Comparative evals](https://emadmokhtar.github.io/skill-evaluator/comparative-evals/) |
 | Exit codes and reports | [Gating](https://emadmokhtar.github.io/skill-evaluator/gating/) |
 | The action and example workflows | [CI integration](https://emadmokhtar.github.io/skill-evaluator/ci/) |
+| The message on your screen | [Troubleshooting](https://emadmokhtar.github.io/skill-evaluator/troubleshooting/) |
 | How it is built | [ARCHITECTURE.md](https://github.com/EmadMokhtar/skill-evaluator/blob/main/ARCHITECTURE.md) |
+| Why a green run means something | [Invariants](https://emadmokhtar.github.io/skill-evaluator/invariants/) |
 | What is checked for vulnerabilities, and where | [Security](https://emadmokhtar.github.io/skill-evaluator/security/) |
 | What's shipped, what's next | [Roadmap](https://emadmokhtar.github.io/skill-evaluator/roadmap/) |
 
@@ -280,10 +129,10 @@ contribution.
 
 ## Status
 
-Milestone 7. Discovery, scoring, judging, comparison, real-file workspaces, reporting, gating
-and the automated release pipeline all ship and are tested. Versions are derived from the
-commit history and published to PyPI on merge. This is `0.x`: a minor release may still
-change behaviour, so pin what you depend on. See the
+Discovery, scoring, judging, comparison, real-file workspaces, reporting, gating and the
+automated release pipeline all ship and are tested. Versions are derived from the commit
+history and published to PyPI on merge. This is `0.x`: a minor release may still change
+behaviour, so pin what you depend on. See the
 [roadmap](https://emadmokhtar.github.io/skill-evaluator/roadmap/) for what is shipped and
 what is planned.
 

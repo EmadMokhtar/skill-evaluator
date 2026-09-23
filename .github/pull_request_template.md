@@ -7,7 +7,8 @@
 - [ ] The PR title follows [Conventional Commits](https://www.conventionalcommits.org/) —
       it becomes the commit on `main` when this is squash-merged.
 - [ ] Documentation is updated in the same PR: `docs/` for user-facing behavior,
-      `ARCHITECTURE.md` for design or invariants, `mkdocs.yml` for a new page.
+      `ARCHITECTURE.md` for design, `mkdocs.yml` for a new page, and — for an invariant —
+      **both** `docs/invariants.md` and `CLAUDE.md`, with a byte-identical bold lead.
       (If genuinely not needed, add the `no-docs-needed` label.)
 - [ ] `uv run pytest` passes.
 - [ ] `uv run ruff check .` and `uv run ruff format --check .` pass.

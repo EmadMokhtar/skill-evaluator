@@ -56,5 +56,7 @@ These are decided behaviors with tests asserting them, not accidents.
   `main`** and must be conventional too. Flag a non-conforming PR title in review.
 - **Documentation ships with the change.** A change to a flag, config key, `EvalCase` field
   or assertion kind must update the matching page under `docs/`; a change to a protocol or
-  an invariant must update `ARCHITECTURE.md`.
+  the module map must update `ARCHITECTURE.md`; a new or reworded invariant must update
+  **both** `docs/invariants.md` and `CLAUDE.md`, with a byte-identical bold lead, or
+  `tests/test_invariants_sync.py` fails.
 - Line length 100, `ruff` for lint and format.

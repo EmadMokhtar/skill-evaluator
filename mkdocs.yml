@@ -36,9 +36,22 @@ theme:
 markdown_extensions:
   - admonition
   - tables
+  # No toc_depth: Python-Markdown reads it from the extension config only, so
+  # any value here applies to every page. Setting it to 2 to shorten
+  # invariants.md's sidebar also drops the level-3 entries from
+  # troubleshooting.md, releasing.md, runners.md and four others, where those
+  # subsections are what a reader scans for. invariants.md listing all of its
+  # claims is the right outcome anyway -- it is a page to look things up in.
   - toc:
       permalink: true
-  - pymdownx.superfences
+  # The custom fence renders ```mermaid blocks as diagrams. The
+  # `!!python/name:` tag is what MkDocs needs and what a plain SafeLoader
+  # refuses; tests/test_docs.py parses this file with a tag-tolerant loader.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   # base_path reaches the repo root so docs/architecture.md can include the
   # root-level ARCHITECTURE.md instead of duplicating it.
   - pymdownx.snippets:
@@ -47,18 +60,23 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Getting started: getting-started.md
+  - Guides:
+      - Getting started: getting-started.md
+      - Concepts: concepts.md
+      - Writing evals: writing-evals.md
+      - CI integration: ci.md
+      - Troubleshooting: troubleshooting.md
   - Reference:
       - Eval files: eval-files.md
-      - Writing evals: writing-evals.md
       - CLI: cli.md
       - Configuration: configuration.md
       - Runners: runners.md
       - Gating and exit codes: gating.md
       - Comparative evals: comparative-evals.md
-      - CI integration: ci.md
+  - Internals:
+      - Architecture: architecture.md
+      - Invariants: invariants.md
+      - Security: security.md
       - Releasing: releasing.md
+      - Contributing: contributing.md
   - Roadmap: roadmap.md
-  - Architecture: architecture.md
-  - Security: security.md
-  - Contributing: contributing.md
