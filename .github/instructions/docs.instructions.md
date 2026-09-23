@@ -37,4 +37,13 @@ applyTo: "docs/**,*.md,mkdocs.yml"
 - **Diagrams are Mermaid**, in a ```mermaid fence. GitHub renders them natively, so
   `README.md` and `ARCHITECTURE.md` get diagrams too. No hard-coded colours — the default
   theme follows the page, so a diagram stays legible in both light and dark mode.
+- **`docs/gating.md` owns the exit-code contract.** Its
+  [exit-2 list](../../docs/gating.md#exit-2-user-and-authoring-errors) is the only complete
+  one, and it follows `_AUTHORING_ERRORS` and the `typer.BadParameter` checks in
+  `src/skill_lens/cli.py`. A PR that adds an exit-2 cause adds it there. Every other page —
+  `docs/concepts.md`, `docs/troubleshooting.md`, `docs/getting-started.md`, `README.md` —
+  says what `0`, `1` and `2` mean in a sentence and links to `gating.md`. Flag any new table
+  or list of exit codes or exit-2 causes outside `gating.md`: two lists drift. The one
+  exception is `docs/troubleshooting.md`'s entries keyed by the exact message a cause
+  prints; they explain a message, they do not enumerate the contract.
 - Relative links must resolve — there is a test for it.
