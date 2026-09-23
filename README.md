@@ -67,7 +67,7 @@ cases:
 
 ```bash
 uv tool install "skill-lens[pydantic-ai]"   # drop the extra for the offline runner alone
-skill-lens run ./skills                     # exit 0 passed, 1 failed, 2 your files are wrong
+skill-lens run ./skills                     # exit 0 passed, 1 failed, 2 your setup is wrong
 ```
 
 That first run is free: the default runner is scripted and offline, so nothing is sent

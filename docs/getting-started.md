@@ -122,8 +122,9 @@ what the agent actually did: its `output:`, and a `tool calls:` list when there 
 (here there were none, which is exactly the problem). A real agent that answered the same
 way would fail for the same reason, and you would see the words it chose. Output is cut at
 500 characters; a cut is never silent, and `--full-output` prints all of it. Exit code `0`
-means the gate passed, `1` failed, `2` something in your own files is wrong — that is the
-whole contract with your pipeline. See [Gating](gating.md). When a run prints something this
+means the gate passed, `1` failed, `2` something in your own files, flags or environment is
+wrong — that is the whole contract with your pipeline. See [Gating](gating.md), which lists
+[every cause of exit `2`](gating.md#exit-2-user-and-authoring-errors). When a run prints something this
 walkthrough does not explain, [Troubleshooting](troubleshooting.md) is keyed by the exact
 message.
 

@@ -301,14 +301,11 @@ See [Comparative evals](comparative-evals.md).
 
 The gate turns the whole run into one number a pipeline can act on.
 
-| Code | Meaning |
-| --- | --- |
-| `0` | The gate passed |
-| `1` | The gate failed — the pass rate was below `min_pass_rate`, a per-skill minimum was missed, some case errored, or `--min-delta` was set and the delta fell short of it |
-| `2` | Something about your setup is wrong — your files, your flags or your environment: a bad path, malformed YAML, an unknown assertion kind, an unfilled `TODO(skill-lens)`, an unset API key, a product's executable not on `PATH` |
-
-Exit `2` is deliberately not a gate failure. A mistake in your setup says nothing about the
-skill, so it aborts the run rather than scoring as evidence against it.
+Exit `0` means the gate passed, `1` that it failed, and `2` that something in your own
+files, flags or environment is wrong, so nothing was measured. Exit `2` is deliberately not a
+gate failure: a mistake in your setup says nothing about the skill, so it aborts the run
+rather than scoring as evidence against it. The gating page lists
+[every cause of exit `2`](gating.md#exit-2-user-and-authoring-errors).
 
 **A run that executed zero cases fails as well.** "Nothing ran" is a broken run, not a pass —
 otherwise a mistyped path would report success forever. The reason names the cause: no skills
