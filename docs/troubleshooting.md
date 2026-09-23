@@ -5,13 +5,11 @@ produced it. Search the page for the words on your screen.
 
 Two facts explain most of what follows.
 
-**Exit codes are the contract** (see [Gating and exit codes](gating.md)):
-
-| Code | Meaning |
-| --- | --- |
-| `0` | The gate passed |
-| `1` | The gate failed — cases ran and scored below the bar, a case errored, or [no case ran at all](#no-eval-cases-ran) |
-| `2` | A user or authoring error — something in your own files or flags is wrong, so nothing was measured |
+**Exit codes are the contract.** `0` means the gate passed. `1` means it failed: cases ran
+and scored below the bar, a case errored, or [no case ran at all](#no-eval-cases-ran). `2`
+means something in your own files, flags or environment is wrong, so nothing was measured.
+[Gating and exit codes](gating.md#exit-2-user-and-authoring-errors) holds the complete list
+of exit-2 causes; this page is keyed by the message each one prints.
 
 **`failed` is not `errored`.** A *failed* case ran and scored below the bar: that is a
 signal about the skill. An *errored* case means the harness itself broke — a provider

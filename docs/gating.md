@@ -1,17 +1,18 @@
 # Gating and exit codes
 
-Exit codes are the CI contract:
+Exit codes are the CI contract. This page is where they are defined; every other page
+summarises them and links here.
 
 | Code | Meaning |
 | --- | --- |
 | `0` | Gate passed |
-| `1` | Gate failed |
-| `2` | User or authoring error (bad path, malformed YAML, unknown assertion kind) |
+| `1` | Gate failed — including a run in which [no case ran at all](troubleshooting.md#no-eval-cases-ran) |
+| `2` | User or authoring error — something in your files, flags or environment is wrong, so nothing was measured. [Every cause is listed below](#exit-2-user-and-authoring-errors). |
 
 ```mermaid
 flowchart TD
-    START["skill-lens run"] --> AUTH{"Are your files and flags valid?"}
-    AUTH -->|"no: unknown assertion kind, bad regex, unfilled TODO, a product that cannot run here"| E2["exit 2 - fix your own files"]
+    START["skill-lens run"] --> AUTH{"Are your files, flags and environment valid?"}
+    AUTH -->|"no: any cause in the exit 2 list"| E2["exit 2 - fix your own setup"]
     AUTH -->|yes| RAN{"Did any candidate case run?"}
     RAN -->|"no: no skills, no cases, --tag or --case matched nothing"| E1["exit 1 - gate failed"]
     RAN -->|yes| ERR{"Did any candidate case error?"}
@@ -23,16 +24,79 @@ flowchart TD
     DELTA -->|"no, or none of those hold"| E0["exit 0 - gate passed"]
 ```
 
-Exit `2` also covers a [product runner](runners.md#product-runners) that cannot run here —
-its executable not on `PATH`, a preset's `--version` failing, a case with `tools:` under a
-product that cannot take the [MCP bridge](runners.md#mock-tools-under-a-product), or
-`trajectory:` / `mode: offered` under `cli` — all found in preflight before any case runs;
-a `trajectory:` naming a tool the case does not declare under `fake`, `pydantic-ai` or
-`langchain`, found in those runners' preflight (a product's tool names are not checked; see
-[Declaring tools](runners.md#declaring-tools-and-scoring-the-trajectory));
-a [product judge](runners.md#judging-with-a-product) whose executable is missing or whose
-`--version` fails, found in the same preflight; and a `--model` or `--judge-model` that
-nothing in the run reads (see [CLI](cli.md#run)).
+## Exit 2: user and authoring errors
+
+Exit `2` is deliberately not a gate failure. A mistake in your setup says nothing about the
+skill, so the run stops instead of scoring it as evidence against the skill (see
+[Authoring errors abort the run; they never score as failures](invariants.md#authoring-errors-abort-the-run-they-never-score-as-failures)).
+Every cause below is found **before any case runs**, so it spends no money — except two. A
+malformed regex is found when its assertion runs, so earlier cases may already have spent
+money. A report that cannot be written is found after the run.
+
+This list is complete. It follows `_AUTHORING_ERRORS` and the `typer.BadParameter` checks in
+`src/skill_lens/cli.py`; a new exit-2 cause is added here, and only here.
+
+**A flag, or a flag combination, that cannot work.**
+
+- An unknown `--runner`, or the same runner named twice (on the flag or in
+  `default_runner`); an unknown `--baseline`; an unknown `judge` in `skill-lens.toml`.
+- `--repeat`, `--concurrency` or `--markdown-max-chars` below `1`, or
+  `--markdown-max-chars` without `--markdown-output`.
+- `--min-delta` without `--baseline` (see [below](#gating-on-the-delta-min-delta)).
+- A `--model` or `--judge-model` that resolves to blank, or an invalid `--base-url`.
+- A `--model`, `--base-url` or `--judge-model` that nothing in the run reads (see
+  [CLI](cli.md#run)).
+
+**A `skill-lens.toml` that cannot be used** (`ConfigError`): a `--config` path that does not
+exist, invalid TOML, an unknown key, an invalid value (such as a `base_url` holding a
+credential, or an empty `default_runner`), or a `cli` runner or judge with no
+`[runners.cli] command`. See [Configuration](configuration.md).
+
+**A skill that cannot be read** (`SkillParseError`): a path that does not exist, an
+unreadable `SKILL.md`, malformed frontmatter, or a `version:` that YAML does not read as text
+(see [the invariant](invariants.md#a-version-that-yaml-does-not-parse-as-a-string-is-an-authoring-error)).
+
+**An eval file that cannot be used** (`CaseParseError`), including a tool library it
+imports: malformed YAML, an unknown key, an unknown assertion `kind:`, a leftover
+`TODO(skill-lens)`, `file:` or
+`judge.artifacts` without a `workspace:` block, a rubric entry phrased against a mock
+tool's `returns:`, an invalid `input_schema`, a `when:` entry that could never answer a
+call, or a `ref:` that cannot be resolved. See [Eval files](eval-files.md).
+
+**An assertion that cannot be checked** (`InvalidAssertionValue`): a malformed regex. It is
+found when the assertion runs, not when the file loads, so `skill-lens list` does not catch
+it. (`UnknownAssertionKind` is the same check for a case built in code, which skips the
+loader.)
+
+**A runner or judge that cannot run here**, found in preflight (the checks made after
+loading and before the first case):
+
+- A keyed runner or judge whose provider key is not exported (`MissingAPIKey`).
+- A runner whose optional dependency is not installed (`RunnerDependencyError`).
+- A `trajectory:` naming a tool the case does not declare under `fake`, `pydantic-ai` or
+  `langchain` (`UndeclaredTool`; a product's tool names are not checked — see
+  [Declaring tools](runners.md#declaring-tools-and-scoring-the-trajectory)).
+- A `base_url` for a provider that takes no endpoint (`UnsupportedBaseURL`).
+- A [product runner](runners.md#product-runners) or
+  [product judge](runners.md#judging-with-a-product) that cannot run here
+  (`ProductSetupError`): its executable not on `PATH`, a preset's `--version` failing, a
+  skill name that cannot be a directory name, a case with `tools:` under a product that
+  cannot take the [MCP bridge](runners.md#mock-tools-under-a-product), `trajectory:` or
+  `mode: offered` under `cli`, the bridge failing its start-up check, `--available-tools`
+  in `[runners.copilot]` while a case declares `tools:`, or a tool-selection flag in a
+  product judge's `args`.
+
+**Bundled scripts turned on but unable to run** (`ScriptSetupError`): a script's
+interpreter is not on `PATH`, or `script_sandbox = "required"` and no sandbox backend works.
+See [Security](security.md).
+
+**A report that cannot be written.** A `--json-output`, `--junit-output` or
+`--markdown-output` file that cannot be written exits `2` — but only when the gate itself
+passed. A failing gate stays `1`, so a write problem never hides a red run.
+
+The other commands use the same code for the same kind of problem: `list` exits `2` on a
+skill or eval file that cannot be read, `init` on a file it cannot read or write, and
+`mcp-import` on a listing it cannot read or parse.
 
 When a message on your screen is not explained here, [Troubleshooting](troubleshooting.md)
 is keyed by the exact text a run prints — search it for the words you see.
