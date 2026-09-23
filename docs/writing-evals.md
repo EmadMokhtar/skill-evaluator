@@ -28,10 +28,13 @@ Then ask for it by name, or describe the task — "write evals for my order-supp
 
 It expects `skill-lens` on `PATH`:
 
-```bash
-uv tool install "skill-lens[pydantic-ai]"
-```
+--8<-- "docs/snippets/install.md"
 
-A checkout works as well — `uv sync` there, and `uv run skill-lens` then works from inside
-it, as does running it in a project that already depends on it. Everything the skill writes
-is an ordinary eval file: nothing about the suite depends on the skill afterwards.
+A project that already depends on `skill-lens` works as well. Everything the skill writes is
+an ordinary eval file: nothing about the suite depends on the skill afterwards.
+
+## Where to go next
+
+Every field the skill writes is described in [Eval files](eval-files.md), and every term it
+uses is defined in [Concepts](concepts.md). Once the suite passes, [CI integration](ci.md)
+turns it into a gate on every pull request.

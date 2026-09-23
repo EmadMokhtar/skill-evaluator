@@ -5,18 +5,18 @@ real agent there are three ways: the `pydantic-ai` framework extra, the `langcha
 framework extra, or an installed agent product (`copilot`, `claude-code`, or a
 command you name as `cli`). A framework extra needs a key in the environment and a
 model; a product needs neither, because it uses its own auth — see
-[Product runners](#product-runners). With a framework extra:
+[Product runners](#product-runners). A framework extra is installed with the package:
+
+--8<-- "docs/snippets/install.md"
+
+Then export the provider's key and name a model:
 
 ```bash
-uv tool install "skill-lens[pydantic-ai]"       # or "skill-lens[langchain]", or both
 export OPENAI_API_KEY=...
 skill-lens run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
 skill-lens run ./skills --runner langchain --model openai:gpt-4o-mini
 skill-lens run ./skills --runner pydantic-ai --runner langchain --model openai:gpt-4o-mini
 ```
-
-From a checkout instead, the extra comes from `uv sync --extra pydantic-ai` (or
-`--extra langchain`) and every command runs as `uv run skill-lens ...`.
 
 ## Choosing a runner
 

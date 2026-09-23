@@ -241,10 +241,10 @@ A *deliberately* skipped baseline (an `offered` case under `--baseline none`) is
 *every* case skips its baseline, or through rule 2 if the pairs that do run leave nothing
 comparable behind.
 
-**Baseline outcomes never count toward the gate.** Every other gate rule — `min_pass_rate`,
-`per_skill_min`, `fail_on_error`, the zero-cases check — reads the **candidate** arm only. A
-strong baseline means the skill was unnecessary, not that CI should go red; the baseline exists
-to be compared against, not to be graded on its own.
+**Baseline outcomes count toward `--min-delta` and no other gate rule.** Every other gate
+rule — `min_pass_rate`, `per_skill_min`, `fail_on_error`, the zero-cases check — reads the
+**candidate** arm only. A strong baseline means the skill was unnecessary, not that CI should
+go red; the baseline exists to be compared against, not to be graded on its own.
 
 ## Cost
 

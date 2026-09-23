@@ -5,15 +5,10 @@ prints. The first four steps cost nothing and need no API key.
 
 ## 1. Install
 
-```bash
-uv tool install "skill-lens[pydantic-ai]"
-```
+--8<-- "docs/snippets/install.md"
 
-`pip install "skill-lens[pydantic-ai]"` works the same way. The extra supplies the
-real-agent runner; drop it if you only want the offline default. A `langchain` extra provides
-the second real-agent runner, and an installed GitHub Copilot CLI or Claude Code is a third
-way that needs no extra and no API key — see [Runners](runners.md). From a checkout of this
-repository, `uv sync --extra pydantic-ai` and prefix every command below with `uv run`.
+An installed GitHub Copilot CLI or Claude Code is a third way to run a real agent, and it
+needs no extra and no API key — see [Runners](runners.md).
 
 ## 2. Scaffold a suite
 

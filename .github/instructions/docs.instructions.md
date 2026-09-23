@@ -14,8 +14,17 @@ applyTo: "docs/**,*.md,mkdocs.yml"
   `tests/test_docs.py` resolves its relative links from the repo root, but mkdocs resolves
   them from `docs/` because the file is inlined into `docs/architecture.md` by a snippet —
   a relative link can pass the test and still fail `mkdocs build --strict`.
-- **A new page must be added to `nav:` in `mkdocs.yml`.** `tests/test_docs.py` fails on an
-  orphan page, and `mkdocs build --strict` fails on a nav entry with no file.
+- **A new page must be added to `nav:` in `mkdocs.yml`**, and linked from `README.md`'s
+  Documentation table or `docs/index.md`'s "Where to go next" table. `tests/test_docs.py`
+  fails on an orphan page or one neither table links, and `mkdocs build --strict` fails on
+  a nav entry with no file.
+- **The install instructions have one copy in `docs/`**: `docs/snippets/install.md`, which
+  pages include with `--8<-- "docs/snippets/install.md"`. `README.md` keeps the only other
+  copy of the command, and `tests/test_docs.py` compares the two. Flag a page that writes
+  the install command out again.
+- **A message quoted in `docs/troubleshooting.md` is pinned to the module that emits it.**
+  Adding, rewording or removing one means changing `QUOTED` in
+  `tests/test_troubleshooting.py` in the same PR.
 - **The nav has four sections, and a new page belongs to one of them.** *Guides* is read
   start to finish. *Reference* is looked things up in. *Internals* is for people working on
   skill-lens itself. *Roadmap* stands alone. A page that fits none of them probably belongs
@@ -37,4 +46,5 @@ applyTo: "docs/**,*.md,mkdocs.yml"
 - **Diagrams are Mermaid**, in a ```mermaid fence. GitHub renders them natively, so
   `README.md` and `ARCHITECTURE.md` get diagrams too. No hard-coded colours — the default
   theme follows the page, so a diagram stays legible in both light and dark mode.
-- Relative links must resolve — there is a test for it.
+- Relative links must resolve, and so must the `#anchor` after one — there is a test for
+  each. Renaming a heading means updating every link to it.
