@@ -671,12 +671,14 @@ Documentation ships **with** the change, never as a follow-up. Two CI jobs enfor
 | Runner behavior, tools, budgets, pricing | `docs/runners.md` |
 | Bundled files, `run_script`, the sandbox or its guarantees | `docs/runners.md` and `docs/security.md` |
 | Gate rules, exit codes, the JSON report | `docs/gating.md` |
-| A protocol or the module map | `ARCHITECTURE.md` |
+| A protocol or the module map | `ARCHITECTURE.md`; a protocol signature also in this file's Architecture section — `tests/test_docs.py` compares both with `src/` |
 | An invariant | **both** `docs/invariants.md` (a heading) and this file's condensed list (a bold-led bullet), spelled the same byte for byte — `tests/test_invariants_sync.py` fails otherwise |
 | CI integration, the action, example workflows | `docs/ci.md` |
 | The release pipeline, its one-time setup, or the cassette-refresh workflow | `docs/releasing.md` |
 | The dependency audit, the `S` lint rules, the exception policy, action pinning, Dependabot, the SBOM, or attestations | `docs/security.md` (and `SECURITY.md` for how to report) |
-| Anything needing a new page | the page plus `nav:` in `mkdocs.yml` |
+| How to install, or a package extra | `docs/snippets/install.md`, which pages include, and the command in `README.md` — `tests/test_docs.py` compares the two |
+| A message quoted in `docs/troubleshooting.md` | the page and `QUOTED` in `tests/test_troubleshooting.py` |
+| Anything needing a new page | the page, `nav:` in `mkdocs.yml`, and a row in `README.md`'s Documentation table or `docs/index.md`'s "Where to go next" |
 
 `README.md` is a landing page only. Reference prose lives in `docs/` — do not reintroduce
 it in the README, and do not duplicate `ARCHITECTURE.md` into `docs/architecture.md`

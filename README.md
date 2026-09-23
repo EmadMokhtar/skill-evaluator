@@ -96,6 +96,7 @@ which takes one skill from nothing to a CI gate.
 | How it is built | [ARCHITECTURE.md](https://github.com/EmadMokhtar/skill-evaluator/blob/main/ARCHITECTURE.md) |
 | Why a green run means something | [Invariants](https://emadmokhtar.github.io/skill-evaluator/invariants/) |
 | What is checked for vulnerabilities, and where | [Security](https://emadmokhtar.github.io/skill-evaluator/security/) |
+| How a release is cut and published | [Releasing](https://emadmokhtar.github.io/skill-evaluator/releasing/) |
 | What's shipped, what's next | [Roadmap](https://emadmokhtar.github.io/skill-evaluator/roadmap/) |
 
 ## Contributing

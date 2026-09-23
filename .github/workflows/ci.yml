@@ -96,6 +96,13 @@ jobs:
         # failure rather than a warning nobody reads.
         run: uv run mkdocs build --strict
 
+      - name: Check the docs tests against the real renderer
+        # tests/test_docs.py works out heading ids with its own copy of
+        # Python-Markdown's rule, and compares that copy with the real renderer
+        # only where the docs group is installed. The test job does not install
+        # it, so this is the one place the comparison runs.
+        run: uv run pytest tests/test_docs.py
+
   docs-freshness:
     # Blunt backstop for stale prose, which tests/test_docs.py cannot see. The
     # `no-docs-needed` label is the escape hatch for refactors and internal-only

@@ -10,9 +10,12 @@ validation:
   absolute_links: warn
 
 # docs/superpowers/ is a historical record of design specs and plans. It lives
-# in the repo but is not part of the published site.
+# in the repo but is not part of the published site. docs/snippets/ holds text
+# that several pages include through pymdownx.snippets; it is never a page of
+# its own.
 exclude_docs: |
   superpowers/
+  snippets/
 
 theme:
   name: material

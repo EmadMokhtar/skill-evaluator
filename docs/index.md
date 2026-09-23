@@ -17,25 +17,19 @@ embedding it.
 
 ## Install
 
-```bash
-uv tool install "skill-lens[pydantic-ai]"
-```
+--8<-- "docs/snippets/install.md"
 
-`pip install "skill-lens[pydantic-ai]"` works the same way. The `pydantic-ai` extra is only
-needed to evaluate against a real agent; `skill-lens` on its own is enough for the offline
-default runner. The `langchain` extra installs the LangChain runner and judge the same way;
-the two can be installed together. An installed GitHub Copilot CLI or Claude Code needs no
-extra and no API key: `--runner copilot` or `--runner claude-code` starts the product
-itself, and `judge = "copilot"` or `judge = "claude-code"` in `skill-lens.toml` grades
-rubrics through it — see [Product runners](runners.md#product-runners).
+An installed GitHub Copilot CLI or Claude Code needs no extra and no API key:
+`--runner copilot` or `--runner claude-code` starts the product itself, and
+`judge = "copilot"` or `judge = "claude-code"` in `skill-lens.toml` grades rubrics through
+it — see [Product runners](runners.md#product-runners).
 
 To work on `skill-lens` itself, or to have the example skills to hand, install from a
-checkout instead — every command then runs as `uv run skill-lens ...`:
+checkout as described above. Make the checkout with:
 
 ```bash
 git clone https://github.com/EmadMokhtar/skill-evaluator.git
 cd skill-evaluator
-uv sync                      # add --extra pydantic-ai for the real-agent runner
 ```
 
 ## Where to go next
@@ -51,4 +45,5 @@ uv sync                      # add --extra pydantic-ai for the real-agent runner
 | Understand exit codes and CI behavior | [Gating](gating.md) |
 | Look up an error message you are seeing | [Troubleshooting](troubleshooting.md) |
 | Understand how the tool is built | [Architecture](architecture.md) |
+| Understand how a release is cut and published | [Releasing](releasing.md) |
 | Work on skill-lens itself | [Contributing](contributing.md) |
