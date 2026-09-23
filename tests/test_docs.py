@@ -209,6 +209,16 @@ def test_the_mkdocs_config_parses_with_a_python_name_tag():
     names = [fence["name"] for fence in superfences["custom_fences"]]
     assert "mermaid" in names, f"no mermaid custom fence in mkdocs.yml: {names}"
 
+    # The parsed `format` is None, because the tag-tolerant loader maps every
+    # unknown tag to None -- so the tag itself has to be asserted against the
+    # raw text. Without this, replacing it with a plain string would leave the
+    # test green while every mermaid block silently stopped rendering, and
+    # would remove the only unknown tag in the file, so nothing would notice
+    # _mkdocs_config being swapped back to the strict safe_load.
+    tag = "!!python/name:pymdownx.superfences.fence_code_format"
+    raw = MKDOCS_YML.read_text(encoding="utf-8")
+    assert tag in raw, f"mkdocs.yml no longer carries {tag}"
+
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 

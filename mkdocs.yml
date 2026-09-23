@@ -36,13 +36,14 @@ theme:
 markdown_extensions:
   - admonition
   - tables
-  # toc_depth keeps the invariant headings on invariants.md out of the
-  # sidebar, which would otherwise list every one of them instead of the nine
-  # groups. Python-Markdown still gives each heading an `id` and a permalink,
-  # so a link to #the-delta-is-paired resolves.
+  # No toc_depth: Python-Markdown reads it from the extension config only, so
+  # any value here applies to every page. Setting it to 2 to shorten
+  # invariants.md's sidebar also drops the level-3 entries from
+  # troubleshooting.md, releasing.md, runners.md and four others, where those
+  # subsections are what a reader scans for. invariants.md listing all of its
+  # claims is the right outcome anyway -- it is a page to look things up in.
   - toc:
       permalink: true
-      toc_depth: 2
   # The custom fence renders ```mermaid blocks as diagrams. The
   # `!!python/name:` tag is what MkDocs needs and what a plain SafeLoader
   # refuses; tests/test_docs.py parses this file with a tag-tolerant loader.
