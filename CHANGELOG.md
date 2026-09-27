@@ -1,3 +1,9 @@
+## v0.18.0 (2026-09-27)
+
+### Feat
+
+- follow a moved SKILL.md when resolving --baseline previous (#77)
+
 ## v0.17.0 (2026-09-27)
 
 ### Feat
