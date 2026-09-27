@@ -286,17 +286,24 @@ fails if the two drift apart — so a new invariant is added in both places or n
   release that bumps one and not the other cannot ship an action installing somebody else's
   version.
 - **The two plugin manifests agree, carry the package version, and the portable one declares
-  Agent Plugins 1.0.0.** The repository root is the `skill-lens` plugin: `plugin.json`
+  Agent Plugins 1.0.0.** `plugins/skill-lens/` is the `skill-lens` plugin: `plugin.json`
   (Agent Plugins, read by Copilot, VS Code, Cursor and Codex) and `.claude-plugin/plugin.json`
   (Claude Code) hold the same fields but `$schema`, with equal values. Both versions are
   `skill_lens.__version__`, rewritten by `version_files` entries that gate on `"version":`,
   never on the bare file, because the `$schema` URL spells a version too. The portable file
   uses only the spec's ten top-level fields (client data goes under `extensions`), declares
   `1.0.0` and not the `1.1.0` draft (Codex rejects a version it does not support), and is a
-  regular file (Codex refuses a symlink). `.claude-plugin/marketplace.json` lists `"./"` as
-  the one plugin and spells no version: Claude Code lets `plugin.json` win silently.
-  `tests/test_plugin.py` checks all of it, and that each skill under `skills/` passes the
-  Agent Skills naming rules.
+  regular file (Codex refuses a symlink). The root `.claude-plugin/marketplace.json` lists
+  `./plugins/skill-lens` as the one plugin and spells no version: Claude Code lets
+  `plugin.json` win silently. `tests/test_plugin.py` checks all of it, and that each skill in
+  the plugin passes the Agent Skills naming rules.
+- **The plugin directory holds what a client loads and nothing else.** An install copies
+  `plugins/skill-lens/` whole, so it holds the two manifests, `LICENSE` and `skills/`, and
+  `tests/test_plugin.py` fails on any other tracked file there. `LICENSE` is the root one byte
+  for byte (the install copies nothing above the directory, and MIT asks for its notice in
+  every copy). Nothing in it resolves outside it — a client denies such a path — so the skill
+  lives in the plugin and `.claude/skills/writing-skill-evals` links into it, never the
+  reverse. The directory is named after the plugin.
 - **No long-lived publishing credential exists.** Trusted Publishing only.
 - **A cassette refresh proves its recordings replay, and checks them for secrets, before
   pushing.** It re-records with `--record-mode=rewrite`, never `once` — `once` only fills in a
@@ -687,7 +694,7 @@ Documentation ships **with** the change, never as a follow-up. Two CI jobs enfor
 | An invariant | **both** `docs/invariants.md` (a heading) and this file's condensed list (a bold-led bullet), spelled the same byte for byte — `tests/test_invariants_sync.py` fails otherwise |
 | CI integration, the action, example workflows | `docs/ci.md` |
 | The release pipeline, its one-time setup, or the cassette-refresh workflow | `docs/releasing.md` |
-| The plugin manifests, the marketplace file, or a skill under `skills/` | `docs/writing-evals.md`; both manifests together (`tests/test_plugin.py` fails otherwise) |
+| The plugin manifests, the marketplace file, or anything under `plugins/skill-lens/` | `docs/writing-evals.md`; both manifests together (`tests/test_plugin.py` fails otherwise) |
 | The dependency audit, the `S` lint rules, the exception policy, action pinning, Dependabot, the SBOM, or attestations | `docs/security.md` (and `SECURITY.md` for how to report) |
 | How to install, or a package extra | `docs/snippets/install.md`, which pages include, and the command in `README.md` — `tests/test_docs.py` compares the two |
 | A message quoted in `docs/troubleshooting.md` | the page and `QUOTED` in `tests/test_troubleshooting.py` |

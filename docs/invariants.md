@@ -508,7 +508,7 @@ invariant above.
 
 ### The two plugin manifests agree, carry the package version, and the portable one declares Agent Plugins 1.0.0
 
-The repository root is the `skill-lens` plugin, and it has two manifests because the agents
+`plugins/skill-lens/` is the `skill-lens` plugin, and it has two manifests because the agents
 that install it disagree on where to look. `plugin.json` is the portable
 [Agent Plugins](https://agent-plugins.org/) manifest that Copilot, VS Code, Cursor and Codex
 read; `.claude-plugin/plugin.json` is the one Claude Code reads. They hold the same fields,
@@ -524,12 +524,27 @@ The portable manifest uses only the ten top-level fields the specification allow
 schema is closed, so a client-specific field such as `hooks` belongs under `extensions` — and
 it declares the published `1.0.0` schema, not the `1.1.0` working draft: Codex rejects a
 plugin that declares an Agent Plugins version it does not support. It is a regular file,
-because Codex also refuses a symlinked one. `.claude-plugin/marketplace.json` lists the
-repository root (`"source": "./"`) as the one plugin and spells no version, since Claude Code
-lets the `plugin.json` version win over a marketplace one without a warning.
+because Codex also refuses a symlinked one. `.claude-plugin/marketplace.json`, at the
+repository root, lists `./plugins/skill-lens` as the one plugin and spells no version, since
+Claude Code lets the `plugin.json` version win over a marketplace one without a warning.
 
-`tests/test_plugin.py` asserts each of these, and that every skill under `skills/` meets the
+`tests/test_plugin.py` asserts each of these, and that every skill in the plugin meets the
 Agent Skills naming rules a client checks before it loads one.
+
+### The plugin directory holds what a client loads and nothing else
+
+An install copies `plugins/skill-lens/` whole, so whatever sits in it ships to every user of
+every agent. It holds the two manifests, `LICENSE` and `skills/`, and a tracked file anywhere
+else in it fails `tests/test_plugin.py`. That is what keeps an install at tens of kilobytes
+rather than the whole repository.
+
+`LICENSE` is a copy of the root one, byte for byte: the install copies nothing above the
+plugin directory, and the MIT license asks for its notice in every copy. Nothing in the
+directory resolves outside it either, because a conformant client denies a package path that
+does and the install would not carry its target. So the skill lives in the plugin, and
+`.claude/skills/writing-skill-evals` links *into* it — the repository's own sessions run
+exactly the skill an install delivers — never the other way round. The directory is named
+after the plugin, so the two names never differ in a cache path or an error message.
 
 ### No long-lived publishing credential exists
 

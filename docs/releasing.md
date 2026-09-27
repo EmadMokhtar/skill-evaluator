@@ -185,7 +185,7 @@ A moving major tag starts at 1.0, when the promise behind it becomes true.
 
 ## The plugin's version
 
-The repository root is also the `skill-lens` plugin (see
+`plugins/skill-lens/` is the `skill-lens` plugin (see
 [Writing evals](writing-evals.md#installing-it)), and its two manifests — `plugin.json` and
 `.claude-plugin/plugin.json` — spell the package version. `cz bump` rewrites the `"version":`
 line of each in the same bump commit, so the plugin at tag `vX.Y.Z` is version `X.Y.Z`, and

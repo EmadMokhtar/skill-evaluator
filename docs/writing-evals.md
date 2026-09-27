@@ -14,14 +14,16 @@ evidence could support.
 
 ## Installing it
 
-The skill ships as a plugin named `skill-lens`, and the repository root is that plugin. It
-carries three manifests, so each agent finds the one it reads:
+The skill ships as a plugin named `skill-lens`, in
+[`plugins/skill-lens/`](https://github.com/EmadMokhtar/skill-evaluator/tree/main/plugins/skill-lens).
+An install copies that directory and nothing else — two manifests, the license and the
+skill, about 30 KB. Each agent finds the file it reads:
 
 | File | Read by |
 | --- | --- |
-| `plugin.json` | Clients that implement [Agent Plugins 1.0.0](https://agent-plugins.org/): GitHub Copilot (CLI and VS Code), Cursor, Codex |
-| `.claude-plugin/plugin.json` | Claude Code, which has its own plugin format |
-| `.claude-plugin/marketplace.json` | Claude Code, Copilot CLI, VS Code and Codex, when you add the repository as a marketplace |
+| `plugins/skill-lens/plugin.json` | Clients that implement [Agent Plugins 1.0.0](https://agent-plugins.org/): GitHub Copilot (CLI and VS Code), Cursor, Codex |
+| `plugins/skill-lens/.claude-plugin/plugin.json` | Claude Code, which has its own plugin format |
+| `.claude-plugin/marketplace.json`, at the repository root | Claude Code, Copilot CLI, VS Code and Codex, when you add the repository as a marketplace |
 
 Install it the way your agent installs plugins:
 
@@ -29,15 +31,28 @@ Install it the way your agent installs plugins:
 | --- | --- |
 | Claude Code | `/plugin marketplace add EmadMokhtar/skill-evaluator`, then `/plugin install skill-lens@skill-lens` |
 | GitHub Copilot CLI | `copilot plugin marketplace add EmadMokhtar/skill-evaluator`, then `copilot plugin install skill-lens@skill-lens` |
-| VS Code | Turn on `chat.plugins.enabled`, run **Chat: Install Plugin From Source**, and enter `https://github.com/EmadMokhtar/skill-evaluator` |
+| VS Code | Turn on `chat.plugins.enabled`, add `"EmadMokhtar/skill-evaluator"` to `chat.plugins.marketplaces`, then install `skill-lens` from **Browse Marketplace** |
 | Codex | `codex plugin marketplace add EmadMokhtar/skill-evaluator`, then `codex plugin add skill-lens@skill-lens` |
-| Cursor | `git clone https://github.com/EmadMokhtar/skill-evaluator ~/.cursor/plugins/local/skill-lens`, then **Developer: Reload Window** |
+| Cursor | Copy `plugins/skill-lens/` from a clone to `~/.cursor/plugins/local/skill-lens`, then run **Developer: Reload Window** |
 
-Any other client that implements Agent Plugins 1.0.0 loads the same directory: it reads
-`plugin.json` and discovers the skill in
-[`skills/writing-skill-evals/`](https://github.com/EmadMokhtar/skill-evaluator/tree/main/skills/writing-skill-evals).
-Because the plugin is the repository root, an install copies the whole repository, about
-5 MB; the agent loads only the skill.
+Adding the repository as a marketplace downloads the repository, because the catalog lives
+in it; the install then copies only the plugin directory. Codex can limit that download to
+the two paths it needs:
+
+```bash
+codex plugin marketplace add EmadMokhtar/skill-evaluator \
+  --sparse .claude-plugin --sparse plugins/skill-lens
+```
+
+For Cursor, from any working directory:
+
+```bash
+git clone --depth 1 https://github.com/EmadMokhtar/skill-evaluator
+cp -R skill-evaluator/plugins/skill-lens ~/.cursor/plugins/local/skill-lens
+```
+
+Any other client that implements Agent Plugins 1.0.0 loads `plugins/skill-lens/` the same
+way: it reads `plugin.json` and discovers the skill in `skills/writing-skill-evals/`.
 
 Then ask for it by name, or describe the task — "write evals for my order-support skill".
 Claude Code lists a plugin's skills under the plugin's name, so there it is
@@ -53,7 +68,8 @@ An agent that reads only a skills directory takes the skill itself. Copy or syml
 
 ```bash
 git clone https://github.com/EmadMokhtar/skill-evaluator
-ln -s "$PWD/skill-evaluator/skills/writing-skill-evals" ~/.claude/skills/writing-skill-evals
+ln -s "$PWD/skill-evaluator/plugins/skill-lens/skills/writing-skill-evals" \
+  ~/.claude/skills/writing-skill-evals
 ```
 
 ## Using it
