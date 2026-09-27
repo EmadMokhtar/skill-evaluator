@@ -173,10 +173,6 @@ major_version_zero = true
 # (commands/bump.py: `arguments["check_consistency"]`), never from this file,
 # so writing `check_consistency = true` here would be an inert no-op. The
 # workflow test asserts the flag is on the command.
-#
-# The two plugin manifests gate on `"version":`, never on the bare file: the
-# portable one's `$schema` URL spells a version of its own (the Agent Plugins
-# spec's), which a filename-only entry would rewrite whenever the two coincide.
 version_files = [
     "action.yml:skill-lens\\[pydantic-ai\\]==",
     "docs/ci.md:skill-evaluator@v",
@@ -184,7 +180,5 @@ version_files = [
     "docs/ci.md:skill-lens\\[pydantic-ai,langchain\\]==",
     "docs/getting-started.md:skill-evaluator@v",
     "examples/ci/skill-lens.yml:skill-evaluator@v",
-    "plugins/skill-lens/.claude-plugin/plugin.json:\"version\":",
-    "plugins/skill-lens/plugin.json:\"version\":",
 ]
 bump_message = "bump: version $current_version → $new_version [skip ci]"

@@ -285,25 +285,28 @@ fails if the two drift apart — so a new invariant is added in both places or n
   `skill_lens.__version__`; `test_the_action_pins_the_current_version` checks both, so a
   release that bumps one and not the other cannot ship an action installing somebody else's
   version.
-- **The two plugin manifests agree, carry the package version, and the portable one declares
-  Agent Plugins 1.0.0.** `plugins/skill-lens/` is the `skill-lens` plugin: `plugin.json`
-  (Agent Plugins, read by Copilot, VS Code, Cursor and Codex) and `.claude-plugin/plugin.json`
-  (Claude Code) hold the same fields but `$schema`, with equal values. Both versions are
-  `skill_lens.__version__`, rewritten by `version_files` entries that gate on `"version":`,
-  never on the bare file, because the `$schema` URL spells a version too. The portable file
-  uses only the spec's ten top-level fields (client data goes under `extensions`), declares
-  `1.0.0` and not the `1.1.0` draft (Codex rejects a version it does not support), and is a
-  regular file (Codex refuses a symlink). The root `.claude-plugin/marketplace.json` lists
-  `./plugins/skill-lens` as the one plugin and spells no version: Claude Code lets
-  `plugin.json` win silently. `tests/test_plugin.py` checks all of it, and that each skill in
-  the plugin passes the Agent Skills naming rules.
-- **The plugin directory holds what a client loads and nothing else.** An install copies
-  `plugins/skill-lens/` whole, so it holds the two manifests, `LICENSE` and `skills/`, and
-  `tests/test_plugin.py` fails on any other tracked file there. `LICENSE` is the root one byte
-  for byte (the install copies nothing above the directory, and MIT asks for its notice in
-  every copy). Nothing in it resolves outside it — a client denies such a path — so the skill
-  lives in the plugin and `.claude/skills/writing-skill-evals` links into it, never the
-  reverse. The directory is named after the plugin.
+- **The two plugin manifests agree, spell no version, and the portable one declares Agent
+  Plugins 1.0.0.** `plugins/skill-lens/` is the `skill-lens` plugin: `plugin.json` (Agent
+  Plugins, read by Copilot, VS Code, Cursor and Codex) and `.claude-plugin/plugin.json` (Claude
+  Code) hold the same fields but `$schema`, with equal values. Neither spells a version, nor
+  does the marketplace entry: agents install from the tip of `main` and key their cache on
+  `version`, so a pinned one kept existing installs on old files after any unreleased edit
+  (Claude Code: "already at the latest version"); without one, Claude Code keys on the commit.
+  The portable file uses only the spec's ten top-level fields (client data goes under
+  `extensions`), declares `1.0.0` and not the `1.1.0` draft (Codex rejects a version it does
+  not support), and is a regular file (Codex refuses a symlink). The root
+  `.claude-plugin/marketplace.json` lists `./plugins/skill-lens` as the one plugin.
+  `tests/test_plugin.py` checks all of it, and reads each skill's frontmatter itself for the
+  Agent Skills rules — the loader falls back to the directory name, a client does not.
+- **The plugin directory ships the manifests, the license and the skills, and nothing else.**
+  An install copies `plugins/skill-lens/` whole, so `tests/test_plugin.py` allows only the two
+  manifests, `LICENSE`, and per skill an exactly spelled `SKILL.md`, `references/`,
+  `scripts/`, `assets/` and its own `evals/*.eval.yaml` (skill-lens finds a suite only beside
+  its `SKILL.md`). `LICENSE` is the root one byte for byte (the install copies nothing above
+  the directory, and MIT asks for its notice in every copy). No link in it resolves outside
+  it, dangles or loops, so the skill lives in the plugin and
+  `.claude/skills/writing-skill-evals` links into it, never the reverse. The directory is
+  named after the plugin.
 - **No long-lived publishing credential exists.** Trusted Publishing only.
 - **A cassette refresh proves its recordings replay, and checks them for secrets, before
   pushing.** It re-records with `--record-mode=rewrite`, never `once` — `once` only fills in a

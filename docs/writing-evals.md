@@ -50,11 +50,16 @@ codex plugin marketplace add EmadMokhtar/skill-evaluator \
   --sparse .claude-plugin --sparse plugins/skill-lens
 ```
 
-For Cursor, from any working directory:
+For Cursor, the same commands install it and, run again, update it — they replace the copy
+rather than nesting a new one inside it:
 
 ```bash
-git clone --depth 1 https://github.com/EmadMokhtar/skill-evaluator
-cp -R skill-evaluator/plugins/skill-lens ~/.cursor/plugins/local/skill-lens
+mkdir -p ~/.cursor/plugins/local
+src=$(mktemp -d)
+git clone --depth 1 https://github.com/EmadMokhtar/skill-evaluator "$src"
+rm -rf ~/.cursor/plugins/local/skill-lens
+cp -R "$src/plugins/skill-lens" ~/.cursor/plugins/local/skill-lens
+rm -rf "$src"
 ```
 
 Any other client that implements Agent Plugins 1.0.0 loads `plugins/skill-lens/` the same
@@ -64,19 +69,51 @@ Then ask for it by name, or describe the task — "write evals for my order-supp
 Claude Code lists a plugin's skills under the plugin's name, so there it is
 `skill-lens:writing-skill-evals`.
 
-The plugin's version is the `skill-lens` version it was released with, so the instructions an
-agent loads describe the CLI of that same version. A new `skill-lens` release is a new plugin
-version.
+!!! warning "A Copilot install reaches your Copilot evals"
+    Copilot loads the plugins under `~/.copilot` in every session, including the ones
+    `--runner copilot` starts. Once installed there, this skill is on offer in both arms of a
+    comparison — `--baseline none` included — and in every `mode: offered` menu, beside the
+    skill you are testing. Run Copilot evals from a hermetic home (one that loads nothing from
+    your personal setup), as [Product runners](runners.md#product-runners) describes.
+    `--runner claude-code` is unaffected: it leaves your plugins out.
+
+### Updating it
+
+The plugin carries no version number, on purpose. Agents install it from the tip of `main`,
+not from a release, and treat a version as a cache key: with one pinned, an edit made between
+releases would never reach an install that already exists, while a fresh install got it under
+the same number. Without one, Claude Code keys each install on the commit, so an update always
+fetches the current skill:
+
+| Agent | Update |
+| --- | --- |
+| Claude Code | `claude plugin marketplace update skill-lens`, then `claude plugin update skill-lens@skill-lens` |
+| GitHub Copilot CLI | `copilot plugin update skill-lens` |
+| Codex | `codex plugin marketplace upgrade skill-lens` |
+| Cursor | Run the commands above again |
+
+The skill describes `skill-lens` as it is on `main`, and a merge that changes the CLI is
+released straight away, so keep the CLI itself current (`uv tool upgrade skill-lens`) rather
+than pinned to an old release.
 
 ### Without a plugin manager
 
-An agent that reads only a skills directory takes the skill itself. Copy or symlink it in:
+An agent that reads only a skills directory takes the skill itself. Link it in:
 
 ```bash
 git clone https://github.com/EmadMokhtar/skill-evaluator
-ln -s "$PWD/skill-evaluator/plugins/skill-lens/skills/writing-skill-evals" \
+mkdir -p ~/.claude/skills
+ln -sfn "$PWD/skill-evaluator/plugins/skill-lens/skills/writing-skill-evals" \
   ~/.claude/skills/writing-skill-evals
 ```
+
+The skill used to live in `skills/writing-skill-evals/`. A link made to that path dangles
+after a `git pull`, and the agent drops the skill without an error. The `ln -sfn` line above
+replaces it: `-f` overwrites the old link, and `-n` stops `ln` from following it.
+
+The skill's directory also carries its own eval suite, `evals/writing-skill-evals.eval.yaml`,
+because skill-lens finds a suite only beside the `SKILL.md` it tests. If you copy the skill
+into a repository you run skill-lens on, leave `evals/` behind, or its cases join your gate.
 
 ## Using it
 

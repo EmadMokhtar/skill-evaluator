@@ -506,7 +506,7 @@ equal `skill_lens.__version__`. What keeps the two in step *at release time* —
 `version_files` patterns, and the replay that proves each still rewrites a line — is the
 invariant above.
 
-### The two plugin manifests agree, carry the package version, and the portable one declares Agent Plugins 1.0.0
+### The two plugin manifests agree, spell no version, and the portable one declares Agent Plugins 1.0.0
 
 `plugins/skill-lens/` is the `skill-lens` plugin, and it has two manifests because the agents
 that install it disagree on where to look. `plugin.json` is the portable
@@ -515,36 +515,43 @@ read; `.claude-plugin/plugin.json` is the one Claude Code reads. They hold the s
 except `$schema`, with the same values: a description edited in one alone would describe the
 plugin differently depending on the agent.
 
-Both versions equal `skill_lens.__version__`. The skill documents the CLI, so the plugin is
-released with it, and `version_files` rewrites both `"version":` lines in the bump commit. The
-entries gate on `"version":` rather than on the bare filename, because the portable
-manifest's `$schema` URL spells a version of its own.
+Neither spells a version, and neither does the marketplace entry. The agents install the
+plugin from the tip of `main`, not from a release, and treat `version` as a cache key. Tied
+to the package version, it held existing installs on their old files whenever the skill
+changed between releases — a `docs:` edit to `SKILL.md` releases nothing — while a fresh
+install got the new files under the same number: Claude Code answered "already at the latest
+version" and kept the old copy. With no version, Claude Code keys each install on the commit,
+so every change reaches an existing install at its next update.
 
 The portable manifest uses only the ten top-level fields the specification allows — its
 schema is closed, so a client-specific field such as `hooks` belongs under `extensions` — and
 it declares the published `1.0.0` schema, not the `1.1.0` working draft: Codex rejects a
 plugin that declares an Agent Plugins version it does not support. It is a regular file,
 because Codex also refuses a symlinked one. `.claude-plugin/marketplace.json`, at the
-repository root, lists `./plugins/skill-lens` as the one plugin and spells no version, since
-Claude Code lets the `plugin.json` version win over a marketplace one without a warning.
+repository root, lists `./plugins/skill-lens` as the one plugin.
 
-`tests/test_plugin.py` asserts each of these, and that every skill in the plugin meets the
-Agent Skills naming rules a client checks before it loads one.
+`tests/test_plugin.py` asserts each of these, and reads every skill's frontmatter itself to
+check the Agent Skills rules a client applies before it loads one — skill-lens's own loader
+falls back to the directory name when `name:` is missing, and a client does not.
 
-### The plugin directory holds what a client loads and nothing else
+### The plugin directory ships the manifests, the license and the skills, and nothing else
 
 An install copies `plugins/skill-lens/` whole, so whatever sits in it ships to every user of
-every agent. It holds the two manifests, `LICENSE` and `skills/`, and a tracked file anywhere
-else in it fails `tests/test_plugin.py`. That is what keeps an install at tens of kilobytes
-rather than the whole repository.
+every agent. `tests/test_plugin.py` holds it to the two manifests, `LICENSE`, and per skill its
+`SKILL.md` (spelled exactly), `references/`, `scripts/`, `assets/` and its own
+`evals/*.eval.yaml` suite; any other tracked file there fails, a stray note or a `.DS_Store`
+included. The suite ships because skill-lens finds a suite only beside the `SKILL.md` it
+tests; the docs tell anyone copying the skill into a repository they run skill-lens on to
+leave `evals/` behind.
 
 `LICENSE` is a copy of the root one, byte for byte: the install copies nothing above the
 plugin directory, and the MIT license asks for its notice in every copy. Nothing in the
-directory resolves outside it either, because a conformant client denies a package path that
-does and the install would not carry its target. So the skill lives in the plugin, and
-`.claude/skills/writing-skill-evals` links *into* it — the repository's own sessions run
-exactly the skill an install delivers — never the other way round. The directory is named
-after the plugin, so the two names never differ in a cache path or an error message.
+directory resolves outside it, and no link in it dangles or loops, because a conformant client
+denies a package path that resolves outside the plugin and the install would not carry its
+target. So the skill lives in the plugin, and `.claude/skills/writing-skill-evals` links
+*into* it — the repository's own sessions run exactly the skill an install delivers — never
+the other way round. The directory is named after the plugin, so the two names never differ
+in a cache path or an error message.
 
 ### No long-lived publishing credential exists
 

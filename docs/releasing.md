@@ -183,14 +183,15 @@ Pin an exact tag. There is no floating `v0` tag: under SemVer a `0.x` minor rele
 change behaviour, so a moving tag would carry you across a breaking change without warning.
 A moving major tag starts at 1.0, when the promise behind it becomes true.
 
-## The plugin's version
+## The plugin has no version
 
 `plugins/skill-lens/` is the `skill-lens` plugin (see
-[Writing evals](writing-evals.md#installing-it)), and its two manifests — `plugin.json` and
-`.claude-plugin/plugin.json` — spell the package version. `cz bump` rewrites the `"version":`
-line of each in the same bump commit, so the plugin at tag `vX.Y.Z` is version `X.Y.Z`, and
-every release is a new plugin version to an agent that checks for updates. Nothing publishes
-the plugin separately: the agents install it from the repository.
+[Writing evals](writing-evals.md#installing-it)), and the release pipeline does nothing for it:
+the agents install it from the tip of `main`, not from a release. Neither of its manifests
+spells a version, and none should. An agent treats a version as a cache key, so one tied to
+the package version would hold an existing install on its old files whenever the skill changed
+between releases. Without one, Claude Code keys each install on the commit, and an update
+fetches whatever `main` holds.
 
 ## Refreshing the cassettes
 

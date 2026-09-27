@@ -12,37 +12,34 @@ Three files make it one:
   directory.
 
 An install copies the plugin directory and nothing else, so the directory holds
-what a client loads and nothing else.
+the manifests, the license and the skills, and nothing else.
 
 No test run loads these files through a client, so nothing else would notice
-them drift apart, go stale at a release, or pick up a field a strict client
-refuses.
+them drift apart, pick up a field a strict client refuses, or ship a file
+nobody meant to ship.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
-import subprocess
-import tomllib
 from pathlib import Path
 
-import skill_lens
-from skill_lens.skills.loader import parse_skill_file
+from repo_files import tracked_files
+from skill_lens.yaml_loading import safe_load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PLUGIN_ROOT = REPO_ROOT / "plugins" / "skill-lens"
 # How the marketplace names the plugin directory: relative to the repository
-# root, with the `./` every reader requires of a local source.
+# root, with the `./` every reader requires of a local source. Everything else
+# is derived from it, so the entry and the directory cannot disagree.
 PLUGIN_SOURCE = "./plugins/skill-lens"
+PLUGIN_PREFIX = PLUGIN_SOURCE.removeprefix("./") + "/"  # as git spells it, `/` on every OS
+PLUGIN_ROOT = REPO_ROOT / PLUGIN_PREFIX
 PORTABLE = PLUGIN_ROOT / "plugin.json"
 CLAUDE = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"
 MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 SKILLS_DIR = PLUGIN_ROOT / "skills"
-
-# Everything an install copies: the two manifests, the license, and the skills.
-PLUGIN_FILES = {"plugin.json", ".claude-plugin/plugin.json", "LICENSE"}
-PLUGIN_DIRS = ("skills/",)
 
 # 1.0.0 is the published release; 1.1.0 is a working draft. Codex supports
 # exactly this identifier and rejects a plugin declaring any other Agent Plugins
@@ -62,7 +59,7 @@ PORTABLE_FIELDS = {
     "keywords",
     "extensions",
 }
-PORTABLE_STRING_FIELDS = ("version", "description", "homepage", "repository", "license")
+PORTABLE_STRING_FIELDS = ("description", "homepage", "repository", "license")
 AUTHOR_FIELDS = {"name", "email", "url"}
 
 # Spec §5.5, as the official schema spells it.
@@ -71,41 +68,51 @@ PLUGIN_NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?
 # The Agent Skills `name` rule: lowercase alphanumerics and single hyphens,
 # neither first nor last, at most 64 characters.
 SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
 
-# Same archive exclusion as tests/test_release_config.py: a manifest quoted in a
-# plan is a record, not a file a release keeps current.
-EXCLUDED_DIRS = ("docs/superpowers/",)
+# What an install copies, relative to the plugin directory: the two manifests
+# and the license, then per skill its SKILL.md, the Agent Skills bundle
+# directories, and the skill's own eval suite -- which ships because skill-lens
+# finds a suite only beside the SKILL.md it tests.
+PLUGIN_FILES = {"plugin.json", ".claude-plugin/plugin.json", "LICENSE"}
+SKILL_FILE = "SKILL.md"
+SKILL_BUNDLE_DIRS = ("references/", "scripts/", "assets/")
+SKILL_SUITE_RE = re.compile(r"evals/[^/]+\.eval\.yaml")
 
 
 def _load(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _tracked_files() -> list[str]:
-    return subprocess.run(
-        ["git", "ls-files"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split()
-
-
-def _tracked_plugin_manifests() -> list[str]:
+def _shipped() -> list[str]:
+    """The tracked files an install copies, relative to the plugin directory."""
     return [
-        name
-        for name in _tracked_files()
-        if Path(name).name == "plugin.json" and not name.startswith(EXCLUDED_DIRS)
+        name.removeprefix(PLUGIN_PREFIX)
+        for name in tracked_files()
+        if name.startswith(PLUGIN_PREFIX)
     ]
 
 
-def _version_file_patterns() -> dict[str, list[re.Pattern]]:
-    config = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    patterns: dict[str, list[re.Pattern]] = {}
-    for entry in config["tool"]["commitizen"]["version_files"]:
-        name, _, regex = entry.partition(":")
-        patterns.setdefault(name, []).append(re.compile(regex))
-    return patterns
+def _skill_names() -> list[str]:
+    return sorted(
+        {
+            name.split("/")[1]
+            for name in _shipped()
+            if name.startswith("skills/") and name.count("/") >= 2
+        }
+    )
+
+
+def _is_skill_file(name: str) -> bool:
+    parts = name.split("/", 2)
+    if len(parts) != 3 or parts[0] != "skills":
+        return False
+    inside = parts[2]
+    return (
+        inside == SKILL_FILE
+        or inside.startswith(SKILL_BUNDLE_DIRS)
+        or SKILL_SUITE_RE.fullmatch(inside) is not None
+    )
 
 
 def test_the_portable_manifest_declares_agent_plugins_1_0_0():
@@ -144,34 +151,18 @@ def test_both_manifests_describe_the_same_plugin():
         assert claude[field] == portable[field], f"{field} differs between the two manifests"
 
 
-def test_the_plugin_carries_the_package_version():
-    # The skill documents the CLI, so the plugin is released with it: an agent
-    # sees an update exactly when a new skill-lens version ships.
+def test_the_plugin_spells_no_version():
+    """Agents install the plugin from the tip of `main`, not from a release
+    tag, and treat `version` as a cache key. With one pinned, an edit that
+    ships without a release never reaches an existing install: Claude Code
+    answers "already at the latest version" and keeps the old files, while a
+    fresh install gets the new ones under the same number. With none, Claude
+    Code keys each install on the commit, so every change reaches an existing
+    install at its next update."""
     for path in (PORTABLE, CLAUDE):
-        assert _load(path)["version"] == skill_lens.__version__, path.relative_to(REPO_ROOT)
-
-
-def test_every_plugin_manifest_is_bumped_with_the_package():
-    """A manifest cz bump does not rewrite spells a stale version at the first
-    release. Every tracked `plugin.json` is checked, so a manifest added for
-    another client later is covered the moment it exists.
-
-    That a listed pattern still rewrites a line carrying the current version at
-    release time is `tests/test_release_config.py`'s replay; this test proves
-    the version line has a pattern at all.
-    """
-    manifests = _tracked_plugin_manifests()
-    expected = {str(path.relative_to(REPO_ROOT)) for path in (PORTABLE, CLAUDE)}
-    assert expected <= set(manifests)
-    patterns = _version_file_patterns()
-    uncovered = []
-    for name in manifests:
-        lines = (REPO_ROOT / name).read_text(encoding="utf-8").splitlines()
-        version_lines = [line for line in lines if re.match(r'\s*"version"\s*:', line)]
-        assert len(version_lines) == 1, f"{name} must spell its version on exactly one line"
-        if not any(pattern.search(version_lines[0]) for pattern in patterns.get(name, [])):
-            uncovered.append(name)
-    assert not uncovered, f"no version_files pattern rewrites the version line of: {uncovered}"
+        assert "version" not in _load(path), path.relative_to(REPO_ROOT).as_posix()
+    [entry] = _load(MARKETPLACE)["plugins"]
+    assert "version" not in entry
 
 
 def test_the_marketplace_lists_the_plugin_directory():
@@ -182,11 +173,7 @@ def test_the_marketplace_lists_the_plugin_directory():
     [entry] = marketplace["plugins"]
     assert entry["name"] == plugin["name"]
     assert entry["source"] == PLUGIN_SOURCE
-    assert (REPO_ROOT / PLUGIN_SOURCE).resolve() == PLUGIN_ROOT.resolve()
     assert entry["description"] == plugin["description"]
-    # Claude Code lets the plugin.json version win silently over a marketplace
-    # one, so a second spelling here could only ever be the stale one.
-    assert "version" not in entry
 
 
 def test_the_plugin_directory_is_named_after_the_plugin():
@@ -195,18 +182,28 @@ def test_the_plugin_directory_is_named_after_the_plugin():
     assert PLUGIN_ROOT.name == _load(PORTABLE)["name"]
 
 
-def test_the_plugin_directory_holds_what_a_client_loads_and_nothing_else():
+def test_the_plugin_directory_ships_the_manifests_the_license_and_the_skills_only():
     """An install copies this directory whole, so anything added here ships to
-    every user of every agent. Keeping it to the manifests, the license and the
-    skills is what keeps an install small."""
-    prefix = str(PLUGIN_ROOT.relative_to(REPO_ROOT)) + "/"
-    shipped = [name.removeprefix(prefix) for name in _tracked_files() if name.startswith(prefix)]
-    unexpected = sorted(
-        name for name in shipped if name not in PLUGIN_FILES and not name.startswith(PLUGIN_DIRS)
-    )
-    assert not unexpected, f"not a manifest, the license or a skill: {unexpected}"
+    every user of every agent. Inside `skills/` only the Agent Skills layout and
+    each skill's own eval suite are allowed: a stray note, a `.DS_Store` or a
+    misspelt `Skill.md` fails here rather than shipping."""
+    shipped = _shipped()
     missing = sorted(PLUGIN_FILES - set(shipped))
     assert not missing, f"the plugin directory is missing: {missing}"
+    unexpected = sorted(
+        name for name in shipped if name not in PLUGIN_FILES and not _is_skill_file(name)
+    )
+    assert not unexpected, f"not a manifest, the license or part of a skill: {unexpected}"
+
+
+def test_every_skill_directory_has_its_skill_md():
+    # Spelled exactly, as git records it: a case-insensitive disk would find a
+    # `Skill.md` that a client on Linux skips.
+    shipped = set(_shipped())
+    skills = _skill_names()
+    assert skills, "the plugin ships no skill"
+    missing = [name for name in skills if f"skills/{name}/{SKILL_FILE}" not in shipped]
+    assert not missing, f"skill directories without an exact {SKILL_FILE}: {missing}"
 
 
 def test_the_plugin_ships_the_repository_license():
@@ -215,27 +212,43 @@ def test_the_plugin_ships_the_repository_license():
     assert (PLUGIN_ROOT / "LICENSE").read_bytes() == (REPO_ROOT / "LICENSE").read_bytes()
 
 
-def test_every_shipped_skill_is_one_a_plugin_client_loads():
-    """Clients discover skills only as immediate children of `skills/` and skip
-    one that breaks the Agent Skills rules, so a bad name would drop the skill
-    from every install without an error anyone sees."""
-    skill_dirs = sorted(path for path in SKILLS_DIR.iterdir() if (path / "SKILL.md").is_file())
-    assert skill_dirs, "the plugin ships no skill"
-    for skill_dir in skill_dirs:
-        skill = parse_skill_file(skill_dir / "SKILL.md")
-        assert skill.name == skill_dir.name, f"{skill_dir.name}: name must match its directory"
-        assert len(skill.name) <= 64 and SKILL_NAME_RE.fullmatch(skill.name), skill.name
-        assert 1 <= len(skill.description) <= 1024, f"{skill.name}: description length"
+def test_every_shipped_skill_meets_the_agent_skills_rules():
+    """A client skips a skill that breaks the Agent Skills rules, so a bad name
+    would drop it from every install without an error anyone sees. The
+    frontmatter is read directly: skill-lens's own loader falls back to the
+    directory name when `name:` is missing, which a client does not."""
+    for directory in _skill_names():
+        text = (SKILLS_DIR / directory / SKILL_FILE).read_text(encoding="utf-8")
+        match = FRONTMATTER_RE.match(text)
+        assert match, f"{directory}: {SKILL_FILE} has no frontmatter"
+        meta = safe_load(match.group(1))
+        assert isinstance(meta, dict), f"{directory}: frontmatter is not a mapping"
+        name = meta.get("name")
+        assert name == directory, f"{directory}: `name` is {name!r}, not the directory's name"
+        assert len(name) <= 64 and SKILL_NAME_RE.fullmatch(name), name
+        description = meta.get("description")
+        assert isinstance(description, str), f"{directory}: `description` is missing"
+        assert 1 <= len(description.strip()) <= 1024, f"{directory}: description length"
 
 
 def test_nothing_in_the_plugin_resolves_outside_it():
     # A conformant client denies any package path that resolves outside the
     # plugin root, and an install copies only the plugin directory, so a symlink
-    # out of it installs as a missing file.
+    # out of it -- or to nothing -- installs as a missing file.
     root = PLUGIN_ROOT.resolve()
-    escaping = [
-        str(path.relative_to(REPO_ROOT))
-        for path in PLUGIN_ROOT.rglob("*")
-        if path.is_symlink() and not path.resolve().is_relative_to(root)
-    ]
-    assert not escaping, f"resolves outside the plugin directory: {escaping}"
+    offending = []
+    for directory, dirnames, filenames in os.walk(PLUGIN_ROOT, followlinks=False):
+        for entry in dirnames + filenames:
+            path = Path(directory) / entry
+            if not path.is_symlink():
+                continue
+            shown = path.relative_to(REPO_ROOT).as_posix()
+            try:
+                target = path.resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                # A dangling link, or a loop: RuntimeError on 3.11/3.12, ELOOP after.
+                offending.append(f"{shown} ({exc})")
+                continue
+            if not target.is_relative_to(root):
+                offending.append(shown)
+    assert not offending, f"resolves outside the plugin directory: {offending}"
