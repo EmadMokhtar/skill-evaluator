@@ -183,6 +183,15 @@ Pin an exact tag. There is no floating `v0` tag: under SemVer a `0.x` minor rele
 change behaviour, so a moving tag would carry you across a breaking change without warning.
 A moving major tag starts at 1.0, when the promise behind it becomes true.
 
+## The plugin's version
+
+The repository root is also the `skill-lens` plugin (see
+[Writing evals](writing-evals.md#installing-it)), and its two manifests — `plugin.json` and
+`.claude-plugin/plugin.json` — spell the package version. `cz bump` rewrites the `"version":`
+line of each in the same bump commit, so the plugin at tag `vX.Y.Z` is version `X.Y.Z`, and
+every release is a new plugin version to an agent that checks for updates. Nothing publishes
+the plugin separately: the agents install it from the repository.
+
 ## Refreshing the cassettes
 
 The replay test tier runs against recorded provider traffic. When the provider's responses

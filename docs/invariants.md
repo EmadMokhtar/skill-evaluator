@@ -506,6 +506,31 @@ equal `skill_lens.__version__`. What keeps the two in step *at release time* —
 `version_files` patterns, and the replay that proves each still rewrites a line — is the
 invariant above.
 
+### The two plugin manifests agree, carry the package version, and the portable one declares Agent Plugins 1.0.0
+
+The repository root is the `skill-lens` plugin, and it has two manifests because the agents
+that install it disagree on where to look. `plugin.json` is the portable
+[Agent Plugins](https://agent-plugins.org/) manifest that Copilot, VS Code, Cursor and Codex
+read; `.claude-plugin/plugin.json` is the one Claude Code reads. They hold the same fields,
+except `$schema`, with the same values: a description edited in one alone would describe the
+plugin differently depending on the agent.
+
+Both versions equal `skill_lens.__version__`. The skill documents the CLI, so the plugin is
+released with it, and `version_files` rewrites both `"version":` lines in the bump commit. The
+entries gate on `"version":` rather than on the bare filename, because the portable
+manifest's `$schema` URL spells a version of its own.
+
+The portable manifest uses only the ten top-level fields the specification allows — its
+schema is closed, so a client-specific field such as `hooks` belongs under `extensions` — and
+it declares the published `1.0.0` schema, not the `1.1.0` working draft: Codex rejects a
+plugin that declares an Agent Plugins version it does not support. It is a regular file,
+because Codex also refuses a symlinked one. `.claude-plugin/marketplace.json` lists the
+repository root (`"source": "./"`) as the one plugin and spells no version, since Claude Code
+lets the `plugin.json` version win over a marketplace one without a warning.
+
+`tests/test_plugin.py` asserts each of these, and that every skill under `skills/` meets the
+Agent Skills naming rules a client checks before it loads one.
+
 ### No long-lived publishing credential exists
 
 PyPI accepts the upload because the job proves its identity with a short-lived token

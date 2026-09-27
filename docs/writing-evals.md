@@ -14,19 +14,52 @@ evidence could support.
 
 ## Installing it
 
-The skill lives in [`skills/writing-skill-evals/`](https://github.com/EmadMokhtar/skill-evaluator/tree/main/skills/writing-skill-evals).
-Copy or symlink it into the skills directory your agent reads:
+The skill ships as a plugin named `skill-lens`, and the repository root is that plugin. It
+carries three manifests, so each agent finds the one it reads:
+
+| File | Read by |
+| --- | --- |
+| `plugin.json` | Clients that implement [Agent Plugins 1.0.0](https://agent-plugins.org/): GitHub Copilot (CLI and VS Code), Cursor, Codex |
+| `.claude-plugin/plugin.json` | Claude Code, which has its own plugin format |
+| `.claude-plugin/marketplace.json` | Claude Code, Copilot CLI, VS Code and Codex, when you add the repository as a marketplace |
+
+Install it the way your agent installs plugins:
+
+| Agent | Install |
+| --- | --- |
+| Claude Code | `/plugin marketplace add EmadMokhtar/skill-evaluator`, then `/plugin install skill-lens@skill-lens` |
+| GitHub Copilot CLI | `copilot plugin marketplace add EmadMokhtar/skill-evaluator`, then `copilot plugin install skill-lens@skill-lens` |
+| VS Code | Turn on `chat.plugins.enabled`, run **Chat: Install Plugin From Source**, and enter `https://github.com/EmadMokhtar/skill-evaluator` |
+| Codex | `codex plugin marketplace add EmadMokhtar/skill-evaluator`, then `codex plugin add skill-lens@skill-lens` |
+| Cursor | `git clone https://github.com/EmadMokhtar/skill-evaluator ~/.cursor/plugins/local/skill-lens`, then **Developer: Reload Window** |
+
+Any other client that implements Agent Plugins 1.0.0 loads the same directory: it reads
+`plugin.json` and discovers the skill in
+[`skills/writing-skill-evals/`](https://github.com/EmadMokhtar/skill-evaluator/tree/main/skills/writing-skill-evals).
+Because the plugin is the repository root, an install copies the whole repository, about
+5 MB; the agent loads only the skill.
+
+Then ask for it by name, or describe the task — "write evals for my order-support skill".
+Claude Code lists a plugin's skills under the plugin's name, so there it is
+`skill-lens:writing-skill-evals`.
+
+The plugin's version is the `skill-lens` version it was released with, so the instructions an
+agent loads describe the CLI of that same version. A new `skill-lens` release is a new plugin
+version.
+
+### Without a plugin manager
+
+An agent that reads only a skills directory takes the skill itself. Copy or symlink it in:
 
 ```bash
 git clone https://github.com/EmadMokhtar/skill-evaluator
 ln -s "$PWD/skill-evaluator/skills/writing-skill-evals" ~/.claude/skills/writing-skill-evals
 ```
 
-Then ask for it by name, or describe the task — "write evals for my order-support skill".
-
 ## Using it
 
-It expects `skill-lens` on `PATH`:
+The plugin installs the skill, not the command-line tool. The skill expects `skill-lens` on
+`PATH`:
 
 --8<-- "docs/snippets/install.md"
 
