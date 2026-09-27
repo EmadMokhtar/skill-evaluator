@@ -723,7 +723,8 @@ scripts for a skill you would not run by hand. See
 `assets/` come from git too, so the old instructions are never paired with the new scripts.
 They are extracted — `git archive`, then `tarfile` with its `data` filter, which is why
 skill-lens requires Python 3.11.4 or later — from the commit that last edited `SKILL.md` at
-the previous version, into a temporary directory that is deleted when the run ends, however
+the previous version, out of the directory the skill had then (it may have moved since), into
+a temporary directory that is deleted when the run ends, however
 it ends; `--keep-workspace` does not keep it, because a baseline bundle is an input, not an
 output.
 

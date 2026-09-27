@@ -10,12 +10,14 @@ for provider failures.
 from __future__ import annotations
 
 import io
+import os
+import re
 import shutil
 import subprocess
 import tarfile
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from skill_lens.bundle import BUNDLE_DIRS
 from skill_lens.models import Skill
@@ -29,6 +31,9 @@ HISTORY_LIMIT = 50
 
 # A hung git must not hang CI.
 GIT_TIMEOUT_SECONDS = 10
+
+# A full object name: SHA-1, or SHA-256 in a repository that uses it.
+_OBJECT_NAME = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 
 @dataclass(frozen=True)
@@ -77,24 +82,109 @@ def _qualifies(previous: Skill, working: Skill, previous_text: str, working_text
     return previous_text != working_text
 
 
-def _materialise_bundle(skill: Skill, sha: str, into: Path) -> Path | None | BaselineUnavailable:
+def _literal(path: str) -> str:
+    """A pathspec matching `path` and nothing else.
+
+    `[`, `*` and `?` are glob syntax in a plain pathspec, and a directory may be
+    named with any of them.
+    """
+    return f":(literal){path}"
+
+
+def _history(top: Path, rev: str, path: str, limit: int) -> list[tuple[str, str]]:
+    """The commits reachable from `rev` that touched `path`, newest first.
+
+    Each comes with the status git gives the file in that commit -- `A` where
+    the commit created it -- or `""` for a merge, which git log shows without
+    a diff. Paths come back quoted in this output, so only the status letter is
+    read from those lines; the path is the one asked for.
+    """
+    out = _git(
+        [
+            "log",
+            f"--max-count={limit}",
+            "--format=%H",
+            "--name-status",
+            "--no-renames",
+            rev,
+            "--",
+            _literal(path),
+        ],
+        cwd=top,
+    )
+    entries: list[tuple[str, str]] = []
+    for line in (out or "").splitlines():
+        if _OBJECT_NAME.fullmatch(line):
+            entries.append((line, ""))
+        elif "\t" in line and entries and not entries[-1][1]:
+            entries[-1] = (entries[-1][0], line.split("\t", 1)[0])
+    return entries
+
+
+def _moved_from(top: Path, sha: str, path: str) -> str | None:
+    """Where commit `sha` moved `path` from, if it moved the file byte for byte.
+
+    `--find-renames=100%` pairs a deleted file with an added one only when
+    their contents are identical, and a copy -- whose source still exists --
+    is never a rename. That is the whole defence against borrowing another
+    skill's history:
+    `git log --follow` follows copies too, and by similarity, so a SKILL.md
+    started from another skill's file would inherit that skill's old versions.
+    A move that also edited the file is therefore not followed, and resolution
+    reports that it found nothing rather than guess.
+    """
+    raw = _git_bytes(
+        ["diff-tree", "-z", "-r", "--find-renames=100%", "--name-status", f"{sha}^", sha], cwd=top
+    )
+    if raw is None:
+        return None
+    fields = [os.fsdecode(field) for field in raw.split(b"\0")]
+    index = 0
+    while index + 1 < len(fields) and fields[index]:
+        status = fields[index]
+        if status[0] in "RC":
+            if index + 2 >= len(fields):
+                return None
+            source, destination = fields[index + 1], fields[index + 2]
+            if status == "R100" and destination == path:
+                return source
+            index += 3
+        else:
+            index += 2
+    return None
+
+
+def _materialise_bundle(
+    skill: Skill, sha: str, directory: str, top: Path, into: Path
+) -> Path | None | BaselineUnavailable:
     """The commit's bundle directories, extracted under `into`.
 
-    `git archive <sha> -- .` from the skill directory yields the subtree with
-    paths relative to it (`scripts/x.py`), which is what makes filtering on the
-    first path component possible. `filter="data"` is the safe extraction
-    filter: no absolute paths, no `..`, no link escaping the target. A commit
-    with none of the three directories yields None -- the baseline then gets
-    no bundle tools, never the candidate's.
+    `directory` is where the skill lived *at that commit*, relative to the
+    repository root -- `""` at the root -- which is not where it lives now if
+    the skill has moved since. `git archive <sha> -- <directory>`, run from the
+    root, names each member by its full path; the directory prefix is stripped
+    so that filtering on the first component (`scripts/x.py`) works.
+    `filter="data"` is the safe extraction filter: no absolute paths, no `..`,
+    no link escaping the target. A commit with none of the three directories
+    yields None -- the baseline then gets no bundle tools, never the
+    candidate's.
     """
-    archive = _git_bytes(["archive", "--format=tar", sha, "--", "."], cwd=skill.path)
+    spec = _literal(directory) if directory else "."
+    archive = _git_bytes(["archive", "--format=tar", sha, "--", spec], cwd=top)
     if archive is None:
         return BaselineUnavailable(skill.name, f"cannot archive commit {sha[:8]}")
+    prefix = f"{directory}/" if directory else ""
     try:
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
-            members = [
-                member for member in tar.getmembers() if member.name.split("/", 1)[0] in BUNDLE_DIRS
-            ]
+            members = []
+            for member in tar.getmembers():
+                if not member.name.startswith(prefix):
+                    continue
+                relative = member.name[len(prefix) :]
+                if relative.split("/", 1)[0] not in BUNDLE_DIRS:
+                    continue
+                member.name = relative
+                members.append(member)
             if not members:
                 return None
             target = Path(tempfile.mkdtemp(prefix=f"{sanitise_label(skill.name)}-", dir=into))
@@ -110,8 +200,33 @@ def _materialise_bundle(skill: Skill, sha: str, into: Path) -> Path | None | Bas
     return target.resolve()
 
 
+def _version_at(skill: Skill, top: Path, sha: str, path: str) -> tuple[Skill, str] | None:
+    """The skill as `path` held it at `sha`, with its text, or None."""
+    blob = _git(["show", f"{sha}:{path}"], cwd=top)
+    if blob is None:
+        return None
+    try:
+        previous = parse_skill_text(
+            blob,
+            name_fallback=skill.path.name,
+            path=skill.path,
+            source=f"{path} at commit {sha[:8]}",
+        )
+    except SkillParseError:
+        # A historical version with broken frontmatter is not an authoring
+        # error about the skill under test. Keep looking.
+        return None
+    return previous, blob
+
+
 def resolve_previous(skill: Skill, *, into: Path) -> Skill | BaselineUnavailable:
     """The newest earlier version of `skill`, or why there isn't one.
+
+    The search walks the commits that touched `SKILL.md` at its current path,
+    newest first. Where one of them created that path by moving the file there
+    byte for byte, it carries on from the old path, before the move; any other
+    creation is where this file's history begins. `HISTORY_LIMIT` bounds the
+    commits read across every path together.
 
     `into` is the run's baseline-bundle directory (see the orchestrator's
     `_BaselineStore`): the previous bundle is extracted into a fresh
@@ -128,37 +243,42 @@ def resolve_previous(skill: Skill, *, into: Path) -> Skill | BaselineUnavailable
 
     if shutil.which("git") is None:
         return BaselineUnavailable(skill.name, "git is not installed")
-    if _git(["rev-parse", "--show-toplevel"], cwd=skill.path) is None:
+    toplevel = _git_bytes(["rev-parse", "--show-toplevel"], cwd=skill.path)
+    prefix = _git_bytes(["rev-parse", "--show-prefix"], cwd=skill.path)
+    if toplevel is None or prefix is None:
         return BaselineUnavailable(skill.name, f"{skill.path} is not inside a git repository")
     if _git(["ls-files", "--error-unmatch", SKILL_FILENAME], cwd=skill.path) is None:
         return BaselineUnavailable(skill.name, f"{SKILL_FILENAME} is not tracked by git")
 
-    log = _git(
-        ["log", f"--max-count={HISTORY_LIMIT}", "--format=%H", "--", SKILL_FILENAME],
-        cwd=skill.path,
-    )
-    for sha in (log or "").split():
-        # `<sha>:./<file>` resolves the path relative to cwd, which is the
-        # skill's directory -- not the repository root.
-        blob = _git(["show", f"{sha}:./{SKILL_FILENAME}"], cwd=skill.path)
-        if blob is None:
-            continue
-        try:
-            previous = parse_skill_text(
-                blob,
-                name_fallback=skill.path.name,
-                path=skill.path,
-                source=f"{SKILL_FILENAME} at commit {sha[:8]}",
-            )
-        except SkillParseError:
-            # A historical version with broken frontmatter is not an authoring
-            # error about the skill under test. Keep looking.
-            continue
-        if _qualifies(previous, skill, blob, working_text):
-            bundle_root = _materialise_bundle(skill, sha, into)
-            if isinstance(bundle_root, BaselineUnavailable):
-                return bundle_root
-            return previous.model_copy(update={"variant": "baseline", "bundle_root": bundle_root})
+    # From here on every command runs at the repository root with root-relative
+    # paths, because an earlier path may name a directory that no longer exists.
+    top = Path(os.fsdecode(toplevel.rstrip(b"\n")))
+    path = os.fsdecode(prefix.rstrip(b"\n")) + SKILL_FILENAME
+    rev = "HEAD"
+    remaining = HISTORY_LIMIT
+    while remaining > 0:
+        moved_from = None
+        for sha, status in _history(top, rev, path, remaining):
+            remaining -= 1
+            found = _version_at(skill, top, sha, path)
+            if found is not None and _qualifies(found[0], skill, found[1], working_text):
+                directory = str(PurePosixPath(path).parent)
+                bundle_root = _materialise_bundle(
+                    skill, sha, "" if directory == "." else directory, top, into
+                )
+                if isinstance(bundle_root, BaselineUnavailable):
+                    return bundle_root
+                return found[0].model_copy(
+                    update={"variant": "baseline", "bundle_root": bundle_root}
+                )
+            if status == "A":
+                moved_from = _moved_from(top, sha, path)
+                if moved_from is not None:
+                    rev = f"{sha}^"
+                    break
+        if moved_from is None:
+            break
+        path = moved_from
 
     return BaselineUnavailable(
         skill.name,
