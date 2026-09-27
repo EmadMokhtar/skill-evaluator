@@ -35,11 +35,17 @@ Install it the way your agent installs plugins:
 | Codex | `codex plugin marketplace add EmadMokhtar/skill-evaluator`, then `codex plugin add skill-lens@skill-lens` |
 | Cursor | Copy `plugins/skill-lens/` from a clone to `~/.cursor/plugins/local/skill-lens`, then run **Developer: Reload Window** |
 
-Adding the repository as a marketplace downloads the repository, because the catalog lives
-in it; the install then copies only the plugin directory. Codex can limit that download to
-the two paths it needs:
+Adding the repository as a marketplace downloads the repository, a few megabytes, because
+the catalog lives in it; the install then copies only the plugin directory. Claude Code and
+Codex can limit that download to the two paths the catalog and the plugin need, which cuts it
+to a fraction:
 
 ```bash
+# Claude Code, from the terminal
+claude plugin marketplace add EmadMokhtar/skill-evaluator \
+  --sparse .claude-plugin plugins/skill-lens
+
+# Codex
 codex plugin marketplace add EmadMokhtar/skill-evaluator \
   --sparse .claude-plugin --sparse plugins/skill-lens
 ```
