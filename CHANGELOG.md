@@ -1,3 +1,9 @@
+## v0.17.0 (2026-09-27)
+
+### Feat
+
+- ship the eval-writing skill as an Agent Plugin (#76)
+
 ## v0.16.0 (2026-09-22)
 
 ### Feat
