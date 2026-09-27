@@ -308,6 +308,30 @@ untracked `SKILL.md`, an exhausted history window. Each comes back as a
 provider failures. Subprocesses run without a shell, decode as UTF-8, and carry a timeout,
 so a hung `git` cannot hang CI.
 
+### A previous baseline follows a byte-for-byte move of `SKILL.md`, and nothing looser
+
+`git log -- SKILL.md` stops at the commit that created the file's current path, so a skill
+whose directory moved lost every earlier version, and `--min-delta` failed on it until its
+next edit. `resolve_previous` carries on from the old path when — and only when — the commit
+that created the current path moved `SKILL.md` there unchanged: `git diff-tree
+--find-renames=100%` against that commit's first parent reports a rename, `R100`, onto this
+exact path.
+
+A copy is never followed, not even one whose source is deleted in a later commit, and neither
+is a move that edited the file in the same commit. Both come back as "no earlier version",
+which the report explains, never as another file's history. That rules out `git log
+--follow`: it follows copies as well as renames, and matches by similarity, so a skill
+started from another skill's `SKILL.md` would silently be measured against that skill's old
+instructions.
+
+Every path is read from the repository root as a literal pathspec — `[` and `*` are glob
+syntax otherwise, and a glob would let a sibling directory's commits use up the history — the
+bundle comes from the directory the skill had at the resolved commit, and `HISTORY_LIMIT`
+counts commits across every path together. `tests/test_baseline_resolution.py` pins each
+case: one move and two, a move out of the repository root, an old name that needs quoting, a
+skill reached through a symlink, a copy, a copy whose source is deleted later, an edited
+move, an unrelated move in the creating commit, and the limit spanning a move.
+
 ### A `version:` that YAML does not parse as a string is an authoring error
 
 `SkillParseError`, exit 2. YAML resolves `1.20` and `1.2` to the same float, so two
@@ -915,9 +939,11 @@ backend's limits.
 
 ### A previous baseline carries its own bundle
 
-A previous baseline carries its own bundle, extracted with `git archive <sha> -- .` from the
-skill directory (verified: that form gives subtree-relative paths; `<sha>:./` gives an empty
-archive), filtered to the three directories, with `tarfile`'s `data` filter — which is why
+A previous baseline carries its own bundle, extracted with `git archive <sha> --
+:(literal)<dir>` run from the repository root, where `<dir>` is the directory the skill had
+*at that commit* — after a move it no longer exists in the checkout, so there is nowhere to
+run `git archive <sha> -- .` from — and the `<dir>/` prefix stripped from every member
+(verified: `<sha>:./` gives an empty archive). It is then filtered to the three directories, with `tarfile`'s `data` filter — which is why
 `requires-python` is `>=3.11.4`, the release that added `filter=`. The commit is the one
 that last edited `SKILL.md` at the previous version — the version is the authority — so a
 bundle-only commit after it is invisible, and a very large historical `assets/` can hit the

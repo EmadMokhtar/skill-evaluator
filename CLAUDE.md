@@ -199,6 +199,15 @@ fails if the two drift apart — so a new invariant is added in both places or n
   about the eval suite, not verdicts on the skill.
 - **`resolve_previous` never raises for environmental failures** — no `git`, no repo, an
   untracked `SKILL.md`, an exhausted history window all come back as `BaselineUnavailable`.
+- **A previous baseline follows a byte-for-byte move of `SKILL.md`, and nothing looser.** Where
+  the commit that created `SKILL.md`'s current path moved it there unchanged (`git diff-tree
+  --find-renames=100%` against the first parent reports `R100` onto this exact path),
+  `resolve_previous`
+  carries on from the old path. A copy is never followed, even one whose source is deleted
+  later, nor a move that edited the file in the same commit: both are "no earlier version",
+  never another file's history. So never `git log --follow`, which follows copies and matches
+  by similarity. Paths are root-relative literal pathspecs, the bundle comes from the
+  directory the skill had then, and `HISTORY_LIMIT` counts commits across every path.
 - **Deterministic evaluators emit per-check verdicts.** Ids come from the case, never the
   result, so the same id names the same check in both arms: `{kind}[{index}]` for assertions,
   `called:{tool}` / `forbidden:{tool}` / `order` / `max_calls` / `skill_triggered` /
@@ -619,8 +628,9 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **`bwrap` does not block Unix-domain sockets** (`/var/run/docker.sock`); macOS's
   `(deny network*)` does. Documented in the Linux row and the guarantee paragraph.
 - **A previous baseline carries its own bundle** from the commit that last edited `SKILL.md`
-  at the previous version (`git archive <sha> -- .` from the skill directory — `<sha>:./`
-  yields an empty archive; `tarfile`'s `data` filter, hence `requires-python >= 3.11.4`), or
+  at the previous version (`git archive <sha> -- :(literal)<dir>` from the repository root,
+  `<dir>` being where the skill lived at that commit, the prefix stripped — `<sha>:./` yields
+  an empty archive; `tarfile`'s `data` filter, hence `requires-python >= 3.11.4`), or
   none. A bundle-only commit after that edit is invisible; a giant `assets/` hitting the
   10 s git timeout is a `BaselineNote`, not an error.
 - **Baseline bundle directories are deleted when the run ends, however it ends** — in a

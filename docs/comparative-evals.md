@@ -77,16 +77,18 @@ flowchart TD
 
 1. Confirm the directory is inside a git repository.
 2. Confirm `SKILL.md` is tracked.
-3. List the commits that touched `SKILL.md` **at its current path**, newest first, bounded
-   to the last **50** commits. The history does not follow a rename: a skill moved to a new
-   directory starts over at the move, and has no earlier version until it is edited there.
+3. List the commits that touched `SKILL.md` at its current path, newest first. Where one of
+   them created that path by **moving** `SKILL.md` there byte for byte, carry on from the old
+   path, before the move (see [When a skill has moved](#when-a-skill-has-moved)). The last
+   **50** commits are read in total, across every path.
 4. Read each candidate commit's `SKILL.md` and parse it. The first one that qualifies as
    genuinely earlier wins:
    - if the **working copy** declares a `version:`, the first commit whose `version` differs
      from the working copy's;
    - if it declares none, the first commit whose **content** differs from the working copy's.
 
-5. Extract that same commit's `scripts/`, `references/` and `assets/` (`git archive`, then
+5. Extract that same commit's `scripts/`, `references/` and `assets/`, from the directory the
+   skill had at that commit (`git archive`, then
    `tarfile` with its `data` filter) into a temporary directory that is deleted when the run
    ends, so the previous instructions are paired with the previous bundle — never with the
    candidate's scripts. A commit with none of the three directories gives the baseline no
@@ -103,6 +105,25 @@ The comparison is against the **working copy**, not `HEAD` — so uncommitted ed
 `SKILL.md` are what run as the candidate. This matters for local iteration: you do not need
 to commit a change before measuring it.
 
+### When a skill has moved
+
+Git records a move as a delete at the old path and an add at the new one, so the history of
+the new path begins at the move. The resolver carries on from the old path only when the
+commit that created the new path moved `SKILL.md` there **unchanged** — the `git mv` of a
+skill's directory, committed on its own. That is certain to be the same file.
+
+Two things look like a move and are not followed:
+
+- **A copy**, even one whose source is deleted in a later commit. A skill started from
+  another skill's `SKILL.md` must never be compared against *that* skill's old instructions.
+  This is why skill-lens does not use `git log --follow`: it follows copies as well as
+  renames, and matches by similarity.
+- **A move that also edited `SKILL.md` in the same commit.** It may well be the same skill,
+  but nothing can prove it, and a baseline taken from another file would be worse than none.
+
+Either one ends the search with *no earlier version found*, which the report explains. To
+keep a skill's history across a move, commit the move by itself, then edit.
+
 Resolution happens **once per skill**, not per case or per repetition — it shells out to
 `git`, and shelling out once per repetition would multiply subprocess calls by nothing useful.
 
@@ -118,7 +139,7 @@ discipline runners follow for provider failures:
 | not a git repository | The skill's directory (or an ancestor) has no `.git` |
 | `SKILL.md` is not tracked by git | The file exists but was never committed |
 | cannot read the working copy's `SKILL.md` | Filesystem error (file missing, permission denied) or character encoding issue |
-| no earlier version found within the searched history | Every commit in the last 50 has the same version (or, unversioned, the same content) — including a skill just moved, whose history starts at the move |
+| no earlier version found within the searched history | Every commit in the last 50 has the same version (or, unversioned, the same content), or the history begins at a copy, or at a move that also edited `SKILL.md` — see [When a skill has moved](#when-a-skill-has-moved) |
 | cannot archive commit `<sha>` | `git archive` failed or exceeded the 10-second timeout — a very large historical `assets/` can do that |
 | cannot extract the bundle at commit `<sha>` | The archive would not parse, or a member failed the safe-extraction filter, or the extraction hit a filesystem error; a half-extracted directory is removed |
 
