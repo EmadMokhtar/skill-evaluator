@@ -1,0 +1,12 @@
+{
+  "name": "skill-lens",
+  "description": "Write, run and audit skill-lens eval suites for Agent Skills: which cases a skill needs, which check fits each claim, and what a failing case means.",
+  "author": {
+    "name": "Emad Mokhtar",
+    "url": "https://github.com/EmadMokhtar"
+  },
+  "homepage": "https://emadmokhtar.github.io/skill-evaluator/writing-evals/",
+  "repository": "https://github.com/EmadMokhtar/skill-evaluator",
+  "license": "MIT",
+  "keywords": ["agent-skills", "evals", "evaluation", "skill-lens", "testing"]
+}

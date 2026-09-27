@@ -84,7 +84,7 @@ which takes one skill from nothing to a CI gate.
 | --- | --- |
 | First eval, end to end | [Getting started](https://emadmokhtar.github.io/skill-evaluator/getting-started/) |
 | The vocabulary, with a glossary | [Concepts](https://emadmokhtar.github.io/skill-evaluator/concepts/) |
-| Deciding what to test | [Writing evals](https://emadmokhtar.github.io/skill-evaluator/writing-evals/) |
+| Deciding what to test, and the plugin that helps | [Writing evals](https://emadmokhtar.github.io/skill-evaluator/writing-evals/) |
 | Eval YAML reference | [Eval files](https://emadmokhtar.github.io/skill-evaluator/eval-files/) |
 | Commands and flags | [CLI](https://emadmokhtar.github.io/skill-evaluator/cli/) |
 | `skill-lens.toml` | [Configuration](https://emadmokhtar.github.io/skill-evaluator/configuration/) |

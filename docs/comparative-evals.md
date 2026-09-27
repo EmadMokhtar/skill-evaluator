@@ -77,7 +77,9 @@ flowchart TD
 
 1. Confirm the directory is inside a git repository.
 2. Confirm `SKILL.md` is tracked.
-3. List the commits that touched `SKILL.md`, newest first, bounded to the last **50** commits.
+3. List the commits that touched `SKILL.md` **at its current path**, newest first, bounded
+   to the last **50** commits. The history does not follow a rename: a skill moved to a new
+   directory starts over at the move, and has no earlier version until it is edited there.
 4. Read each candidate commit's `SKILL.md` and parse it. The first one that qualifies as
    genuinely earlier wins:
    - if the **working copy** declares a `version:`, the first commit whose `version` differs
@@ -116,7 +118,7 @@ discipline runners follow for provider failures:
 | not a git repository | The skill's directory (or an ancestor) has no `.git` |
 | `SKILL.md` is not tracked by git | The file exists but was never committed |
 | cannot read the working copy's `SKILL.md` | Filesystem error (file missing, permission denied) or character encoding issue |
-| no earlier version found within the searched history | Every commit in the last 50 has the same version (or, unversioned, the same content) |
+| no earlier version found within the searched history | Every commit in the last 50 has the same version (or, unversioned, the same content) — including a skill just moved, whose history starts at the move |
 | cannot archive commit `<sha>` | `git archive` failed or exceeded the 10-second timeout — a very large historical `assets/` can do that |
 | cannot extract the bundle at commit `<sha>` | The archive would not parse, or a member failed the safe-extraction filter, or the extraction hit a filesystem error; a half-extracted directory is removed |
 

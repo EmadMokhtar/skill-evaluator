@@ -1,0 +1,16 @@
+{
+  "name": "skill-lens",
+  "owner": {
+    "name": "Emad Mokhtar"
+  },
+  "metadata": {
+    "description": "The skill-lens plugin, published from the repository that builds the skill-lens CLI."
+  },
+  "plugins": [
+    {
+      "name": "skill-lens",
+      "source": "./plugins/skill-lens",
+      "description": "Write, run and audit skill-lens eval suites for Agent Skills: which cases a skill needs, which check fits each claim, and what a failing case means."
+    }
+  ]
+}

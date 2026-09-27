@@ -24,6 +24,7 @@ which `cz bump` generates from the commit history.
 | Token, cost and latency budgets | [Budget limits and pricing](runners.md#budget-limits-and-pricing) |
 | Repository defaults, including a self-hosted model endpoint | [Configuration](configuration.md) |
 | Scaffolding a suite, and importing a real MCP server's tools | [`init`](cli.md#init), [`mcp-import`](cli.md#mcp-import) |
+| The eval-writing skill, as a plugin for Claude Code, Copilot, VS Code, Codex and Cursor | [Installing it](writing-evals.md#installing-it) |
 | JUnit and Markdown reporters, `--concurrency`, the composite action | [CI integration](ci.md) |
 | Releases derived from commit history, published over Trusted Publishing | [Releasing](releasing.md) |
 

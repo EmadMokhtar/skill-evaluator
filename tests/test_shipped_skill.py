@@ -16,7 +16,9 @@ from skill_lens.models import EvalCase
 from skill_lens.skills.loader import load_skills, parse_skill_file
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SKILL_DIR = REPO_ROOT / "skills" / "writing-skill-evals"
+# The skill ships inside the plugin directory; see tests/test_plugin.py.
+SKILLS_DIR = REPO_ROOT / "plugins" / "skill-lens" / "skills"
+SKILL_DIR = SKILLS_DIR / "writing-skill-evals"
 SYNTAX = SKILL_DIR / "references" / "eval-file-syntax.md"
 
 _HEADING_RE_TEMPLATE = r"^##\s+{}\s*$"
@@ -87,12 +89,12 @@ def test_the_syntax_reference_documents_exactly_the_assertion_kinds_the_code_has
 
 
 def test_the_skill_is_linked_into_dot_claude():
+    # The link points at the copy the plugin ships, so this repository's own
+    # sessions run exactly the skill an install delivers.
     link = REPO_ROOT / ".claude" / "skills" / "writing-skill-evals"
     assert link.is_dir(), "the skill is not linked into .claude/skills/"
     assert (link / "SKILL.md").is_file()
-
-
-SKILLS_DIR = REPO_ROOT / "skills"
+    assert link.resolve() == SKILL_DIR.resolve()
 
 
 def _find_skill(name: str):
