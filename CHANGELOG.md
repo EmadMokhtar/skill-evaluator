@@ -1,3 +1,9 @@
+## v0.20.0 (2026-09-28)
+
+### Feat
+
+- add a Cursor plugin manifest and the skill-lens logo (#79)
+
 ## v0.19.0 (2026-09-28)
 
 ### Feat
