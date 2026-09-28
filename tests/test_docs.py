@@ -287,6 +287,22 @@ def test_relative_links_resolve(path: Path):
         assert resolved.exists(), f"{path.name}: dead link to {target!r}"
 
 
+def test_docs_site_assets_named_by_url_exist():
+    """README.md shows the logo by its docs-site URL, so the image also renders
+    on PyPI, where a relative path would not resolve. The site serves docs/
+    as-is, so a URL under its `assets/` must name a file in docs/assets/, or
+    the image is broken everywhere and no link check notices."""
+    site_assets = _mkdocs_config()["site_url"] + "assets/"
+    pattern = re.compile(re.escape(site_assets) + r"""([^"'\s)>]+)""")
+    missing = [
+        f"{path.name}: {site_assets}{name}"
+        for path in _markdown_files()
+        for name in pattern.findall(path.read_text(encoding="utf-8"))
+        if not (DOCS / "assets" / name).is_file()
+    ]
+    assert not missing, f"docs-site assets that do not exist under docs/assets/: {missing}"
+
+
 # `--8<-- "path"` on a line of its own, as pymdownx.snippets reads it. The
 # path is relative to the repository root (`base_path: ["."]` in mkdocs.yml).
 SNIPPET_RE = re.compile(r'^--8<-- "([^"]+)"$', re.MULTILINE)
