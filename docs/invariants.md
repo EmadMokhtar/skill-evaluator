@@ -530,16 +530,22 @@ equal `skill_lens.__version__`. What keeps the two in step *at release time* —
 `version_files` patterns, and the replay that proves each still rewrites a line — is the
 invariant above.
 
-### The two plugin manifests agree, spell no version, and the portable one declares Agent Plugins 1.0.0
+### The three plugin manifests agree, spell no version, and the portable one declares Agent Plugins 1.0.0
 
-`plugins/skill-lens/` is the `skill-lens` plugin, and it has two manifests because the agents
-that install it disagree on where to look. `plugin.json` is the portable
-[Agent Plugins](https://agent-plugins.org/) manifest that Copilot, VS Code, Cursor and Codex
-read; `.claude-plugin/plugin.json` is the one Claude Code reads. They hold the same fields,
-except `$schema`, with the same values: a description edited in one alone would describe the
-plugin differently depending on the agent.
+`plugins/skill-lens/` is the `skill-lens` plugin, and it has three manifests because the
+agents that install it disagree on where to look. `plugin.json` is the portable
+[Agent Plugins](https://agent-plugins.org/) manifest that Copilot, VS Code and Codex read;
+`.claude-plugin/plugin.json` is the one Claude Code reads; `.cursor-plugin/plugin.json` is the
+one Cursor reads first, and the first thing its marketplace reviewers check for. They hold the
+same fields, except `$schema`, with the same values: a description edited in one alone would
+describe the plugin differently depending on the agent. Cursor's copy differs in two ways:
+its `author` keeps only `name`, because Cursor's closed schema takes a name and an email but
+not a `url`; and it adds `displayName`, `category` and `logo`, fields only Cursor reads. The
+logo is named by its docs-site URL, not shipped in the plugin, so the one file under
+`docs/assets/` serves both the plugin listing and the publisher form; the URL must name a file
+that exists under `docs/`.
 
-Neither spells a version, and neither does the marketplace entry. The agents install the
+None spells a version, and neither does the marketplace entry. The agents install the
 plugin from the tip of `main`, not from a release, and treat `version` as a cache key. Tied
 to the package version, it held existing installs on their old files whenever the skill
 changed between releases — a `docs:` edit to `SKILL.md` releases nothing — while a fresh
@@ -565,7 +571,7 @@ falls back to the directory name when `name:` is missing, and a client does not.
 ### The plugin directory ships the manifests, a README, the license and the skills, and nothing else
 
 An install copies `plugins/skill-lens/` whole, so whatever sits in it ships to every user of
-every agent. `tests/test_plugin.py` holds it to the two manifests, `README.md` — what a
+every agent. `tests/test_plugin.py` holds it to the three manifests, `README.md` — what a
 marketplace listing shows, which must name every skill the plugin ships — `LICENSE`, and per
 skill its
 `SKILL.md` (spelled exactly), `references/`, `scripts/`, `assets/` and its own

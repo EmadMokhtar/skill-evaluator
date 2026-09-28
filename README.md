@@ -1,4 +1,6 @@
-# skill-lens
+<h1 align="center">
+  <img src="https://emadmokhtar.github.io/skill-evaluator/assets/skill-lens-logo-wide.svg" alt="skill-lens" width="640">
+</h1>
 
 **An Agent Skill is a prompt. Prompts regress.** `skill-lens` turns *"I think this
 `SKILL.md` got better"* into a score, a report, and an exit code your pipeline can gate on.

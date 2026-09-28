@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="title desc">
+  <title id="title">skill-lens</title>
+  <desc id="desc">A magnifying glass over a SKILL.md page, with a passing check mark in the glass.</desc>
+  <rect width="512" height="512" fill="#182238"/>
+  <g transform="translate(-26 -8)">
+    <path d="M122 84H248L304 140V346Q304 364 286 364H122Q104 364 104 346V102Q104 84 122 84Z" fill="#EEF1F4"/>
+    <path d="M248 84V122Q248 140 266 140H304Z" fill="#C7CFDA"/>
+    <path d="M142 184H250M142 224H236M142 264H196" fill="none" stroke="#9AA6B8" stroke-width="16" stroke-linecap="round"/>
+    <path d="M386 370L438 422" fill="none" stroke="#F2B441" stroke-width="46" stroke-linecap="round"/>
+    <circle cx="318" cy="302" r="92" fill="#22325A" stroke="#F2B441" stroke-width="30"/>
+    <path d="M276 304L306 334L362 270" fill="none" stroke="#7EE0A1" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
