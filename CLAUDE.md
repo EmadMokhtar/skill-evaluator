@@ -294,10 +294,13 @@ fails if the two drift apart — so a new invariant is added in both places or n
   `skill_lens.__version__`; `test_the_action_pins_the_current_version` checks both, so a
   release that bumps one and not the other cannot ship an action installing somebody else's
   version.
-- **The two plugin manifests agree, spell no version, and the portable one declares Agent
+- **The three plugin manifests agree, spell no version, and the portable one declares Agent
   Plugins 1.0.0.** `plugins/skill-lens/` is the `skill-lens` plugin: `plugin.json` (Agent
-  Plugins, read by Copilot, VS Code, Cursor and Codex) and `.claude-plugin/plugin.json` (Claude
-  Code) hold the same fields but `$schema`, with equal values. Neither spells a version, nor
+  Plugins, read by Copilot, VS Code and Codex), `.claude-plugin/plugin.json` (Claude Code) and
+  `.cursor-plugin/plugin.json` (Cursor, and what its reviewers check for) hold the same fields
+  but `$schema`, with equal values. Cursor's copy differs twice: its `author` keeps only `name`
+  (its closed schema takes no `url`), and it adds `displayName`, `category` and a `logo` named
+  by docs-site URL, which must name a file under `docs/`. None spells a version, nor
   does the marketplace entry: agents install from the tip of `main` and key their cache on
   `version`, so a pinned one kept existing installs on old files after any unreleased edit
   (Claude Code: "already at the latest version"); without one, Claude Code keys on the commit.
@@ -311,7 +314,7 @@ fails if the two drift apart — so a new invariant is added in both places or n
   Agent Skills rules — the loader falls back to the directory name, a client does not.
 - **The plugin directory ships the manifests, a README, the license and the skills, and
   nothing else.** An install copies `plugins/skill-lens/` whole, so `tests/test_plugin.py`
-  allows only the two manifests, `README.md` (what a marketplace listing shows; it names every
+  allows only the three manifests, `README.md` (what a marketplace listing shows; it names every
   skill), `LICENSE`, and per skill an exactly spelled `SKILL.md`, `references/`,
   `scripts/`, `assets/` and its own `evals/*.eval.yaml` (skill-lens finds a suite only beside
   its `SKILL.md`). `LICENSE` is the root one byte for byte (the install copies nothing above
@@ -710,7 +713,7 @@ Documentation ships **with** the change, never as a follow-up. Two CI jobs enfor
 | An invariant | **both** `docs/invariants.md` (a heading) and this file's condensed list (a bold-led bullet), spelled the same byte for byte — `tests/test_invariants_sync.py` fails otherwise |
 | CI integration, the action, example workflows | `docs/ci.md` |
 | The release pipeline, its one-time setup, or the cassette-refresh workflow | `docs/releasing.md` |
-| The plugin manifests, either marketplace file, or anything under `plugins/skill-lens/` | `docs/writing-evals.md`; both manifests together (`tests/test_plugin.py` fails otherwise) |
+| The plugin manifests, either marketplace file, or anything under `plugins/skill-lens/` | `docs/writing-evals.md`; all three manifests together (`tests/test_plugin.py` fails otherwise) |
 | The dependency audit, the `S` lint rules, the exception policy, action pinning, Dependabot, the SBOM, or attestations | `docs/security.md` (and `SECURITY.md` for how to report) |
 | How to install, or a package extra | `docs/snippets/install.md`, which pages include, and the command in `README.md` — `tests/test_docs.py` compares the two |
 | A message quoted in `docs/troubleshooting.md` | the page and `QUOTED` in `tests/test_troubleshooting.py` |

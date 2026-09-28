@@ -1,12 +1,13 @@
 """`plugins/skill-lens/` is an Agent Plugin that ships the eval-writing skill.
 
-Four files make it one:
+Five files make it one:
 
 - `plugins/skill-lens/plugin.json`, the portable Agent Plugins 1.0.0 manifest
-  (https://agent-plugins.org/) that GitHub Copilot, VS Code, Cursor and Codex
-  read;
+  (https://agent-plugins.org/) that GitHub Copilot, VS Code and Codex read;
 - `plugins/skill-lens/.claude-plugin/plugin.json`, the manifest Claude Code
   reads instead, since it does not implement Agent Plugins;
+- `plugins/skill-lens/.cursor-plugin/plugin.json`, the manifest Cursor reads
+  first and its marketplace reviewers check for;
 - `.claude-plugin/marketplace.json` at the repository root, the one catalog
   path Claude Code, Copilot, VS Code and Codex all look for, listing the plugin
   directory;
@@ -40,6 +41,7 @@ PLUGIN_PREFIX = PLUGIN_SOURCE.removeprefix("./") + "/"  # as git spells it, `/` 
 PLUGIN_ROOT = REPO_ROOT / PLUGIN_PREFIX
 PORTABLE = PLUGIN_ROOT / "plugin.json"
 CLAUDE = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"
+CURSOR = PLUGIN_ROOT / ".cursor-plugin" / "plugin.json"
 MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 CURSOR_MARKETPLACE = REPO_ROOT / ".cursor-plugin" / "marketplace.json"
 README = PLUGIN_ROOT / "README.md"
@@ -73,6 +75,46 @@ CURSOR_OWNER_FIELDS = {"name", "email"}
 CURSOR_ENTRY_FIELDS = {"name", "source", "description", "minClientVersions"}
 CURSOR_ENTRY_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$")
 
+# Cursor's plugin manifest schema is closed too (schemas/plugin.schema.json),
+# and its author takes a name and an email but no url.
+CURSOR_PLUGIN_FIELDS = {
+    "name",
+    "displayName",
+    "description",
+    "version",
+    "minClientVersions",
+    "author",
+    "publisher",
+    "homepage",
+    "repository",
+    "license",
+    "logo",
+    "keywords",
+    "category",
+    "tags",
+    "commands",
+    "agents",
+    "skills",
+    "rules",
+    "hooks",
+    "variables",
+    "mcpServers",
+}
+CURSOR_AUTHOR_FIELDS = {"name", "email"}
+CURSOR_STRING_FIELDS = (
+    "displayName",
+    "description",
+    "homepage",
+    "repository",
+    "license",
+    "logo",
+    "category",
+)
+
+# The docs site serves everything under docs/ at this address, which is where a
+# logo named by URL has to live.
+DOCS_SITE = "https://emadmokhtar.github.io/skill-evaluator/"
+
 # Spec §5.5, as the official schema spells it.
 PLUGIN_NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 
@@ -81,12 +123,18 @@ PLUGIN_NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?
 SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
 
-# What an install copies, relative to the plugin directory: the two manifests,
+# What an install copies, relative to the plugin directory: the three manifests,
 # the README a marketplace listing shows and the license, then per skill its
 # SKILL.md, the Agent Skills bundle directories, and the skill's own eval suite
 # -- which ships because skill-lens finds a suite only beside the SKILL.md it
 # tests.
-PLUGIN_FILES = {"plugin.json", ".claude-plugin/plugin.json", "README.md", "LICENSE"}
+PLUGIN_FILES = {
+    "plugin.json",
+    ".claude-plugin/plugin.json",
+    ".cursor-plugin/plugin.json",
+    "README.md",
+    "LICENSE",
+}
 SKILL_FILE = "SKILL.md"
 SKILL_BUNDLE_DIRS = ("references/", "scripts/", "assets/")
 SKILL_SUITE_RE = re.compile(r"evals/[^/]+\.eval\.yaml")
@@ -152,8 +200,8 @@ def test_the_portable_manifest_is_a_regular_file():
     assert not PORTABLE.is_symlink()
 
 
-def test_both_manifests_describe_the_same_plugin():
-    # Two files, one plugin: a description, keyword or license edited in one
+def test_the_manifests_describe_the_same_plugin():
+    # Three files, one plugin: a description, keyword or license edited in one
     # alone would list the plugin differently depending on the agent.
     portable = _load(PORTABLE)
     claude = _load(CLAUDE)
@@ -161,6 +209,48 @@ def test_both_manifests_describe_the_same_plugin():
     assert set(claude) == shared, f"field sets differ: {sorted(set(claude) ^ shared)}"
     for field in sorted(shared):
         assert claude[field] == portable[field], f"{field} differs between the two manifests"
+    # Cursor's manifest carries every shared field too. Its author keeps only
+    # the fields Cursor's schema allows; its own extra fields are checked below.
+    cursor = _load(CURSOR)
+    missing = sorted(shared - set(cursor))
+    assert not missing, f"fields the Cursor manifest lacks: {missing}"
+    for field in sorted(shared - {"author"}):
+        assert cursor[field] == portable[field], f"{field} differs in the Cursor manifest"
+    expected_author = {
+        key: value for key, value in portable["author"].items() if key in CURSOR_AUTHOR_FIELDS
+    }
+    assert cursor["author"] == expected_author, "author differs in the Cursor manifest"
+
+
+def test_the_cursor_manifest_fits_cursors_closed_schema():
+    manifest = _load(CURSOR)
+    extra = sorted(set(manifest) - CURSOR_PLUGIN_FIELDS)
+    assert not extra, f"fields Cursor's plugin schema refuses: {extra}"
+    assert CURSOR_ENTRY_NAME_RE.fullmatch(manifest["name"]), manifest["name"]
+    for field in CURSOR_STRING_FIELDS:
+        if field in manifest:
+            assert isinstance(manifest[field], str), f"{field} must be a string"
+    extra = sorted(set(manifest.get("author", {})) - CURSOR_AUTHOR_FIELDS)
+    assert not extra, f"author fields Cursor's schema refuses: {extra}"
+    keywords = manifest.get("keywords", [])
+    assert isinstance(keywords, list) and all(isinstance(word, str) for word in keywords)
+
+
+def test_the_cursor_manifest_logo_exists():
+    """The logo is named by the docs-site URL rather than shipped in the
+    plugin directory, so the one file serves the plugin listing and the
+    publisher form alike. A URL that names no file under docs/ would be a
+    broken image in the marketplace, which nothing else would notice."""
+    site_url = f"site_url: {DOCS_SITE}\n"
+    assert site_url in (REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8"), "docs site moved"
+    logo = _load(CURSOR).get("logo")
+    if logo is None:
+        return
+    if logo.startswith(DOCS_SITE):
+        assert (REPO_ROOT / "docs" / logo.removeprefix(DOCS_SITE)).is_file(), logo
+    else:
+        assert not logo.startswith(("http://", "https://")), f"logo hosted elsewhere: {logo}"
+        assert (PLUGIN_ROOT / logo).is_file(), logo
 
 
 def test_the_plugin_spells_no_version():
@@ -171,7 +261,7 @@ def test_the_plugin_spells_no_version():
     fresh install gets the new ones under the same number. With none, Claude
     Code keys each install on the commit, so every change reaches an existing
     install at its next update."""
-    for path in (PORTABLE, CLAUDE):
+    for path in (PORTABLE, CLAUDE, CURSOR):
         assert "version" not in _load(path), path.relative_to(REPO_ROOT).as_posix()
     [entry] = _load(MARKETPLACE)["plugins"]
     assert "version" not in entry

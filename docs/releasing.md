@@ -187,7 +187,7 @@ A moving major tag starts at 1.0, when the promise behind it becomes true.
 
 `plugins/skill-lens/` is the `skill-lens` plugin (see
 [Writing evals](writing-evals.md#installing-it)), and the release pipeline does nothing for it:
-the agents install it from the tip of `main`, not from a release. Neither of its manifests
+the agents install it from the tip of `main`, not from a release. None of its three manifests
 spells a version, and none should. An agent treats a version as a cache key, so one tied to
 the package version would hold an existing install on its old files whenever the skill changed
 between releases. Without one, Claude Code keys each install on the commit, and an update
