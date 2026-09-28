@@ -1,3 +1,9 @@
+## v0.19.0 (2026-09-28)
+
+### Feat
+
+- make the plugin discoverable by the Cursor Marketplace (#78)
+
 ## v0.18.0 (2026-09-27)
 
 ### Feat
