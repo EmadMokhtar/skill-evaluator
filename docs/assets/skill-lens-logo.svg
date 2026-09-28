@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="title desc">
+  <title id="title">skill-lens</title>
+  <desc id="desc">Three parallel rays pass through a lens and meet at one focal point.</desc>
+  <rect width="512" height="512" fill="#0F2A35"/>
+  <g fill="none" stroke="#E7F0EF" stroke-width="30" stroke-linecap="round">
+    <path d="M80 176H236M80 256H236M80 336H236"/>
+    <path d="M236 176L408 256M236 256H408M236 336L408 256"/>
+  </g>
+  <path d="M236 92Q324 256 236 420Q148 256 236 92Z" fill="#86CFD8" stroke="#0F2A35" stroke-width="14" stroke-linejoin="round"/>
+  <path d="M220 152Q194 256 220 360" fill="none" stroke="#D6F1F4" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="408" cy="256" r="40" fill="#F2B441" stroke="#0F2A35" stroke-width="12"/>
+</svg>
