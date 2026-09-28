@@ -1,6 +1,6 @@
 """`plugins/skill-lens/` is an Agent Plugin that ships the eval-writing skill.
 
-Three files make it one:
+Four files make it one:
 
 - `plugins/skill-lens/plugin.json`, the portable Agent Plugins 1.0.0 manifest
   (https://agent-plugins.org/) that GitHub Copilot, VS Code, Cursor and Codex
@@ -9,10 +9,12 @@ Three files make it one:
   reads instead, since it does not implement Agent Plugins;
 - `.claude-plugin/marketplace.json` at the repository root, the one catalog
   path Claude Code, Copilot, VS Code and Codex all look for, listing the plugin
-  directory.
+  directory;
+- `.cursor-plugin/marketplace.json`, the same catalog where Cursor looks for it:
+  a plugin that is not at the repository root is found only through that file.
 
 An install copies the plugin directory and nothing else, so the directory holds
-the manifests, the license and the skills, and nothing else.
+the manifests, a README, the license and the skills, and nothing else.
 
 No test run loads these files through a client, so nothing else would notice
 them drift apart, pick up a field a strict client refuses, or ship a file
@@ -39,6 +41,8 @@ PLUGIN_ROOT = REPO_ROOT / PLUGIN_PREFIX
 PORTABLE = PLUGIN_ROOT / "plugin.json"
 CLAUDE = PLUGIN_ROOT / ".claude-plugin" / "plugin.json"
 MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
+CURSOR_MARKETPLACE = REPO_ROOT / ".cursor-plugin" / "marketplace.json"
+README = PLUGIN_ROOT / "README.md"
 SKILLS_DIR = PLUGIN_ROOT / "skills"
 
 # 1.0.0 is the published release; 1.1.0 is a working draft. Codex supports
@@ -62,6 +66,13 @@ PORTABLE_FIELDS = {
 PORTABLE_STRING_FIELDS = ("description", "homepage", "repository", "license")
 AUTHOR_FIELDS = {"name", "email", "url"}
 
+# Cursor's marketplace schema is closed at every level
+# (https://github.com/cursor/plugins, schemas/marketplace.schema.json).
+CURSOR_CATALOG_FIELDS = {"name", "owner", "metadata", "plugins"}
+CURSOR_OWNER_FIELDS = {"name", "email"}
+CURSOR_ENTRY_FIELDS = {"name", "source", "description", "minClientVersions"}
+CURSOR_ENTRY_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$")
+
 # Spec §5.5, as the official schema spells it.
 PLUGIN_NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
 
@@ -70,11 +81,12 @@ PLUGIN_NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?
 SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
 
-# What an install copies, relative to the plugin directory: the two manifests
-# and the license, then per skill its SKILL.md, the Agent Skills bundle
-# directories, and the skill's own eval suite -- which ships because skill-lens
-# finds a suite only beside the SKILL.md it tests.
-PLUGIN_FILES = {"plugin.json", ".claude-plugin/plugin.json", "LICENSE"}
+# What an install copies, relative to the plugin directory: the two manifests,
+# the README a marketplace listing shows and the license, then per skill its
+# SKILL.md, the Agent Skills bundle directories, and the skill's own eval suite
+# -- which ships because skill-lens finds a suite only beside the SKILL.md it
+# tests.
+PLUGIN_FILES = {"plugin.json", ".claude-plugin/plugin.json", "README.md", "LICENSE"}
 SKILL_FILE = "SKILL.md"
 SKILL_BUNDLE_DIRS = ("references/", "scripts/", "assets/")
 SKILL_SUITE_RE = re.compile(r"evals/[^/]+\.eval\.yaml")
@@ -176,13 +188,39 @@ def test_the_marketplace_lists_the_plugin_directory():
     assert entry["description"] == plugin["description"]
 
 
+def test_cursor_reads_the_same_catalog():
+    # One catalog in two places: an entry edited in one alone would list the
+    # plugin differently in Cursor than everywhere else.
+    assert _load(CURSOR_MARKETPLACE) == _load(MARKETPLACE)
+
+
+def test_the_catalog_fits_cursors_closed_schema():
+    catalog = _load(CURSOR_MARKETPLACE)
+    extra = sorted(set(catalog) - CURSOR_CATALOG_FIELDS)
+    assert not extra, f"catalog fields Cursor's schema refuses: {extra}"
+    extra = sorted(set(catalog.get("owner", {})) - CURSOR_OWNER_FIELDS)
+    assert not extra, f"owner fields Cursor's schema refuses: {extra}"
+    for entry in catalog["plugins"]:
+        extra = sorted(set(entry) - CURSOR_ENTRY_FIELDS)
+        assert not extra, f"entry fields Cursor's schema refuses: {extra}"
+        assert CURSOR_ENTRY_NAME_RE.fullmatch(entry["name"]), entry["name"]
+
+
+def test_the_readme_names_every_shipped_skill():
+    # The README is what a marketplace listing shows; a skill it does not
+    # mention is one a reader of the listing never learns is there.
+    text = README.read_text(encoding="utf-8")
+    missing = [name for name in _skill_names() if f"`{name}`" not in text]
+    assert not missing, f"skills the plugin README does not name: {missing}"
+
+
 def test_the_plugin_directory_is_named_after_the_plugin():
     # The spec does not require it, but a directory named otherwise is a second
     # name for the same plugin in every cache path and error message.
     assert PLUGIN_ROOT.name == _load(PORTABLE)["name"]
 
 
-def test_the_plugin_directory_ships_the_manifests_the_license_and_the_skills_only():
+def test_the_plugin_directory_ships_the_manifests_the_readme_the_license_and_the_skills_only():
     """An install copies this directory whole, so anything added here ships to
     every user of every agent. Inside `skills/` only the Agent Skills layout and
     each skill's own eval suite are allowed: a stray note, a `.DS_Store` or a
@@ -193,7 +231,7 @@ def test_the_plugin_directory_ships_the_manifests_the_license_and_the_skills_onl
     unexpected = sorted(
         name for name in shipped if name not in PLUGIN_FILES and not _is_skill_file(name)
     )
-    assert not unexpected, f"not a manifest, the license or part of a skill: {unexpected}"
+    assert not unexpected, f"not a manifest, the README, the license or a skill: {unexpected}"
 
 
 def test_every_skill_directory_has_its_skill_md():

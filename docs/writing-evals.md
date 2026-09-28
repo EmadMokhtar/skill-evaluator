@@ -16,14 +16,15 @@ evidence could support.
 
 The skill ships as a plugin named `skill-lens`, in
 [`plugins/skill-lens/`](https://github.com/EmadMokhtar/skill-evaluator/tree/main/plugins/skill-lens).
-An install copies that directory and nothing else — two manifests, the license and the
-skill, about 30 KB. Each agent finds the file it reads:
+An install copies that directory and nothing else — two manifests, a README, the license and
+the skill, about 30 KB. Each agent finds the file it reads:
 
 | File | Read by |
 | --- | --- |
 | `plugins/skill-lens/plugin.json` | Clients that implement [Agent Plugins 1.0.0](https://agent-plugins.org/): GitHub Copilot (CLI and VS Code), Cursor, Codex |
 | `plugins/skill-lens/.claude-plugin/plugin.json` | Claude Code, which has its own plugin format |
 | `.claude-plugin/marketplace.json`, at the repository root | Claude Code, Copilot CLI, VS Code and Codex, when you add the repository as a marketplace |
+| `.cursor-plugin/marketplace.json`, at the repository root | Cursor, which finds a plugin outside the repository root only through this file; it is a copy of the one above, kept identical by a test |
 
 Install it the way your agent installs plugins:
 

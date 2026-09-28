@@ -552,16 +552,22 @@ schema is closed, so a client-specific field such as `hooks` belongs under `exte
 it declares the published `1.0.0` schema, not the `1.1.0` working draft: Codex rejects a
 plugin that declares an Agent Plugins version it does not support. It is a regular file,
 because Codex also refuses a symlinked one. `.claude-plugin/marketplace.json`, at the
-repository root, lists `./plugins/skill-lens` as the one plugin.
+repository root, lists `./plugins/skill-lens` as the one plugin, and
+`.cursor-plugin/marketplace.json` holds the same catalog where Cursor looks for it — Cursor
+finds a plugin outside the repository root only through that file. The two are equal as JSON,
+a copy rather than a link for the same reason as the manifests, and both use only the fields
+Cursor's closed marketplace schema allows, since the one catalog serves every agent.
 
 `tests/test_plugin.py` asserts each of these, and reads every skill's frontmatter itself to
 check the Agent Skills rules a client applies before it loads one — skill-lens's own loader
 falls back to the directory name when `name:` is missing, and a client does not.
 
-### The plugin directory ships the manifests, the license and the skills, and nothing else
+### The plugin directory ships the manifests, a README, the license and the skills, and nothing else
 
 An install copies `plugins/skill-lens/` whole, so whatever sits in it ships to every user of
-every agent. `tests/test_plugin.py` holds it to the two manifests, `LICENSE`, and per skill its
+every agent. `tests/test_plugin.py` holds it to the two manifests, `README.md` — what a
+marketplace listing shows, which must name every skill the plugin ships — `LICENSE`, and per
+skill its
 `SKILL.md` (spelled exactly), `references/`, `scripts/`, `assets/` and its own
 `evals/*.eval.yaml` suite; any other tracked file there fails, a stray note or a `.DS_Store`
 included. The suite ships because skill-lens finds a suite only beside the `SKILL.md` it

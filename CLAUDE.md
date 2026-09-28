@@ -304,12 +304,15 @@ fails if the two drift apart — so a new invariant is added in both places or n
   The portable file uses only the spec's ten top-level fields (client data goes under
   `extensions`), declares `1.0.0` and not the `1.1.0` draft (Codex rejects a version it does
   not support), and is a regular file (Codex refuses a symlink). The root
-  `.claude-plugin/marketplace.json` lists `./plugins/skill-lens` as the one plugin.
+  `.claude-plugin/marketplace.json` lists `./plugins/skill-lens` as the one plugin, and
+  `.cursor-plugin/marketplace.json` is the same catalog, JSON-equal, where Cursor finds a
+  plugin outside the root; both keep to Cursor's closed marketplace schema.
   `tests/test_plugin.py` checks all of it, and reads each skill's frontmatter itself for the
   Agent Skills rules — the loader falls back to the directory name, a client does not.
-- **The plugin directory ships the manifests, the license and the skills, and nothing else.**
-  An install copies `plugins/skill-lens/` whole, so `tests/test_plugin.py` allows only the two
-  manifests, `LICENSE`, and per skill an exactly spelled `SKILL.md`, `references/`,
+- **The plugin directory ships the manifests, a README, the license and the skills, and
+  nothing else.** An install copies `plugins/skill-lens/` whole, so `tests/test_plugin.py`
+  allows only the two manifests, `README.md` (what a marketplace listing shows; it names every
+  skill), `LICENSE`, and per skill an exactly spelled `SKILL.md`, `references/`,
   `scripts/`, `assets/` and its own `evals/*.eval.yaml` (skill-lens finds a suite only beside
   its `SKILL.md`). `LICENSE` is the root one byte for byte (the install copies nothing above
   the directory, and MIT asks for its notice in every copy). No link in it resolves outside
@@ -707,7 +710,7 @@ Documentation ships **with** the change, never as a follow-up. Two CI jobs enfor
 | An invariant | **both** `docs/invariants.md` (a heading) and this file's condensed list (a bold-led bullet), spelled the same byte for byte — `tests/test_invariants_sync.py` fails otherwise |
 | CI integration, the action, example workflows | `docs/ci.md` |
 | The release pipeline, its one-time setup, or the cassette-refresh workflow | `docs/releasing.md` |
-| The plugin manifests, the marketplace file, or anything under `plugins/skill-lens/` | `docs/writing-evals.md`; both manifests together (`tests/test_plugin.py` fails otherwise) |
+| The plugin manifests, either marketplace file, or anything under `plugins/skill-lens/` | `docs/writing-evals.md`; both manifests together (`tests/test_plugin.py` fails otherwise) |
 | The dependency audit, the `S` lint rules, the exception policy, action pinning, Dependabot, the SBOM, or attestations | `docs/security.md` (and `SECURITY.md` for how to report) |
 | How to install, or a package extra | `docs/snippets/install.md`, which pages include, and the command in `README.md` — `tests/test_docs.py` compares the two |
 | A message quoted in `docs/troubleshooting.md` | the page and `QUOTED` in `tests/test_troubleshooting.py` |
