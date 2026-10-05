@@ -1150,3 +1150,9 @@ def test_a_ref_that_is_not_a_name_is_refused_with_the_type_error(tmp_path, value
     path.write_text(REF_CASES.replace("ref: issue_refund", f"ref: {value}"), encoding="utf-8")
     with pytest.raises(CaseParseError, match=r"orders.yaml: case #1 tool #2: invalid ref: entry"):
         parse_cases_file(path)
+
+
+def test_case_parse_error_is_one_class_from_both_import_paths():
+    from skill_lens.cases import errors, loader
+
+    assert errors.CaseParseError is loader.CaseParseError

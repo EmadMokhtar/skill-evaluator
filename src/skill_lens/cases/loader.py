@@ -11,6 +11,7 @@ from jsonschema.exceptions import SchemaError
 from pydantic import ValidationError
 
 from skill_lens.cases.checks import UNFILLED_SENTINEL, check_tool_schema, find_unfilled
+from skill_lens.cases.errors import CaseParseError
 from skill_lens.cases.tool_libraries import (
     EMPTY_LIBRARY,
     TOOL_LIBRARIES_KEY,
@@ -25,10 +26,6 @@ from skill_lens.yaml_loading import safe_load
 
 EVALS_DIRNAME = "evals"
 EVAL_SUFFIX = ".eval.yaml"
-
-
-class CaseParseError(Exception):
-    """Raised when an eval file is missing or cannot be parsed."""
 
 
 def _reject_unfilled(path: Path, index: int, raw: object) -> None:
