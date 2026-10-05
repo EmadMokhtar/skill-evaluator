@@ -1170,3 +1170,69 @@ def test_model_with_a_product_judge_and_the_fake_runner_is_a_user_error(tmp_path
     )
     assert result.exit_code == 2
     assert "--model is read by pydantic-ai and langchain only" in plain(result.output)
+
+
+def _make_evals_json_skill(tmp_path, evals):
+    skill_dir = tmp_path / "pdf"
+    (skill_dir / "evals").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
+    document = {"skill_name": "pdf", "evals": evals}
+    (skill_dir / "evals" / "evals.json").write_text(json.dumps(document), encoding="utf-8")
+    return skill_dir
+
+
+def test_list_counts_the_cases_in_an_evals_json(tmp_path):
+    skill_dir = _make_evals_json_skill(
+        tmp_path,
+        [
+            {"id": 1, "prompt": "a", "assertions": ["x"]},
+            {"id": 2, "prompt": "b", "assertions": ["y"]},
+        ],
+    )
+    result = runner.invoke(app, ["list", str(skill_dir)])
+    assert result.exit_code == 0, result.output
+    assert "2 case(s)" in result.stdout
+
+
+def test_a_first_stage_evals_json_lists_and_runs(tmp_path):
+    # The guide starts authors with only a prompt and an expected output.
+    skill_dir = _make_evals_json_skill(
+        tmp_path, [{"id": 1, "prompt": "extract", "expected_output": "The text."}]
+    )
+    listed = runner.invoke(app, ["list", str(skill_dir)])
+    assert listed.exit_code == 0, listed.output
+    assert "1 case(s)" in listed.stdout
+    ran = runner.invoke(app, ["run", str(skill_dir)])
+    # No judge is configured, so the one check cannot be graded: errored, never green.
+    assert ran.exit_code == 1, ran.output
+    assert "1 errored" in ran.output
+
+
+def test_run_over_an_evals_json_errors_under_the_default_judge(tmp_path):
+    skill_dir = _make_evals_json_skill(
+        tmp_path, [{"id": 1, "prompt": "extract", "assertions": ["names the library"]}]
+    )
+    result = runner.invoke(app, ["run", str(skill_dir)])
+    assert result.exit_code == 1, result.output
+    assert "1 errored" in result.output
+
+
+def test_an_unknown_evals_json_key_is_a_user_error(tmp_path):
+    skill_dir = _make_evals_json_skill(
+        tmp_path, [{"id": 1, "prompt": "a", "assertions": ["x"], "kind": "dialogue"}]
+    )
+    result = runner.invoke(app, ["run", str(skill_dir)])
+    assert result.exit_code == 2
+    assert "'kind'" in plain(result.output)
+
+
+def test_evals_accepts_an_explicit_json_file(tmp_path):
+    skill_dir = _make_evals_json_skill(tmp_path, [{"id": 1, "prompt": "a", "assertions": ["x"]}])
+    other = tmp_path / "more.json"
+    other.write_text(
+        json.dumps({"evals": [{"id": 7, "prompt": "b", "assertions": ["y"]}]}),
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["list", str(skill_dir), "--evals", str(other)])
+    assert result.exit_code == 0, result.output
+    assert "1 case(s)" in result.stdout

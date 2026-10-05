@@ -70,7 +70,7 @@ format, not the format, and it is deferred below.
 | **`files` reuse `check_relative_path`, `resolve_under` and `stat_regular` from `workspace.py`.** | The same containment rules the workspace uses: nothing outside the skill directory, only regular files, a FIFO or device refused from a `stat` and never opened, a size above `max_file_bytes` refused before reading. A folder entry, a missing file, non-UTF-8 content and a path listed twice are errors that name the eval and the path. |
 | **The load-time size limit is the default `max_file_bytes` (1,000,000).** | The loader has no access to configuration. The configured limit still applies when the workspace is seeded, so a lower configured value is not bypassed. A file above the default cannot be used from `evals.json` even if the configuration raises the cap; the docs say so. |
 | **An empty `evals` list is an authoring error.** | Without it the run fails later with the generic "no cases" gate reason, which does not point at the file. |
-| **Discovery: `evals/evals.json` is found together with `evals/*.yaml`; both load.** | `discover_eval_paths` already prefers the `evals/` directory over `*.eval.yaml` beside `SKILL.md`; adding the JSON file does not change that rule. `init` and `list` already call it, so a skill with an `evals.json` is not scaffolded over. |
+| **Discovery: `evals/evals.json` is found together with `evals/*.yaml`; both load.** | `discover_eval_paths` already prefers the `evals/` directory over `*.eval.yaml` beside `SKILL.md`; adding the JSON file does not change that rule. `list` and batch `init` already call it, so batch `init` skips a skill that has an `evals.json`; single-skill `init` writes its scaffold beside the JSON file and never touches it. |
 | **In a directory override, only a file named `evals.json` is read as JSON.** | A directory can hold other JSON (fixtures, schemas). Reading every `.json` would turn them into parse errors. |
 | **A real judge is required, and the existing rule says so.** | The default `judge = "fake"` errors on a rubric nothing scripted, which is the project's rule for an unchecked rubric. The docs show how to pick a judge; the quickstart for `evals.json` names it. |
 
@@ -117,6 +117,8 @@ move avoids an import cycle: the loader imports the converter, which raises the 
   `json.loads` (an invalid document is `CaseParseError("invalid JSON in …")`) and
   `evals_json_to_raw_cases`, and continues into the same per-case validation. The
   unfilled-scaffold scan and tool-library resolution do not apply to JSON.
+  A leading byte-order mark is removed first, because Windows editors write one and
+  `json.loads` refuses it.
 - `discover_eval_paths` adds `evals/evals.json` to the paths from `evals/`.
 - `load_cases_for_skill` accepts a `.json` file as `evals_path`, and in a directory override
   includes a file named `evals.json`.
@@ -169,9 +171,14 @@ All offline, `FakeRunner` and scripted `FakeJudge` tier:
 - `tests/test_case_loader.py` — `parse_cases_file` on a `.json` path; invalid JSON names the
   file; `discover_eval_paths` finds `evals/evals.json` beside YAML files; `--evals` as a file
   and as a directory containing `evals.json` plus an unrelated `.json`.
-- `tests/test_cli.py` — `run` on a skill whose only eval file is `evals.json`, with a scripted
-  judge, exits 0; with the default `fake` judge the cases are `errored` and the gate fails;
-  `list` counts the cases; `init` does not scaffold over an `evals.json`.
+- `tests/test_orchestrator.py` — an `evals.json` case is graded by a scripted judge and passes;
+  under the default `fake` judge it is `errored`; an input file reaches the workspace; an
+  unknown key aborts the run.
+- `tests/test_cli.py` — `list` counts the cases; a first-stage file (only `prompt` and
+  `expected_output`) lists and runs; `run` over an `evals.json` exits 1 with `1 errored` under
+  the default judge; an unknown key exits 2 naming it; `--evals` accepts a `.json` file.
+- `tests/test_cli_init.py` — batch `init` skips a skill that has an `evals.json`; single
+  `init` writes beside it and leaves it unchanged.
 - `tests/test_case_loader.py` — `CaseParseError` is the same class when imported from
   `cases.errors` and from `cases.loader`.
 - `tests/test_framework_isolation.py` and `tests/test_naming.py` keep passing;
