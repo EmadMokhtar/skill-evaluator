@@ -330,7 +330,9 @@ never pass tells you nothing about the skill.
 
 A case that declares a [`workspace:`](eval-files.md#workspaces) block gets a real,
 contained temporary directory in addition to the canned tools above. `list_files`,
-`read_file` and `write_file` are the only way in or out of it.
+`read_file` and `write_file` are the only way in or out of it. A case read from an
+`evals.json` gets a workspace only when it lists input `files`; see
+[Reading `evals.json`](eval-files.md#reading-evalsjson).
 
 **Containment.** Every path a tool is given is resolved relative to the workspace root and
 then checked against it: an absolute path, one containing `..`, or one that resolves outside

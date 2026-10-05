@@ -73,7 +73,11 @@ so `EvalCase.tools` still holds only `ToolSpec`. Its design is in
 `tool` and either `contains:` (a structural subset) or `equals:` (the whole argument dict),
 holding when at least one call matched or, with `every: true`, when every call did; ids are
 `call_args[{index}]`. Its design is in
-`docs/superpowers/specs/2026-09-21-skill-lens-call-args-design.md`. Milestones are defined in
+`docs/superpowers/specs/2026-09-21-skill-lens-call-args-design.md`.
+`evals.json` support lets a skill that already has `evals/evals.json` — the file the Agent
+Skills guide and `skill-creator` use — run with no YAML: `cases/evals_json.py` converts it to
+the raw mappings the YAML loader produces, so the same validation applies. Its design is in
+`docs/superpowers/specs/2026-10-05-skill-lens-evals-json-design.md`. Milestones are defined in
 `docs/superpowers/specs/2026-07-30-skill-eval-design.md` §9; the M2 design is
 in `docs/superpowers/specs/2026-08-01-skill-eval-m2-design.md`, the M3 design
 is in `docs/superpowers/specs/2026-08-03-skill-eval-m3-design.md`, the M4
@@ -375,6 +379,19 @@ form, that file is the explanation.
   rule is the loader's, beside `called` / `forbidden` / `order`. Ids are positional
   `call_args[{index}]`; a failing check's evidence renders the arguments seen and announces
   a cut.
+- **`evals.json` is converted to raw case mappings and validated by the existing pipeline.**
+  `cases/evals_json.py` has no validator of its own beyond shape; `EvalCase` and the loader's
+  `_validate_*` functions are the only rules, so a JSON case and a YAML case are identical
+  downstream. No runner, evaluator, reporter, model or exit code changed.
+- **`evals.json` keys are strict, and nothing to grade is refused.** An unknown key at either
+  level is an authoring error naming it; `assertions` and `expectations` are one list (both in
+  one eval is refused); no statements and no `expected_output` is refused, while
+  `expected_output` alone becomes the single check `The output satisfies: <expected_output>`.
+- **`evals.json` `id` is never a boolean and the case name is `eval-<id>`.** Ids are unique
+  across `1` and `"1"`.
+- **`evals.json` input files are text inside the skill directory, read at load time** through
+  the workspace's containment helpers, capped at the default `max_file_bytes`; a `workspace:`
+  block exists only when `files` is non-empty.
 - **`EvalCase.tools` holds only `ToolSpec`; a `ref:` is resolved by the case loader on the
   raw mapping before validation.** No runner, evaluator, reporter or product preflight ever
   sees a reference; the product `tools:` refusal, the duplicate-name, built-in-name,
