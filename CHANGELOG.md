@@ -1,3 +1,9 @@
+## v0.21.0 (2026-10-05)
+
+### Feat
+
+- read evals.json eval files (#83)
+
 ## v0.20.0 (2026-09-28)
 
 ### Feat
