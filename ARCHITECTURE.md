@@ -949,6 +949,9 @@ symlink loop, a link out of the directory, a folder, a binary file or one over
 cap because the loader has no configuration; the configured cap still applies when the
 workspace is seeded. A `workspace:` block exists only when `files` is non-empty.
 
+**A leading byte-order mark is skipped.** `cases/loader.py` removes it before `json.loads`,
+because Windows editors write one and `json.loads` refuses a document that starts with it.
+
 **`CaseParseError` lives in `cases/errors.py`** and the loader re-exports it, because the
 loader imports the converter and the converter raises the error.
 

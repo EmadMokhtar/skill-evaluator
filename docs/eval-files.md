@@ -428,6 +428,8 @@ What to know:
   the skill directory, no larger than 1,000,000 bytes. A missing file, a folder, a binary file
   or a path that leaves the skill directory stops the run (exit 2). A case with no `files`
   gets no workspace.
+- **A leading byte-order mark is skipped.** Some Windows editors write one at the start of a
+  JSON file. skill-lens ignores it, so the file loads as it would without it.
 - **The judge reads the agent's reply.** `evals.json` does not name output files, so a file the
   agent writes is not shown to the judge. Move to a YAML case with `judge.artifacts` when the
   skill's product is a file.
