@@ -1,3 +1,67 @@
+## v0.20.0 (2026-09-28)
+
+### Feat
+
+- add a Cursor plugin manifest and the skill-lens logo (#79)
+
+## v0.19.0 (2026-09-28)
+
+### Feat
+
+- make the plugin discoverable by the Cursor Marketplace (#78)
+
+## v0.18.0 (2026-09-27)
+
+### Feat
+
+- follow a moved SKILL.md when resolving --baseline previous (#77)
+
+## v0.17.0 (2026-09-27)
+
+### Feat
+
+- ship the eval-writing skill as an Agent Plugin (#76)
+
+## v0.16.0 (2026-09-22)
+
+### Feat
+
+- let skill-lens.toml name a base_url for self-hosted endpoints (#66)
+
+## v0.15.0 (2026-09-22)
+
+### Feat
+
+- refuse a rubric entry phrased against a mock tool's returns (#65)
+
+## v0.14.2 (2026-09-22)
+
+### Fix
+
+- **release**: require the tag on origin to point at the pushed commit (#64)
+
+## v0.14.1 (2026-09-22)
+
+### Fix
+
+- **release**: treat a run that main outran as a no-op, not a failure (#62)
+
+## v0.14.0 (2026-09-22)
+
+### Feat
+
+- serve mock tools to product runners through a stdio MCP server (#57)
+
+## v0.13.0 (2026-09-22)
+
+### Feat
+
+- let a mock tool answer differently per call (#60)
+
+### Fix
+
+- let a trajectory name a product runner's own tools (#58)
+
 ## v0.12.0 (2026-09-22)
 
 ### Feat

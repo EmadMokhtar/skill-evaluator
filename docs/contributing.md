@@ -25,7 +25,7 @@ spend. `uv run skill-lens run ./examples` needs the `pydantic-ai` runner (see
 assert real model behavior, so `list` is what dogfoods discovery for free.
 
 `test_a_baseline_run_reaches_the_provider_without_the_skill_name` in `tests/test_cassettes.py`
-proves the M4 no-name-leak rule survives the wire, but its cassette has not been recorded yet
+proves the baseline no-name-leak rule survives the wire, but its cassette has not been recorded yet
 — no API key was available when it was written. A missing cassette **skips rather than
 fails**, by design, so a fresh clone is never red for this; whoever has a key next should
 record it with:
@@ -46,14 +46,31 @@ uv run pytest tests/test_docs.py
 ```
 
 Documentation ships with the change, not as a follow-up. Two CI jobs enforce it: `docs`
-builds the site with `--strict`, and `docs-freshness` fails a PR that changes
+builds the site with `--strict` and runs `tests/test_docs.py` with the docs group installed,
+and `docs-freshness` fails a PR that changes
 `src/skill_lens/**` without touching `docs/`, `README.md`, `ARCHITECTURE.md` or
 `mkdocs.yml`. When a change genuinely needs no documentation — a pure refactor, a
 dependency bump — add the `no-docs-needed` label to the PR.
 
-`tests/test_docs.py` is the precise half of the same idea: it asserts that every command,
-flag, config key, `EvalCase` field and assertion kind appears in the docs, that every page
-is in the nav, and that no relative link is dead.
+`tests/test_docs.py` is the precise half of the same idea. It asserts that:
+
+- every command, flag, config key, `EvalCase` field and assertion kind appears in the docs;
+- every page is in the nav, and linked from `README.md`'s Documentation table or the home
+  page's "Where to go next" table;
+- no relative link is dead, and no `#anchor` names a heading that does not exist. Renaming
+  a heading means updating every link to it;
+- the install instructions are written once, in `docs/snippets/install.md`, which pages
+  include with `--8<-- "docs/snippets/install.md"`. `README.md` cannot include a file, so
+  its copy of the command is compared with the snippet's;
+- `ARCHITECTURE.md` and `CLAUDE.md` state the three protocols as `src/` defines them.
+
+Heading ids are worked out the way Python-Markdown does it. With the docs group installed,
+the same file also checks that rule against the real renderer; that is why the `docs` job
+runs it.
+
+`tests/test_troubleshooting.py` does the same for [Troubleshooting](troubleshooting.md).
+Every message quoted there is listed in its `QUOTED` table with the module that emits it,
+and the test fails if either side changes. A new message on that page needs a row there.
 
 ## Conventional Commits are required
 

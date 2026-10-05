@@ -4,7 +4,12 @@ from pathlib import Path
 
 import skill_lens.runners.tools as tools_module
 from skill_lens.models import TOOL_NAME_PATTERN, Skill, ToolSpec
-from skill_lens.runners.tools import build_mock_tool, build_skill_tool, skill_tool_name
+from skill_lens.runners.tools import (
+    NO_RESPONSE_SCRIPTED,
+    build_mock_tool,
+    build_skill_tool,
+    skill_tool_name,
+)
 
 
 def test_schema_describes_every_declared_parameter():
@@ -75,6 +80,112 @@ def test_calling_the_tool_ignores_whatever_arguments_it_is_handed():
 
 def test_a_tool_with_no_return_value_yields_an_empty_string():
     assert build_mock_tool(ToolSpec(name="ping")).call() == ""
+
+
+# --- a sequence of return values, consumed in call order -----------------------
+
+
+def test_a_sequence_is_handed_back_one_entry_per_call_in_order():
+    tool = build_mock_tool(
+        ToolSpec(name="get_work_item", returns=['{"id": "A", "parent": "B"}', '{"id": "B"}'])
+    )
+    assert tool.call(id="A") == '{"id": "A", "parent": "B"}'
+    assert tool.call(id="B") == '{"id": "B"}'
+
+
+def test_a_sequence_repeats_its_last_entry_once_exhausted():
+    # The last entry is the steady state: a skill that keeps calling gets the
+    # same answer it stopped on, and `trajectory.max_calls` is what catches a
+    # loop that should have ended.
+    tool = build_mock_tool(ToolSpec(name="poll", returns=["running", "done"]))
+    assert [tool.call() for _ in range(4)] == ["running", "done", "done", "done"]
+
+
+def test_a_sequence_ignores_the_arguments_it_is_handed():
+    tool = build_mock_tool(ToolSpec(name="poll", returns=["one", "two"]))
+    assert tool.call(unexpected="x") == "one"
+    assert tool.call() == "two"
+
+
+def test_each_built_tool_counts_its_own_calls():
+    # Two builds of the same spec -- two arms, two attempts, two work items --
+    # must never share a counter: the second run would start mid-sequence.
+    spec = ToolSpec(name="poll", returns=["one", "two"])
+    first, second = build_mock_tool(spec), build_mock_tool(spec)
+    assert first.call() == "one"
+    assert second.call() == "one"
+    assert first.call() == "two"
+
+
+def test_a_sequence_is_consumed_exactly_once_under_concurrent_calls():
+    # A framework may run several calls from one model turn in parallel, so
+    # the counter is locked: every entry is handed out exactly once before
+    # the last one repeats, whichever thread gets there first.
+    from concurrent.futures import ThreadPoolExecutor
+
+    entries = [str(n) for n in range(50)]
+    tool = build_mock_tool(ToolSpec(name="poll", returns=entries))
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        seen = list(pool.map(lambda _: tool.call(), range(50)))
+    assert sorted(seen, key=int) == entries
+
+
+# --- a lookup keyed by the call's arguments ------------------------------------
+
+
+def test_a_lookup_hands_back_the_first_entry_whose_when_matches():
+    tool = build_mock_tool(
+        ToolSpec(
+            name="get_work_item",
+            returns=[
+                {"when": {"id": "A"}, "value": '{"id": "A", "parent": "B"}'},
+                {"when": {"id": "B"}, "value": '{"id": "B", "parent": null}'},
+            ],
+        )
+    )
+    assert tool.call(id="B") == '{"id": "B", "parent": null}'
+    assert tool.call(id="A") == '{"id": "A", "parent": "B"}'
+    # Order-independent: the argument decides, not the call count.
+    assert tool.call(id="B") == '{"id": "B", "parent": null}'
+
+
+def test_a_lookup_matches_on_a_subset_of_the_arguments():
+    tool = build_mock_tool(
+        ToolSpec(name="search", returns=[{"when": {"repo": "a/b"}, "value": "found"}])
+    )
+    assert tool.call(repo="a/b", query="anything", page=2) == "found"
+
+
+def test_a_lookup_entry_without_when_is_the_fallback():
+    tool = build_mock_tool(
+        ToolSpec(
+            name="get_work_item",
+            returns=[{"when": {"id": "A"}, "value": "A"}, {"value": "not found"}],
+        )
+    )
+    assert tool.call(id="A") == "A"
+    assert tool.call(id="Z") == "not found"
+    assert tool.call() == "not found"
+
+
+def test_a_call_matching_no_lookup_entry_gets_a_readable_message_not_an_exception():
+    # An unscripted argument is an eval signal -- the skill asked for
+    # something the author did not anticipate -- so the model reads a message
+    # and the transcript shows it, rather than the run erroring.
+    tool = build_mock_tool(
+        ToolSpec(name="get_work_item", returns=[{"when": {"id": "A"}, "value": "A"}])
+    )
+    message = tool.call(id="Z", expand=True)
+    assert message == NO_RESPONSE_SCRIPTED.format(
+        name="get_work_item", arguments='{"expand": true, "id": "Z"}'
+    )
+    assert tool.call() == NO_RESPONSE_SCRIPTED.format(name="get_work_item", arguments="{}")
+
+
+def test_the_no_match_message_survives_arguments_json_cannot_encode():
+    tool = build_mock_tool(ToolSpec(name="t", returns=[{"when": {"id": "A"}, "value": "A"}]))
+    assert isinstance(tool.call(id=object()), str)
+    assert isinstance(tool.call(id=float("nan"), blob=b"\x00"), str)
 
 
 def test_module_does_not_import_an_agent_framework():

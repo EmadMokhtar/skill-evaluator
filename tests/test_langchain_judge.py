@@ -1,11 +1,13 @@
 """The LangChain judge, exercised offline with a scripted model."""
 
+import pytest
 from langchain_core.messages import AIMessage, ToolCall
 
 from langchain_fakes import USAGE, FunctionChatModel, StatusError
 from skill_lens.judges.base import Judge
 from skill_lens.judges.langchain import LangChainJudge
 from skill_lens.models import JudgeRequest, RubricCheck
+from skill_lens.runners.preflight import UnsupportedBaseURL
 
 REQUEST = JudgeRequest(
     task="Why can't I return this?",
@@ -151,3 +153,39 @@ def test_a_failure_while_capturing_the_result_is_reported_not_raised(monkeypatch
     result = judge.judge(REQUEST)
     assert result.errored is True
     assert "cost calc exploded" in result.error
+
+
+# --- base_url: a self-hosted OpenAI-compatible endpoint ------------------------
+
+LOCAL = "http://localhost:11434/v1"
+
+
+def test_the_judge_hands_its_base_url_to_the_chat_model_it_builds(monkeypatch):
+    import langchain.chat_models
+
+    seen: dict = {}
+
+    def record(model, **kwargs):
+        seen.update(kwargs)
+        return FunctionChatModel(reply=lambda messages, turn: verdict([]))
+
+    monkeypatch.setattr(langchain.chat_models, "init_chat_model", record)
+    LangChainJudge(model="openai:gpt-oss:latest", base_url=LOCAL).judge(REQUEST)
+    assert seen["base_url"] == LOCAL
+
+
+def test_the_judge_refuses_a_rejected_base_url_in_preflight_before_any_spend(monkeypatch):
+    import langchain.chat_models
+
+    def refuse(model, **kwargs):
+        raise TypeError("unexpected keyword argument 'base_url'")
+
+    monkeypatch.setattr(langchain.chat_models, "init_chat_model", refuse)
+    judge = LangChainJudge(model="somewhere:model", base_url=LOCAL)
+    with pytest.raises(UnsupportedBaseURL, match="judge langchain"):
+        judge.preflight()
+
+
+def test_the_judge_preflight_returns_no_product_status(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    assert LangChainJudge(model="openai:gpt-4o-mini", base_url=LOCAL).preflight() is None

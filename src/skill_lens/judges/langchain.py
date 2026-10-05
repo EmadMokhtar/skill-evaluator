@@ -26,6 +26,7 @@ from skill_lens.runners.langchain import (
     _model_name,
     _require_langchain,
     _usage,
+    check_base_url,
 )
 from skill_lens.runners.retry import run_with_retries
 
@@ -43,12 +44,21 @@ class LangChainJudge:
         retries: int = 2,
         retry_backoff_seconds: float = 1.0,
         sleep: Callable[[float], None] = time.sleep,
+        base_url: str = "",
     ) -> None:
         self._model = model
         self._temperature = temperature
         self._retries = retries
         self._retry_backoff_seconds = retry_backoff_seconds
         self._sleep = sleep
+        self._base_url = base_url
+
+    def preflight(self) -> None:
+        """Refuse a `base_url` the judge's chat model cannot take, before any spend.
+
+        Returns None: a keyed judge has no product status.
+        """
+        check_base_url(f"judge {self.name}", self._model, self._temperature, self._base_url)
 
     def _grade(self, request: JudgeRequest) -> dict[str, Any]:
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -57,7 +67,7 @@ class LangChainJudge:
         # LangChain hands back only the parsed object, and tokens, cost and
         # the served model name -- what the report's judge-overhead line is
         # built from -- would be unreadable.
-        grader = _chat_model(self._model, self._temperature).with_structured_output(
+        grader = _chat_model(self._model, self._temperature, self._base_url).with_structured_output(
             JudgeOutput, include_raw=True
         )
         prompt = [SystemMessage(SYSTEM_PROMPT), HumanMessage(render_request(request))]

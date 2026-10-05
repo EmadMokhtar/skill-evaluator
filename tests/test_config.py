@@ -496,8 +496,10 @@ def test_a_command_naming_another_executable_drops_the_presets_version_probe(tmp
     )
     product = load_config(tmp_path / "skill-lens.toml").product(name)
     assert product.version_command is None
-    # a wrapper is not known to accept the preset's judge-only flag either
+    # a wrapper is not known to accept the preset's judge-only flag either,
+    # nor the flag that hands it the MCP bridge's config
     assert product.judge_args == ()
+    assert product.mcp is None
 
 
 @pytest.mark.parametrize("name", ["claude-code", "copilot"])
@@ -510,3 +512,66 @@ def test_a_command_keeping_the_presets_executable_keeps_its_version_probe(tmp_pa
     product = load_config(tmp_path / "skill-lens.toml").product(name)
     assert product.version_command == (executable, "--version")
     assert product.judge_args == JUDGE_ARGS[name]
+    assert product.mcp is PRESETS[name].mcp
+
+
+def test_the_presets_take_the_bridge_and_cli_does_not(tmp_path):
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.cli]\ncommand = ["my-agent", "{prompt}"]\n', encoding="utf-8"
+    )
+    config = load_config(tmp_path / "skill-lens.toml")
+    assert config.product("cli").mcp is None
+    for name in PRESETS:
+        assert config.product(name).mcp is PRESETS[name].mcp is not None
+
+
+def test_base_urls_default_to_empty_and_load_from_the_file(tmp_path):
+    assert Config().base_url == ""
+    assert Config().judge_base_url == ""
+    path = tmp_path / "skill-lens.toml"
+    path.write_text(
+        'base_url = "http://localhost:11434/v1"\n'
+        'judge_base_url = "https://gpu-box.internal:8000/v1"\n'
+    )
+    config = load_config(path=path)
+    assert config.base_url == "http://localhost:11434/v1"
+    assert config.judge_base_url == "https://gpu-box.internal:8000/v1"
+
+
+@pytest.mark.parametrize("key", ["base_url", "judge_base_url"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "localhost:11434/v1",  # no scheme
+        "ftp://localhost:11434",  # not http(s)
+        "http://",  # no host
+        "   ",  # blank but not empty
+        "http://user:secret@localhost:11434/v1",  # a credential in the file
+    ],
+)
+def test_a_malformed_or_credentialed_base_url_is_a_config_error(tmp_path, key, value):
+    path = tmp_path / "skill-lens.toml"
+    path.write_text(f'{key} = "{value}"\n')
+    with pytest.raises(ConfigError, match=key):
+        load_config(path=path)
+
+
+def test_a_credential_in_a_base_url_is_refused_with_the_secrets_rule(tmp_path):
+    path = tmp_path / "skill-lens.toml"
+    path.write_text('base_url = "http://user:secret@localhost:11434/v1"\n')
+    with pytest.raises(ConfigError, match="never reads secrets"):
+        load_config(path=path)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("  http://localhost:11434/v1  ", "http://localhost:11434/v1"),
+        ("http://localhost:11434/v1/", "http://localhost:11434/v1/"),
+        ("https://gpu-box.internal:8000", "https://gpu-box.internal:8000"),
+    ],
+)
+def test_a_well_formed_base_url_is_kept_with_only_the_whitespace_removed(tmp_path, value, expected):
+    path = tmp_path / "skill-lens.toml"
+    path.write_text(f'base_url = "{value}"\n')
+    assert load_config(path=path).base_url == expected

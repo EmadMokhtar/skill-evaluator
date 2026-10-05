@@ -174,3 +174,26 @@ def test_the_fake_runner_accepts_and_ignores_the_scripts_keyword():
     skill = Skill(name="pdf", path=Path("/tmp/pdf"))
     case = EvalCase(name="x", task="t")
     assert runner.run(skill, case, scripts=runtime).output == "ok"
+
+
+def test_preflight_refuses_a_trajectory_naming_a_tool_the_case_does_not_declare():
+    # The fake runner offers a case's mock tools and nothing else, so it makes
+    # the same check the framework runners do -- before any case runs.
+    from skill_lens.models import TrajectorySpec
+    from skill_lens.runners.preflight import UndeclaredTool
+
+    case = EvalCase(name="c", task="t", trajectory=TrajectorySpec(called=["Bash"]))
+    with pytest.raises(UndeclaredTool, match=r"runner fake: case 'c' of skill 's'"):
+        FakeRunner().preflight([], {"s": [case]})
+
+
+def test_preflight_returns_nothing_for_a_clean_plan():
+    from skill_lens.models import ToolSpec, TrajectorySpec
+
+    case = EvalCase(
+        name="c",
+        task="t",
+        tools=[ToolSpec(name="lookup_order")],
+        trajectory=TrajectorySpec(called=["lookup_order"]),
+    )
+    assert FakeRunner().preflight([], {"s": [case]}) is None

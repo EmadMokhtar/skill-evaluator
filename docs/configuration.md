@@ -19,11 +19,13 @@ greeting = 0.9
 | --- | --- | --- |
 | `default_runner` | `"fake"` (a string, or a list of names) | `--runner` |
 | `model` | `"openai:gpt-4o-mini"` | `--model` |
+| `base_url` | `""` (the provider's own variable, then its default) | `--base-url` |
 | `temperature` | `0.0` | — |
 | `retries` | `2` | — |
 | `retry_backoff_seconds` | `1.0` | — |
 | `judge` | `"fake"` | — |
 | `judge_model` | `""` (falls back to `model`) | `--judge-model` |
+| `judge_base_url` | `""` (inherits `base_url` with `model`) | — |
 | `judge_temperature` | `0.0` | — |
 | `min_pass_rate` | `1.0` | `--min-pass-rate` |
 | `fail_on_error` | `true` | — |
@@ -120,6 +122,60 @@ retry_backoff_seconds = 1.0
 A blank model id is rejected as a user error (exit 2) rather than being passed to a provider,
 whether it arrives from `model`, `judge_model`, or the matching flag.
 
+### Self-hosted endpoints
+
+`base_url` points the runner's provider at a self-hosted, OpenAI-compatible server (Ollama,
+vLLM, LM Studio, a gateway) instead of the provider's own endpoint. It is exactly the kind
+of value a repository commits beside `model`: not a secret, and the same for every
+contributor who runs the suite against the same machine.
+
+```toml
+default_runner = "pydantic-ai"
+model = "ollama:gpt-oss:latest"
+base_url = "http://localhost:11434/v1"
+```
+
+Resolution follows the usual order — `--base-url` > `base_url` > the provider's own
+environment variable (`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, read by the framework when
+skill-lens passes nothing) > the provider's default. The variable is a fallback, not an
+override: to point a committed file at a different machine for one run, pass `--base-url`,
+as `--model` does for the model.
+
+The endpoint travels with the model. `judge_base_url` is empty by default, and an empty
+value means the judge uses `base_url` **exactly when it uses `model`** — `judge_model` unset
+and no `--judge-model`. A judge with a model of its own gets its provider's default
+endpoint unless `judge_base_url` names one, so a cloud judge under a local runner is never
+pointed at `localhost`, and two local models on one server are one line each:
+
+```toml
+judge = "pydantic-ai"
+judge_model = "ollama:qwen3"                 # its own model, so ...
+judge_base_url = "http://localhost:11434/v1" # ... its own endpoint, spelled out
+```
+
+What is checked, and when:
+
+- **At load time (exit 2):** a value must be a bare `http://` or `https://` URL naming a
+  host. A URL carrying a user name or password (`http://user:secret@host/v1`) is refused
+  as a secret in a committed file — credentials go in the provider's environment variable.
+- **In preflight, before any spend (exit 2):** a provider whose client takes no endpoint.
+  Under `pydantic-ai`, `openai:`, `ollama:` and `anthropic:` take one; `deepseek:`,
+  `azure:`, `openrouter:` and the other hosted-only prefixes do not, and the refusal names
+  the provider. Under `langchain` the value reaches the chat model as `base_url=`, which the
+  OpenAI and Anthropic families accept; a chat model that rejects it is refused the same
+  way. Without a `base_url` nothing is checked and nothing changes.
+- **Never relaxed:** the API-key check. `ollama:` needs no key. `openai:` pointed at a local
+  server still needs `OPENAI_API_KEY` exported — to any value — because the provider's
+  client requires one; the docs for your server say whether it reads it.
+
+`ollama:` under `pydantic-ai` has no default endpoint: with neither `base_url` nor
+`OLLAMA_BASE_URL` set, every case errors with the provider's own message. Committing
+`base_url` is what makes that prefix work from a fresh clone.
+
+Product runners and judges (`copilot`, `claude-code`, `cli`) reach their own endpoint and
+ignore both keys, as they ignore `model`; `--base-url` under a run where nothing reads it is
+a user error (exit 2), the rule `--model` follows. `base_url` is never printed in a report.
+
 ## Product runners
 
 One `[runners.<name>]` table per product — `copilot`, `claude-code`, or `cli` — whether the
@@ -151,7 +207,7 @@ max_output_bytes = 8000000                        # default
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `command` | the preset's argv (required for `cli`) | The whole argv. Exactly one element must be `{prompt}`, and it cannot be the first (the executable); the prompt is substituted as that one element, never through a shell. When the first element is not the preset's own executable, preflight skips the `--version` probe (a wrapper might treat `--version` as a prompt). |
+| `command` | the preset's argv (required for `cli`) | The whole argv. Exactly one element must be `{prompt}`, and it cannot be the first (the executable); the prompt is substituted as that one element, never through a shell. When the first element is not the preset's own executable, preflight skips the `--version` probe (a wrapper might treat `--version` as a prompt), the judge's tool restriction is dropped, and a case with `tools:` is refused — a wrapper is not known to take the flag that hands the product the [MCP bridge](runners.md#mock-tools-under-a-product)'s config. |
 | `args` | `[]` | Appended after `command`. Must not contain `{prompt}`. |
 | `timeout_seconds` | `600.0` | Wall clock per case (per judge call, for the judge), finite and positive; the process group is killed at expiry. |
 | `max_output_bytes` | `8000000` | Cap on the trace, positive; a longer one is an errored case naming this key. |
@@ -172,7 +228,13 @@ gets nothing extra. The same table's `args` (or `command`) may not carry the pro
 tool-selection flag (`--tools` under `claude-code`, `--available-tools` under `copilot`) when
 the product judges: both products accumulate a repeated flag instead of taking the last
 one, so the entry would hand the judge tools back, and the judge's preflight refuses it
-(exit 2) naming the entry. Narrow the runner's tools under a different judge instead. See
+(exit 2) naming the entry. Narrow the runner's tools under a different judge instead. When
+a case declares `tools:`, the runner's preflight refuses `--available-tools` in
+`[runners.copilot]` the same way: the flag keeps only the tools it names, MCP tools
+included, so it would hide the case's mock tools from the model (Claude Code's `--tools`
+governs its built-in set only and is not refused). A case's `tools:` reach a preset through
+the [MCP bridge](runners.md#mock-tools-under-a-product), whose config is appended after
+`args` as the last argument; the bridge itself has no key here. See
 [Runners](runners.md#product-runners) for what
 each product runner measures, [Judging with a product](runners.md#judging-with-a-product)
 for the judge, and [Security](security.md#product-runners) for what naming one means.
@@ -242,8 +304,11 @@ repository that installs only `skill-lens[langchain]` can both run and grade.
 ```toml
 judge = "pydantic-ai"
 judge_model = ""             # empty falls back to `model`
+judge_base_url = ""          # empty inherits `base_url` exactly when `judge_model` is empty
 judge_temperature = 0.0      # or "unset" for a reasoning judge model
 ```
+
+`judge_base_url` follows the model: see [Self-hosted endpoints](#self-hosted-endpoints).
 
 `judge` also accepts `copilot`, `claude-code` and `cli`: the rubric is then graded through
 that product, started from its [`[runners.<name>]` table](#product-runners) — the same table

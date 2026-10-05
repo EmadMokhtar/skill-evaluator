@@ -5,18 +5,43 @@ real agent there are three ways: the `pydantic-ai` framework extra, the `langcha
 framework extra, or an installed agent product (`copilot`, `claude-code`, or a
 command you name as `cli`). A framework extra needs a key in the environment and a
 model; a product needs neither, because it uses its own auth — see
-[Product runners](#product-runners). With a framework extra:
+[Product runners](#product-runners). A framework extra is installed with the package:
+
+--8<-- "docs/snippets/install.md"
+
+Then export the provider's key and name a model:
 
 ```bash
-uv tool install "skill-lens[pydantic-ai]"       # or "skill-lens[langchain]", or both
 export OPENAI_API_KEY=...
 skill-lens run ./skills --runner pydantic-ai --model openai:gpt-4o-mini
 skill-lens run ./skills --runner langchain --model openai:gpt-4o-mini
 skill-lens run ./skills --runner pydantic-ai --runner langchain --model openai:gpt-4o-mini
 ```
 
-From a checkout instead, the extra comes from `uv sync --extra pydantic-ai` (or
-`--extra langchain`) and every command runs as `uv run skill-lens ...`.
+## Choosing a runner
+
+| Runner | What it costs | Needs | Measures |
+| --- | --- | --- | --- |
+| `fake` | Nothing. Offline, scripted, deterministic | Nothing | The pipeline itself — discovery, scoring, gating, reporting. Use it to check a suite is wired up before you spend anything |
+| `pydantic-ai` | Provider tokens | The `pydantic-ai` extra and an API key in the environment | Output, mock tools, `trajectory:`, `mode: offered`, the workspace, tokens, cost, latency |
+| `langchain` | Provider tokens | The `langchain` extra and an API key in the environment | The same as `pydantic-ai`, through a second framework |
+| `copilot` | Your GitHub Copilot quota, billed per premium request rather than per token | GitHub Copilot CLI installed; it uses its own auth, so no API key | Output, mock tools through the [MCP bridge](#mock-tools-under-a-product), `trajectory:`, `mode: offered` from the product's own skill-load signal, the workspace, latency, and tokens when the trace reports them. Never `budget: max_cost_usd` |
+| `claude-code` | Your Claude Code quota | Claude Code installed; it uses its own auth, so no API key | The same as `copilot`, plus `budget: max_cost_usd` — this product reports its own cost |
+| `cli` | Whatever the command you name costs | A `[runners.cli]` table whose `command` names that command; without one, `cli` cannot be named at all | Output, the workspace, and latency. `tools:`, `trajectory:` and `mode: offered` are authoring errors under it |
+
+A feature-by-feature version of the last column is in [Which runners serve which case
+features](eval-files.md#which-runners-serve-which-case-features), and the per-limit budget
+detail is under [Product runners](#product-runners).
+
+Two rules worth knowing before you choose:
+
+- **`--runner` is repeatable**, so one invocation can run every case through several
+  runners and produce one report. The flag replaces `default_runner` wholesale rather than
+  appending to it, and the same runner named twice is a user error (exit `2`), not silently
+  de-duplicated.
+- **Naming a product runner is a trust decision.** The product runs with its permission
+  prompts disabled, your whole environment inherited, and no skill-lens sandbox. Every
+  report says so — see [Security](security.md#product-runners).
 
 ## Two frameworks, one measurement
 
@@ -50,6 +75,17 @@ the same in both; other providers differ (PydanticAI `google-gla:`, LangChain
 `google_genai:`) and need their provider package installed beside the extra
 (`pip install langchain-google-genai`, or `pydantic-ai-slim[google]`).
 
+A self-hosted, OpenAI-compatible server (Ollama, vLLM, LM Studio, a gateway) is reached
+through `base_url` in `skill-lens.toml` or `--base-url`, so the endpoint is committed
+beside `model` rather than exported in every shell; with neither set, the provider's own
+variable (`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`) is the fallback, as before. Under
+`pydantic-ai` the provider is built with the endpoint (`openai:`, `ollama:` and
+`anthropic:` take one; a hosted-only prefix such as `deepseek:` or `azure:` does not and is
+refused in preflight, before any spend); under `langchain` it reaches the chat model as
+`base_url=`. The judge inherits the endpoint exactly when it inherits the model — see
+[Self-hosted endpoints](configuration.md#self-hosted-endpoints) for `judge_base_url`, the
+load-time checks and why the API-key check is unchanged.
+
 Per turn, LangChain reports token usage on each model response and the served model
 name in the response metadata; the runner sums the former and reads the latter from the
 last response that carries one. A LangChain judge that returns a structured verdict the
@@ -81,45 +117,52 @@ skill-lens run ./skills --runner copilot --runner pydantic-ai --model openai:gpt
 | `claude-code` | `claude -p <prompt> --output-format stream-json --verbose --dangerously-skip-permissions --setting-sources project --strict-mcp-config --no-session-persistence` | `.claude/skills/<name>/` | Claude Code's `stream-json` |
 | `cli` | the `command` in `[runners.cli]` | `skills_dir` (default `.agents/skills`) | none — stdout is the output |
 
-The flags are the verified minimum: what the product needs to run without a terminal,
-what emits the trace, and what keeps *your* setup out of the eval. `--no-custom-instructions`
-stops a stray `AGENTS.md` or a personal instructions file shaping a Copilot run;
-`--setting-sources project --strict-mcp-config` keeps your own hooks, plugins and MCP
-servers out of a Claude Code run while the project skill is still discovered and
-OAuth auth still works; `--no-session-persistence` writes nothing under `~/.claude`.
+The flags are the verified minimum: what the product needs to run without a terminal, what
+emits the trace, and what keeps *your* setup out of the eval.
+
+- `--no-custom-instructions` stops a stray `AGENTS.md` or a personal instructions file
+  shaping a Copilot run;
+- `--setting-sources project --strict-mcp-config` keeps your own hooks, plugins and MCP
+  servers out of a Claude Code run while the project skill is still discovered and
+  OAuth auth still works;
+- `--no-session-persistence` writes nothing under `~/.claude`.
+
 Personal skills and plugins under `~/.copilot` do still load for Copilot — that is the
-product as you have it; for a hermetic run (one that loads nothing from your personal
-setup) point `COPILOT_HOME` at an empty directory and set `COPILOT_GITHUB_TOKEN`. Add flags
-with `[runners.<name>] args` (for example, a model); replace the whole argv with `command`.
-See
-[Configuration](configuration.md#product-runners).
+product as you have it; for a hermetic run (one that loads nothing from your personal setup)
+point `COPILOT_HOME` at an empty directory and set `COPILOT_GITHUB_TOKEN`.
+
+Add flags with `[runners.<name>] args` (for example, a model); replace the whole argv with
+`command`. See [Configuration](configuration.md#product-runners).
 
 **What the product sees.** The eval's working directory (the case's workspace when it
-declares one, a fresh temporary directory otherwise) holds `SKILL.md` **verbatim (its
-text as written; line endings are normalised)** —
-products honour frontmatter keys skill-lens does not model, such as `allowed-tools` — and
-beside it `scripts/`, `references/` and `assets/`, nothing else. The prompt is the case's
-`task`, verbatim: the product owns its system prompt, and skill-lens adds no preamble.
-`mode: loaded` invokes the skill through the product's own spelling (`/<name> <task>` for
-both presets; `invoke` under `cli`, default `{task}`); `mode: offered` sends the bare task
-and reads the product's own load signal — the `skill` tool call in Copilot, the `Skill`
-tool call in Claude Code — so a negative control is measured, never assumed. Copilot's
-`skill.invoked` event is the slash invocation's: a skill the model chose itself is a
-request for the `skill` tool and no event, so the parser reads both. Under
-`--baseline none` the baseline arm has no skill directory and gets the bare task in both
-modes; under `--baseline previous` the previous version is delivered with its own bundle.
+declares one, a fresh temporary directory otherwise) holds `SKILL.md` **verbatim (its text
+as written; line endings are normalised)** — products honour frontmatter keys skill-lens
+does not model, such as `allowed-tools` — and beside it `scripts/`, `references/` and
+`assets/`, nothing else.
+
+The prompt is the case's `task`, verbatim: the product owns its system prompt, and
+skill-lens adds no preamble. `mode: loaded` invokes the skill through the product's own
+spelling (`/<name> <task>` for both presets; `invoke` under `cli`, default `{task}`); `mode:
+offered` sends the bare task and reads the product's own load signal — the `skill` tool call
+in Copilot, the `Skill` tool call in Claude Code — so a negative control is measured, never
+assumed. Copilot's `skill.invoked` event is the slash invocation's: a skill the model chose
+itself is a request for the `skill` tool and no event, so the parser reads both.
+
+Under `--baseline none` the baseline arm has no skill directory and gets the bare task in
+both modes; under `--baseline previous` the previous version is delivered with its own
+bundle.
 
 **What a product runner can measure.**
 
 | | `copilot` | `claude-code` | `cli` |
 | --- | --- | --- | --- |
 | Output text and `assertions:` | yes | yes | yes (stdout) |
-| `trajectory:` (the product's own tool names, e.g. `bash`, `Bash`) | yes | yes | no — an authoring error |
+| `trajectory:` | yes — `called`/`forbidden`/`order` name the case's mock tools, as declared, or the product's own tools (e.g. `bash`, `Bash`), spelled as the product spells them and unchecked, since skill-lens cannot list a product's tools; `max_calls` counts every call, the product's own included | same | no — an authoring error |
 | `mode: offered` / `skill_triggered` | yes | yes | no — an authoring error |
 | `budget: max_tokens` (input + cache read + cache write, plus output) | when the trace reports usage; otherwise a failing "not evaluated" check | when the trace reports usage; otherwise a failing "not evaluated" check | failing "not evaluated" check |
 | `budget: max_cost_usd` | failing "not evaluated" check — Copilot bills per premium request (its billing unit: one counted request, not tokens), and the note says how many | yes, at list price (the provider's published per-token price), as the product reports it in `total_cost_usd` | failing "not evaluated" check |
 | `budget: max_latency_ms` | yes | yes | yes |
-| `tools:` (mock tools) | authoring error | authoring error | authoring error |
+| `tools:` (mock tools) | yes, through the [MCP bridge](#mock-tools-under-a-product) | yes, through the [MCP bridge](#mock-tools-under-a-product) | no — an authoring error |
 
 Token counts under a product runner include the product's own system prompt and tool
 definitions — tens of thousands of tokens for a one-line answer under Claude Code. A
@@ -128,20 +171,31 @@ set a separate budget, or run budget cases through the framework runners only.
 
 Tool calls are what the model *requested* (Copilot's `toolRequests`, Claude Code's
 `tool_use` blocks), not what executed — a refused call was still the model's choice, the
-same rule the framework runners apply. A case the runner cannot serve is an **authoring
-error** (exit 2) found in preflight, before any case runs and before any quota is spent —
-never a vacuous pass. `--model` is not read by a product runner: a flag nothing reads is
-refused as a user error rather than silently ignored; set the product's model in its table.
+same rule the framework runners apply.
+
+A case the runner cannot serve is an **authoring error** (exit 2) found in preflight, before
+any case runs and before any quota is spent — never a vacuous pass. A `trajectory:` name is
+not among the things checked: under a product it names one of the case's [mock
+tools](#mock-tools-under-a-product) or one of the product's own tools, which skill-lens
+cannot enumerate, so a misspelled `called: [bassh]` is a failing check whose evidence says
+the tool was never called and whose failure excerpt shows the calls that did happen — read
+those before blaming the skill.
+
+`--model` is not read by a product runner: a flag nothing reads is refused as a user error
+rather than silently ignored; set the product's model in its table.
 
 **Errors.** A timeout (`timeout_seconds`, default 600), a non-zero exit, a product-reported
 failure, a trace cut short by `max_output_bytes`, a prompt over 100 KiB (the prompt travels
-as one argument, and Linux caps one at 128 KiB), and a missing executable at run time are
-all **errored** cases — never raised, never failed. A complete trace carrying the product's
-own error message is reported in preference to the exit code; a cut trace names the cap to
-raise. Preflight checks the executable is on `PATH` and, for the two presets, that it
-actually starts (`--version`); `cli` has no version command, so only the `PATH` lookup
-applies to it. The report names the product, its executable and — where there is one — its
-version on every run.
+as one argument, and Linux caps one at 128 KiB), a missing executable at run time, and a
+product that ran a case with `tools:` but never asked the [MCP
+bridge](#mock-tools-under-a-product) for them are all **errored** cases — never raised,
+never failed. A complete trace carrying the product's own error message is reported in
+preference to the exit code; a cut trace names the cap to raise.
+
+Preflight checks the executable is on `PATH` and, for the two presets, that it actually
+starts (`--version`); `cli` has no version command, so only the `PATH` lookup applies to it.
+The report names the product, its executable and — where there is one — its version on every
+run.
 
 **Trust.** The product runs with permission prompts disabled and inherits your whole
 environment — it needs its own auth, and cannot run non-interactively otherwise. No
@@ -149,6 +203,75 @@ skill-lens sandbox applies; the skill's bundled scripts are reachable through th
 own shell whatever `allow_scripts` says, which governs only skill-lens's `run_script` tool.
 **Naming a product runner is that decision**, and every report says so. See
 [Security](security.md#product-runners).
+
+### Mock tools under a product
+
+A case's `tools:` reach a preset product through an MCP server (Model Context Protocol —
+the JSON-RPC protocol an agent product uses to discover and call tools a separate process
+serves) that ships inside skill-lens: the **MCP bridge**, `python -m skill_lens.mcp_bridge`.
+Nothing changes in the eval file, and no extra flag turns it on — a case that declares
+`tools:` runs under `copilot` and `claude-code` the way it runs under the framework runners,
+`mode: loaded` and `mode: offered` alike, in both arms of a comparative run:
+
+```bash
+skill-lens run ./skills --runner copilot        # every case, mock tools included, no API key
+```
+
+**How it works.** For each invocation the runner writes two files into a temporary directory
+of its own — never the working directory, which the product can list and a `file-produced`
+assertion can read: the case's tools (name, description, the JSON schema `build_mock_tool`
+registers — a `parameters:` shorthand closed with `additionalProperties: false`, an
+`input_schema` verbatim — and `returns`) and an MCP config naming the bridge as one stdio
+server: this Python interpreter, `-m`, the module, the tools file.
+
+The config is handed to the product as the last argument on its command line, after the
+table's `args`: `--mcp-config=<file>` under Claude Code, beside the preset's
+`--strict-mcp-config`, so the bridge is the only MCP server the run sees;
+`--additional-mcp-config=@<file>` under Copilot, where it is added beside the built-in
+GitHub server and whatever `~/.copilot/mcp-config.json` configures (the hermetic recipe
+above keeps those out).
+
+The product starts the bridge itself, lists its tools, and calls them as it would any MCP
+server's; a call is answered from `returns:` by the same rules as under every other runner —
+one value for every call, a sequence in call order, or a `when:` lookup by argument, a call
+no entry answers getting the same "no response is scripted" message — and nothing executes.
+The directory is deleted after every run, `--keep-workspace` or not.
+
+**Tool names.** The product shows the model each tool under its own spelling for an MCP
+tool — `mcp__skill-lens__<name>` under Claude Code, `skill-lens-<name>` under Copilot — and
+its trace reports the call that way. The runner maps every declared tool back to the name
+the case gave it, so `trajectory: called`, `forbidden` and `order` read identically under
+every runner (the transcript keeps the product's spelling). Any other call keeps the
+product's own name. Claude Code loads an MCP tool's schema on demand and may fetch it with
+a `ToolSearch` call first — that call is the product's own and counts toward `max_calls`,
+so a cap written for a framework runner may need one more under Claude Code.
+
+**What is checked before, and after.** When any planned case declares `tools:`, preflight
+starts the bridge once under this interpreter (`--check`) — executed, not merely found, like
+the version probe — and a bridge that cannot start is exit 2 before any quota is spent.
+
+After a run, a product that reached a clean result but never asked the bridge for its tools
+(MCP support switched off by a table flag, say) is an **errored** case naming the cause,
+never a `called:` that failed for a reason that says nothing about the skill.
+
+`[runners.copilot] args` or `command` carrying `--available-tools` is refused in preflight
+when a case declares `tools:` — verified against `copilot` 1.0.37, the flag keeps only the
+tools it names, MCP tools included — while Claude Code's `--tools` governs the built-in set
+only (verified against 2.1.274: the MCP tool stays listed under `--tools ""`) and is not
+refused.
+
+A `command` naming another executable drops the bridge along with the version probe and the
+judge restriction, because a wrapper is not known to take the flag, and `tools:` is then an
+authoring error under that runner; `cli` has no known flag, so `tools:` is an authoring
+error there too.
+
+The [product judge](#judging-with-a-product) never gets the bridge: it grades text with no
+tools at all.
+
+**Trust.** The bridge is skill-lens's own code — it returns canned text and runs nothing
+from the eval file or the skill — started by the product as a child process with the
+product's environment; naming the product runner remains the trust decision, and the
+report's sentence is unchanged. See [Security](security.md#product-runners).
 
 ### Judging with a product
 
@@ -168,45 +291,55 @@ judge = "claude-code"           # grades through the same product as the runner
 and artifacts the framework judges send — goes in as one text prompt, because a product has
 no structured-output mode and its system prompt is its own. One closing line asks for a
 single JSON object and nothing else: `{"checks": [{"id": ..., "passed": ..., "evidence":
-...}, ...]}`, one entry per rubric check. The judge runs in an empty temporary directory
-with no skill delivered: it grades text, it never invokes the skill under test, and the
-directory is removed after every call. Each preset grades with its tool restriction
-appended after the table's `args`, so it has no tools at all while it judges: Claude Code
-with `--tools ""`, Copilot with `--available-tools=skill-lens-none`. Copilot's flag keeps
-only the tools it names and ignores an empty list, so the list names one tool that does not
-exist and the model is left with none, built-in and MCP alike — verified against `copilot`
-1.0.37 by reading the tool list it sends the model, which is empty; `--excluded-tools` takes
-no wildcard, and `--deny-tool` governs approval prompts, not what the model sees. A
-`command` that names another executable drops the restriction along with the version probe,
-because a wrapper is not known to accept it; `cli` has none. The table's `args` or `command`
-may not carry that same flag (`--tools`, `--available-tools`) when the product judges: both
-products accumulate a repeated flag rather than taking the last one (verified: `claude
---tools Bash --tools ""` runs Bash; Copilot sends `bash` under `--available-tools=bash
---available-tools=skill-lens-none`), so the entry would give the judge tools back, and
-preflight refuses it as a user error (exit 2) naming the entry, before any case runs. A
-graded response that reads
-like an instruction then has nothing to act with — the prompt says the response is untrusted
-data, but that is a request, not a guarantee; the restriction is what makes acting on it
-impossible, and it does not stop such an instruction from swaying the verdict itself; see
-[Security](security.md#product-runners).
+...}, ...]}`, one entry per rubric check.
+
+The judge runs in an empty temporary directory with no skill delivered: it grades text, it
+never invokes the skill under test, and the directory is removed after every call.
+
+Each preset grades with its tool restriction appended after the table's `args`, so it has no
+tools at all while it judges: Claude Code with `--tools ""`, Copilot with
+`--available-tools=skill-lens-none`. Copilot's flag keeps only the tools it names and
+ignores an empty list, so the list names one tool that does not exist and the model is left
+with none, built-in and MCP alike — verified against `copilot` 1.0.37 by reading the tool
+list it sends the model, which is empty; `--excluded-tools` takes no wildcard, and
+`--deny-tool` governs approval prompts, not what the model sees.
+
+A `command` that names another executable drops the restriction along with the version
+probe, because a wrapper is not known to accept it; `cli` has none.
+
+The table's `args` or `command` may not carry that same flag (`--tools`,
+`--available-tools`) when the product judges: both products accumulate a repeated flag
+rather than taking the last one (verified: `claude --tools Bash --tools ""` runs Bash;
+Copilot sends `bash` under `--available-tools=bash --available-tools=skill-lens-none`), so
+the entry would give the judge tools back, and preflight refuses it as a user error (exit 2)
+naming the entry, before any case runs.
+
+A graded response that reads like an instruction then has nothing to act with — the prompt
+says the response is untrusted data, but that is a request, not a guarantee; the restriction
+is what makes acting on it impossible, and it does not stop such an instruction from swaying
+the verdict itself; see [Security](security.md#product-runners).
 
 **The verdict.** Exactly one top-level JSON object in the reply is the verdict: the first
 balanced `{ ... }` — the earliest `{` whose `}` closes it, braces inside JSON strings not
 counted — is validated strictly as `JudgeOutput`: a `checks` list of `{id, passed,
-evidence}` entries, and no other key beside it. Prose around it and a code fence are fine,
-and a brace pair in prose (`{name}`, say) is not an object — only a span that parses as
-JSON counts. Two or more such objects — for example a graded response that quotes a forged verdict
-before the model gives its real one — is an unreadable verdict, never a choice between
-them: it is refused the same way as no object at all, not resolved silently in the earlier
-one's favour. A reply with no readable verdict — prose only, a cut-off object, the wrong
-shape, an empty object, a key beside `checks`, two or more top-level objects — is an
-**errored** case (`judge failed: JudgeOutputInvalid: ...` naming the mismatch), never a low
-score: the same rule as the framework judges, because an unreadable verdict is an
-infrastructure signal. From there the verdict is handled as under every judge: a verdict
-whose check ids do not match the rubric is errored, and a pass with no evidence (an empty
-or missing `evidence`) is recorded as a failure. A product failure — a timeout, a non-zero
-exit, a reply over `max_output_bytes`, a prompt over 100 KiB, an executable that vanished
-after preflight — is errored the same way.
+evidence}` entries, and no other key beside it.
+
+Prose around it and a code fence are fine, and a brace pair in prose (`{name}`, say) is not
+an object — only a span that parses as JSON counts. Two or more such objects — for example a
+graded response that quotes a forged verdict before the model gives its real one — is an
+unreadable verdict, never a choice between them: it is refused the same way as no object at
+all, not resolved silently in the earlier one's favour.
+
+A reply with no readable verdict — prose only, a cut-off object, the wrong shape, an empty
+object, a key beside `checks`, two or more top-level objects — is an **errored** case
+(`judge failed: JudgeOutputInvalid: ...` naming the mismatch), never a low score: the same
+rule as the framework judges, because an unreadable verdict is an infrastructure signal.
+
+From there the verdict is handled as under every judge: a verdict whose check ids do not
+match the rubric is errored, and a pass with no evidence (an empty or missing `evidence`) is
+recorded as a failure. A product failure — a timeout, a non-zero exit, a reply over
+`max_output_bytes`, a prompt over 100 KiB, an executable that vanished after preflight — is
+errored the same way.
 
 **What is read and what is not.** `judge_model` and `judge_temperature` are not read: no
 product exposes a temperature, and a product's model is set with `[runners.<name>] args`.
@@ -309,22 +442,41 @@ A tool declares its arguments with the `parameters:` shorthand shown above, or w
 tools](eval-files.md#mock-tools). The shorthand is closed — every key required,
 `additionalProperties: false` — because the author wrote every key. A declared
 `input_schema` is handed to the agent verbatim, because fidelity to the server it stands in
-for is its reason to exist. Each framework may still normalise it on the way to the
-provider — LangChain inlines `$ref` and drops `$defs`, PydanticAI passes it untouched — so
-the schema in a request log can differ in spelling from the eval file while meaning the
-same thing. [`skill-lens mcp-import`](cli.md#mcp-import) writes one from the server's own
-`tools/list` listing.
+for is its reason to exist.
+
+Each framework may still normalise it on the way to the provider — LangChain inlines `$ref`
+and drops `$defs`, PydanticAI passes it untouched — so the schema in a request log can
+differ in spelling from the eval file while meaning the same thing. [`skill-lens
+mcp-import`](cli.md#mcp-import) writes one from the server's own `tools/list` listing.
 
 A tool declared in a [tool library](eval-files.md#sharing-tools-across-eval-files) and
 named with `ref:` is resolved by the case loader before any runner is involved, so a
 runner never sees a reference — only the `ToolSpec` it named, with the case's own
 `returns:`.
 
-Every tool name in `called`, `forbidden`, `order` or a `call_args` entry's `tool` must be
-declared in that case's `tools:` — including `forbidden`, since forbidding a tool the agent
-was never offered in the first place is a check that can never fire. A name that isn't declared is an
+`returns:` may also be a list — of strings, consumed in call order with the last one
+repeating, or of `when:`/`value:` entries matched against the call's arguments; see
+[Answering differently per call](eval-files.md#answering-differently-per-call). The
+runner builds every mock afresh for each run, and for each *attempt* of a run: a
+transient provider failure that is retried starts a new conversation, and its tools start
+from the top of the sequence too, so the retried attempt is shown exactly what the first
+one was. A sequence's counter is locked, so a framework that runs several calls from one
+model turn in parallel still hands out each entry once — in whichever order it ran them.
+
+Under `fake`, `pydantic-ai` and `langchain`, every tool name in `called`, `forbidden`,
+`order` or a `call_args` entry's `tool` must be declared in that case's `tools:` — or be
+a built-in, in a case with a `workspace:` block — including `forbidden`, since forbidding
+a tool the agent was never offered in the first place is a check that can never fire. A
+name that isn't declared is an
 authoring error (the run aborts, exit `2`), not a failing case, because a check that can
 never pass tells you nothing about the skill.
+
+That check is the runner's, made in preflight for the cases that will run under it — before
+any case runs and before any spend — rather than the eval file's, because which tools a case
+has depends on the runner: under a [product runner](#product-runners) the same block names
+the product's own tools (`Bash`), which skill-lens cannot list, so no name is refused there.
+One invocation may run one case through both kinds. `skill-lens list` calls no runner, so it
+accepts any name; `run` is where the rule applies.
 
 ## The workspace
 
@@ -352,13 +504,15 @@ cannot block on a FIFO committed to the repository either.
 **Reads are capped too.** `read_file`, a `file:` assertion and a judge artifact refuse a
 file larger than `max_file_bytes` before reading a byte of it — `refused: report.md is
 2,000,001 bytes; max_file_bytes is 1,000,000`. `read_file` uses the
-[configured](configuration.md) value; the assertion, the judge and `read_skill_file` use
-the built-in default of 1 MB. A sparse file has whatever apparent size a script gives it at
+[configured](configuration.md) value; the assertion, the judge and `read_skill_file` use the
+built-in default of 1 MB. A sparse file has whatever apparent size a script gives it at
 almost no cost on disk, so the cap on `st_size` is what bounds what reaches a model or an
-evaluator. A `file:` assertion scores the refusal as a failed check; the judge sees the
-artifact rendered as `(too large to read)` — distinct from `(not produced)`, because the
-file does exist. `file-produced` is unaffected: it asks whether the file exists, not whether
-it is readable.
+evaluator.
+
+A `file:` assertion scores the refusal as a failed check; the judge sees the artifact
+rendered as `(too large to read)` — distinct from `(not produced)`, because the file does
+exist. `file-produced` is unaffected: it asks whether the file exists, not whether it is
+readable.
 
 **The caps.** Three [configured](configuration.md) limits — `max_file_bytes`, `max_files`,
 `max_total_bytes` — bound what one case may write. They default to roughly 100x a realistic
@@ -516,14 +670,16 @@ writes under the temporary directory and `/dev/shm` land in an in-memory mount t
 discarded when the script exits — bounded, like output, only by the timeout); and cannot
 read anything under the system temporary directory except the workspace, the scratch
 directory and the skill's own bundle — so under `--concurrency N` a script cannot read the
-baseline arm's workspace or another case's scratch directory. One difference between the
-two: `bwrap`'s `--unshare-net` isolates the network stack only, so a Unix-domain socket the
-CI user can reach through the filesystem — `/var/run/docker.sock` is the usual one — is
-still connectable there, whereas macOS's `(deny network*)` covers Unix sockets too. A
-runner whose user can reach the Docker socket should not run scripts you would not run by
-hand. The bundle is allowed back
-explicitly because a `--baseline previous` bundle is extracted under that temporary
-directory. Reads anywhere else are allowed (see below).
+baseline arm's workspace or another case's scratch directory.
+
+One difference between the two: `bwrap`'s `--unshare-net` isolates the network stack only,
+so a Unix-domain socket the CI user can reach through the filesystem —
+`/var/run/docker.sock` is the usual one — is still connectable there, whereas macOS's `(deny
+network*)` covers Unix sockets too. A runner whose user can reach the Docker socket should
+not run scripts you would not run by hand.
+
+The bundle is allowed back explicitly because a `--baseline previous` bundle is extracted
+under that temporary directory. Reads anywhere else are allowed (see below).
 
 | | Backend | How |
 | --- | --- | --- |
@@ -531,29 +687,32 @@ directory. Reads anywhere else are allowed (see below).
 | Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install. A stock Ubuntu CI image may not ship `bwrap`, or may refuse unprivileged user namespaces; the report's `sandbox:` line says which. `--unshare-net` does not block Unix-domain sockets (see above). |
 | Windows | none | The portable guards only. `"required"` refuses to run. |
 
-The probe runs once per run, after discovery and before any case. The backend is
-*executed* — `sandbox-exec -p '(version 1)(allow default)(deny network*)' /usr/bin/true`, or
-`bwrap --ro-bind / / --dev /dev --proc /proc --unshare-net --unshare-pid --die-with-parent
--- /bin/true` — not merely found on `PATH`, because present is not the same as working: a
-stock Ubuntu runner may not ship `bwrap` at all, or may refuse unprivileged user namespaces,
-and the first line of that refusal is what the report shows. The result is on every report
-that enabled scripts —
-`scripts: on, sandbox: bwrap`, or `scripts: on, sandbox: none (bwrap not found on PATH)` —
-so you can tell from a log whether the isolation you expected applied. `"required"` turns a
-missing backend into exit 2 before any money is spent. The probe fails closed on one more
-thing: a temporary-directory path containing a double quote cannot be written into a
-`sandbox-exec` profile safely, so it reports `none` with a detail naming that, and
-`"required"` then exits 2.
+The probe runs once per run, after discovery and before any case. The backend is *executed*
+— `sandbox-exec -p '(version 1)(allow default)(deny network*)' /usr/bin/true`, or `bwrap
+--ro-bind / / --dev /dev --proc /proc --unshare-net --unshare-pid --die-with-parent --
+/bin/true` — not merely found on `PATH`, because present is not the same as working: a stock
+Ubuntu runner may not ship `bwrap` at all, or may refuse unprivileged user namespaces, and
+the first line of that refusal is what the report shows.
 
-The same preflight resolves the interpreters. For every discovered skill with a bundle,
-each file under `scripts/` whose extension is in `script_interpreters` must have its
-interpreter on `PATH`, or the run exits 2 naming the script and the interpreter. This covers
-every *discovered* skill — including one that `--tag` or `--case` filters out, or that has
-no cases at all — so a missing interpreter for a skill that would never run still exits 2:
-a fail-closed check that quietly skipped some skills would not be one. A file under
-`scripts/` with an unmapped extension (a `data.json`, a `helper.txt`) is not an error; it
-is simply not runnable. Preflight checks the candidate's bundles only; a baseline script
-whose interpreter is missing is a refusal the model reads, not an error.
+The result is on every report that enabled scripts — `scripts: on, sandbox: bwrap`, or
+`scripts: on, sandbox: none (bwrap not found on PATH)` — so you can tell from a log whether
+the isolation you expected applied. `"required"` turns a missing backend into exit 2 before
+any money is spent.
+
+The probe fails closed on one more thing: a temporary-directory path containing a double
+quote cannot be written into a `sandbox-exec` profile safely, so it reports `none` with a
+detail naming that, and `"required"` then exits 2.
+
+The same preflight resolves the interpreters. For every discovered skill with a bundle, each
+file under `scripts/` whose extension is in `script_interpreters` must have its interpreter
+on `PATH`, or the run exits 2 naming the script and the interpreter. This covers every
+*discovered* skill — including one that `--tag` or `--case` filters out, or that has no
+cases at all — so a missing interpreter for a skill that would never run still exits 2: a
+fail-closed check that quietly skipped some skills would not be one.
+
+A file under `scripts/` with an unmapped extension (a `data.json`, a `helper.txt`) is not an
+error; it is simply not runnable. Preflight checks the candidate's bundles only; a baseline
+script whose interpreter is missing is a refusal the model reads, not an error.
 
 **What the sandbox does not do.** It does not hide the rest of the filesystem: a script
 can read whatever the CI user can read (the interpreter and its libraries live there),
@@ -566,15 +725,19 @@ scripts for a skill you would not run by hand. See
 `assets/` come from git too, so the old instructions are never paired with the new scripts.
 They are extracted — `git archive`, then `tarfile` with its `data` filter, which is why
 skill-lens requires Python 3.11.4 or later — from the commit that last edited `SKILL.md` at
-the previous version, into a temporary directory that is deleted when the run ends, however
+the previous version, out of the directory the skill had then (it may have moved since), into
+a temporary directory that is deleted when the run ends, however
 it ends; `--keep-workspace` does not keep it, because a baseline bundle is an input, not an
-output. The version is the authority, and that has two consequences: a bundle-only commit
-made after that `SKILL.md` edit is invisible to the baseline, and a very large historical
-`assets/` can hit the 10-second git timeout, which is reported as a baseline note
-(`cannot archive commit <sha>`), never an error. A commit with none of the three
-directories gives the baseline no bundle tools — never the candidate's. `--baseline none`
-has no bundle: there is no skill. See
-[How `previous` is resolved](comparative-evals.md#how-previous-is-resolved).
+output.
+
+The version is the authority, and that has two consequences: a bundle-only commit made after
+that `SKILL.md` edit is invisible to the baseline, and a very large historical `assets/` can
+hit the 10-second git timeout, which is reported as a baseline note (`cannot archive commit
+<sha>`), never an error.
+
+A commit with none of the three directories gives the baseline no bundle tools — never the
+candidate's. `--baseline none` has no bundle: there is no skill. See [How `previous` is
+resolved](comparative-evals.md#how-previous-is-resolved).
 
 ## Budget limits and pricing
 
@@ -582,22 +745,28 @@ The `budget` block sets ceilings on tokens, cost, and latency. Pricing comes fro
 `genai-prices`, which carries data for widely-used models but not every provider — for
 example, Groq and Mistral models have no pricing entry yet. When a model cannot be priced,
 `cost_usd` degrades to `0.0` and a note is recorded explaining why; the note always appears
-in the JSON report. On the console it surfaces as budget-evaluator failure detail, which is
-only printed for a case that fails — and a declared `max_cost_usd` that cannot be priced
-always fails its case (see below), so the note is always printed alongside it on the console,
-never silently on a passing case. An aggregate line ("some costs not priced" / "Total cost:
-not priced") also appears in the console totals whenever any outcome's pricing degraded,
-pointing you at the JSON for the per-case detail.
+in the JSON report.
+
+On the console it surfaces as budget-evaluator failure detail, which is only printed for a
+case that fails — and a declared `max_cost_usd` that cannot be priced always fails its case
+(see below), so the note is always printed alongside it on the console, never silently on a
+passing case. An aggregate line ("some costs not priced" / "Total cost: not priced") also
+appears in the console totals whenever any outcome's pricing degraded, pointing you at the
+JSON for the per-case detail.
+
 An unpriceable cost limit is **skipped rather than silently passed**, so a case with an
 unpriced cost limit and no other budget checks will fail, because nothing was actually
 verified. If other budget limits are declared alongside (tokens, latency), they are still
-evaluated normally and contribute to `score` — but the case's `passed` verdict still requires
-every declared limit to hold, and a skipped cost limit never holds. **A budget block whose
-priced limits all hold still fails the case if it also declares an unpriceable
-`max_cost_usd`** — the skipped check counts as a failure of that one check, even though it
-does not lower `score` below what the priced checks alone would give it. If you adopt
-`skill-lens` against a provider `genai-prices` cannot price, omit `max_cost_usd` from the
-budget block for that provider rather than expecting it to be silently ignored.
+evaluated normally and contribute to `score` — but the case's `passed` verdict still
+requires every declared limit to hold, and a skipped cost limit never holds.
+
+**A budget block whose priced limits all hold still fails the case if it also declares an
+unpriceable `max_cost_usd`** — the skipped check counts as a failure of that one check, even
+though it does not lower `score` below what the priced checks alone would give it.
+
+If you adopt `skill-lens` against a provider `genai-prices` cannot price, omit
+`max_cost_usd` from the budget block for that provider rather than expecting it to be
+silently ignored.
 
 The same rule applies to tokens. A runner that cannot count tokens sets `usage_note`, and
 `max_tokens` is then a failing *not evaluated* check, exactly as `max_cost_usd` is under

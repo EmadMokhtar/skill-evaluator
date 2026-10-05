@@ -255,3 +255,210 @@ def test_the_previous_version_carries_its_own_file_text(tmp_path):
     _commit(repo, _skill_md("1.1.0", "v2"), "second")
     previous = _resolve(tmp_path, parse_skill_file(repo / "SKILL.md"))
     assert previous.markdown == _skill_md("1.0.0", "v1")
+
+
+# A skill's history across a move of its directory. `git log -- SKILL.md` stops
+# at the commit that created the new path; the resolver continues from the old
+# path only when that commit moved SKILL.md byte for byte, so a copy of another
+# skill's file never borrows that skill's history.
+
+
+def _move(repo: Path, source: str, destination: str, message: str = "refactor: move") -> None:
+    (repo / destination).parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "mv", source, destination], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", message], cwd=repo, check=True)
+
+
+def test_a_skill_moved_with_git_mv_resolves_its_pre_move_version_and_bundle(tmp_path):
+    repo = _repo(tmp_path)
+    _commit_bundle(
+        repo,
+        {"skills/pdf/SKILL.md": _skill_md("1.0.0", "old"), "skills/pdf/scripts/count.py": "old"},
+        "feat: v1",
+    )
+    _commit_bundle(
+        repo,
+        {"skills/pdf/SKILL.md": _skill_md("1.1.0", "new"), "skills/pdf/scripts/count.py": "new"},
+        "feat: v2",
+    )
+    _move(repo, "skills/pdf", "plugins/kit/skills/pdf")
+    skill = parse_skill_file(repo / "plugins" / "kit" / "skills" / "pdf" / "SKILL.md")
+
+    previous = _resolve(tmp_path, skill)
+
+    assert isinstance(previous, Skill), previous
+    assert previous.version == "1.0.0"
+    assert previous.markdown == _skill_md("1.0.0", "old")
+    # The candidate's directory, exactly as for a skill that never moved.
+    assert previous.path == skill.path
+    assert previous.bundle_root is not None
+    assert (previous.bundle_root / "scripts" / "count.py").read_text(encoding="utf-8") == "old"
+    assert not (previous.bundle_root / "SKILL.md").exists()
+
+
+def test_a_skill_moved_twice_is_followed_through_both_moves(tmp_path):
+    repo = _repo(tmp_path)
+    _commit_bundle(repo, {"a/pdf/SKILL.md": _skill_md("1.0.0", "old")}, "feat: v1")
+    _commit_bundle(repo, {"a/pdf/SKILL.md": _skill_md("1.1.0", "new")}, "feat: v2")
+    _move(repo, "a/pdf", "b/pdf")
+    _move(repo, "b/pdf", "c/pdf")
+
+    previous = _resolve(tmp_path, parse_skill_file(repo / "c" / "pdf" / "SKILL.md"))
+
+    assert isinstance(previous, Skill), previous
+    assert previous.version == "1.0.0"
+
+
+def test_a_skill_moved_out_of_the_repository_root_keeps_its_history_and_bundle(tmp_path):
+    repo = _repo(tmp_path)
+    _commit_bundle(
+        repo, {"SKILL.md": _skill_md("1.0.0", "old"), "scripts/count.py": "old"}, "feat: v1"
+    )
+    _commit_bundle(
+        repo, {"SKILL.md": _skill_md("1.1.0", "new"), "scripts/count.py": "new"}, "feat: v2"
+    )
+    (repo / "pdf").mkdir()
+    subprocess.run(["git", "mv", "SKILL.md", "scripts", "pdf/"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "refactor: move"], cwd=repo, check=True)
+
+    previous = _resolve(tmp_path, parse_skill_file(repo / "pdf" / "SKILL.md"))
+
+    assert isinstance(previous, Skill), previous
+    assert previous.version == "1.0.0"
+    assert (previous.bundle_root / "scripts" / "count.py").read_text(encoding="utf-8") == "old"
+
+
+def test_an_old_directory_name_that_needs_quoting_is_followed(tmp_path):
+    # Brackets are pathspec glob syntax and a space splits an unquoted argv:
+    # the old path must reach git as one literal path.
+    repo = _repo(tmp_path)
+    old = "skills/p[df] x"
+    _commit_bundle(
+        repo, {f"{old}/SKILL.md": _skill_md("1.0.0", "old"), f"{old}/scripts/a.py": "old"}, "v1"
+    )
+    _commit_bundle(repo, {f"{old}/SKILL.md": _skill_md("1.1.0", "new")}, "v2")
+    _move(repo, old, "pdf")
+
+    previous = _resolve(tmp_path, parse_skill_file(repo / "pdf" / "SKILL.md"))
+
+    assert isinstance(previous, Skill), previous
+    assert previous.version == "1.0.0"
+    assert (previous.bundle_root / "scripts" / "a.py").read_text(encoding="utf-8") == "old"
+
+
+def test_a_moved_skill_reached_through_a_symlink_is_followed(tmp_path):
+    # This repository links .claude/skills/<name> to the skill it ships.
+    repo = _repo(tmp_path)
+    _commit_bundle(repo, {"skills/pdf/SKILL.md": _skill_md("1.0.0", "old")}, "feat: v1")
+    _commit_bundle(repo, {"skills/pdf/SKILL.md": _skill_md("1.1.0", "new")}, "feat: v2")
+    _move(repo, "skills/pdf", "plugins/kit/skills/pdf")
+    link = repo / "linked-pdf"
+    link.symlink_to(repo / "plugins" / "kit" / "skills" / "pdf", target_is_directory=True)
+
+    previous = _resolve(tmp_path, parse_skill_file(link / "SKILL.md"))
+
+    assert isinstance(previous, Skill), previous
+    assert previous.version == "1.0.0"
+
+
+def test_a_skill_md_copied_from_another_skill_never_borrows_its_history(tmp_path):
+    # `git log --follow` takes this copy for the file's origin -- it follows
+    # copies as well as renames -- and would hand skill b the old instructions
+    # of skill a. The source still exists, so it is a copy, never a move.
+    repo = _repo(tmp_path)
+    _commit_bundle(repo, {"skills/a/SKILL.md": _skill_md("1.0.0", "a old")}, "feat: a v1")
+    _commit_bundle(repo, {"skills/a/SKILL.md": _skill_md("1.1.0", "a new")}, "feat: a v2")
+    _commit_bundle(repo, {"skills/b/SKILL.md": _skill_md("1.1.0", "a new")}, "feat: copy a to b")
+
+    result = _resolve(tmp_path, parse_skill_file(repo / "skills" / "b" / "SKILL.md"))
+
+    assert isinstance(result, BaselineUnavailable), result
+
+
+def test_a_copy_whose_source_is_deleted_later_is_still_not_followed(tmp_path):
+    repo = _repo(tmp_path)
+    _commit_bundle(repo, {"skills/a/SKILL.md": _skill_md("1.0.0", "a old")}, "feat: a v1")
+    _commit_bundle(repo, {"skills/a/SKILL.md": _skill_md("1.1.0", "a new")}, "feat: a v2")
+    _commit_bundle(repo, {"skills/b/SKILL.md": _skill_md("1.1.0", "a new")}, "feat: copy a to b")
+    subprocess.run(["git", "rm", "-rq", "skills/a"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "chore: drop a"], cwd=repo, check=True)
+
+    result = _resolve(tmp_path, parse_skill_file(repo / "skills" / "b" / "SKILL.md"))
+
+    assert isinstance(result, BaselineUnavailable), result
+
+
+def _long_skill_md(version: str) -> str:
+    """A realistic SKILL.md: one edited line leaves it well over 90% similar."""
+    body = "\n".join(f"{n}. Step {n} of the procedure, spelled out in full." for n in range(40))
+    return f"---\nname: pdf\ndescription: Handle PDFs\nversion: {version}\n---\n\n{body}\n"
+
+
+def test_a_move_that_also_edits_skill_md_is_not_followed(tmp_path):
+    # Only a byte-for-byte move is certain to be the same file. A move and an
+    # edit in one commit -- here a one-line version bump git itself would call
+    # a rename -- is reported as unavailable, never guessed at.
+    repo = _repo(tmp_path)
+    _commit_bundle(repo, {"skills/pdf/SKILL.md": _long_skill_md("1.0.0")}, "feat: v1")
+    (repo / "plugins").mkdir()
+    subprocess.run(["git", "mv", "skills/pdf", "plugins/pdf"], cwd=repo, check=True)
+    (repo / "plugins" / "pdf" / "SKILL.md").write_text(_long_skill_md("1.1.0"), encoding="utf-8")
+    subprocess.run(["git", "commit", "-qam", "feat: move and edit"], cwd=repo, check=True)
+
+    result = _resolve(tmp_path, parse_skill_file(repo / "plugins" / "pdf" / "SKILL.md"))
+
+    assert isinstance(result, BaselineUnavailable), result
+
+
+def test_a_move_elsewhere_in_the_creating_commit_is_never_borrowed(tmp_path):
+    # The commit that creates skill b also moves an unrelated skill. That
+    # move's source is not b's past.
+    repo = _repo(tmp_path)
+    _commit_bundle(repo, {"skills/other/SKILL.md": _skill_md("1.0.0", "other old")}, "v1")
+    _commit_bundle(repo, {"skills/other/SKILL.md": _skill_md("2.0.0", "other new")}, "v2")
+    (repo / "moved").mkdir()
+    subprocess.run(["git", "mv", "skills/other", "moved/other"], cwd=repo, check=True)
+    _commit_bundle(repo, {"skills/b/SKILL.md": _skill_md("2.0.0", "b")}, "feat: add b, move other")
+
+    result = _resolve(tmp_path, parse_skill_file(repo / "skills" / "b" / "SKILL.md"))
+
+    assert isinstance(result, BaselineUnavailable), result
+
+
+def test_a_sibling_a_glob_would_match_does_not_use_up_the_history(tmp_path, monkeypatch):
+    # `skills/p[df]` is a glob for `skills/pd` too; read as one, the sibling's
+    # commits would fill the history limit before the moved skill's own did.
+    import skill_lens.skills.baseline as baseline_module
+
+    repo = _repo(tmp_path)
+    _commit_bundle(repo, {"skills/p[df]/SKILL.md": _skill_md("1.0.0", "old")}, "v1")
+    _commit_bundle(repo, {"skills/p[df]/SKILL.md": _skill_md("1.1.0", "new")}, "v2")
+    for n in range(3):
+        _commit_bundle(repo, {"skills/pd/SKILL.md": _skill_md(f"0.{n}.0", "sibling")}, f"pd {n}")
+    _move(repo, "skills/p[df]", "plugins/pdf")
+    monkeypatch.setattr(baseline_module, "HISTORY_LIMIT", 3)
+
+    previous = _resolve(tmp_path, parse_skill_file(repo / "plugins" / "pdf" / "SKILL.md"))
+
+    assert isinstance(previous, Skill), previous
+    assert previous.version == "1.0.0"
+
+
+def test_the_history_limit_counts_commits_on_both_sides_of_a_move(tmp_path, monkeypatch):
+    import skill_lens.skills.baseline as baseline_module
+
+    repo = _repo(tmp_path)
+    _commit_bundle(repo, {"a/pdf/SKILL.md": _skill_md("1.0.0", "oldest")}, "feat: v1")
+    _commit_bundle(repo, {"a/pdf/SKILL.md": _skill_md("1.1.0", "middle")}, "feat: v2")
+    _commit_bundle(repo, {"a/pdf/SKILL.md": _skill_md("1.1.0", "reworded")}, "docs: v2")
+    _move(repo, "a/pdf", "b/pdf")
+    skill = parse_skill_file(repo / "b" / "pdf" / "SKILL.md")
+
+    # The move, the reword and v2 all carry 1.1.0; v1 is the fourth commit back.
+    monkeypatch.setattr(baseline_module, "HISTORY_LIMIT", 3)
+    assert isinstance(_resolve(tmp_path, skill), BaselineUnavailable)
+
+    monkeypatch.setattr(baseline_module, "HISTORY_LIMIT", 4)
+    previous = _resolve(tmp_path, skill)
+    assert isinstance(previous, Skill), previous
+    assert previous.version == "1.0.0"

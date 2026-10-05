@@ -11,7 +11,12 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from pydantic import ValidationError
 
-from skill_lens.cases.checks import UNFILLED_SENTINEL, check_tool_schema, find_unfilled
+from skill_lens.cases.checks import (
+    UNFILLED_SENTINEL,
+    check_tool,
+    find_hidden_data_reference,
+    find_unfilled,
+)
 from skill_lens.cases.errors import CaseParseError
 from skill_lens.cases.evals_json import EVALS_JSON_FILENAME, evals_json_to_raw_cases
 from skill_lens.cases.tool_libraries import (
@@ -104,7 +109,11 @@ def _resolve_tool_refs(path: Path, index: int, raw: object, library: ToolLibrary
             raise CaseParseError(f"{where} {exc}") from exc
         resolved = copy.deepcopy(spec.model_dump())
         if ref.returns is not None:
-            resolved["returns"] = ref.returns
+            # The raw YAML value, not the validated model: the resolved
+            # mapping stays plain data for `EvalCase.model_validate`, and a
+            # lookup's entries are checked against the library's contract by
+            # `_validate_tools` once the case is built.
+            resolved["returns"] = copy.deepcopy(entry["returns"])
         tools.append(resolved)
     return {**raw, "tools": tools}
 
@@ -244,16 +253,17 @@ def _validate_assertions(path: Path, case: EvalCase) -> None:
 
 
 def _validate_tools(path: Path, case: EvalCase) -> None:
-    """Check each mock tool's declared schema at load time.
+    """Check each mock tool's declared schema and its `returns:` at load time.
 
-    The rules are `checks.check_tool_schema`'s, shared with tool libraries;
-    here each refusal names the file, the case and the tool. All three
-    mistakes are the author's, so they abort before any case runs rather than
-    surface as an errored case.
+    The rules are `checks.check_tool`'s, shared with tool libraries; here
+    each refusal names the file, the case and the tool. Every one of them is
+    the author's mistake, so it aborts before any case runs rather than
+    surface as an errored case. A `ref:` is already resolved by now, so its
+    `returns:` is checked against the contract the library declared.
     """
     for tool in case.tools:
         try:
-            check_tool_schema(tool)
+            check_tool(tool)
         except ValueError as exc:
             raise CaseParseError(f"{path}: case {case.name!r} tool {tool.name!r} {exc}") from exc
 
@@ -328,8 +338,6 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
 
     declared = {tool.name for tool in case.tools}
     if case.workspace is not None:
-        # The built-ins are real tools the agent can call, so a trajectory may
-        # name them -- but only in a case that actually has them.
         declared |= set(BUILTIN_TOOL_NAMES)
 
     if case.judge is not None:
@@ -346,6 +354,19 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
                     f"entry {position} is blank. Give the judge something to check, or "
                     f"remove the entry -- a check that verifies nothing would score as "
                     f"a pass nobody verified."
+                )
+            phrase = find_hidden_data_reference(entry)
+            if phrase is not None:
+                raise CaseParseError(
+                    f"{path}: case {case.name!r} rubric entry {position} names "
+                    f"{phrase!r}, which the judge never sees. A rubric is graded "
+                    f"from the task, the expected text, the response and the files "
+                    f"'judge.artifacts' names -- never from what a mock tool "
+                    f"returned -- so this check could only pass under a judge that "
+                    f"ignores its own 'fail when ambiguous' rule. Phrase the check "
+                    f"against the response itself, or put the data in a "
+                    f"'workspace:' file, name it under 'judge.artifacts', and phrase "
+                    f"the check against that file."
                 )
         if case.judge.artifacts and case.workspace is None:
             raise CaseParseError(
@@ -373,24 +394,13 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
             f"could never be false -- set 'mode: offered'."
         )
 
-    for field_name, names in (
-        ("called", case.trajectory.called),
-        ("forbidden", case.trajectory.forbidden),
-        ("order", case.trajectory.order),
-        ("call_args", [entry.tool for entry in case.trajectory.call_args]),
-    ):
-        for name in names:
-            if name not in declared:
-                hint = (
-                    " Built-in workspace and bundle tools only exist in a case with a "
-                    "'workspace:' block."
-                    if name in BUILTIN_TOOL_NAMES
-                    else ""
-                )
-                raise CaseParseError(
-                    f"{path}: case {case.name!r} trajectory.{field_name} names "
-                    f"{name!r}, which is not declared in this case's tools.{hint}"
-                )
+    # Whether a name in `called` / `forbidden` / `order` / `call_args` is a tool the case
+    # will have is the runner's to say, not the loader's: a framework runner
+    # offers the case's mock tools, a product runner offers the product's own
+    # (`Bash`), and one invocation may run this case through both. Each
+    # runner's `preflight` checks the cases planned for it --
+    # `runners.preflight.check_trajectory_names` for the framework runners,
+    # nothing for a product, whose tools skill-lens cannot list.
 
 
 def discover_eval_paths(skill: Skill) -> list[Path]:

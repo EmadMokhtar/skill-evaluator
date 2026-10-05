@@ -21,6 +21,37 @@ which has no `cases:` list and is strict at every level — see [Reading
 | `workspace` | no | A temporary directory and the files it starts with |
 | `mode` | no | `loaded` (default) or `offered` — see [Did the agent reach for the skill?](#did-the-agent-reach-for-the-skill) |
 
+## Choosing a check
+
+Four kinds of check, and each answers a different question.
+
+| Use | When you want to know | Costs |
+| --- | --- | --- |
+| `assertions:` | Did the output — or a file the agent wrote — contain the right text, match a pattern, or validate against a JSON schema? | Nothing |
+| `trajectory:` | Did the agent reach for the skill, and call the right tools — in the right order, with the right arguments, no more often than it should? | Nothing |
+| `budget:` | Did it stay inside a token, cost or latency limit? | Nothing |
+| `judge:` | Is the output *good* — complete, correctly reasoned, in the right tone? | One judge call per case that carries a rubric |
+
+Reach for the cheapest one that answers your question. An `assertions:` entry is exact and
+free; a `judge:` rubric is the only thing that can grade quality, and every case carrying
+one spends a judge call — so it has to be turned on, because the default `judge = "fake"`
+grades nothing and reports such a case as **errored**. A skill whose job is to *call
+something* is measured by `trajectory:`, not by what it said about calling it.
+
+Some rules that catch people out:
+
+- A rubric entry phrased against a mock tool's `returns:` is an authoring error. The judge
+  never sees a tool's return, so that entry is unverifiable — reword it, or name a
+  `workspace:` file under `judge.artifacts`.
+- **In a `judge:` rubric only**, a check the judge passes without citing evidence is
+  recorded as a failure. Assertion, trajectory and budget checks build their evidence from
+  the same comparison that produced the verdict, so the rule does not apply to them — see
+  [Per-check results](#per-check-results).
+- A `trajectory:` naming a tool the case does not declare is refused before any case runs,
+  under `fake`, `pydantic-ai` and `langchain`. A product's own tools cannot be listed, so
+  `copilot` and `claude-code` refuse no name, and `cli` refuses a `trajectory:` block
+  outright.
+
 ## Workspaces
 
 A `workspace:` block gives one case a real, contained temporary directory: created fresh
@@ -79,7 +110,9 @@ A `tools:` list declares the tools the agent may call. Nothing executes: calling
 the call and returns `returns` verbatim, so the trajectory is the model's own choice and
 the run has no side effects. See [Declaring tools and scoring the
 trajectory](runners.md#declaring-tools-and-scoring-the-trajectory) for how the calls are
-scored.
+scored. The same block serves a [product runner](runners.md#mock-tools-under-a-product):
+`copilot` and `claude-code` get the tools through an MCP server skill-lens starts for the
+case, under the same names, with the same canned `returns`.
 
 A tool declares its arguments one of two ways:
 
@@ -118,6 +151,79 @@ Tool names follow the rule both OpenAI and Anthropic enforce, `^[A-Za-z0-9_-]{1,
 a hyphenated MCP tool name such as `get-pull-request` is kept as the server spells it. A
 name outside the rule is an authoring error; skill-lens never rewrites one.
 
+### Answering differently per call
+
+One `returns:` string answers every call the same way. A skill whose instructions loop
+over a tool — fetch work item A, follow its parent link, fetch B, stop when there is no
+parent — needs the mock to answer differently, and `returns:` takes two more shapes for
+that. **The shape says which rule applies.**
+
+A **list of strings** is a sequence, consumed in the order the calls arrive: the first
+call gets the first entry, the second call the second, and every call after the list is
+used up gets the **last entry again**.
+
+```yaml
+    tools:
+      - name: get_work_item
+        description: Fetch a work item by id, with its parent link
+        parameters:
+          id: string
+        returns:
+          - '{"id": "A", "parent": "B"}'
+          - '{"id": "B", "parent": null}'      # the third call and every later one get this too
+    trajectory:
+      called: [get_work_item]
+      max_calls: 2                            # the check for a loop that should have stopped
+```
+
+The last entry repeating is the steady state a skill that keeps calling should see — the
+item with no parent, the job that is done. It is not a check on how many calls were made:
+`trajectory.max_calls` is. A sequence ignores the arguments, so it is the right shape when
+the *position* of the call decides the answer (polling until done) and the wrong one when
+the *argument* does: a model that issues several calls in one turn gets the entries in
+whatever order the framework runs them.
+
+A **list of `when:`/`value:` mappings** is a lookup, answered by the first entry whose
+`when:` keys all equal the call's arguments — a subset is enough; the call may carry more
+arguments than `when:` names. An entry with no `when:` matches every call, which makes it
+the fallback.
+
+```yaml
+    tools:
+      - name: get_work_item
+        description: Fetch a work item by id, with its parent link
+        parameters:
+          id: string
+        returns:
+          - when: {id: "A"}
+            value: '{"id": "A", "parent": "B"}'
+          - when: {id: "B"}
+            value: '{"id": "B", "parent": null}'
+          - value: '{"error": "not found"}'   # no when: -- every other call lands here
+```
+
+`when:` matches by the same rule as [`call_args`
+`contains:`](runners.md#what-a-tool-was-called-with): a subset at every level (a nested
+mapping may name only the keys that matter), a list element by element at equal length,
+and values as YAML and JSON parse them — `when: {id: 1}` matches a call with the integer
+`1`, `when: {id: "1"}` a call with the string `"1"`, and a `true` matches only a boolean,
+never a `1`. Without a fallback, a call that matches nothing gets the fixed reply
+`no response is scripted for get_work_item with arguments {"id": "C"}` (the arguments as
+sorted JSON): the skill asked for something the case did not anticipate, which the
+transcript then shows, and a mock tool never raises.
+
+Three lookup mistakes are authoring errors (exit `2`), caught before any case runs, because
+each is a check that could never fire: a `when:` key the tool can never carry (one outside
+`parameters:`, or outside a closed `input_schema` — `additionalProperties: false` with its
+`properties` listed; an open schema may key on any name), an empty `when: {}` (drop the key
+to declare a fallback), and an entry an earlier one already answers — a fallback above it,
+the same `when:`, or a `when:` it only narrows — since the first match wins. So are an
+empty list (`returns: ''` is how an empty reply is spelled) and a list that mixes strings
+with mappings.
+
+A [`ref:`](#sharing-tools-across-eval-files) may set `returns:` in any of the three
+shapes; a lookup's `when:` keys are checked against the parameters the library declared.
+
 ### Sharing tools across eval files
 
 Several skills often front one API — one MCP server behind nine skills — and every eval
@@ -152,8 +258,9 @@ cases:
 ```
 
 The library owns the tool's **contract** — name, description, `parameters:` or
-`input_schema:` — and the case owns the **scenario**: a `ref:` may set `returns:` and
-nothing else. Any other key beside `ref:` is an authoring error naming it; a case that
+`input_schema:` — and the case owns the **scenario**: a `ref:` may set `returns:` (a
+string, a sequence or a lookup, as [above](#answering-differently-per-call)) and nothing
+else. Any other key beside `ref:` is an authoring error naming it; a case that
 needs a different contract declares the tool inline, and a `ref:` may sit in the same list
 as inline tools. After loading, the case is exactly what it would have been with the
 library's block pasted in: `trajectory:` names, the six reserved built-in names and the
@@ -201,6 +308,57 @@ Two rules follow from that, and both are mechanical rather than a prompt asking 
 
 An empty `rubric`, or a blank entry within one, is an authoring error: a check that verifies
 nothing would score as a pass nobody verified.
+
+**The judge sees the task, `expected`, the response, and the files `artifacts` names —
+nothing else.** It is never shown what a case's mock `tools:` returned, or which tools were
+called: it grades text, and never invokes the skill under test. So a rubric line
+must never be a comparison against the mock data, however much it reads like a sensible
+hallucination check:
+
+```yaml
+    tools:
+      - name: pull_request_threads
+        description: The review threads on a pull request
+        returns: '{"threads": [{"author": "Alex Chen", "comment": "Rename this."}]}'
+    judge:
+      rubric:
+        # Refused: the judge cannot see the mocked data
+        - The summary does not invent any reviewer or comment not present in the mocked data
+```
+
+A check like that is unverifiable as written. A careful judge fails it as ambiguous — a red
+case that looks like a regression — and a lenient one passes it without looking, which is
+worse: a suite can stay green for months on a check no judge ever verified. skill-lens
+refuses the line at load time (exit `2`) when it names the harness's own vocabulary for that
+data: `mock`/`mocked` followed by `data`, `response`, `result`, `return`, `value`, `output` or
+`tool`; `tool`/`mock` (with or without a possessive `'s` or `'`) followed by `returned`,
+`returns`, `return value`, `response`, `result`, `output`, `data` or `value`; or `returned by
+the tool`/`mock`. A bare `mock` ("proposes a
+mock for the HTTP client") or `tool` ("names the tool it would use") is not refused, so a
+rubric about a testing skill or about the response itself is untouched; if a line trips the
+rule for a reason of your own, reword it. The judge is told the same thing in its own
+instructions — that it was not shown what any tool returned, which tools were called, or
+any mock data, and that a check decidable only against those is a fail — so a line the
+vocabulary rule does not catch still fails honestly rather than passing unread.
+
+Two fixes, depending on what the check is really about. If it is about the response, phrase
+it against the response: "The summary names Alex Chen as the reviewer." If it is really a
+comparison against the data, put the data where the judge can read it — a `workspace:` file
+named under `artifacts` — and phrase the check against that file:
+
+```yaml
+    workspace:
+      files:
+        threads.json: '{"threads": [{"author": "Alex Chen", "comment": "Rename this."}]}'
+    tools:
+      - name: pull_request_threads
+        description: The review threads on a pull request
+        returns: '{"threads": [{"author": "Alex Chen", "comment": "Rename this."}]}'
+    judge:
+      rubric:
+        - The summary names no reviewer absent from threads.json
+      artifacts: [threads.json]
+```
 
 `artifacts` names [workspace](#workspaces) files the judge may read, so a rubric can grade
 the document a skill produced rather than the chat message about it:
@@ -255,8 +413,8 @@ Three things to know:
 
 - The offered tool call lands in the trajectory like any other, so it counts toward
   `max_calls`.
-- Check it with `skill_triggered`, not by naming it in `called:` — that list only accepts
-  tools the case itself declares.
+- Check it with `skill_triggered`, not by naming it in `called:` — under `fake`,
+  `pydantic-ai` and `langchain` that list only accepts tools the case itself declares.
 - The tool name is the skill's name normalised to what providers accept — ASCII letters,
   digits and `_`, at most 64 characters (`order-support` becomes `order_support`, `café`
   becomes `caf_`). A case tool that collides with it is an authoring error. This
@@ -278,8 +436,8 @@ under that runner, never a silent `false` that would pass every negative control
 | Case feature | `fake` | `pydantic-ai` / `langchain` | `copilot` / `claude-code` | `cli` |
 | --- | --- | --- | --- | --- |
 | `assertions:` | yes | yes | yes | yes |
-| `tools:` (mock tools) | yes | yes | authoring error | authoring error |
-| `trajectory:` | yes | yes | yes, the product's tool names | authoring error |
+| `tools:` (mock tools) | yes | yes | yes — through the [MCP bridge](runners.md#mock-tools-under-a-product) | authoring error |
+| `trajectory:` | yes — names must be the case's own tools | yes — names must be the case's own tools | yes — the case's tools by their declared names, or the product's own tool names, unchecked; `max_calls` counts the product's own calls too | authoring error |
 | `mode: offered` | yes | yes | yes | authoring error |
 | `budget:` | yes | yes | see [Product runners](runners.md#product-runners) | latency only |
 | `workspace:` | yes | yes | yes — the product's working directory | yes |

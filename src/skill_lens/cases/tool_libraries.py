@@ -21,7 +21,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
-from skill_lens.cases.checks import UNFILLED_SENTINEL, check_tool_schema, find_unfilled
+from skill_lens.cases.checks import UNFILLED_SENTINEL, check_tool, find_unfilled
 from skill_lens.models import ToolSpec
 from skill_lens.yaml_loading import safe_load
 
@@ -71,8 +71,9 @@ def parse_tool_library(path: Path) -> list[ToolSpec]:
 
     Every tool is checked as an inline one would be -- the scaffold sentinel
     first, so the message names the field to fill in; then `ToolSpec` itself
-    (the name rule, unknown keys); then the schema rules -- and each refusal
-    names this file and the tool's position, because this is the file to fix.
+    (the name rule, unknown keys, the shape of `returns`); then the schema
+    and `returns` rules -- and each refusal names this file and the tool's
+    position, because this is the file to fix.
     """
     path = Path(path)
     try:
@@ -111,7 +112,7 @@ def parse_tool_library(path: Path) -> list[ToolSpec]:
             fields = ", ".join(str(e["loc"][0]) for e in exc.errors() if e["loc"])
             raise ToolLibraryError(f"{where} invalid ({fields}): {exc}") from exc
         try:
-            check_tool_schema(spec)
+            check_tool(spec)
         except ValueError as exc:
             raise ToolLibraryError(f"{where} {spec.name!r} {exc}") from exc
         if spec.name in positions:

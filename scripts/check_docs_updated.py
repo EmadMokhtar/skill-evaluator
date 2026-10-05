@@ -68,9 +68,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{listed}\n\n"
         "Update whichever of these the change affects:\n"
         "  - docs/            user-facing documentation\n"
-        "  - ARCHITECTURE.md  design, invariants, extension points\n"
+        "  - ARCHITECTURE.md  design and extension points\n"
         "  - README.md        the landing page\n"
         "  - mkdocs.yml       navigation\n\n"
+        "A new invariant goes in BOTH docs/invariants.md (as a heading) and\n"
+        "CLAUDE.md (as a bold-led bullet), spelled the same byte for byte.\n"
+        "tests/test_invariants_sync.py fails if the two drift apart.\n\n"
         f"If the change genuinely needs no documentation, add the `{LABEL}` "
         "label to the PR."
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from skill_lens.matching import structural_match
 from skill_lens.models import (
     CallArgsSpec,
     CheckResult,
@@ -27,48 +28,6 @@ def _is_subsequence(required: list[str], actual: list[str]) -> bool:
     """True when `required` appears in `actual` in order, gaps allowed."""
     remaining = iter(actual)
     return all(name in remaining for name in required)
-
-
-def _same_scalar(expected: Any, actual: Any) -> bool:
-    """Equality without Python's bool-is-an-int rule.
-
-    `True == 1` in Python, so an author who wrote `limit: 1` would otherwise
-    pass on a call that sent `true`. A bool only ever equals a bool. Every
-    other scalar compares as JSON would: `"1"` never equals `1`, and `1`
-    equals `1.0`.
-    """
-    if isinstance(expected, bool) or isinstance(actual, bool):
-        return isinstance(expected, bool) and isinstance(actual, bool) and expected == actual
-    return expected == actual
-
-
-def _matches(expected: Any, actual: Any, *, exact: bool) -> bool:
-    """Structural match of `expected` against a call's recorded arguments.
-
-    A mapping matches when every key it names is present with a matching
-    value; under `exact` it must also name every key the call carried. A
-    list matches element by element at the same length -- containment is
-    not subsetting, so `[bug]` does not match `[bug, urgent]`. Anything else
-    is a scalar and must be equal.
-    """
-    if isinstance(expected, dict):
-        if not isinstance(actual, dict):
-            return False
-        if exact and set(expected) != set(actual):
-            return False
-        return all(
-            key in actual and _matches(value, actual[key], exact=exact)
-            for key, value in expected.items()
-        )
-    if isinstance(expected, list):
-        return (
-            isinstance(actual, list)
-            and len(expected) == len(actual)
-            and all(_matches(e, a, exact=exact) for e, a in zip(expected, actual, strict=True))
-        )
-    if isinstance(actual, (dict, list)):
-        return False
-    return _same_scalar(expected, actual)
 
 
 def _render(value: Any) -> str:
@@ -107,7 +66,7 @@ def _call_args_check(index: int, entry: CallArgsSpec, tool_calls: list[ToolCall]
     if not calls:
         return CheckResult(id=check_id, passed=False, evidence=f"{tool} was never called")
     total = len(calls)
-    verdicts = [_matches(expected, call.arguments, exact=exact) for call in calls]
+    verdicts = [structural_match(expected, call.arguments, exact=exact) for call in calls]
 
     if entry.every:
         for position, (call, held) in enumerate(zip(calls, verdicts, strict=True), start=1):

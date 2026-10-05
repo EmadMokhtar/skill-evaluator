@@ -32,7 +32,7 @@ to hold even the verdict) that falls back to a hard character cut.
 ## The composite action
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v0.12.0
+- uses: EmadMokhtar/skill-evaluator@v0.20.0
   with:
     path: ./skills
     runner: pydantic-ai
@@ -55,12 +55,15 @@ Every `skill-lens run` flag is available as a kebab-cased input (`--min-pass-rat
 `claude-code` or `cli` — or a comma-separated list to run every case through each
 (`runner: pydantic-ai,langchain`). Install every framework named:
 `install-spec: skill-lens[pydantic-ai,langchain]==…`; a product runner needs the product
-installed instead, see [Running under a product](#running-under-a-product). Three more
-inputs are about the environment rather than the run:
+installed instead, see [Running under a product](#running-under-a-product). `base-url`
+points a keyed runner at a self-hosted endpoint the job can reach — a self-hosted GitHub
+runner beside the model server, typically — and is usually better committed as `base_url`
+in `skill-lens.toml` (see [Self-hosted endpoints](configuration.md#self-hosted-endpoints))
+than passed per job. Three more inputs are about the environment rather than the run:
 
 | Input | Default | Purpose |
 | --- | --- | --- |
-| `install-spec` | `skill-lens[pydantic-ai]==0.12.0` | Passed verbatim to `uv tool install`. Accepts a PyPI name, a pinned version, a git ref, or a local path. Add the `langchain` extra (`skill-lens[pydantic-ai,langchain]`, pinned the same way) when a job runs the LangChain runner. |
+| `install-spec` | `skill-lens[pydantic-ai]==0.20.0` | Passed verbatim to `uv tool install`. Accepts a PyPI name, a pinned version, a git ref, or a local path. Add the `langchain` extra (`skill-lens[pydantic-ai,langchain]`, pinned the same way) when a job runs the LangChain runner. |
 | `working-directory` | `.` | Directory to run in. |
 | `step-summary` | `true` | Append the Markdown summary to `$GITHUB_STEP_SUMMARY`. |
 
@@ -85,7 +88,7 @@ steps:
   - uses: actions/checkout@v4
     with:
       persist-credentials: false
-  - uses: EmadMokhtar/skill-evaluator@v0.12.0
+  - uses: EmadMokhtar/skill-evaluator@v0.20.0
     with:
       path: ./skills
       allow-scripts: true
@@ -104,7 +107,7 @@ backstop. In those workflows pass `allow-scripts: false` explicitly, which overr
 file:
 
 ```yaml
-  - uses: EmadMokhtar/skill-evaluator@v0.12.0
+  - uses: EmadMokhtar/skill-evaluator@v0.20.0
     with:
       path: ./skills
       allow-scripts: false
@@ -150,15 +153,41 @@ only a fixture that is *supposed* to go red can catch a regression in how red ge
 --8<-- "examples/ci/skill-lens.yml"
 ```
 
+## Gating on the delta
+
+The complete workflow above is already comparative: `baseline: previous` re-runs every case
+against the skill's previous version, and `repeat: 3` samples each arm three times. Both are
+ordinary inputs, and `min-delta` is the third — it turns the delta the report carries into a
+verdict:
+
+```yaml
+      - uses: EmadMokhtar/skill-evaluator@v0.20.0
+        with:
+          path: ./skills
+          runner: pydantic-ai
+          model: openai:gpt-4o-mini
+          baseline: previous      # none, or previous resolved from git
+          repeat: 3               # sample each arm three times
+          min-delta: "0.0"        # must not regress
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+`baseline: previous` reads git history, so the checkout must be unshallow —
+`fetch-depth: 0`, as in the workflow above. `min-delta` without `baseline` is a user error
+(exit `2`), and a delta gate with nothing comparable fails rather than passing vacuously:
+the rules are in [Comparative evals](comparative-evals.md#-min-delta). Two arms sampled
+three times is six runs per case — see [Concurrency and cost](#concurrency-and-cost).
+
 ## Running the matrix
 
 One job, one report, every case through both frameworks:
 
 ```yaml
-      - uses: EmadMokhtar/skill-evaluator@v0.12.0
+      - uses: EmadMokhtar/skill-evaluator@v0.20.0
         with:
           path: ./skills
-          install-spec: "skill-lens[pydantic-ai,langchain]==0.12.0"
+          install-spec: "skill-lens[pydantic-ai,langchain]==0.20.0"
           runner: pydantic-ai,langchain
           model: openai:gpt-4o-mini
           markdown-output: skill-lens.md
@@ -184,7 +213,7 @@ so a pull request cannot pick the product for itself:
 - uses: actions/setup-node@v4
   with: { node-version: 22 }
 - run: npm install -g @github/copilot
-- uses: EmadMokhtar/skill-evaluator@v0.12.0
+- uses: EmadMokhtar/skill-evaluator@v0.20.0
   with:
     path: ./skills
     runner: copilot

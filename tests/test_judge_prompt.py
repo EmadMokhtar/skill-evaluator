@@ -49,6 +49,16 @@ def test_the_system_prompt_states_the_final_matching_closing_tag_is_the_boundary
     assert "the final matching closing tag is" in SYSTEM_PROMPT
 
 
+def test_the_system_prompt_tells_the_judge_what_it_was_not_shown():
+    # The loader refuses a rubric line that names mock data in the harness's
+    # own words; a line that refers to it some other way still reaches the
+    # judge, and a lenient model would pass it unread. So the prompt says
+    # outright what the judge was not given -- tool returns, tool calls, mock
+    # data -- and that a check decidable only against those is a fail.
+    assert "you were not shown what any tool returned" in SYSTEM_PROMPT
+    assert "data you were not given" in SYSTEM_PROMPT
+
+
 def test_the_rendered_request_carries_task_output_and_every_check():
     text = render_request(
         request(

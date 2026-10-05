@@ -23,6 +23,11 @@ user's suite unasked.
 - [ ] **Unevidenceable rubric entries.** Anything you could not prove by quoting the
       output ("is helpful", "is well structured"), or compound entries hiding which half
       failed.
+- [ ] **Rubric entries graded against the mock.** A line comparing the output to a tool's
+      `returns:` ("not present in the mocked data", "matches what the tool returned"). The
+      judge never sees tool returns, so the line is unverifiable — a lenient judge passes it
+      unread. Phrase it against the response, or expose the data as a workspace file named
+      under `artifacts:`.
 - [ ] **Budgets that never bind, or bind too tightly.** A ceiling far above any plausible
       run checks nothing; one at the current spend turns every prompt change red.
 - [ ] **A cost limit as the only budget check** on a model with no pricing entry — the

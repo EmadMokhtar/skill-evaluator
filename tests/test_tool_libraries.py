@@ -255,3 +255,42 @@ def test_resolve_against_empty_imports_says_nothing_is_declared():
     library = ToolLibrary(specs={}, sources={}, declared=True)
     with pytest.raises(ToolLibraryError, match="the imports declare: nothing"):
         library.resolve("x")
+
+
+def test_a_library_tool_may_declare_a_sequence_or_a_lookup(tmp_path):
+    body = (
+        "tools:\n"
+        "  - name: poll\n    returns: [running, done]\n"
+        "  - name: get_work_item\n    parameters: {id: string}\n"
+        "    returns:\n      - when: {id: A}\n        value: a\n      - value: fallback\n"
+    )
+    poll, item = parse_tool_library(_write(tmp_path, body))
+    assert poll.returns == ["running", "done"]
+    assert [entry.when for entry in item.returns] == [{"id": "A"}, None]
+
+
+def test_the_returns_checks_apply_naming_the_tool(tmp_path):
+    unreachable = (
+        "tools:\n  - name: t\n    parameters: {id: string}\n"
+        "    returns:\n      - value: a\n      - when: {id: A}\n        value: b\n"
+    )
+    with pytest.raises(ToolLibraryError, match=r"tool #1 't' returns\[1\] can never be reached"):
+        parse_tool_library(_write(tmp_path, unreachable))
+    unknown_key = (
+        "tools:\n  - name: t\n    parameters: {id: string}\n"
+        "    returns:\n      - when: {item: A}\n        value: b\n"
+    )
+    with pytest.raises(ToolLibraryError, match=r"tool #1 't' returns\[0\]\.when names 'item'"):
+        parse_tool_library(_write(tmp_path, unknown_key))
+    mixed = "tools:\n  - name: t\n    returns: [a, {value: b}]\n"
+    with pytest.raises(ToolLibraryError, match=r"(?s)tool #1 invalid \(returns\).*not a mix"):
+        parse_tool_library(_write(tmp_path, mixed))
+
+
+def test_a_placeholder_inside_a_lookup_entry_names_its_trail(tmp_path):
+    body = (
+        "tools:\n  - name: t\n    parameters: {id: string}\n"
+        f"    returns:\n      - when: {{id: A}}\n        value: {UNFILLED_SENTINEL} fill\n"
+    )
+    with pytest.raises(ToolLibraryError, match=r"tool #1 still has .* at returns\[0\]\.value"):
+        parse_tool_library(_write(tmp_path, body))

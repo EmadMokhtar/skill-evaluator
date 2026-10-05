@@ -8,11 +8,11 @@ somebody else's version.
 from __future__ import annotations
 
 import re
-import subprocess
 import tomllib
 from pathlib import Path
 
 import skill_lens
+from repo_files import tracked_files
 from skill_lens.yaml_loading import safe_load
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -49,16 +49,9 @@ def _commitizen() -> dict:
 
 
 def _tracked_files() -> list[Path]:
-    out = subprocess.run(
-        ["git", "ls-files"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split()
     return [
         REPO_ROOT / name
-        for name in out
+        for name in tracked_files()
         if not name.startswith(EXCLUDED_DIRS) and name not in EXCLUDED_FILES
     ]
 

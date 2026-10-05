@@ -14,6 +14,12 @@ environment is inherited (the product needs its own auth). Nothing here is
 sandboxed; `ProductStatus.trust` says so on every report. Naming a product
 runner is the decision.
 
+A case's `tools:` reach the product through a stdio MCP server skill-lens
+ships (`mcp_bridge.py`) and the product starts from a config file this
+runner writes per invocation (`runners/mcp.py`); the product's trace then
+reports the calls under its own spelling of the tool, mapped back to the
+case's name here.
+
 Imports no agent framework: a product is an executable and a trace grammar.
 """
 
@@ -33,6 +39,16 @@ from typing import Any
 from skill_lens.bundle import BUNDLE_DIRS
 from skill_lens.models import EvalCase, ProductStatus, RunResult, Skill
 from skill_lens.process import group_kwargs, read_capped_handle, reap_and_kill_group
+from skill_lens.runners.mcp import (
+    CLAUDE_CODE_MCP,
+    COPILOT_MCP,
+    Bridge,
+    BridgeSetupError,
+    McpSupport,
+    probe_bridge,
+    restore_tool_names,
+    write_bridge,
+)
 from skill_lens.runners.traces import Trace, parse_claude_code, parse_copilot
 from skill_lens.skills.loader import SKILL_FILENAME
 from skill_lens.workspace import PathRefused, Workspace, check_relative_path
@@ -69,6 +85,10 @@ class Product:
     as a whole element -- never through a shell. `invoke` is how `mode:
     loaded` asks the product to load the skill (`{name}`, `{task}`);
     `parse` is None for a generic product, whose stdout is the output.
+    `mcp` is how the product takes the stdio MCP server that serves a case's
+    `tools:`, or None for a product with no known flag (`cli`, or a preset
+    whose `command` names another executable), under which `tools:` stays a
+    preflight authoring error.
     """
 
     name: str
@@ -93,6 +113,7 @@ class Product:
     # or `command` naming it would hand the judge tools back behind
     # `judge_args`. `ProductJudge.preflight` refuses it.
     tool_flag: str | None = None
+    mcp: McpSupport | None = None
 
 
 PRESETS: dict[str, Product] = {
@@ -127,6 +148,7 @@ PRESETS: dict[str, Product] = {
         # left for it to approve.
         judge_args=("--available-tools=skill-lens-none",),
         tool_flag="--available-tools",
+        mcp=COPILOT_MCP,
     ),
     "claude-code": Product(
         name="claude-code",
@@ -154,6 +176,7 @@ PRESETS: dict[str, Product] = {
         version_command=("claude", "--version"),
         judge_args=("--tools", ""),
         tool_flag="--tools",
+        mcp=CLAUDE_CODE_MCP,
     ),
 }
 
@@ -170,12 +193,16 @@ class Invocation:
     error: str | None = None
 
 
-def invoke(product: Product, prompt: str, cwd: Path) -> Invocation:
+def invoke(
+    product: Product, prompt: str, cwd: Path, extra_args: tuple[str, ...] = ()
+) -> Invocation:
     """Start the product once with `prompt`, in `cwd`; never raises.
 
-    Output goes to files in a scratch directory and is read back through the
-    handles the harness opened (see `process.read_capped_handle`). The
-    process group is killed after every exit, timeout or not.
+    `extra_args` go after everything else -- after the table's `args` -- and
+    are how the MCP bridge's config reaches the product. Output goes to
+    files in a scratch directory and is read back through the handles the
+    harness opened (see `process.read_capped_handle`). The process group is
+    killed after every exit, timeout or not.
     """
     # Resolved the way preflight resolved it: `shutil.which` honours PATHEXT,
     # so a Windows `.cmd` shim that passed preflight also starts here, where
@@ -184,6 +211,7 @@ def invoke(product: Product, prompt: str, cwd: Path) -> Invocation:
     argv = [
         executable,
         *(prompt if element == PROMPT_PLACEHOLDER else element for element in product.argv[1:]),
+        *extra_args,
     ]
     try:
         scratch = Path(tempfile.mkdtemp(prefix=SCRATCH_PREFIX)).resolve()
@@ -323,6 +351,20 @@ def _check_skill_name(name: str) -> None:
         )
 
 
+def _no_bridge_reason(product: Product) -> str:
+    """Why this product cannot take the MCP bridge, for the `tools:` refusal."""
+    preset = PRESETS.get(product.name)
+    if preset is not None and preset.mcp is not None:
+        return (
+            f"[runners.{product.name}] command names another executable, which is not "
+            f"known to take {preset.mcp.config_arg.split('=')[0]}; keep the preset's "
+            "executable in command, or add flags with args"
+        )
+    return (
+        "the cli runner has no flag that takes an MCP server; use a preset (copilot, claude-code)"
+    )
+
+
 def _install_hint(product: Product) -> str:
     if product.name == "cli":
         return "set [runners.cli] command in skill-lens.toml to a command on PATH"
@@ -416,19 +458,46 @@ class ProductRunner:
             )
 
         private: Path | None = None
+        bridge: Bridge | None = None
         try:
             if workspace is not None:
                 cwd = workspace.root
             else:
                 private = Path(tempfile.mkdtemp(prefix=PRIVATE_PREFIX)).resolve()
                 cwd = private
+            extra_args: tuple[str, ...] = ()
+            if case.tools:
+                # Preflight refused a product that cannot take the bridge, so
+                # this is only reached with one that can. The bridge's files
+                # live in a directory of their own, never in `cwd`.
+                if product.mcp is None:
+                    raise ProductSetupError(
+                        f"the {product.name} runner cannot serve the case's tools:"
+                    )
+                bridge = write_bridge(case.tools, product.mcp)
+                extra_args = bridge.argv()
             deliver_skill(skill, cwd, product.skills_dir)
-            trace = read_trace(product, invoke(product, prompt, cwd))
-        except ProductSetupError as exc:
+            trace = read_trace(product, invoke(product, prompt, cwd, extra_args))
+            if bridge is not None and trace.error is None and not bridge.connected():
+                # The product ran, but never asked the bridge for its tools:
+                # the model had none. Infra, not a skill that failed to call
+                # them -- a `trajectory: called:` would otherwise fail for a
+                # reason that says nothing about the skill.
+                trace = replace(
+                    trace,
+                    error=(
+                        f"{product.name} never listed the case's mock tools: the MCP bridge "
+                        f"did not connect (check [runners.{product.name}] args for a flag "
+                        "that disables MCP servers, and the product's own MCP logs)"
+                    ),
+                )
+        except (ProductSetupError, BridgeSetupError) as exc:
             return RunResult(error=str(exc), latency_ms=elapsed())
         except OSError as exc:
             return RunResult(error=f"{type(exc).__name__}: {exc}", latency_ms=elapsed())
         finally:
+            if bridge is not None:
+                bridge.cleanup()
             if private is not None:
                 shutil.rmtree(private, ignore_errors=True)
 
@@ -436,7 +505,11 @@ class ProductRunner:
             return RunResult(error=trace.error, latency_ms=elapsed(), model=trace.model)
         return RunResult(
             output=trace.output,
-            tool_calls=list(trace.tool_calls),
+            tool_calls=(
+                restore_tool_names(bridge, trace.tool_calls)
+                if bridge is not None
+                else list(trace.tool_calls)
+            ),
             transcript=list(trace.transcript),
             input_tokens=trace.input_tokens,
             output_tokens=trace.output_tokens,
@@ -469,15 +542,18 @@ class ProductRunner:
         product = self._product
         executable = find_executable(product, "runner")
         version = probe_version(product, executable)
+        bridged = False
         for skill in skills:
             _check_skill_name(skill.name)
             for case in cases_by_skill.get(skill.name, []):
                 where = f"case {case.name!r} of skill {skill.name!r}"
                 if case.tools:
-                    raise ProductSetupError(
-                        f"{where} declares tools:, which the {product.name} runner cannot "
-                        "provide -- mock tools reach only pydantic-ai and langchain"
-                    )
+                    if product.mcp is None:
+                        raise ProductSetupError(
+                            f"{where} declares tools:, which the {product.name} runner cannot "
+                            f"provide -- {_no_bridge_reason(product)}"
+                        )
+                    bridged = True
                 if product.parse is None:
                     if case.trajectory is not None:
                         raise ProductSetupError(
@@ -489,6 +565,37 @@ class ProductRunner:
                             f"{where} is mode: offered, but the cli runner cannot observe "
                             "whether a skill was loaded; use a preset or mode: loaded"
                         )
+        if bridged and product.mcp is not None:
+            self._check_bridge(product.mcp)
         return ProductStatus(
             name=product.name, executable=executable, version=version, trust=TRUST_NOTE
         )
+
+    def _check_bridge(self, support: McpSupport) -> None:
+        """A planned case declares `tools:`: refuse a table flag that would
+        hide them from the model, then prove the bridge starts.
+
+        The flag check mirrors `ProductJudge.preflight`'s: Copilot's
+        `--available-tools` keeps only the tools it names, built-in and MCP
+        alike, so an entry in `[runners.copilot]` would leave the model
+        without the mocks and every `trajectory: called:` failing for a
+        reason that says nothing about the skill. The probe is executed, not
+        merely found, like the version probe: a `sys.executable` that cannot
+        import the bridge (a frozen build, say) is exit 2 up front, not one
+        errored case per work item.
+        """
+        product = self._product
+        for flag in support.hiding_flags:
+            for element in product.argv[1:]:
+                if element == flag or element.startswith(f"{flag}="):
+                    spelling = support.product_name("<name>")
+                    raise ProductSetupError(
+                        f"runner {product.name}: {element!r} in [runners.{product.name}] "
+                        f"would hide the case's mock tools from the model ({flag} keeps only "
+                        "the tools it names, MCP tools included); drop the flag, or name "
+                        f"each mock tool in it as the product spells it ({spelling})"
+                    )
+        try:
+            probe_bridge()
+        except BridgeSetupError as exc:
+            raise ProductSetupError(f"runner {product.name}: {exc}") from exc

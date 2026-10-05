@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from skill_lens.models import EvalCase, Skill, WorkspaceSpec
+from skill_lens.models import EvalCase, Skill, ToolSpec, WorkspaceSpec
+from skill_lens.runners.mcp import CLAUDE_CODE_MCP, COPILOT_MCP
 from skill_lens.runners.product import (
     PRESETS,
     Invocation,
@@ -121,6 +122,8 @@ def test_the_presets_are_the_verified_spellings():
     assert claude.version_command == ("claude", "--version")
     assert claude.judge_args == ("--tools", "")
     assert claude.tool_flag == "--tools"
+    assert copilot.mcp is COPILOT_MCP
+    assert claude.mcp is CLAUDE_CODE_MCP
     assert set(PRESETS) == {"copilot", "claude-code"}
     for preset in PRESETS.values():
         assert preset.timeout_seconds == 600.0
@@ -395,3 +398,125 @@ def test_invoke_starts_the_executable_preflight_resolved(tmp_path, fake, monkeyp
     result = ProductRunner(product).run(_skill(tmp_path), _case())
     assert result.error is None
     assert result.output == "PONG-7731"
+
+
+# --- mock tools, through the MCP bridge ---
+
+TOOLS = [
+    ToolSpec(
+        name="lookup_order",
+        description="Look up an order.",
+        parameters={"order_id": "string"},
+        returns='{"order_id": "A-17", "status": "shipped"}',
+    )
+]
+
+
+def _bridge_dir(seen: dict) -> Path:
+    """The bridge's directory, from the config element the product was handed."""
+    element = seen["argv"][-1]
+    for prefix in ("--mcp-config=", "--additional-mcp-config=@"):
+        if element.startswith(prefix):
+            return Path(element[len(prefix) :]).parent
+    raise AssertionError(f"no config element in {seen['argv']}")
+
+
+def test_a_case_with_tools_hands_the_product_the_bridge_and_maps_the_names_back(
+    tmp_path, fake, monkeypatch
+):
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "claude-code-mcp.jsonl"))
+    monkeypatch.setenv("FAKE_PRODUCT_MCP_CALL", "lookup_order")
+    runner = ProductRunner(_product(mcp=CLAUDE_CODE_MCP))
+    result = runner.run(_skill(tmp_path), _case(tools=TOOLS))
+    assert result.error is None
+    seen = fake()
+    # The config element is the last argument -- after the table's own args.
+    assert seen["argv"][-2] == "--flag"
+    assert seen["argv"][-1].startswith("--mcp-config=")
+    mcp = seen["mcp"]
+    assert mcp["server"] == "skill-lens"
+    assert mcp["config"]["mcpServers"]["skill-lens"]["command"] == sys.executable
+    assert mcp["initialize"]["serverInfo"]["name"] == "skill-lens"
+    assert mcp["tools"] == ["lookup_order"]
+    assert mcp["call"] == {
+        "content": [{"type": "text", "text": '{"order_id": "A-17", "status": "shipped"}'}]
+    }
+    assert mcp["exit_code"] == 0  # the server left when the product closed its stdin
+    # The trace names the tool the product's way; the result names it the case's way.
+    assert [call.name for call in result.tool_calls] == ["Skill", "ToolSearch", "lookup_order"]
+    assert result.tool_calls[2].arguments == {"order_id": "A-17"}
+    assert result.output == "Order A-17 is shipped."
+    # The bridge's files were never in the working directory, and are gone now.
+    assert _bridge_dir(seen) != Path(seen["cwd"])
+    assert not _bridge_dir(seen).exists()
+    assert seen["skill_files"] == ["ping/SKILL.md"]
+
+
+def test_under_copilot_the_bridge_takes_the_products_own_spellings(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "copilot-mcp.jsonl"))
+    monkeypatch.setenv("FAKE_PRODUCT_SKILLS_DIR", ".agents/skills")
+    product = _product(
+        name="copilot", parse=parse_copilot, skills_dir=".agents/skills", mcp=COPILOT_MCP
+    )
+    result = ProductRunner(product).run(_skill(tmp_path), _case(tools=TOOLS))
+    assert result.error is None
+    seen = fake()
+    assert seen["argv"][-1].startswith("--additional-mcp-config=@")
+    entry = seen["mcp"]["config"]["mcpServers"]["skill-lens"]
+    assert entry["type"] == "local" and entry["tools"] == ["*"]
+    assert seen["mcp"]["tools"] == ["lookup_order"]
+    assert [call.name for call in result.tool_calls] == ["lookup_order"]
+    assert result.output == "Order A-17 is shipped."
+
+
+def test_the_bridge_stays_out_of_a_workspace(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "claude-code-mcp.jsonl"))
+    workspace = create_workspace(WorkspaceSpec(files={"in.txt": "hi"}), label="t")
+    try:
+        result = ProductRunner(_product(mcp=CLAUDE_CODE_MCP)).run(
+            _skill(tmp_path), _case(tools=TOOLS, workspace=WorkspaceSpec()), workspace=workspace
+        )
+        assert result.error is None
+        assert workspace.listing() == [".claude/skills/ping/SKILL.md", "in.txt"]
+        assert _bridge_dir(fake()) != workspace.root
+    finally:
+        workspace.cleanup()
+
+
+def test_a_product_that_never_connects_is_an_error_not_a_failed_trajectory(
+    tmp_path, fake, monkeypatch
+):
+    # The product ran to a clean result, but never asked the bridge for its
+    # tools: the model had none, which says nothing about the skill.
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "claude-code-mcp.jsonl"))
+    monkeypatch.setenv("FAKE_PRODUCT_MCP", "ignore")
+    result = ProductRunner(_product(mcp=CLAUDE_CODE_MCP)).run(_skill(tmp_path), _case(tools=TOOLS))
+    assert result.error is not None
+    assert "never listed the case's mock tools" in result.error
+    assert "[runners.claude-code] args" in result.error
+    assert fake()["mcp"]["ignored"] is True
+
+
+def test_a_product_failure_is_reported_before_the_connection_check(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "exit3")
+    monkeypatch.setenv("FAKE_PRODUCT_MCP", "ignore")
+    result = ProductRunner(_product(mcp=CLAUDE_CODE_MCP)).run(_skill(tmp_path), _case(tools=TOOLS))
+    assert result.error == "claude-code exited with code 3: boom"
+    assert not _bridge_dir(fake()).exists()  # removed on the failure path too
+
+
+def test_a_case_without_tools_gets_no_bridge(tmp_path, fake):
+    result = ProductRunner(_product(mcp=CLAUDE_CODE_MCP)).run(_skill(tmp_path), _case())
+    assert result.error is None
+    seen = fake()
+    assert seen["argv"][-1] == "--flag"
+    assert seen["mcp"] is None
+
+
+def test_a_product_that_cannot_take_the_bridge_errors_a_tools_case(tmp_path, fake):
+    # Preflight refuses this before a run; a caller that skipped preflight
+    # still gets an errored result, never a raise or a silent run without
+    # the tools.
+    result = ProductRunner(_product()).run(_skill(tmp_path), _case(tools=TOOLS))
+    assert result.error == "the claude-code runner cannot serve the case's tools:"
+    assert not (tmp_path / "record.json").exists()  # the product never started

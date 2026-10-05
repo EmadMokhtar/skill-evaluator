@@ -103,6 +103,35 @@ written and must be a valid JSON Schema of `type: object`. For a tool a real MCP
 exposes, `skill-lens mcp-import tools.json` writes the `input_schema:` block from the
 server's `tools/list` listing — `returns:` still has to be filled in by hand.
 
+`returns:` may answer differently per call, and the shape says which rule applies. A
+list of strings is consumed in call order, the last entry repeating once used up (pair it
+with `max_calls`); a list of `when:`/`value:` mappings is answered by the first entry whose
+`when:` keys all equal the call's arguments, an entry with no `when:` being the fallback:
+
+```yaml
+      - name: get_work_item
+        parameters:
+          id: string
+        returns:                        # by call order: A, then B, then B again
+          - '{"id": "A", "parent": "B"}'
+          - '{"id": "B", "parent": null}'
+      - name: lookup_order
+        parameters:
+          order_id: string
+        returns:                        # by argument: first match wins
+          - when: {order_id: "1234"}
+            value: '{"id": "1234", "days_since_delivery": 45}'
+          - when: {order_id: "5678"}
+            value: '{"id": "5678", "days_since_delivery": 3}'
+          - value: '{"error": "not found"}'
+```
+
+Values compare as parsed (`1` is an integer, `"1"` a string, `true` matches only a
+boolean). A call no entry answers gets `no response is scripted for <tool> with arguments
+{...}`. An empty list, a list mixing strings and mappings, a `when:` key the tool never
+carries, an empty `when: {}`, or an entry an earlier entry already answers is an authoring
+error (exit 2).
+
 A tool several skills share is declared once in a **tool library** — a YAML file with a
 top-level `tools:` list, the block above, which is also what `mcp-import` prints. The eval
 file imports it with `tool_libraries:` (paths relative to the eval file; a directory
@@ -120,8 +149,9 @@ cases:
         returns: '{"id": "1234", "days_since_delivery": 45}'   # this case's scenario
 ```
 
-A `ref:` may carry `returns:` and nothing else. An unknown name, a missing library, a name
-two libraries both declare, or an absolute path is an authoring error (exit 2).
+A `ref:` may carry `returns:` — in any of its three shapes — and nothing else. An unknown
+name, a missing library, a name two libraries both declare, or an absolute path is an
+authoring error (exit 2).
 
 ## Trajectory
 
@@ -140,12 +170,17 @@ two libraries both declare, or an absolute path is an authoring error (exit 2).
           equals: {order_id: "5678"}     # the whole argument dict, exactly
 ```
 
-Every name in `called`, `forbidden`, `order` and a `call_args` entry's `tool` must be a tool
-the case itself declares. A `call_args` entry carries exactly one of `contains` / `equals`
-(`contains: {}` is refused; `equals: {}` means "called with no arguments"), matches
-structurally with no type coercion (`"1"` is not `1`, `true` is not `1`, `[bug]` is not
-`[bug, urgent]`), and fails when the tool was never called — under `every: true` too.
-Each entry is its own check, `call_args[0]`, `call_args[1]`, ….
+Under `fake`, `pydantic-ai` and `langchain`, every name in `called`, `forbidden`, `order`
+and a `call_args` entry's `tool` must be a tool the case itself declares (a built-in counts
+in a case with a `workspace:`); `run` refuses anything else before any case runs. Under
+`copilot` or `claude-code` the names are the product's own tools (`Bash`) and are not
+checked, so spell them as the product does.
+
+A `call_args` entry carries exactly one of `contains` / `equals` (`contains: {}` is refused;
+`equals: {}` means "called with no arguments"), matches structurally with no type coercion
+(`"1"` is not `1`, `true` is not `1`, `[bug]` is not `[bug, urgent]`), and fails when the
+tool was never called — under `every: true` too. Each entry is its own check,
+`call_args[0]`, `call_args[1]`, ….
 
 ## Budget
 
@@ -173,7 +208,10 @@ nothing was verified.
 
 One verdict per rubric entry, each with its evidence; skill-lens derives pass and score
 from those. A check that passes without evidence is recorded as a failure. An empty
-rubric, or a blank entry, is an authoring error. Judging costs money and is opted into
+rubric, or a blank entry, is an authoring error; so is an entry phrased against a mock
+tool's `returns:` ("the mocked data", "what the tool returned") — the judge is shown the
+task, `expected`, the response and any named `artifacts`, never a tool's return, so the
+check could not be verified. Judging costs money and is opted into
 with `judge = "pydantic-ai"` in `skill-lens.toml`; the default `judge = "fake"` reports a
 judged case as **errored** rather than passing a rubric nobody checked.
 

@@ -12,8 +12,10 @@ reporting the difference.
 
 Every case can run in two **arms**:
 
-- **candidate** — the skill under test, exactly as it runs today. This is the only arm that
-  existed before M4, and it is the only arm the gate reads.
+- **candidate** — the skill under test, exactly as it runs today. This is the only arm a run
+  without `--baseline` produces, and the only arm `min_pass_rate`, `per_skill_min`,
+  `fail_on_error` and the zero-cases check ever read. [`--min-delta`](#-min-delta) is the one
+  gate rule that reads both, because the delta it gates on is built from both.
 - **baseline** — a comparison point, selected with `--baseline`:
   - `none` — an **empty skill**: same name, no description, no instructions. This isolates
     what the skill's text contributes, as opposed to what the model would do unprompted.
@@ -22,10 +24,10 @@ Every case can run in two **arms**:
 
 **Omitting `--baseline` is what turns comparison off.** `none` names a *kind* of baseline (an
 empty skill), not the absence of one — so leaving the flag unset, not passing `--baseline
-none`, is the only way to get a single-arm run. With no flag, `skill-lens run` keeps the same
-layout it had before M4: one arm, one line per outcome, no delta block. It is not
+none`, is the only way to get a single-arm run. With no flag, `skill-lens run` keeps the single-arm
+layout: one arm, one line per outcome, no delta block. It is not
 byte-identical, though — a failing case's assertion, trajectory and budget evaluators now
-emit per-check evidence (an M4 addition, previously only the judge evaluator did this), so a
+emit per-check evidence (once, only the judge evaluator did this), so a
 failing outcome prints one indented line per failed check where it printed none before. That
 is strictly more information, not a behavior change in what runs. Upgrading to a version of
 `skill-lens` that supports comparison must never silently double anyone's bill.
@@ -55,20 +57,38 @@ A case's mock tools (`tools:`) are unaffected by the arm. They are the environme
 declares, not part of the skill, so both arms see the same tools and the comparison stays
 honest.
 
+```mermaid
+flowchart TD
+    CASE["One eval case"] --> CAND["Candidate arm: SKILL.md as it is now"]
+    CASE --> BASE["Baseline arm: --baseline none or previous"]
+    CAND --> CR["Run it --repeat N times"]
+    BASE --> BR["Run it --repeat N times"]
+    CR --> PAIR{"Can both arms be honestly compared?"}
+    BR --> PAIR
+    PAIR -->|"no: skipped, unresolvable, or every repetition errored"| DROP["Excluded from BOTH halves of the delta"]
+    PAIR -->|yes| DELTA["Delta: pass rate, tokens, cost, latency"]
+    CR --> GATE["The gate: candidate outcomes, plus the delta under --min-delta"]
+    DELTA -->|"--min-delta, when set"| GATE
+```
+
 ## How `previous` is resolved
 
 `--baseline previous` walks the skill's own git history, rooted at its directory:
 
 1. Confirm the directory is inside a git repository.
 2. Confirm `SKILL.md` is tracked.
-3. List the commits that touched `SKILL.md`, newest first, bounded to the last **50** commits.
+3. List the commits that touched `SKILL.md` at its current path, newest first. Where one of
+   them created that path by **moving** `SKILL.md` there byte for byte, carry on from the old
+   path, before the move (see [When a skill has moved](#when-a-skill-has-moved)). The last
+   **50** commits are read in total, across every path.
 4. Read each candidate commit's `SKILL.md` and parse it. The first one that qualifies as
    genuinely earlier wins:
    - if the **working copy** declares a `version:`, the first commit whose `version` differs
      from the working copy's;
    - if it declares none, the first commit whose **content** differs from the working copy's.
 
-5. Extract that same commit's `scripts/`, `references/` and `assets/` (`git archive`, then
+5. Extract that same commit's `scripts/`, `references/` and `assets/`, from the directory the
+   skill had at that commit (`git archive`, then
    `tarfile` with its `data` filter) into a temporary directory that is deleted when the run
    ends, so the previous instructions are paired with the previous bundle — never with the
    candidate's scripts. A commit with none of the three directories gives the baseline no
@@ -85,6 +105,25 @@ The comparison is against the **working copy**, not `HEAD` — so uncommitted ed
 `SKILL.md` are what run as the candidate. This matters for local iteration: you do not need
 to commit a change before measuring it.
 
+### When a skill has moved
+
+Git records a move as a delete at the old path and an add at the new one, so the history of
+the new path begins at the move. The resolver carries on from the old path only when the
+commit that created the new path moved `SKILL.md` there **unchanged** — the `git mv` of a
+skill's directory, committed on its own. That is certain to be the same file.
+
+Two things look like a move and are not followed:
+
+- **A copy**, even one whose source is deleted in a later commit. A skill started from
+  another skill's `SKILL.md` must never be compared against *that* skill's old instructions.
+  This is why skill-lens does not use `git log --follow`: it follows copies as well as
+  renames, and matches by similarity.
+- **A move that also edited `SKILL.md` in the same commit.** It may well be the same skill,
+  but nothing can prove it, and a baseline taken from another file would be worse than none.
+
+Either one ends the search with *no earlier version found*, which the report explains. To
+keep a skill's history across a move, commit the move by itself, then edit.
+
 Resolution happens **once per skill**, not per case or per repetition — it shells out to
 `git`, and shelling out once per repetition would multiply subprocess calls by nothing useful.
 
@@ -100,7 +139,7 @@ discipline runners follow for provider failures:
 | not a git repository | The skill's directory (or an ancestor) has no `.git` |
 | `SKILL.md` is not tracked by git | The file exists but was never committed |
 | cannot read the working copy's `SKILL.md` | Filesystem error (file missing, permission denied) or character encoding issue |
-| no earlier version found within the searched history | Every commit in the last 50 has the same version (or, unversioned, the same content) |
+| no earlier version found within the searched history | Every commit in the last 50 has the same version (or, unversioned, the same content), or the history begins at a copy, or at a move that also edited `SKILL.md` — see [When a skill has moved](#when-a-skill-has-moved) |
 | cannot archive commit `<sha>` | `git archive` failed or exceeded the 10-second timeout — a very large historical `assets/` can do that |
 | cannot extract the bundle at commit `<sha>` | The archive would not parse, or a member failed the safe-extraction filter, or the extraction hit a filesystem error; a half-extracted directory is removed |
 
@@ -207,24 +246,28 @@ least this much better than the baseline's.
 exits `2` — the alternative is a gate that silently checks nothing, which is the same
 vacuous-pass failure mode every other gate rule in this project rejects.
 
-With a baseline set, `--min-delta` fails the gate for three reasons:
+With a baseline set, `--min-delta` fails the gate for four reasons, checked in this order:
 
-1. **The delta is below the bar** — `pass_rate_delta < min_delta`.
+1. **No baseline arm ran at all** — every case's baseline was skipped, so there is nothing to
+   build a delta from in the first place. A suite made entirely of skipped-baseline `offered`
+   cases under `--baseline none` fails through *this* rule, not the next one: those cases
+   produce no baseline outcomes at all, so there is no delta to look inside.
 2. **No case was comparable** — mirroring "a run executing zero cases fails the gate": a gate
-   that verified nothing must never report a pass. A suite made entirely of skipped-baseline
-   `offered` cases under `--baseline none` fails through this rule, which is the honest reason
-   even though no individual baseline "failed".
-3. **A skill's baseline could not be resolved** — naming the skill and the reason. Otherwise a
+   that verified nothing must never report a pass. This is the rule for a delta that was
+   built and then emptied — some baseline did run, but every pair was dropped.
+3. **The delta is below the bar** — `pass_rate_delta < min_delta`.
+4. **A skill's baseline could not be resolved** — naming the skill and the reason. Otherwise a
    repository could pass `--min-delta` forever by deleting its git history.
 
 A *deliberately* skipped baseline (an `offered` case under `--baseline none`) is, on its own,
-**not** a gate reason — nothing went wrong. It only becomes one indirectly, through rule 2, if
-it leaves nothing comparable behind.
+**not** a gate reason — nothing went wrong. It becomes one only indirectly: through rule 1 if
+*every* case skips its baseline, or through rule 2 if the pairs that do run leave nothing
+comparable behind.
 
-**Baseline outcomes never count toward the gate.** Every other gate rule — `min_pass_rate`,
-`per_skill_min`, `fail_on_error`, the zero-cases check — reads the **candidate** arm only. A
-strong baseline means the skill was unnecessary, not that CI should go red; the baseline exists
-to be compared against, not to be graded on its own.
+**Baseline outcomes count toward `--min-delta` and no other gate rule.** Every other gate
+rule — `min_pass_rate`, `per_skill_min`, `fail_on_error`, the zero-cases check — reads the
+**candidate** arm only. A strong baseline means the skill was unnecessary, not that CI should
+go red; the baseline exists to be compared against, not to be graded on its own.
 
 ## Cost
 

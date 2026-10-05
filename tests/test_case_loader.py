@@ -173,11 +173,32 @@ def test_typoed_assertion_key_singular_raises_instead_of_silently_passing(tmp_pa
     assert "assertion" in str(exc.value)
 
 
-def test_trajectory_called_naming_an_undeclared_tool_raises(tmp_path):
-    # A typo in `called:` (e.g. lookup_ordr instead of lookup_order) can never
-    # pass -- it isn't a signal about the skill, it's a mistake in the case
-    # file, and must abort the run rather than score as a failure.
-    path = tmp_path / "typo.eval.yaml"
+def test_trajectory_naming_an_undeclared_tool_is_the_runners_call_not_the_loaders(tmp_path):
+    # Which tools a case has depends on the runner: a framework runner offers
+    # the case's mock tools, a product runner offers the product's own (`Bash`),
+    # and one invocation may run the same case through both. The loader cannot
+    # know, so it accepts the name; each runner's preflight decides -- see
+    # tests/test_preflight.py and tests/test_product_preflight.py.
+    path = tmp_path / "product.eval.yaml"
+    path.write_text(
+        "cases:\n"
+        "  - name: order lookup\n"
+        "    task: look up order 1234\n"
+        "    trajectory:\n"
+        "      called: [Bash]\n"
+        "      forbidden: [Write]\n"
+        "      order: [Read, Bash]\n"
+    )
+    (case,) = parse_cases_file(path)
+    assert case.trajectory.called == ["Bash"]
+    assert case.trajectory.forbidden == ["Write"]
+    assert case.trajectory.order == ["Read", "Bash"]
+
+
+def test_a_trajectory_beside_declared_tools_may_still_name_others(tmp_path):
+    # A case can declare mock tools for a framework run and still name a name
+    # the loader has never heard of; the runner it runs under is the judge.
+    path = tmp_path / "mixed.eval.yaml"
     path.write_text(
         "cases:\n"
         "  - name: order lookup\n"
@@ -185,48 +206,10 @@ def test_trajectory_called_naming_an_undeclared_tool_raises(tmp_path):
         "    tools:\n"
         "      - name: lookup_order\n"
         "    trajectory:\n"
-        "      called: [lookup_ordr]\n"
+        "      called: [lookup_order, lookup_ordr]\n"
     )
-    with pytest.raises(CaseParseError) as exc:
-        parse_cases_file(path)
-    assert "typo.eval.yaml" in str(exc.value)
-    assert "order lookup" in str(exc.value)
-    assert "lookup_ordr" in str(exc.value)
-
-
-def test_trajectory_forbidden_naming_an_undeclared_tool_raises(tmp_path):
-    path = tmp_path / "typo.eval.yaml"
-    path.write_text(
-        "cases:\n"
-        "  - name: order lookup\n"
-        "    task: look up order 1234\n"
-        "    tools:\n"
-        "      - name: lookup_order\n"
-        "    trajectory:\n"
-        "      forbidden: [issue_refnd]\n"
-    )
-    with pytest.raises(CaseParseError) as exc:
-        parse_cases_file(path)
-    assert "typo.eval.yaml" in str(exc.value)
-    assert "order lookup" in str(exc.value)
-    assert "issue_refnd" in str(exc.value)
-
-
-def test_trajectory_order_naming_an_undeclared_tool_raises(tmp_path):
-    path = tmp_path / "typo.eval.yaml"
-    path.write_text(
-        "cases:\n"
-        "  - name: order lookup\n"
-        "    task: look up order 1234\n"
-        "    tools:\n"
-        "      - name: lookup_order\n"
-        "    trajectory:\n"
-        "      order: [lookup_order, issue_refnd]\n"
-    )
-    with pytest.raises(CaseParseError) as exc:
-        parse_cases_file(path)
-    assert "typo.eval.yaml" in str(exc.value)
-    assert "issue_refnd" in str(exc.value)
+    (case,) = parse_cases_file(path)
+    assert case.trajectory.called == ["lookup_order", "lookup_ordr"]
 
 
 def test_trajectory_referencing_only_declared_tools_is_fine(tmp_path):
@@ -247,9 +230,9 @@ def test_trajectory_referencing_only_declared_tools_is_fine(tmp_path):
     assert cases[0].trajectory.called == ["lookup_order"]
 
 
-def test_call_args_naming_an_undeclared_tool_raises(tmp_path):
-    # Same rule as called/forbidden/order: a check on a tool the agent was
-    # never offered can never pass, so it is a mistake in the file.
+def test_call_args_naming_an_undeclared_tool_is_the_runners_call_too(tmp_path):
+    # Same rule as called/forbidden/order, made in the same place: the
+    # runner's preflight (tests/test_preflight.py), not the loader.
     path = tmp_path / "typo.eval.yaml"
     path.write_text(
         "cases:\n"
@@ -262,12 +245,8 @@ def test_call_args_naming_an_undeclared_tool_raises(tmp_path):
         "        - tool: lookup_ordr\n"
         "          contains: {order_id: '1234'}\n"
     )
-    with pytest.raises(CaseParseError) as exc:
-        parse_cases_file(path)
-    assert "typo.eval.yaml" in str(exc.value)
-    assert "order lookup" in str(exc.value)
-    assert "trajectory.call_args" in str(exc.value)
-    assert "lookup_ordr" in str(exc.value)
+    (case,) = parse_cases_file(path)
+    assert case.trajectory.call_args[0].tool == "lookup_ordr"
 
 
 def test_call_args_on_a_declared_tool_parses_as_written(tmp_path):
@@ -334,7 +313,9 @@ def test_an_empty_contains_names_the_file(tmp_path):
     assert "empty contains" in str(exc.value)
 
 
-def test_call_args_may_name_a_builtin_only_with_a_workspace(tmp_path):
+def test_call_args_may_name_a_builtin_with_or_without_a_workspace_at_load_time(tmp_path):
+    # Whether `write_file` exists for this case is the runner's to say, in
+    # preflight; the loader accepts the name either way.
     body = (
         "    trajectory:\n"
         "      call_args:\n"
@@ -349,8 +330,7 @@ def test_call_args_may_name_a_builtin_only_with_a_workspace(tmp_path):
 
     without = tmp_path / "nows.eval.yaml"
     without.write_text("cases:\n  - name: n\n    task: t\n" + body)
-    with pytest.raises(CaseParseError, match="workspace"):
-        parse_cases_file(without)
+    assert parse_cases_file(without)[0].trajectory.call_args[0].tool == "write_file"
 
 
 def test_duplicate_tool_names_in_one_case_raise(tmp_path):
@@ -432,6 +412,78 @@ cases:
     )
     with pytest.raises(CaseParseError, match="entry 2 is blank"):
         parse_cases_file(path)
+
+
+def test_a_rubric_entry_naming_hidden_mock_data_is_an_authoring_error(tmp_path):
+    # The judge sees the task, `expected`, the response and any named
+    # artifacts -- never what a mock tool returned. A check phrased against
+    # that data can only pass under a judge that ignores its own "fail when
+    # ambiguous" rule, so it is refused before any judge is asked.
+    path = write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    tools:
+      - name: threads
+        description: d
+        returns: '{"author": "Alex Chen"}'
+    judge:
+      rubric:
+        - The reply names each reviewer
+        - The summary does not invent any detail not present in the mocked data
+""",
+    )
+    with pytest.raises(CaseParseError) as excinfo:
+        parse_cases_file(path)
+    message = str(excinfo.value)
+    assert str(path) in message
+    assert "case 'c'" in message
+    assert "rubric entry 2" in message
+    assert "'mocked data'" in message
+    assert "artifacts" in message
+
+
+def test_a_rubric_entry_naming_hidden_data_is_refused_without_tools_too(tmp_path):
+    # The judge never sees tool returns in any case, so the rule does not
+    # depend on whether this one declares `tools:`.
+    path = write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    judge:
+      rubric:
+        - The reply repeats what the tool returned
+""",
+    )
+    with pytest.raises(CaseParseError, match="rubric entry 1"):
+        parse_cases_file(path)
+
+
+def test_a_rubric_graded_against_a_named_artifact_loads(tmp_path):
+    # The documented fix: put the data in a workspace file the judge can read
+    # and phrase the check against that file.
+    path = write(
+        tmp_path,
+        """
+cases:
+  - name: c
+    task: t
+    workspace:
+      files:
+        threads.json: '{"author": "Alex Chen"}'
+    judge:
+      rubric:
+        - The summary names no reviewer absent from threads.json
+      artifacts: [threads.json]
+""",
+    )
+    cases = parse_cases_file(path)
+    assert cases[0].judge is not None
+    assert cases[0].judge.artifacts == ["threads.json"]
 
 
 def test_skill_triggered_on_a_loaded_case_is_an_authoring_error(tmp_path):
@@ -749,13 +801,16 @@ def test_a_trajectory_may_name_a_builtin_when_a_workspace_exists(tmp_path):
     assert case.trajectory.called == ["write_file"]
 
 
-def test_a_trajectory_naming_a_builtin_without_a_workspace_is_rejected(tmp_path):
-    path = _write(
-        tmp_path,
-        "cases:\n  - name: n\n    task: t\n    trajectory:\n      called: [write_file]\n",
+def test_a_trajectory_naming_a_builtin_without_a_workspace_loads(tmp_path):
+    # Whether `write_file` exists for this case is the runner's to say: a
+    # framework runner refuses it in preflight (no workspace, no built-ins), a
+    # product runner may well have a tool of that name.
+    path = tmp_path / "x.eval.yaml"
+    path.write_text(
+        "cases:\n  - name: n\n    task: t\n    trajectory:\n      called: [write_file]\n"
     )
-    with pytest.raises(CaseParseError, match="workspace"):
-        parse_cases_file(path)
+    (case,) = parse_cases_file(path)
+    assert case.trajectory.called == ["write_file"]
 
 
 def test_a_case_with_no_workspace_still_loads_unchanged(tmp_path):
@@ -814,13 +869,17 @@ def test_a_trajectory_may_name_run_script_when_a_workspace_exists(tmp_path):
     assert case.trajectory.called == ["run_script", "read_skill_file"]
 
 
-def test_a_trajectory_naming_run_script_without_a_workspace_is_rejected(tmp_path):
+def test_a_trajectory_naming_run_script_without_a_workspace_loads(tmp_path):
+    # The bundle tools exist only where a workspace does -- a fact the
+    # framework runners' preflight enforces (tests/test_preflight.py), not
+    # the loader, which cannot know whether a product runner has a tool of
+    # that name.
     path = _write(
         tmp_path,
         "cases:\n  - name: n\n    task: t\n    trajectory:\n      called: [run_script]\n",
     )
-    with pytest.raises(CaseParseError, match="workspace and bundle tools only exist"):
-        parse_cases_file(path)
+    (case,) = parse_cases_file(path)
+    assert case.trajectory.called == ["run_script"]
 
 
 INPUT_SCHEMA_CASE = """cases:
@@ -1270,4 +1329,161 @@ def test_a_yaml_file_still_needs_a_cases_list(tmp_path):
     path = tmp_path / "x.eval.yaml"
     path.write_text("evals: []\n", encoding="utf-8")
     with pytest.raises(CaseParseError, match="expected a top-level 'cases' list"):
+        parse_cases_file(path)
+
+
+# --- returns: a sequence or a lookup, from YAML -------------------------------
+
+SEQUENCE_CASE = """cases:
+  - name: walks the parent chain
+    task: Summarise work item A and everything above it
+    tools:
+      - name: get_work_item
+        description: Fetch a work item by id
+        parameters:
+          id: string
+        returns:
+          - '{"id": "A", "parent": "B"}'
+          - '{"id": "B", "parent": null}'
+    trajectory:
+      called: [get_work_item]
+      max_calls: 2
+"""
+
+LOOKUP_CASE = """cases:
+  - name: walks the parent chain
+    task: Summarise work item A and everything above it
+    tools:
+      - name: get_work_item
+        description: Fetch a work item by id
+        parameters:
+          id: string
+        returns:
+          - when: {id: "A"}
+            value: '{"id": "A", "parent": "B"}'
+          - when: {id: "B"}
+            value: '{"id": "B", "parent": null}'
+          - value: '{"error": "not found"}'
+"""
+
+
+def test_a_sequence_of_returns_loads_in_file_order(tmp_path):
+    (case,) = parse_cases_file(_write(tmp_path, SEQUENCE_CASE))
+    assert case.tools[0].returns == ['{"id": "A", "parent": "B"}', '{"id": "B", "parent": null}']
+
+
+def test_a_lookup_of_returns_loads_with_its_when_mappings(tmp_path):
+    (case,) = parse_cases_file(_write(tmp_path, LOOKUP_CASE))
+    entries = case.tools[0].returns
+    assert [entry.when for entry in entries] == [{"id": "A"}, {"id": "B"}, None]
+    assert entries[2].value == '{"error": "not found"}'
+
+
+def test_a_when_value_keeps_its_yaml_type(tmp_path):
+    # A YAML `1` is an integer and `"1"` a string, exactly as the model's JSON
+    # would be parsed; the loader does not stringify either side.
+    body = LOOKUP_CASE.replace("id: string", "id: integer").replace(
+        'when: {id: "A"}', "when: {id: 1}"
+    )
+    (case,) = parse_cases_file(_write(tmp_path, body))
+    assert case.tools[0].returns[0].when == {"id": 1}
+
+
+def test_a_returns_list_mixing_strings_and_mappings_is_refused_naming_the_tool(tmp_path):
+    body = SEQUENCE_CASE.replace(
+        '          - \'{"id": "B", "parent": null}\'\n',
+        "          - when: {id: B}\n            value: x\n",
+    )
+    with pytest.raises(CaseParseError, match=r"(?s)case #1 invalid \(tools\).*not a mix"):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_an_empty_returns_list_is_refused(tmp_path):
+    body = "cases:\n  - name: n\n    task: t\n    tools:\n      - name: t\n        returns: []\n"
+    with pytest.raises(CaseParseError, match=r"(?s)case #1 invalid \(tools\).*empty list"):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_a_when_key_the_tool_never_carries_is_an_authoring_error(tmp_path):
+    body = LOOKUP_CASE.replace('when: {id: "B"}', 'when: {item_id: "B"}')
+    with pytest.raises(
+        CaseParseError,
+        match=r"case 'walks the parent chain' tool 'get_work_item' returns\[1\]\.when names "
+        r"'item_id'",
+    ):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_an_unreachable_lookup_entry_is_an_authoring_error(tmp_path):
+    body = LOOKUP_CASE.replace(
+        '          - value: \'{"error": "not found"}\'\n',
+        '          - value: \'{"error": "not found"}\'\n'
+        '          - when: {id: "C"}\n            value: \'{"id": "C"}\'\n',
+    )
+    with pytest.raises(
+        CaseParseError,
+        match=r"tool 'get_work_item' returns\[3\] can never be reached: returns\[2\]",
+    ):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_a_placeholder_inside_a_sequence_names_its_position(tmp_path):
+    body = SEQUENCE_CASE.replace(
+        '          - \'{"id": "B", "parent": null}\'\n',
+        "          - TODO(skill-lens) the second reply\n",
+    )
+    with pytest.raises(
+        CaseParseError, match=r"placeholder TODO\(skill-lens\) at tools\[0\]\.returns\[1\]"
+    ):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_a_placeholder_inside_a_lookup_value_names_its_field(tmp_path):
+    body = LOOKUP_CASE.replace(
+        '            value: \'{"id": "B", "parent": null}\'\n',
+        "            value: TODO(skill-lens) what B looks like\n",
+    )
+    with pytest.raises(
+        CaseParseError, match=r"placeholder TODO\(skill-lens\) at tools\[0\]\.returns\[1\]\.value"
+    ):
+        parse_cases_file(_write(tmp_path, body))
+
+
+def test_a_ref_may_set_a_sequence_or_a_lookup(tmp_path):
+    path = _layout(tmp_path)
+    path.write_text(
+        REF_CASES.replace(
+            '        returns: \'{"id": "1234", "days_since_delivery": 45}\'\n',
+            "        returns:\n"
+            "          - when: {order_id: '1234'}\n"
+            '            value: \'{"id": "1234", "days_since_delivery": 45}\'\n'
+            "          - when: {order_id: '5678'}\n"
+            '            value: \'{"id": "5678", "days_since_delivery": 3}\'\n',
+        ).replace(
+            "      - ref: issue_refund\n",
+            "      - ref: issue_refund\n        returns: ['{\"ok\": true}', '{\"ok\": false}']\n",
+        ),
+        encoding="utf-8",
+    )
+    (case,) = parse_cases_file(path)
+    lookup, refund = case.tools
+    assert type(lookup) is ToolSpec
+    assert [entry.when for entry in lookup.returns] == [{"order_id": "1234"}, {"order_id": "5678"}]
+    assert refund.returns == ['{"ok": true}', '{"ok": false}']
+
+
+def test_a_ref_lookup_is_checked_against_the_library_contract(tmp_path):
+    # The library declares `order_id`; a case keying on `id` could never match.
+    path = _layout(tmp_path)
+    path.write_text(
+        REF_CASES.replace(
+            '        returns: \'{"id": "1234", "days_since_delivery": 45}\'\n',
+            "        returns:\n          - when: {id: '1234'}\n            value: x\n",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        CaseParseError,
+        match=r"tool 'lookup_order' returns\[0\]\.when names 'id'.*declares order_id",
+    ):
         parse_cases_file(path)

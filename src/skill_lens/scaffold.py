@@ -47,7 +47,9 @@ cases:
   #    For a tool a real MCP server exposes, `skill-lens mcp-import tools.json`
   #    writes this block from the server's own schema instead. A tool several
   #    skills share can live once in a library file each eval file imports
-  #    with `tool_libraries:` and names with `- ref: <name>`.
+  #    with `tool_libraries:` and names with `- ref: <name>`. A skill that
+  #    loops over a tool needs `returns:` as a list: strings answered in call
+  #    order, or `when:`/`value:` entries matched by argument.
   - name: takes the right path on the hard case
     task: >-
       {sentinel} the prompt that reaches the policy edge

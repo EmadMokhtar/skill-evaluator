@@ -26,6 +26,7 @@ agent sees when deciding whether to reach for the skill.
 | --- | --- |
 | Policy skill (refunds, approvals) | `trajectory` proving it looked before deciding; `forbidden` on the destructive tool; both sides of the policy line |
 | Tool-using skill | `order` for a required sequence; `max_calls` against loops; `call_args` when correctness is in the arguments (a filter, an id, a path) — `called` alone cannot tell a filtered query from an unfiltered one; a case where the tool returns an error string |
+| Loop-until / branch-on-result skill (walk a parent chain, poll until done, act on each of several ids) | one case whose mock answers per call — a `returns:` list in call order, or `when:`/`value:` entries keyed by argument — so the whole loop runs; `max_calls` for the stop condition; `call_args` with `every: true` for the id each call must carry; a `contains` per item it should have reached |
 | Formatting skill | `regex` — but only on structure the skill actually promised; a judge for "reads plainly" |
 | Knowledge skill | `contains` on the fact; `not_contains` on the plausible wrong answer; a judge for reasoning |
 
@@ -40,6 +41,14 @@ it?**
   as proof, and an unsupported pass is an LLM judge's characteristic failure mode.
 
 Split compound entries. "Names the order and explains the policy" hides which half failed.
+
+Never phrase an entry against a mock tool's `returns:`. The judge sees the task, `expected`,
+the response and the files `artifacts:` names — never what a tool returned — so "does not
+invent any detail not present in the mocked data" is unverifiable as written: a careful
+judge fails it as ambiguous and a lenient one passes it unread. skill-lens refuses such a
+line at load time. Phrase the check against the response ("names Alex Chen as the
+reviewer"), or put the data in a `workspace:` file, name it under `artifacts:`, and phrase
+the check against that file.
 
 ## Assertions that age badly
 

@@ -16,7 +16,8 @@ from langchain_fakes import (
 )
 from skill_lens.models import EvalCase, Skill, ToolSpec
 from skill_lens.runners.base import Runner
-from skill_lens.runners.langchain import LangChainRunner
+from skill_lens.runners.langchain import LangChainRunner, _chat_model
+from skill_lens.runners.preflight import UnsupportedBaseURL
 from skill_lens.runners.prompting import BASELINE_PREAMBLE, OFFERED_PREAMBLE, WORKSPACE_PREAMBLE
 from skill_lens.runners.tools import (
     BUILTIN_TOOL_NAMES,
@@ -106,6 +107,40 @@ def test_the_canned_return_value_is_handed_back_to_the_model():
         SKILL, case(tools=[ToolSpec(name="lookup_order", returns='{"status": "shipped"}')])
     )
     assert tool_results(model.turns[1]) == {"lookup_order": '{"status": "shipped"}'}
+
+
+def test_a_sequence_of_return_values_is_handed_back_in_call_order():
+    model = scripted(
+        tool_call("get_work_item", {"id": "A"}),
+        tool_call("get_work_item", {"id": "B"}),
+        text("done"),
+    )
+    LangChainRunner(model=model).run(
+        SKILL,
+        case(tools=[ToolSpec(name="get_work_item", returns=['{"id": "A"}', '{"id": "B"}'])]),
+    )
+    assert tool_results(model.turns[1]) == {"get_work_item": '{"id": "A"}'}
+    assert tool_results(model.turns[2])["get_work_item"] == '{"id": "B"}'
+
+
+def test_a_retry_starts_a_sequence_of_return_values_from_the_top():
+    # A retried attempt is a fresh conversation, so its mocks must be fresh
+    # too: an agent reused across attempts would hand the second attempt's
+    # first call the sequence's second entry.
+    def reply(messages, turn):
+        if turn in (0, 2):  # the first model turn of each attempt
+            return tool_call("poll", {})
+        if turn == 1:  # attempt 1 fails after the tool ran once
+            raise StatusError(429)
+        return text("done")
+
+    model = FunctionChatModel(reply=reply)
+    runner = LangChainRunner(
+        model=model, retries=1, retry_backoff_seconds=0.01, sleep=lambda _: None
+    )
+    result = runner.run(SKILL, case(tools=[ToolSpec(name="poll", returns=["one", "two"])]))
+    assert result.errored is False
+    assert tool_results(model.turns[3]) == {"poll": "one"}
 
 
 def test_a_model_omitting_a_required_tool_argument_does_not_error_the_case():
@@ -339,13 +374,13 @@ def test_a_numeric_temperature_reaches_the_chat_model(monkeypatch):
 
     seen = {}
 
-    def fake_chat_model(model, temperature):
-        seen["model"], seen["temperature"] = model, temperature
+    def fake_chat_model(model, temperature, base_url=""):
+        seen["model"], seen["temperature"], seen["base_url"] = model, temperature, base_url
         return scripted(text("done"))
 
     monkeypatch.setattr(adapter, "_chat_model", fake_chat_model)
     LangChainRunner(model="openai:gpt-4o-mini", temperature=0.7).run(SKILL, case())
-    assert seen == {"model": "openai:gpt-4o-mini", "temperature": 0.7}
+    assert seen == {"model": "openai:gpt-4o-mini", "temperature": 0.7, "base_url": ""}
 
 
 def test_init_chat_model_receives_the_temperature_and_omits_it_when_unset(monkeypatch):
@@ -554,3 +589,86 @@ def test_a_model_running_a_missing_script_is_refused_not_errored(tmp_path):
     )
     assert result.error is None
     assert "refused" in tool_results(model.turns[1])["run_script"]
+
+
+def test_preflight_refuses_a_trajectory_naming_a_tool_the_case_does_not_declare():
+    from skill_lens.models import TrajectorySpec
+    from skill_lens.runners.preflight import UndeclaredTool
+
+    case_ = EvalCase(name="c", task="t", trajectory=TrajectorySpec(called=["Bash"]))
+    runner = LangChainRunner(model=scripted(text("x")))
+    with pytest.raises(UndeclaredTool, match=r"runner langchain: case 'c' of skill 's'"):
+        runner.preflight([], {"s": [case_]})
+    assert runner.preflight([], {"s": [EvalCase(name="c", task="t")]}) is None
+
+
+# --- base_url: a self-hosted OpenAI-compatible endpoint ------------------------
+
+LOCAL = "http://localhost:11434/v1"
+
+
+def test_a_base_url_reaches_the_chat_model(monkeypatch):
+    # The provider's own variable is unset so the value can only have come from us.
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    chat = _chat_model("openai:gpt-oss:latest", 0.0, LOCAL)
+    # The client normalises to a trailing slash; the host and path are what matter.
+    assert str(chat.root_client.base_url).rstrip("/") == LOCAL
+
+
+def test_no_base_url_leaves_the_chat_model_reading_its_own_environment(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://from-the-shell:1/v1")
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    chat = _chat_model("openai:gpt-oss:latest", 0.0, "")
+    assert str(chat.root_client.base_url).rstrip("/") == "http://from-the-shell:1/v1"
+
+
+def test_a_base_url_cannot_apply_to_a_model_object():
+    with pytest.raises(UnsupportedBaseURL):
+        _chat_model(scripted(text("x")), 0.0, LOCAL)
+
+
+def test_a_chat_model_that_rejects_the_base_url_is_refused_in_preflight(monkeypatch):
+    import langchain.chat_models
+
+    def refuse(model, **kwargs):
+        raise TypeError("unexpected keyword argument 'base_url'")
+
+    # The one framework call that could say no is stood in for: no installed
+    # provider package refuses `base_url`, and the refusal has to be exercised.
+    monkeypatch.setattr(langchain.chat_models, "init_chat_model", refuse)
+    runner = LangChainRunner(model="somewhere:model", base_url=LOCAL)
+    with pytest.raises(UnsupportedBaseURL, match="runner langchain") as caught:
+        runner.preflight([SKILL], {SKILL.name: [case()]})
+    assert "unexpected keyword argument" in str(caught.value)
+
+
+def test_the_runner_hands_its_base_url_to_the_agent_it_builds(monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    import langchain.chat_models
+
+    seen: dict = {}
+    real = langchain.chat_models.init_chat_model
+
+    def record(model, **kwargs):
+        seen.update(kwargs)
+        return real(model, **kwargs)
+
+    monkeypatch.setattr(langchain.chat_models, "init_chat_model", record)
+    LangChainRunner(model="openai:gpt-oss:latest", base_url=LOCAL)._build_agent(
+        SKILL, case(), None, None
+    )
+    assert seen["base_url"] == LOCAL
+
+
+def test_preflight_reports_a_missing_extra_as_the_setup_error_not_a_raw_import_error(monkeypatch):
+    import skill_lens.runners.langchain as adapter
+
+    def explode() -> None:
+        raise adapter.RunnerDependencyError("the 'langchain' runner needs its optional extra")
+
+    monkeypatch.setattr(adapter, "_require_langchain", explode)
+    runner = LangChainRunner(model="openai:gpt-4o-mini", base_url=LOCAL)
+    with pytest.raises(adapter.RunnerDependencyError):
+        runner.preflight([SKILL], {SKILL.name: [case()]})
