@@ -219,3 +219,32 @@ def test_batch_init_stops_at_a_write_failure_and_keeps_earlier_scaffolds(tmp_pat
     assert str(root / "beta" / "evals" / "beta.eval.yaml") in result.output
     assert (root / "alpha" / "evals" / "alpha.eval.yaml").is_file()
     assert "Fill in every" not in result.output
+
+
+def test_batch_init_skips_a_skill_that_has_an_evals_json(tmp_path):
+    root = tmp_path / "skills"
+    skill = root / "csv"
+    (skill / "evals").mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: csv\ndescription: csv things\n---\n\nbody\n", encoding="utf-8"
+    )
+    original = '{"evals": []}'
+    (skill / "evals" / "evals.json").write_text(original, encoding="utf-8")
+
+    result = runner.invoke(app, ["init", str(root)])
+    assert result.exit_code == 0, result.output
+    assert "Skipped csv: already has 1 eval file(s)" in result.output
+    assert [p.name for p in (skill / "evals").iterdir()] == ["evals.json"]
+    assert (skill / "evals" / "evals.json").read_text(encoding="utf-8") == original
+
+
+def test_single_init_writes_beside_an_evals_json_and_leaves_it_alone(tmp_path):
+    path = _skill_dir(tmp_path)
+    (path / "evals").mkdir()
+    original = '{"evals": []}'
+    (path / "evals" / "evals.json").write_text(original, encoding="utf-8")
+
+    result = runner.invoke(app, ["init", str(path)])
+    assert result.exit_code == 0, result.output
+    assert (path / "evals" / "order-support.eval.yaml").is_file()
+    assert (path / "evals" / "evals.json").read_text(encoding="utf-8") == original

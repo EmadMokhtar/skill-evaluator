@@ -1,8 +1,14 @@
+import json
 from pathlib import Path
 
 import pytest
 
-from skill_lens.cases.loader import CaseParseError, load_cases_for_skill, parse_cases_file
+from skill_lens.cases.loader import (
+    UNFILLED_SENTINEL,
+    CaseParseError,
+    load_cases_for_skill,
+    parse_cases_file,
+)
 from skill_lens.models import Skill, ToolSpec
 
 CASES_YAML = """cases:
@@ -1208,6 +1214,157 @@ def test_a_ref_that_is_not_a_name_is_refused_with_the_type_error(tmp_path, value
     path = _layout(tmp_path)
     path.write_text(REF_CASES.replace("ref: issue_refund", f"ref: {value}"), encoding="utf-8")
     with pytest.raises(CaseParseError, match=r"orders.yaml: case #1 tool #2: invalid ref: entry"):
+        parse_cases_file(path)
+
+
+def test_case_parse_error_is_one_class_from_both_import_paths():
+    from skill_lens.cases import errors, loader
+
+    assert errors.CaseParseError is loader.CaseParseError
+
+
+EVALS_JSON = {
+    "skill_name": "pdf",
+    "evals": [
+        {"id": 1, "prompt": "Extract the text from report.pdf", "assertions": ["names pdfplumber"]},
+        {"id": 2, "prompt": "Extract from nope.pdf", "expected_output": "A polite error."},
+    ],
+}
+
+
+def _json_skill(tmp_path, document=EVALS_JSON):
+    skill = _skill(tmp_path)
+    evals = skill.path / "evals"
+    evals.mkdir()
+    (evals / "evals.json").write_text(json.dumps(document), encoding="utf-8")
+    return skill
+
+
+def test_parses_cases_from_an_evals_json_file(tmp_path):
+    skill = _json_skill(tmp_path)
+    cases = parse_cases_file(skill.path / "evals" / "evals.json", skill)
+    assert [c.name for c in cases] == ["eval-1", "eval-2"]
+    assert cases[0].task == "Extract the text from report.pdf"
+    assert cases[0].judge.rubric == ["names pdfplumber"]
+    assert cases[1].judge.expected == "A polite error."
+    assert cases[1].judge.rubric == ["The output satisfies: A polite error."]
+    assert cases[0].workspace is None
+
+
+def test_a_json_case_with_files_gets_a_workspace(tmp_path):
+    document = {
+        "evals": [
+            {"id": 1, "prompt": "p", "assertions": ["a"], "files": ["evals/files/in.csv"]},
+        ]
+    }
+    skill = _json_skill(tmp_path, document)
+    (skill.path / "evals" / "files").mkdir()
+    (skill.path / "evals" / "files" / "in.csv").write_text("x,y\n", encoding="utf-8")
+    [case] = load_cases_for_skill(skill)
+    assert case.workspace is not None
+    assert case.workspace.files == {"evals/files/in.csv": "x,y\n"}
+
+
+def test_discovers_evals_json_in_the_evals_directory(tmp_path):
+    assert len(load_cases_for_skill(_json_skill(tmp_path))) == 2
+
+
+def test_evals_json_loads_beside_yaml_files(tmp_path):
+    skill = _json_skill(tmp_path)
+    (skill.path / "evals" / "basic.yaml").write_text(CASES_YAML)
+    names = [c.name for c in load_cases_for_skill(skill)]
+    assert names == ["extracts text", "handles missing file", "eval-1", "eval-2"]
+
+
+def test_other_json_files_in_the_evals_directory_are_not_eval_files(tmp_path):
+    skill = _json_skill(tmp_path)
+    (skill.path / "evals" / "schema.json").write_text("{not json", encoding="utf-8")
+    assert len(load_cases_for_skill(skill)) == 2
+
+
+def test_an_explicit_json_file_is_read_whatever_it_is_called(tmp_path):
+    skill = _skill(tmp_path)
+    other = tmp_path / "cases.json"
+    other.write_text(json.dumps(EVALS_JSON), encoding="utf-8")
+    assert len(load_cases_for_skill(skill, evals_path=other)) == 2
+
+
+def test_an_explicit_directory_reads_only_a_file_named_evals_json(tmp_path):
+    skill = _skill(tmp_path)
+    directory = tmp_path / "somewhere"
+    directory.mkdir()
+    (directory / "evals.json").write_text(json.dumps(EVALS_JSON), encoding="utf-8")
+    (directory / "other.json").write_text("{not json", encoding="utf-8")
+    assert len(load_cases_for_skill(skill, evals_path=directory)) == 2
+
+
+def test_invalid_json_names_the_file(tmp_path):
+    skill = _skill(tmp_path)
+    path = tmp_path / "evals.json"
+    path.write_text("{not json", encoding="utf-8")
+    with pytest.raises(CaseParseError, match=r"invalid JSON in .*evals\.json"):
+        parse_cases_file(path, skill)
+
+
+def test_an_empty_file_is_invalid_json_not_a_crash(tmp_path):
+    skill = _skill(tmp_path)
+    path = tmp_path / "evals.json"
+    path.write_text("", encoding="utf-8")
+    with pytest.raises(CaseParseError, match="invalid JSON"):
+        parse_cases_file(path, skill)
+
+
+def test_a_byte_order_mark_is_skipped(tmp_path):
+    # Windows editors write one, and json.loads refuses a document that starts with it.
+    skill = _skill(tmp_path)
+    path = tmp_path / "evals.json"
+    path.write_text("\ufeff" + json.dumps(EVALS_JSON), encoding="utf-8")
+    assert len(parse_cases_file(path, skill)) == 2
+
+
+def test_a_bare_json_list_is_refused_with_the_expected_shape(tmp_path):
+    skill = _skill(tmp_path)
+    path = tmp_path / "evals.json"
+    path.write_text("[]", encoding="utf-8")
+    with pytest.raises(CaseParseError, match="expected a JSON object with an 'evals' list"):
+        parse_cases_file(path, skill)
+
+
+def test_a_huge_integer_is_an_authoring_error_not_a_traceback(tmp_path):
+    # json.loads refuses an integer of more than 4300 digits with a plain ValueError, which is
+    # not a JSONDecodeError. The unknown key keeps the case an authoring error even where the
+    # interpreter's digit limit is switched off.
+    skill = _skill(tmp_path)
+    path = tmp_path / "evals.json"
+    huge = "9" * 5000
+    path.write_text(
+        '{"evals": [{"id": 1, "prompt": "p", "assertions": ["a"], "x": ' + huge + "}]}",
+        encoding="utf-8",
+    )
+    with pytest.raises(CaseParseError):
+        parse_cases_file(path, skill)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        {"id": 1, "prompt": f"{UNFILLED_SENTINEL} describe the task", "assertions": ["a"]},
+        {"id": 1, "prompt": "p", "assertions": [f"{UNFILLED_SENTINEL} what must hold"]},
+        {"id": 1, "prompt": "p", "expected_output": f"{UNFILLED_SENTINEL} the result"},
+    ],
+)
+def test_the_scaffold_placeholder_aborts_a_json_run_as_it_does_a_yaml_one(tmp_path, case):
+    skill = _skill(tmp_path)
+    path = tmp_path / "evals.json"
+    path.write_text(json.dumps({"evals": [case]}), encoding="utf-8")
+    with pytest.raises(CaseParseError, match="scaffold placeholder"):
+        parse_cases_file(path, skill)
+
+
+def test_a_yaml_file_still_needs_a_cases_list(tmp_path):
+    path = tmp_path / "x.eval.yaml"
+    path.write_text("evals: []\n", encoding="utf-8")
+    with pytest.raises(CaseParseError, match="expected a top-level 'cases' list"):
         parse_cases_file(path)
 
 

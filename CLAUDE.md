@@ -448,6 +448,18 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **A `when:` matches by the `call_args.contains` rule, through the one matcher**,
   `matching.structural_match` (a subset at every level, a bool only ever equal to a bool): a
   YAML `true` never answers a model's `1`, and `when:` and `call_args` can never drift apart.
+- **`evals.json` is converted to raw case mappings and validated by the existing pipeline.**
+  `cases/evals_json.py` checks the shape only; `EvalCase` and the loader's `_validate_*`
+  functions are the rules, so a JSON case and a YAML case are identical downstream.
+- **`evals.json` keys are strict, and nothing to grade is refused.** An unknown key at either
+  level is an authoring error (exit 2) naming it; `assertions` and `expectations` are one list
+  (both in one eval is refused); no statements and no `expected_output` is refused, while
+  `expected_output` alone becomes the check `The output satisfies: <expected_output>`.
+- **`evals.json` `id` is never a boolean and the case name is `eval-<id>`.** `1` and `"1"`
+  collide.
+- **`evals.json` input files are text inside the skill directory, read at load time** through
+  the workspace's containment helpers and capped at the default `max_file_bytes`; a
+  `workspace:` block exists only when `files` is non-empty.
 - **`EvalCase.tools` holds only `ToolSpec`**; a `ref:` is resolved by the case loader on the
   raw mapping before validation. No runner, evaluator, reporter or product preflight ever
   sees a reference; the product `tools:` refusal, the duplicate-name, built-in-name,

@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 import tempfile
@@ -1321,3 +1322,54 @@ def test_a_judges_hook_returning_none_adds_no_status(tmp_path):
 
     report = run_evals([_skill_with_cases(tmp_path)], [_runner()], judge=QuietJudge())
     assert report.products == []
+
+
+def _evals_json_skill(tmp_path, evals, *, name="s"):
+    skill_dir = tmp_path / name
+    (skill_dir / "evals").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\n---\nbody\n", encoding="utf-8")
+    document = {"skill_name": name, "evals": evals}
+    (skill_dir / "evals" / "evals.json").write_text(json.dumps(document), encoding="utf-8")
+    return skill_dir
+
+
+def test_an_evals_json_case_is_graded_by_the_judge(tmp_path):
+    skill_dir = _evals_json_skill(tmp_path, [{"id": 1, "prompt": "t", "assertions": ["is polite"]}])
+    judge = FakeJudge(
+        default=JudgeVerdict(checks=[CheckResult(id="r1", passed=True, evidence="polite tone")])
+    )
+    report = run_evals(load_skills(skill_dir), [FakeRunner()], judge=judge)
+    assert [outcome.status for outcome in report.outcomes] == ["passed"]
+
+
+def test_an_evals_json_case_errors_under_the_default_judge(tmp_path):
+    skill_dir = _evals_json_skill(tmp_path, [{"id": 1, "prompt": "t", "assertions": ["is polite"]}])
+    report = run_evals(load_skills(skill_dir), [FakeRunner()])
+    assert [outcome.status for outcome in report.outcomes] == ["errored"]
+
+
+def test_an_evals_json_input_file_reaches_the_workspace(tmp_path):
+    class ReadsTheInput(FakeRunner):
+        def run(self, skill, case, workspace=None, scripts=None):
+            return RunResult(output=workspace.read("evals/files/in.csv"))
+
+    skill_dir = _evals_json_skill(
+        tmp_path,
+        [{"id": 1, "prompt": "t", "assertions": ["a"], "files": ["evals/files/in.csv"]}],
+    )
+    (skill_dir / "evals" / "files").mkdir()
+    (skill_dir / "evals" / "files" / "in.csv").write_text("x,y\n", encoding="utf-8")
+    judge = FakeJudge(
+        default=JudgeVerdict(checks=[CheckResult(id="r1", passed=True, evidence="ok")])
+    )
+    report = run_evals(load_skills(skill_dir), [ReadsTheInput()], judge=judge)
+    assert report.outcomes[0].status == "passed"
+    assert report.outcomes[0].result.output == "x,y\n"
+
+
+def test_an_unknown_evals_json_key_aborts_the_run(tmp_path):
+    skill_dir = _evals_json_skill(
+        tmp_path, [{"id": 1, "prompt": "t", "assertions": ["a"], "kind": "dialogue"}]
+    )
+    with pytest.raises(CaseParseError, match="'kind'"):
+        run_evals(load_skills(skill_dir), [FakeRunner()])

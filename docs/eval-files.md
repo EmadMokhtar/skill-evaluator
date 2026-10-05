@@ -1,10 +1,12 @@
 # Eval files
 
-Each file has a top-level `cases:` list. Unknown keys **within a case or an assertion** are
-rejected — a typo like `assertion:` would otherwise produce a case that passes vacuously.
-Extra keys alongside `cases:` at the top level of the file are ignored, with one exception
+Each YAML eval file has a top-level `cases:` list. Unknown keys **within a case or an assertion**
+are rejected — a typo like `assertion:` would otherwise produce a case that passes vacuously.
+Extra keys alongside `cases:` at the top level of a YAML file are ignored, with one exception
 skill-lens reads: `tool_libraries:` — see [Sharing tools across eval
-files](#sharing-tools-across-eval-files).
+files](#sharing-tools-across-eval-files). A skill can also keep its cases in an `evals.json`,
+which has no `cases:` list and is strict at every level — see [Reading
+`evals.json`](#reading-evalsjson).
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -538,14 +540,76 @@ applied to assertion, trajectory or budget checks — their evidence is generate
 deterministically from the same comparison that produced the verdict, so it cannot go missing
 independently of it.
 
+## Reading `evals.json`
+
+A skill that already has an `evals/evals.json` — the file the [Agent Skills evaluation
+guide](https://agentskills.io/skill-creation/evaluating-skills) describes and Anthropic's
+`skill-creator` writes — runs with no YAML:
+
+```bash
+skill-lens run ./my-skill
+```
+
+```json
+{
+  "skill_name": "csv-analyzer",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Find the top 3 months by revenue in the CSV and chart them.",
+      "expected_output": "A bar chart of the three highest months.",
+      "files": ["evals/files/sales.csv"],
+      "assertions": ["The chart shows exactly 3 months", "Both axes are labelled"]
+    }
+  ]
+}
+```
+
+| `evals.json` | Becomes | Rule |
+| --- | --- | --- |
+| `skill_name` | — | Optional. When present it must equal the skill's `name`. |
+| `id` | the case name `eval-<id>` | Required. An integer or a non-empty string, never a boolean, unique in the file. |
+| `prompt` | `task` | Required, non-empty. |
+| `assertions` or `expectations` | `judge.rubric` | A list of non-empty strings. The guide says `assertions`; `skill-creator` says `expectations`. Both in one eval is an error. |
+| `expected_output` | `judge.expected` | Context for the judge. With no statements it becomes the single check `The output satisfies: <expected_output>`. |
+| `files` | `workspace.files` | Paths relative to the skill directory, keyed in the workspace by the path as written. |
+
+What to know:
+
+- **A real judge grades it.** The statements are plain English, so `judge = "fake"` (the
+  default) reports the cases as `errored`, never as passed. Pick a judge — see
+  [Judging output quality](#judging-output-quality) and [Configuration](configuration.md).
+- **Nothing to grade is an error.** An eval with no statements and no `expected_output` stops
+  the run (exit 2).
+- **Keys are strict.** An unknown key at the top level or in an eval stops the run (exit 2)
+  and is named in the message. A file in another layout, such as one with a `trigger` block
+  or `files` that are folder names, needs rewriting first.
+- **`files` are text.** Each is read when the file loads and must be a UTF-8 text file inside
+  the skill directory, no larger than 1,000,000 bytes. A missing file, a folder, a binary file
+  or a path that leaves the skill directory stops the run (exit 2). A case with no `files`
+  gets no workspace.
+- **A leading byte-order mark is skipped.** Some Windows editors write one at the start of a
+  JSON file. skill-lens ignores it, so the file loads as it would without it.
+- **The judge reads the agent's reply.** `evals.json` does not name output files, so a file the
+  agent writes is not shown to the judge. Move to a YAML case with `judge.artifacts` when the
+  skill's product is a file.
+- **Upgrading can change a run.** If a skill already had an `evals/evals.json` that earlier
+  versions skipped, its cases now count toward the gate. Configure a judge, or they come back
+  `errored` and the gate fails.
+- **Move to YAML for more.** Mock `tools`, `trajectory`, `budget` and `mode: offered` exist only
+  in YAML. Both kinds of file can sit in one `evals/` directory and are loaded together.
+
 ## Where eval files are found
 
 For each discovered skill, in order:
 
-1. an `evals/` directory beside `SKILL.md` — every `.yaml` / `.yml` file in it, or
+1. an `evals/` directory beside `SKILL.md` — every `.yaml` / `.yml` file in it, plus
+   `evals.json` ([Reading `evals.json`](#reading-evalsjson)), or
 2. any `*.eval.yaml` file beside `SKILL.md`.
 
-`--evals <path>` overrides discovery with an explicit file or directory. Skills with no eval
+`--evals <path>` overrides discovery with an explicit file or directory. A file ending in
+`.json` is read as `evals.json`; in a directory, only a file named `evals.json` is read among
+the JSON files, so fixtures and schemas are left alone. Skills with no eval
 files are reported as **skipped** — visible in the output, never silently ignored.
 
 A `tool_libraries:` entry resolves against the eval file's own directory whichever way the

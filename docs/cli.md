@@ -29,7 +29,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--evals <path>` | discovery | An explicit eval file or directory, overriding discovery |
+| `--evals <path>` | discovery | An explicit eval file (YAML or `evals.json`) or directory, overriding discovery |
 | `--runner <name>` | `fake` | `fake`, `pydantic-ai`, `langchain`, `copilot`, `claude-code` or `cli`; repeatable — every case then runs through each runner named. `copilot`, `claude-code` and `cli` start an installed agent product and need no API key; see [Runners](runners.md) and [Product runners](runners.md#product-runners) |
 | `--model <name>` | `openai:gpt-4o-mini` | Model id. Read by `pydantic-ai` and `langchain` (and by a keyed judge, `judge = "pydantic-ai"` or `"langchain"`, whose `judge_model` is unset). Passing it to a run where nothing reads it — `--runner fake`, or only product runners, with no keyed judge falling back to it — is a user error (exit 2): a flag that looks honoured while the product runs its own default model would be a mistake that is easy to miss. A product's model is set with `[runners.<name>] args` in `skill-lens.toml` |
 | `--base-url <url>` | `base_url` in `skill-lens.toml`, else the provider's own variable | Endpoint for the model's provider — `http://localhost:11434/v1` for a self-hosted OpenAI-compatible server. Read wherever `--model` is, and refused where it is not (exit 2); must be a bare `http://` or `https://` URL naming a host, with no user name or password in it. Reaches the judge too when the judge inherits `--model`; a judge with a model of its own takes `judge_base_url` from the file instead. See [Self-hosted endpoints](configuration.md#self-hosted-endpoints) |
@@ -107,7 +107,7 @@ case's tools under `fake`, `pydantic-ai` or `langchain`, but is the product's ow
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--evals <path>` | discovery | An explicit eval file or directory, overriding discovery |
+| `--evals <path>` | discovery | An explicit eval file (YAML or `evals.json`) or directory, overriding discovery |
 
 ```bash
 uv run skill-lens list ./examples

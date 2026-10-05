@@ -53,6 +53,15 @@ the eval was wrong. Everything here exists to prevent one of those.
 | `trajectory` | The failure is invisible in the output — deciding without looking the order up, calling the tool that was forbidden, calling it without the filter the skill demands (`call_args`). |
 | `budget` | Guarding against a regression into a tool-call loop or a runaway answer. |
 
+## A skill that already has `evals/evals.json`
+
+skill-lens reads that file directly (the shape the Agent Skills guide and `skill-creator` use):
+`skill-lens run ./the-skill` needs no YAML. Its `assertions` / `expectations` become a judge
+rubric, so a real judge must be configured — under the default `judge = "fake"` the cases come
+back `errored`. Keep the JSON when plain-English checks on the reply are enough. Add a YAML
+file in the same `evals/` directory when the skill needs mock `tools`, a `trajectory`, a
+`budget`, `mode: offered`, or a judge that reads a file the agent wrote; both load together.
+
 ## Assert on the artifact, not the sentence about it
 
 When a skill's job is to produce a file, assert on the file. `contains` against

@@ -12,6 +12,7 @@ which `cz bump` generates from the commit history.
 | Capability | Where it is documented |
 | --- | --- |
 | Skill discovery, eval cases, assertion kinds and per-check scoring | [CLI](cli.md), [Eval files](eval-files.md) |
+| Running a skill that already has an `evals/evals.json`, with no YAML | [Reading `evals.json`](eval-files.md#reading-evalsjson) |
 | The gate, its exit codes, the JSON report, and what a failing case shows | [Gating and exit codes](gating.md) |
 | Real agents through PydanticAI and LangChain, one run through both | [Runners](runners.md) |
 | Installed products as the runner and as the judge, with no API key | [Product runners](runners.md#product-runners) |

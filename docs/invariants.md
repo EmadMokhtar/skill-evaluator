@@ -1294,6 +1294,42 @@ author learns one rule for naming arguments and the two can never drift. The loa
 reachability check uses the same `matches`, so "unreachable" means exactly what the runtime
 would do.
 
+## Reading `evals.json`
+
+### `evals.json` is converted to raw case mappings and validated by the existing pipeline
+
+`cases/evals_json.py` checks the shape of the file and stops: it produces the same raw case
+mappings the YAML loader reads. `EvalCase.model_validate` and the loader's `_validate_*`
+functions are the rules, so a JSON case and a YAML case meet identical checks, and no runner,
+evaluator, reporter, model or exit code knows which file a case came from. `CaseParseError`
+lives in `cases/errors.py` and the loader re-exports it, because the loader imports the
+converter and the converter raises the error.
+
+### `evals.json` keys are strict, and nothing to grade is refused
+
+An unknown top-level or per-case key is an authoring error (exit 2) naming the key. There is
+no leniency flag: the only thing that stops a misspelled `assertion:` from dropping every
+check is that it is refused. `assertions` (the Agent Skills guide) and `expectations`
+(`skill-creator`) are one list under two names, and both in one eval is refused as
+ambiguous. An eval with no statements and no `expected_output` is refused, never passed;
+`expected_output` alone becomes the single check `The output satisfies: <expected_output>`,
+because the guide defines it as a description of success and tells authors to start with
+only a prompt and an expected output. A leading byte-order mark is skipped before parsing.
+
+### `evals.json` `id` is never a boolean and the case name is `eval-<id>`
+
+`bool` is an `int` in Python, so `true` would otherwise become id 1. `1` and `"1"` give the
+same case name and collide.
+
+### `evals.json` input files are text inside the skill directory, read at load time
+
+The converter uses `check_relative_path`, `resolve_under` and `stat_regular` from
+`workspace.py`, so a FIFO, a symlink loop, a link out of the directory, a folder, a file that
+is not UTF-8 or one over `max_file_bytes` aborts the run before any case executes. The
+load-time limit is the default cap because the loader has no configuration; the configured
+cap still applies when the workspace is seeded. A `workspace:` block exists only when `files`
+is non-empty.
+
 ## Product runners
 
 ### The product sees `SKILL.md` verbatim (its text as written; line endings are normalised)

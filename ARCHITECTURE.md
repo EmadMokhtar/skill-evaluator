@@ -94,7 +94,9 @@ flowchart LR
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
 | `skills/baseline.py` | Resolves a skill's previous version from git history for `--baseline previous` — across a byte-for-byte move of `SKILL.md`, never a copy — and extracts that same commit's bundle (`git archive`, `tarfile` with the `data` filter) so the old instructions are paired with the old scripts. Shells out to `git`, never raises for an environmental failure, imports no agent framework. |
-| `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models; imports the file's `tool_libraries:` and resolves every `- ref:` into the library's `ToolSpec` on the raw mapping, before validation. |
+| `cases/loader.py` | Finds and parses eval YAML for a skill into `EvalCase` models; imports the file's `tool_libraries:` and resolves every `- ref:` into the library's `ToolSpec` on the raw mapping, before validation; an `evals.json` is read through `cases/evals_json.py`. |
+| `cases/errors.py` | `CaseParseError`, alone, so the converter below can raise it without importing the loader that imports the converter. |
+| `cases/evals_json.py` | Turns one parsed `evals/evals.json` — the shared format of the Agent Skills guide and `skill-creator` — into the raw case mappings the YAML loader produces: strict keys, `eval-<id>` names, `assertions` / `expectations` as `judge.rubric`, `expected_output` as `judge.expected` (or the one check when there are no statements), and `files` read as UTF-8 text through the workspace's containment helpers. It validates nothing the loader already validates. |
 | `cases/checks.py` | The checks an eval file and a tool library share: the `TODO(skill-lens)` sentinel walk (`find_unfilled`, keys and values, cycle-safe), `check_tool_schema` (`parameters`/`input_schema` exclusive, `check_schema`, top-level `type: object`) and `check_tool_returns` (a `returns:` lookup's `when:` keys the tool can carry, no entry unreachable), which `check_tool` runs together. Below both loaders so neither imports the other. |
 | `cases/tool_libraries.py` | A tool library is a YAML file with one top-level `tools:` list — the block `mcp-import` prints. `parse_tool_library` checks each tool as the case loader would and names the file and position in every refusal; `load_tool_libraries` resolves an eval file's `tool_libraries:` entries against the eval file's directory (file or directory, never absolute) into one `ToolLibrary` that refuses a name declared twice; `ToolLibrary.resolve` turns a `ref:` into its `ToolSpec` or says what to fix. Raises `ToolLibraryError`; the case loader wraps it with the importing file. |
 | `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. `scaffold_target` decides where `init` writes. |
@@ -141,7 +143,7 @@ flowchart LR
 path
   └─ skills/loader (walk for SKILL.md) ──────────────► [Skill] (bundle_root if scripts/, references/ or assets/ exists)
         └─ per skill: skills/baseline (once, if --baseline) ──► baseline Skill (+ its own bundle) | note
-        └─ per skill: cases/loader (evals/ dir or *.eval.yaml; tool_libraries: → cases/tool_libraries; ref: resolved) ──► [EvalCase]
+        └─ per skill: cases/loader (evals/ dir or *.eval.yaml; evals.json → cases/evals_json; tool_libraries: → cases/tool_libraries; ref: resolved) ──► [EvalCase]
   └─ scripts.preflight (once, only if allow_scripts) ──► ScriptRuntime | ScriptSetupError (exit 2)
   └─ each Runner.preflight(skills, cases_by_skill), then Judge.preflight() (once, where defined) ──► [ProductStatus] | ProductSetupError (exit 2)
 
