@@ -114,9 +114,12 @@ move avoids an import cycle: the loader imports the converter, which raises the 
 ## 5. `cases/loader.py`
 
 - `parse_cases_file` reads the text as today, then, for a `.json` suffix, calls
-  `json.loads` (an invalid document is `CaseParseError("invalid JSON in …")`) and
-  `evals_json_to_raw_cases`, and continues into the same per-case validation. The
-  unfilled-scaffold scan and tool-library resolution do not apply to JSON.
+  `json.loads` (an invalid document is `CaseParseError("invalid JSON in …")`; any
+  `ValueError` counts, because an integer of more than 4300 digits raises a plain
+  `ValueError`, not a `JSONDecodeError`) and `evals_json_to_raw_cases`, and continues
+  into the same per-case validation. The unfilled-scaffold scan applies to the converted
+  mappings, as it does to YAML: the guard is unconditional, so a hand-written stub gets it
+  too. Tool-library resolution does not apply to JSON, which has no `tools`.
   A leading byte-order mark is removed first, because Windows editors write one and
   `json.loads` refuses it.
 - `discover_eval_paths` adds `evals/evals.json` to the paths from `evals/`.

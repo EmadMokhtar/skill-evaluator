@@ -234,6 +234,14 @@ def test_no_workspace_block_without_files():
     assert "workspace" not in case
 
 
+def test_crlf_line_endings_are_read_as_newlines(tmp_path):
+    # Workspace.write translates "\n" to "\r\n" on Windows, so CRLF text read as it is on disk
+    # would be seeded as "\r\r\n" and read back with an extra blank line.
+    skill = _with_file(tmp_path, "evals/files/win.csv", b"a,b\r\n1,2\r\n")
+    [case] = _convert(_doc(_eval(files=["evals/files/win.csv"])), skill)
+    assert case["workspace"]["files"]["evals/files/win.csv"] == "a,b\n1,2\n"
+
+
 def test_a_file_is_read_as_text_and_keyed_by_the_path_as_written(tmp_path):
     skill = _with_file(tmp_path, "evals/files/sales.csv")
     [case] = _convert(_doc(_eval(files=["evals/files/sales.csv"])), skill)

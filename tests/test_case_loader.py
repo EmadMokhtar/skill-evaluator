@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from skill_lens.cases.loader import CaseParseError, load_cases_for_skill, parse_cases_file
+from skill_lens.cases.loader import (
+    UNFILLED_SENTINEL,
+    CaseParseError,
+    load_cases_for_skill,
+    parse_cases_file,
+)
 from skill_lens.models import Skill, ToolSpec
 
 CASES_YAML = """cases:
@@ -1322,6 +1327,37 @@ def test_a_bare_json_list_is_refused_with_the_expected_shape(tmp_path):
     path = tmp_path / "evals.json"
     path.write_text("[]", encoding="utf-8")
     with pytest.raises(CaseParseError, match="expected a JSON object with an 'evals' list"):
+        parse_cases_file(path, skill)
+
+
+def test_a_huge_integer_is_an_authoring_error_not_a_traceback(tmp_path):
+    # json.loads refuses an integer of more than 4300 digits with a plain ValueError, which is
+    # not a JSONDecodeError. The unknown key keeps the case an authoring error even where the
+    # interpreter's digit limit is switched off.
+    skill = _skill(tmp_path)
+    path = tmp_path / "evals.json"
+    huge = "9" * 5000
+    path.write_text(
+        '{"evals": [{"id": 1, "prompt": "p", "assertions": ["a"], "x": ' + huge + "}]}",
+        encoding="utf-8",
+    )
+    with pytest.raises(CaseParseError):
+        parse_cases_file(path, skill)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        {"id": 1, "prompt": f"{UNFILLED_SENTINEL} describe the task", "assertions": ["a"]},
+        {"id": 1, "prompt": "p", "assertions": [f"{UNFILLED_SENTINEL} what must hold"]},
+        {"id": 1, "prompt": "p", "expected_output": f"{UNFILLED_SENTINEL} the result"},
+    ],
+)
+def test_the_scaffold_placeholder_aborts_a_json_run_as_it_does_a_yaml_one(tmp_path, case):
+    skill = _skill(tmp_path)
+    path = tmp_path / "evals.json"
+    path.write_text(json.dumps({"evals": [case]}), encoding="utf-8")
+    with pytest.raises(CaseParseError, match="scaffold placeholder"):
         parse_cases_file(path, skill)
 
 

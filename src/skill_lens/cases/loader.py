@@ -149,11 +149,18 @@ def _raw_cases_from_yaml(path: Path, text: str) -> tuple[list[object], ToolLibra
 def _raw_cases_from_json(path: Path, text: str, skill: Skill | None) -> list[object]:
     """The raw case mappings of an `evals.json` file."""
     # A byte-order mark is not part of the document, and json.loads refuses it.
+    # ValueError, not JSONDecodeError (its subclass): an integer of more than 4300 digits
+    # raises a plain ValueError, and that must stay an authoring error (exit 2).
     try:
         data = json.loads(text.removeprefix("\ufeff"))
-    except json.JSONDecodeError as exc:
+    except ValueError as exc:
         raise CaseParseError(f"invalid JSON in {path}: {exc}") from exc
-    return list(evals_json_to_raw_cases(path, data, skill))
+    raw_cases = list(evals_json_to_raw_cases(path, data, skill))
+    # The same unconditional guard a YAML case gets: a hand-written stub carrying the
+    # scaffold placeholder is an unfinished eval, not a signal about the skill.
+    for index, raw in enumerate(raw_cases):
+        _reject_unfilled(path, index, raw)
+    return raw_cases
 
 
 def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:

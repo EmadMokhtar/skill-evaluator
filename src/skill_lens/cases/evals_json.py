@@ -195,7 +195,10 @@ def _read_one(path: Path, where: str, root: Path, candidate: str) -> str:
             f"the limit is {limit:,})"
         )
     try:
-        return target.read_bytes().decode("utf-8")
+        # Text mode, as `Workspace.read` does: CRLF becomes "\n". Seeding writes the text
+        # back with `write_text`, which turns each "\n" into "\r\n" on Windows, so keeping
+        # the CRLF here would seed "\r\r\n".
+        return target.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
         raise CaseParseError(
             f"{path}: {where} file {candidate!r} is not UTF-8 text; workspace files are text"
