@@ -1,10 +1,12 @@
 # Eval files
 
-Each file has a top-level `cases:` list. Unknown keys **within a case or an assertion** are
-rejected — a typo like `assertion:` would otherwise produce a case that passes vacuously.
-Extra keys alongside `cases:` at the top level of the file are ignored, with one exception
+Each YAML eval file has a top-level `cases:` list. Unknown keys **within a case or an assertion**
+are rejected — a typo like `assertion:` would otherwise produce a case that passes vacuously.
+Extra keys alongside `cases:` at the top level of a YAML file are ignored, with one exception
 skill-lens reads: `tool_libraries:` — see [Sharing tools across eval
-files](#sharing-tools-across-eval-files).
+files](#sharing-tools-across-eval-files). A skill can also keep its cases in an `evals.json`,
+which has no `cases:` list and is strict at every level — see [Reading
+`evals.json`](#reading-evalsjson).
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -433,6 +435,9 @@ What to know:
 - **The judge reads the agent's reply.** `evals.json` does not name output files, so a file the
   agent writes is not shown to the judge. Move to a YAML case with `judge.artifacts` when the
   skill's product is a file.
+- **Upgrading can change a run.** If a skill already had an `evals/evals.json` that earlier
+  versions skipped, its cases now count toward the gate. Configure a judge, or they come back
+  `errored` and the gate fails.
 - **Move to YAML for more.** Mock `tools`, `trajectory`, `budget` and `mode: offered` exist only
   in YAML. Both kinds of file can sit in one `evals/` directory and are loaded together.
 
