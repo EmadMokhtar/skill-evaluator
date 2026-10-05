@@ -13,11 +13,19 @@ misspelled `assertion:` must not drop the checks and pass.
 
 from __future__ import annotations
 
+import stat
 from pathlib import Path
 from typing import Any
 
 from skill_lens.cases.errors import CaseParseError
 from skill_lens.models import Skill
+from skill_lens.workspace import (
+    DEFAULT_LIMITS,
+    PathRefused,
+    check_relative_path,
+    resolve_under,
+    stat_regular,
+)
 
 EVALS_JSON_FILENAME = "evals.json"
 
@@ -141,9 +149,56 @@ def _statements(path: Path, where: str, entry: dict) -> list[str]:
 
 
 def _read_files(path: Path, where: str, raw: object, skill: Skill | None) -> dict[str, str]:
-    """Input files, keyed by the path as written. Filled in by the next task."""
+    """Input files, read now as UTF-8 text and keyed by the path as written.
+
+    Read at load time so a missing or binary file aborts the run before any
+    case spends money. The paths are relative to the skill directory, which is
+    what both published schemas say.
+    """
     if not isinstance(raw, list) or any(not isinstance(item, str) for item in raw):
         raise CaseParseError(f"{path}: {where} 'files' must be a list of paths")
-    if raw:
-        raise CaseParseError(f"{path}: {where} input files are not supported yet")
-    return {}
+    if not raw:
+        return {}
+    if skill is None:
+        raise CaseParseError(
+            f"{path}: {where} lists input files, but no skill directory was given to "
+            "resolve them against"
+        )
+    files: dict[str, str] = {}
+    for candidate in raw:
+        if candidate in files:
+            raise CaseParseError(f"{path}: {where} lists the file {candidate!r} twice")
+        files[candidate] = _read_one(path, where, skill.path, candidate)
+    return files
+
+
+def _read_one(path: Path, where: str, root: Path, candidate: str) -> str:
+    """One input file's text, through the workspace's own containment helpers."""
+    try:
+        check_relative_path(candidate)
+        target = resolve_under(root, candidate)
+        if not target.is_relative_to(root.resolve()):
+            raise PathRefused(f"refused: {candidate!r} resolves outside the skill directory")
+        found = stat_regular(target, candidate)
+    except PathRefused as exc:
+        raise CaseParseError(f"{path}: {where} file {candidate!r}: {exc}") from exc
+    if found is None:
+        raise CaseParseError(f"{path}: {where} file {candidate!r} does not exist under {root}")
+    if stat.S_ISDIR(found.st_mode):
+        raise CaseParseError(
+            f"{path}: {where} file {candidate!r} is a directory; list its files one by one"
+        )
+    limit = DEFAULT_LIMITS.max_file_bytes
+    if found.st_size > limit:
+        raise CaseParseError(
+            f"{path}: {where} file {candidate!r} is too large ({found.st_size:,} bytes; "
+            f"the limit is {limit:,})"
+        )
+    try:
+        return target.read_bytes().decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CaseParseError(
+            f"{path}: {where} file {candidate!r} is not UTF-8 text; workspace files are text"
+        ) from exc
+    except OSError as exc:
+        raise CaseParseError(f"{path}: {where} file {candidate!r} cannot be read: {exc}") from exc
