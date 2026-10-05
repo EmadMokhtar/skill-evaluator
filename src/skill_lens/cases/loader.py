@@ -1,8 +1,9 @@
-"""Discover and parse eval case YAML files."""
+"""Discover and parse eval case files: YAML, and the shared evals.json."""
 
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 
 import yaml
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 
 from skill_lens.cases.checks import UNFILLED_SENTINEL, check_tool_schema, find_unfilled
 from skill_lens.cases.errors import CaseParseError
+from skill_lens.cases.evals_json import EVALS_JSON_FILENAME, evals_json_to_raw_cases
 from skill_lens.cases.tool_libraries import (
     EMPTY_LIBRARY,
     TOOL_LIBRARIES_KEY,
@@ -107,18 +109,17 @@ def _resolve_tool_refs(path: Path, index: int, raw: object, library: ToolLibrary
     return {**raw, "tools": tools}
 
 
-def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
-    """Parse one YAML file into EvalCase models.
+def _is_eval_file(path: Path) -> bool:
+    """A YAML file, or the one JSON file the shared format uses.
 
-    `skill` is optional because a case file can be parsed on its own; it is
-    only needed for the checks that depend on what the skill would be offered
-    as (see `_validate_cross_references`).
+    Other JSON in an `evals/` directory (fixtures, schemas) is not an eval
+    file, so it is never parsed as one.
     """
-    path = Path(path)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as exc:
-        raise CaseParseError(f"cannot read {path}: {exc}") from exc
+    return path.suffix in {".yaml", ".yml"} or path.name == EVALS_JSON_FILENAME
+
+
+def _raw_cases_from_yaml(path: Path, text: str) -> tuple[list[object], ToolLibrary]:
+    """The `cases:` list of a YAML file, and the tool library it imports."""
     try:
         data = safe_load(text) or {}
     except yaml.YAMLError as exc:
@@ -133,7 +134,37 @@ def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
     # library it will import is missing.
     for index, raw in enumerate(raw_cases):
         _reject_unfilled(path, index, raw)
-    library = _load_tool_libraries(path, data)
+    return raw_cases, _load_tool_libraries(path, data)
+
+
+def _raw_cases_from_json(path: Path, text: str, skill: Skill | None) -> list[object]:
+    """The raw case mappings of an `evals.json` file."""
+    # A byte-order mark is not part of the document, and json.loads refuses it.
+    try:
+        data = json.loads(text.removeprefix("\ufeff"))
+    except json.JSONDecodeError as exc:
+        raise CaseParseError(f"invalid JSON in {path}: {exc}") from exc
+    return list(evals_json_to_raw_cases(path, data, skill))
+
+
+def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
+    """Parse one YAML or evals.json file into EvalCase models.
+
+    `skill` is optional because a case file can be parsed on its own; it is
+    only needed for the checks that depend on what the skill would be offered
+    as (see `_validate_cross_references`), and, for an `evals.json`, to resolve
+    its input files and check its `skill_name`.
+    """
+    path = Path(path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CaseParseError(f"cannot read {path}: {exc}") from exc
+    if path.suffix == ".json":
+        raw_cases = _raw_cases_from_json(path, text, skill)
+        library = EMPTY_LIBRARY
+    else:
+        raw_cases, library = _raw_cases_from_yaml(path, text)
     cases: list[EvalCase] = []
     for index, raw in enumerate(raw_cases):
         raw = _resolve_tool_refs(path, index, raw, library)
@@ -363,10 +394,10 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
 
 
 def discover_eval_paths(skill: Skill) -> list[Path]:
-    """Find eval files beside a skill: an evals/ dir, then *.eval.yaml."""
+    """Find eval files beside a skill: an evals/ dir (YAML and evals.json), then *.eval.yaml."""
     evals_dir = skill.path / EVALS_DIRNAME
     if evals_dir.is_dir():
-        return sorted(p for p in evals_dir.iterdir() if p.suffix in {".yaml", ".yml"})
+        return sorted(p for p in evals_dir.iterdir() if _is_eval_file(p))
     return sorted(skill.path.glob(f"*{EVAL_SUFFIX}"))
 
 
@@ -377,7 +408,7 @@ def load_cases_for_skill(skill: Skill, evals_path: Path | None = None) -> list[E
         if not evals_path.exists():
             raise CaseParseError(f"evals path does not exist: {evals_path}")
         paths = (
-            sorted(p for p in evals_path.iterdir() if p.suffix in {".yaml", ".yml"})
+            sorted(p for p in evals_path.iterdir() if _is_eval_file(p))
             if evals_path.is_dir()
             else [evals_path]
         )

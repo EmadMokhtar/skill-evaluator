@@ -171,7 +171,9 @@ def _build_judge(name: str, settings: Config, model_name: str) -> Judge:
 @app.command()
 def run(
     path: Annotated[Path, typer.Argument(help="A skill directory, or a directory of skills.")],
-    evals: Annotated[Path | None, typer.Option(help="Explicit eval file or directory.")] = None,
+    evals: Annotated[
+        Path | None, typer.Option(help="Explicit eval file (YAML or evals.json) or directory.")
+    ] = None,
     runner: Annotated[
         list[str] | None,
         typer.Option(
@@ -414,7 +416,9 @@ def run(
 @app.command("list")
 def list_skills(
     path: Annotated[Path, typer.Argument(help="A skill directory, or a directory of skills.")],
-    evals: Annotated[Path | None, typer.Option(help="Explicit eval file or directory.")] = None,
+    evals: Annotated[
+        Path | None, typer.Option(help="Explicit eval file (YAML or evals.json) or directory.")
+    ] = None,
 ) -> None:
     """Show the skills that would be evaluated and how many cases each has."""
     try:
