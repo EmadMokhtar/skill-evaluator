@@ -1227,12 +1227,21 @@ def test_an_unknown_evals_json_key_is_a_user_error(tmp_path):
 
 
 def test_evals_accepts_an_explicit_json_file(tmp_path):
-    skill_dir = _make_evals_json_skill(tmp_path, [{"id": 1, "prompt": "a", "assertions": ["x"]}])
+    # The skill's own evals.json holds 2 cases and more.json holds 1, so
+    # "1 case(s)" can only come from --evals being honoured.
+    skill_dir = _make_evals_json_skill(
+        tmp_path,
+        [
+            {"id": 1, "prompt": "a", "assertions": ["x"]},
+            {"id": 2, "prompt": "b", "assertions": ["y"]},
+        ],
+    )
     other = tmp_path / "more.json"
     other.write_text(
-        json.dumps({"evals": [{"id": 7, "prompt": "b", "assertions": ["y"]}]}),
+        json.dumps({"evals": [{"id": 7, "prompt": "c", "assertions": ["z"]}]}),
         encoding="utf-8",
     )
     result = runner.invoke(app, ["list", str(skill_dir), "--evals", str(other)])
     assert result.exit_code == 0, result.output
     assert "1 case(s)" in result.stdout
+    assert "2 case(s)" not in result.stdout
