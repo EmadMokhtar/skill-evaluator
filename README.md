@@ -41,6 +41,25 @@ without embedding it.
   against a baseline (no skill, or its previous version resolved from git), and gate on the
   delta.
 
+## Works with
+
+The same cases and the same evaluators score two kinds of agent, so you can compare them
+in one report.
+
+| Kind | Runner | What you need |
+| --- | --- | --- |
+| **Agent framework** — you call a model API, the framework runs the loop | `pydantic-ai` | The `pydantic-ai` extra and a provider API key |
+| | `langchain` | The `langchain` extra and a provider API key |
+| **Harness** — an installed agent product that runs its own loop and tools | `copilot` | GitHub Copilot CLI installed; it uses its own login, so no API key |
+| | `claude-code` | Claude Code installed; it uses its own login, so no API key |
+
+- **Offline by default.** The `fake` runner is scripted, so a first run costs nothing.
+- **Mock tools everywhere.** Tools you declare in a case reach a framework directly and a
+  harness through an MCP (Model Context Protocol) bridge that `skill-lens` ships.
+- **Several at once.** `--runner pydantic-ai --runner claude-code` runs every case through
+  both and puts them in one report.
+- **Any other command-line agent** can be scored through the `cli` runner, for output only.
+
 ## What an eval looks like
 
 ```yaml
@@ -73,8 +92,8 @@ skill-lens run ./skills                     # exit 0 passed, 1 failed, 2 your se
 ```
 
 That first run is free: the default runner is scripted and offline, so nothing is sent
-anywhere and no API key is read. `--runner pydantic-ai`, `--runner copilot` or
-`--runner claude-code` scores a real agent instead — see
+anywhere and no API key is read. Name a real agent with `--runner` instead — see
+[Works with](#works-with) and
 [Runners](https://emadmokhtar.github.io/skill-evaluator/runners/).
 
 Start at [Getting started](https://emadmokhtar.github.io/skill-evaluator/getting-started/),
