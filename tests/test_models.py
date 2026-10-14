@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from skill_lens.models import (
+    ArtifactGlob,
     AssertionSpec,
     BudgetSpec,
     CallArgsSpec,
@@ -27,6 +28,7 @@ from skill_lens.models import (
     ToolSpec,
     TrajectorySpec,
     WorkspaceSpec,
+    artifact_name,
 )
 
 
@@ -618,3 +620,30 @@ def test_a_tool_ref_accepts_every_returns_shape():
         ToolRef(ref="t", returns=[])
     with pytest.raises(ValidationError, match="not a mix"):
         ToolRef(ref="t", returns=["a", {"value": "b"}])
+
+
+def test_an_artifact_entry_is_a_path_or_a_glob():
+    spec = JudgeSpec.model_validate(
+        {"rubric": ["r"], "artifacts": ["a.md", {"glob": ".planning/*/b.md"}]}
+    )
+    assert spec.artifacts == ["a.md", ArtifactGlob(glob=".planning/*/b.md")]
+
+
+def test_an_artifact_glob_forbids_unknown_keys():
+    with pytest.raises(ValidationError):
+        JudgeSpec.model_validate({"rubric": ["r"], "artifacts": [{"glob": "*.md", "path": "x"}]})
+
+
+def test_an_artifact_glob_hashes_so_duplicates_collapse():
+    assert len({ArtifactGlob(glob="a*"), ArtifactGlob(glob="a*")}) == 1
+
+
+def test_an_artifact_is_named_by_what_the_author_wrote():
+    assert artifact_name("report.md") == "report.md"
+    assert artifact_name(ArtifactGlob(glob=".planning/*/progress.md")) == ".planning/*/progress.md"
+
+
+def test_an_assertion_carries_a_file_glob():
+    spec = AssertionSpec(kind="file-produced", file_glob=".planning/*/task_plan.md")
+    assert spec.file_glob == ".planning/*/task_plan.md"
+    assert spec.file is None

@@ -216,6 +216,11 @@ class AssertionSpec(BaseModel):
     `json_schema`, not `schema`: Pydantic refuses a field name that shadows an
     attribute on BaseModel, and an alias would be machinery bought for a
     cosmetic gain.
+
+    `file_glob` is the pattern form of `file`: a one-level glob that must
+    match exactly one workspace file. A spec carries one of the two, never
+    both; `cases/loader.py` enforces that and treats `file_glob` as `file`
+    in its per-kind table.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -223,6 +228,7 @@ class AssertionSpec(BaseModel):
     kind: str
     value: str | None = None
     file: str | None = None
+    file_glob: str | None = None
     json_schema: dict[str, Any] | None = None
 
 
@@ -404,6 +410,25 @@ class BudgetSpec(BaseModel):
     max_latency_ms: int | None = None
 
 
+class ArtifactGlob(BaseModel):
+    """A judge artifact named by a pattern rather than a path.
+
+    The pattern, not the file it matches, is the artifact's name in the
+    prompt: the author wrote the pattern, the model chose the path. Frozen
+    so it hashes, because `_artifacts` deduplicates entries with
+    `dict.fromkeys`.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    glob: str
+
+
+def artifact_name(entry: str | ArtifactGlob) -> str:
+    """What an artifact is called in the judge prompt: the text its author wrote."""
+    return entry if isinstance(entry, str) else entry.glob
+
+
 class JudgeSpec(BaseModel):
     """What "good" looks like, in prose, for an LLM judge to check.
 
@@ -421,7 +446,7 @@ class JudgeSpec(BaseModel):
 
     expected: str = ""
     rubric: list[str] = Field(default_factory=list)
-    artifacts: list[str] = Field(default_factory=list)
+    artifacts: list[str | ArtifactGlob] = Field(default_factory=list)
 
 
 class WorkspaceSpec(BaseModel):
