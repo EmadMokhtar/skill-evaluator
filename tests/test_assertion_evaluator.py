@@ -489,3 +489,102 @@ def test_a_file_over_the_read_cap_still_counts_as_produced(tmp_path):
     result = RunResult(output="", workspace=tmp_path.resolve())
     case = _case(AssertionSpec(kind="file-produced", file="triage.md"))
     assert AssertionEvaluator().evaluate(case, result).passed
+
+
+# --- file_glob ---------------------------------------------------------------
+
+PLAN = ".planning/*/task_plan.md"
+
+
+def _tree(tmp_path, files: dict[str, str]) -> RunResult:
+    for name, content in files.items():
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    return RunResult(output="chat output", workspace=tmp_path.resolve())
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        AssertionSpec(kind="file-produced", file_glob=PLAN),
+        AssertionSpec(kind="contains", value="## Goal", file_glob=PLAN),
+        AssertionSpec(kind="not_contains", value="pickle", file_glob=PLAN),
+        AssertionSpec(kind="regex", value="(?m)^## Goal", file_glob=PLAN),
+        AssertionSpec(kind="equals", value="## Goal", file_glob=PLAN),
+    ],
+)
+def test_a_file_glob_reads_the_one_file_it_matches(tmp_path, spec):
+    result = _tree(tmp_path, {".planning/2026-10-11-todo/task_plan.md": "## Goal\n"})
+    assert AssertionEvaluator().evaluate(_case(spec), result).passed is True
+
+
+def test_json_schema_reads_the_one_file_a_glob_matches(tmp_path):
+    result = _tree(tmp_path, {"out/run-7.json": json.dumps({"total": 3})})
+    spec = AssertionSpec(
+        kind="json-schema",
+        file_glob="out/*.json",
+        json_schema={"type": "object", "required": ["total"]},
+    )
+    assert AssertionEvaluator().evaluate(_case(spec), result).passed is True
+
+
+def test_a_glob_matching_nothing_fails_and_shows_the_workspace(tmp_path):
+    result = _tree(tmp_path, {"todo.py": "x"})
+    score = AssertionEvaluator().evaluate(
+        _case(AssertionSpec(kind="file-produced", file_glob=PLAN)), result
+    )
+    [check] = score.checks
+    assert check.passed is False
+    assert check.id == "file-produced[0]"
+    assert f"no file matched {PLAN}; workspace held todo.py" in check.evidence
+
+
+def test_a_glob_matching_several_files_fails_and_names_them(tmp_path):
+    result = _tree(
+        tmp_path,
+        {".planning/a/task_plan.md": "## Goal", ".planning/b/task_plan.md": "## Goal"},
+    )
+    score = AssertionEvaluator().evaluate(
+        _case(AssertionSpec(kind="contains", value="## Goal", file_glob=PLAN)), result
+    )
+    [check] = score.checks
+    assert check.passed is False
+    assert (
+        f"{PLAN} matched 2 files: .planning/a/task_plan.md, .planning/b/task_plan.md; "
+        "exactly one is required"
+    ) in check.evidence
+
+
+def test_the_evidence_says_a_pattern_was_used(tmp_path):
+    result = _tree(tmp_path, {".planning/x/task_plan.md": "y"})
+    score = AssertionEvaluator().evaluate(
+        _case(AssertionSpec(kind="regex", value="Goal", file_glob=PLAN)), result
+    )
+    assert f"file_glob='{PLAN}'" in score.checks[0].evidence
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks are a POSIX feature here")
+def test_a_matched_symlink_pointing_outside_is_a_failed_check(tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.md"
+    outside.write_text("## Goal", encoding="utf-8")
+    (tmp_path / "out").mkdir()
+    os.symlink(outside, tmp_path / "out" / "report.md")
+    result = RunResult(output="o", workspace=tmp_path.resolve())
+    score = AssertionEvaluator().evaluate(
+        _case(AssertionSpec(kind="contains", value="Goal", file_glob="out/*.md")), result
+    )
+    assert score.passed is False
+    assert "resolves outside" in score.checks[0].evidence
+
+
+def test_a_programmatic_case_with_both_file_and_file_glob_is_an_authoring_error(tmp_path):
+    spec = AssertionSpec(kind="file-produced", file="a.md", file_glob="*.md")
+    with pytest.raises(InvalidAssertionValue, match="both file and file_glob"):
+        AssertionEvaluator().evaluate(_case(spec), _tree(tmp_path, {}))
+
+
+def test_a_programmatic_case_with_a_recursive_glob_is_an_authoring_error(tmp_path):
+    spec = AssertionSpec(kind="file-produced", file_glob="**/x.md")
+    with pytest.raises(InvalidAssertionValue, match="'\\*\\*'"):
+        AssertionEvaluator().evaluate(_case(spec), _tree(tmp_path, {}))

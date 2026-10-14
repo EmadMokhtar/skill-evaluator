@@ -10,7 +10,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as SchemaViolation
 
 from skill_lens.models import AssertionSpec, CheckResult, EvalCase, EvalScore, RunResult
-from skill_lens.workspace import PathRefused, Workspace, check_relative_path
+from skill_lens.workspace import PathRefused, Workspace, check_glob_pattern, check_relative_path
 
 
 class UnknownAssertionKind(Exception):
@@ -71,26 +71,59 @@ def _listing(workspace: Workspace) -> str:
 
 def _describe(spec: AssertionSpec) -> str:
     if spec.kind == "file-produced":
+        if spec.file_glob is not None:
+            return f"file-produced(file_glob={spec.file_glob!r})"
         return f"file-produced({spec.file!r})"
     if spec.kind == "json-schema":
+        if spec.file_glob is not None:
+            return f"json-schema(file_glob={spec.file_glob!r})"
         return f"json-schema({spec.file!r})" if spec.file else "json-schema(output)"
-    target = f", file={spec.file!r}" if spec.file else ""
+    if spec.file_glob is not None:
+        target = f", file_glob={spec.file_glob!r}"
+    else:
+        target = f", file={spec.file!r}" if spec.file else ""
     return f"{spec.kind}({spec.value!r}{target})"
 
 
 def _authored_path(spec: AssertionSpec) -> str:
-    """The `file:` the author wrote, or raise if it could never name a workspace file.
+    """The `file:` or `file_glob:` the author wrote, or raise if it could never work.
 
-    An empty, absolute or `..`-bearing path is a mistake in the eval file, so
-    it aborts the run as an authoring error. Everything *about the target*
-    -- what the run actually put at a well-formed path -- is judged later,
-    by `Workspace`, and is the skill's doing rather than the author's.
+    An empty, absolute or `..`-bearing path, a recursive or wildcard-free
+    pattern, or both keys at once is a mistake in the eval file, so it
+    aborts the run as an authoring error. Everything *about the target* --
+    what the run actually put there -- is judged later, by `Workspace`, and
+    is the skill's doing rather than the author's.
     """
+    if spec.file is not None and spec.file_glob is not None:
+        raise InvalidAssertionValue("an assertion sets both file and file_glob; use one")
     try:
+        if spec.file_glob is not None:
+            check_glob_pattern(spec.file_glob)
+            return spec.file_glob
         check_relative_path(spec.file or "")
     except PathRefused as exc:
         raise InvalidAssertionValue(str(exc)) from exc
     return spec.file or ""
+
+
+def _locate(spec: AssertionSpec, workspace: Workspace) -> tuple[str, str]:
+    """(the path to check, '') or ('', why no single file was found).
+
+    A pattern must match exactly one file. None and several both fail the
+    check: two plan directories must never pass by luck.
+    """
+    authored = _authored_path(spec)
+    if spec.file_glob is None:
+        return authored, ""
+    matches = workspace.match(authored)
+    if not matches:
+        return "", f"no file matched {authored}; {_listing(workspace)}"
+    if len(matches) > 1:
+        shown = ", ".join(matches[:_LISTING_LIMIT])
+        if len(matches) > _LISTING_LIMIT:
+            shown = f"{shown}, +{len(matches) - _LISTING_LIMIT} more"
+        return "", f"{authored} matched {len(matches):,} files: {shown}; exactly one is required"
+    return matches[0], ""
 
 
 def _subject_text(spec: AssertionSpec, result: RunResult) -> tuple[str, str]:
@@ -103,10 +136,12 @@ def _subject_text(spec: AssertionSpec, result: RunResult) -> tuple[str, str]:
     over `max_file_bytes` -- because a bundled script can create any of
     those. Only a malformed *authored* path raises.
     """
-    if spec.file is None:
+    if spec.file is None and spec.file_glob is None:
         return result.output, ""
     workspace = _workspace_of(result)
-    file = _authored_path(spec)
+    file, missing = _locate(spec, workspace)
+    if missing:
+        return "", missing
     try:
         return workspace.read(file), ""
     except PathRefused as exc:
@@ -121,7 +156,9 @@ def _check(spec: AssertionSpec, result: RunResult) -> tuple[bool, str]:
     """(held, why). `why` is '' when it held, and explains the failure otherwise."""
     if spec.kind == "file-produced":
         workspace = _workspace_of(result)
-        file = _authored_path(spec)
+        file, missing = _locate(spec, workspace)
+        if missing:
+            return False, missing
         try:
             target = workspace.resolve(file)
         except PathRefused as exc:
