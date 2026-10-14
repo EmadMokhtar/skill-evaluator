@@ -16,9 +16,12 @@ from skill_lens.evaluators.judge import (
     JudgeEvaluator,
     _truncate,
     build_request,
+    several_matches,
 )
 from skill_lens.judges.fake import FakeJudge
+from skill_lens.judges.prompt import render_request
 from skill_lens.models import (
+    ArtifactGlob,
     CheckResult,
     EvalCase,
     JudgeSpec,
@@ -390,3 +393,73 @@ def test_the_too_large_sentinel_never_consumes_the_content_budget(tmp_path):
     (tmp_path / "tiny.md").write_text("body", encoding="utf-8")
     request = build_request(_case("huge.md", "tiny.md"), RunResult(output="o", workspace=tmp_path))
     assert request.artifacts == {"huge.md": TOO_LARGE, "tiny.md": "body"}
+
+
+# --- glob artifacts ----------------------------------------------------------
+
+PROGRESS = ArtifactGlob(glob=".planning/*/progress.md")
+
+
+def _put(tmp_path, name: str, content: str) -> None:
+    target = tmp_path / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+
+
+def test_a_glob_artifact_is_read_from_its_one_match_and_named_by_its_pattern(tmp_path):
+    _put(tmp_path, ".planning/2026-10-11-secret-slug/progress.md", "Session 2: done")
+    request = build_request(_case(PROGRESS), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {".planning/*/progress.md": "Session 2: done"}
+
+
+def test_the_matched_path_never_reaches_the_prompt(tmp_path):
+    _put(tmp_path, ".planning/2026-10-11-secret-slug/progress.md", "Session 2: done")
+    prompt = render_request(
+        build_request(_case(PROGRESS), RunResult(output="o", workspace=tmp_path))
+    )
+    assert ".planning/*/progress.md" in prompt
+    assert "Session 2: done" in prompt
+    assert "secret-slug" not in prompt
+
+
+def test_a_glob_artifact_matching_nothing_is_not_produced(tmp_path):
+    request = build_request(_case(PROGRESS), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {".planning/*/progress.md": NOT_PRODUCED}
+
+
+def test_a_glob_artifact_with_no_workspace_is_not_produced():
+    request = build_request(_case(PROGRESS), RunResult(output="o"))
+    assert request.artifacts == {".planning/*/progress.md": NOT_PRODUCED}
+
+
+def test_a_glob_artifact_matching_several_files_says_so(tmp_path):
+    _put(tmp_path, ".planning/a/progress.md", "a")
+    _put(tmp_path, ".planning/b/progress.md", "b")
+    request = build_request(_case(PROGRESS), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {".planning/*/progress.md": several_matches(2)}
+    assert several_matches(2) == "(matched 2 files; exactly one is required)"
+
+
+def test_the_several_matches_sentinel_spends_no_content_budget(tmp_path):
+    # Three full-size files fill the total budget exactly. If the sentinel
+    # spent any of it, the third file would come back truncated.
+    assert MAX_ARTIFACTS_TOTAL_BYTES == 3 * MAX_ARTIFACT_BYTES
+    _put(tmp_path, ".planning/a/progress.md", "a")
+    _put(tmp_path, ".planning/b/progress.md", "b")
+    full = "x" * MAX_ARTIFACT_BYTES
+    for name in ("one.md", "two.md", "three.md"):
+        _put(tmp_path, name, full)
+    request = build_request(
+        _case(PROGRESS, "one.md", "two.md", "three.md"),
+        RunResult(output="o", workspace=tmp_path),
+    )
+    assert request.artifacts["three.md"] == full
+
+
+def test_a_path_and_a_glob_naming_one_file_are_two_artifacts(tmp_path):
+    _put(tmp_path, "run/progress.md", "body")
+    request = build_request(
+        _case("run/progress.md", ArtifactGlob(glob="*/progress.md")),
+        RunResult(output="o", workspace=tmp_path),
+    )
+    assert request.artifacts == {"run/progress.md": "body", "*/progress.md": "body"}
