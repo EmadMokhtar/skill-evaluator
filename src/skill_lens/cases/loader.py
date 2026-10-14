@@ -26,9 +26,9 @@ from skill_lens.cases.tool_libraries import (
     ToolLibraryError,
     load_tool_libraries,
 )
-from skill_lens.models import EvalCase, Skill, ToolRef
+from skill_lens.models import ArtifactGlob, EvalCase, Skill, ToolRef, artifact_name
 from skill_lens.runners.tools import BUILTIN_TOOL_NAMES, skill_tool_name
-from skill_lens.workspace import PathRefused, check_relative_path
+from skill_lens.workspace import PathRefused, check_glob_pattern, check_relative_path
 from skill_lens.yaml_loading import safe_load
 
 EVALS_DIRNAME = "evals"
@@ -200,7 +200,8 @@ def parse_cases_file(path: Path, skill: Skill | None = None) -> list[EvalCase]:
 # Per kind: which of `value` / `file` / `json_schema` it requires, and which
 # it merely allows. Anything not listed is forbidden for that kind, so a
 # `value:` on a `file-produced` -- which would read as a content check but
-# assert nothing -- is caught rather than ignored.
+# assert nothing -- is caught rather than ignored. `file` here means `file`
+# or `file_glob`: the pattern form takes the same place in every kind.
 #
 # This is deliberately a second table, not a reuse of the evaluator's
 # `_CHECKS`: that one maps a kind to a predicate, this one maps a kind to its
@@ -215,7 +216,7 @@ _ASSERTION_FIELDS: dict[str, tuple[frozenset[str], frozenset[str]]] = {
     "json-schema": (frozenset({"json_schema"}), frozenset({"file"})),
 }
 
-_ASSERTION_FIELD_NAMES = ("value", "file", "json_schema")
+_ASSERTION_FIELD_NAMES = ("value", "file", "file_glob", "json_schema")
 
 
 def _validate_assertions(path: Path, case: EvalCase) -> None:
@@ -234,11 +235,20 @@ def _validate_assertions(path: Path, case: EvalCase) -> None:
             raise CaseParseError(
                 f"{where} has unknown kind {spec.kind!r}. Known kinds: {known}."
             ) from None
+        if spec.file is not None and spec.file_glob is not None:
+            raise CaseParseError(
+                f"{where} sets both file and file_glob. Use file for a literal path "
+                f"or file_glob for a pattern, not both."
+            )
         present = {name for name in _ASSERTION_FIELD_NAMES if getattr(spec, name) is not None}
+        # file_glob is the pattern form of file: the table says `file` and means either.
+        if "file_glob" in present:
+            present = (present - {"file_glob"}) | {"file"}
         missing = sorted(required - present)
         if missing:
+            named = ["file (or file_glob)" if name == "file" else name for name in missing]
             raise CaseParseError(
-                f"{where} ({spec.kind}) requires {', '.join(missing)}, which is missing."
+                f"{where} ({spec.kind}) requires {', '.join(named)}, which is missing."
             )
         extra = sorted(present - required - optional)
         if extra:
@@ -246,9 +256,12 @@ def _validate_assertions(path: Path, case: EvalCase) -> None:
                 f"{where} ({spec.kind}) does not accept {', '.join(extra)}. "
                 f"It would assert nothing, so it is a mistake rather than a check."
             )
-        if spec.file is not None and case.workspace is None:
+        key, target = ("file", spec.file)
+        if spec.file is None:
+            key, target = "file_glob", spec.file_glob
+        if target is not None and case.workspace is None:
             raise CaseParseError(
-                f"{where} targets file {spec.file!r}, but the case declares no "
+                f"{where} targets {key} {target!r}, but the case declares no "
                 f"'workspace:' block. There would be no file to look at, so the "
                 f"assertion could never hold."
             )
@@ -292,6 +305,9 @@ def _validate_workspace(path: Path, case: EvalCase) -> None:
     authoring-error verdict rather than a raw `UnicodeEncodeError`; it is
     just no longer the only place a YAML-authored case's escape is caught,
     and now catches it before the runner has spent anything on the case.
+
+    A `file_glob` and a glob artifact get `check_glob_pattern`, which also
+    refuses `**` and a pattern with no wildcard.
     """
     if case.workspace is not None:
         for name in case.workspace.files:
@@ -302,14 +318,34 @@ def _validate_workspace(path: Path, case: EvalCase) -> None:
                     f"{path}: case {case.name!r} declares workspace file {name!r}: {exc}"
                 ) from exc
     if case.judge is not None:
-        for name in case.judge.artifacts:
+        kinds: dict[str, str] = {}
+        for entry in case.judge.artifacts:
+            name = artifact_name(entry)
+            kind = "glob" if isinstance(entry, ArtifactGlob) else "path"
+            if kinds.setdefault(name, kind) != kind:
+                raise CaseParseError(
+                    f"{path}: case {case.name!r} names judge artifact {name!r} "
+                    f"once as a path and once as a glob. The judge would see one "
+                    f"name for two different things; keep one."
+                )
             try:
-                check_relative_path(name)
+                if isinstance(entry, ArtifactGlob):
+                    check_glob_pattern(entry.glob)
+                else:
+                    check_relative_path(entry)
             except PathRefused as exc:
                 raise CaseParseError(
                     f"{path}: case {case.name!r} names judge artifact {name!r}: {exc}"
                 ) from exc
     for position, spec in enumerate(case.assertions, start=1):
+        if spec.file_glob is not None:
+            try:
+                check_glob_pattern(spec.file_glob)
+            except PathRefused as exc:
+                raise CaseParseError(
+                    f"{path}: case {case.name!r} assertion #{position} targets file_glob "
+                    f"{spec.file_glob!r}: {exc}"
+                ) from exc
         if spec.file is None:
             continue
         try:
@@ -378,8 +414,8 @@ def _validate_cross_references(path: Path, case: EvalCase, skill: Skill | None =
         if case.judge.artifacts and case.workspace is None:
             raise CaseParseError(
                 f"{path}: case {case.name!r} names judge artifacts "
-                f"{case.judge.artifacts}, but declares no 'workspace:' block. "
-                f"There would be no files to read."
+                f"{[artifact_name(entry) for entry in case.judge.artifacts]}, but declares "
+                f"no 'workspace:' block. There would be no files to read."
             )
 
     if case.mode == "offered" and skill is not None:
