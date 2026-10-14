@@ -541,7 +541,8 @@ kind that accepts `file`:
 - The pattern must match **exactly one** file. No match fails the check and lists the
   workspace; two or more fails it and names the matches. Neither is an error, and neither
   is a pass.
-- A directory is never a match, and a symbolic link to a directory is never entered.
+- A directory is never a match, and a symbolic link to a directory is never entered. Any
+  other symbolic link counts as a match, even a dangling one, and the read then decides.
 - A pattern with no wildcard, `**`, `..`, an absolute path, a backslash, an unclosed `[`,
   or `file` and `file_glob` on one assertion is an authoring error (exit `2`).
 - The single match is read under the same rules as `file:`. A match that is a symbolic

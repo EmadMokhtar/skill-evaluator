@@ -789,7 +789,9 @@ failure would blame the skill for a check that could not have held under any out
 passes: two plan directories must not pass by luck, and a missing file is the skill's
 doing. `**`, a pattern with no wildcard, a backslash and an unclosed `[` are authoring
 errors from `check_glob_pattern`, at load time. A FIFO or a device is never a match, and
-a symlinked directory is never entered. The single match is then read through
+a symlinked directory is never entered. A symbolic link counts as a match whatever it
+points to, unless it points to a directory: a dangling link or a link outside the root is
+still a match, and the read then refuses it as a failed check. The single match is then read through
 `Workspace.read`, so every existing read rule applies to it unchanged.
 
 ### A matched path never reaches the judge prompt

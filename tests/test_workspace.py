@@ -489,3 +489,15 @@ def test_check_glob_pattern_accepts_one_level_patterns(pattern):
 def test_match_refuses_a_bad_pattern_before_touching_the_disk(tmp_path):
     with pytest.raises(PathRefused, match="'\\*\\*'"):
         _workspace(tmp_path).match("**/x.md")
+
+
+@posix_only
+def test_a_dangling_symlink_counts_as_a_match_and_the_read_refuses_it(tmp_path):
+    # Pinned because the published invariant says so: a link is a candidate
+    # unless it points to a directory, so it cannot hide a second plan.
+    ws = _workspace(tmp_path)
+    ws.write("out/a.md", "x")
+    os.symlink(tmp_path / "nowhere.md", tmp_path / "out" / "dangle.md")
+    assert ws.match("out/*.md") == ["out/a.md", "out/dangle.md"]
+    with pytest.raises(OSError):
+        ws.read("out/dangle.md")

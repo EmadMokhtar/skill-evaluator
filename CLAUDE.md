@@ -359,7 +359,8 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **A `file_glob` must match exactly one regular file.** Zero or several is a failed check,
   never an error and never a pass; `**`, no wildcard, a backslash and an unclosed `[` are
   authoring errors from `check_glob_pattern`. `Workspace.match` is the one matcher; the match
-  is then read through `Workspace.read`, so every read rule still applies.
+  is then read through `Workspace.read`, so every read rule still applies. A symbolic link
+  counts as a match unless it points to a directory; the read then decides.
 - **A matched path never reaches the judge prompt.** A glob artifact is named by its
   pattern; the model-chosen path is untrusted, and several matches render a count-only
   sentinel that spends no content budget.
