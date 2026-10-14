@@ -19,6 +19,7 @@ from skill_lens.workspace import (
     Workspace,
     WorkspaceError,
     WorkspaceLimits,
+    check_glob_pattern,
     check_relative_path,
     create_workspace,
     sanitise_label,
@@ -381,3 +382,110 @@ def test_a_directory_is_still_resolvable_but_not_readable(tmp_path):
     assert ws.resolve("sub") == tmp_path.resolve() / "sub"
     with pytest.raises(OSError):
         ws.read("sub")
+
+
+# --- file_glob: matching by pattern ------------------------------------------
+
+PLAN = ".planning/*/task_plan.md"
+
+
+def test_match_finds_the_one_file_a_run_put_in_a_directory_it_named(tmp_path):
+    ws = _workspace(tmp_path)
+    ws.write(".planning/2026-10-11-todo/task_plan.md", "x")
+    assert ws.match(PLAN) == [".planning/2026-10-11-todo/task_plan.md"]
+
+
+def test_match_returns_nothing_when_nothing_matches(tmp_path):
+    ws = _workspace(tmp_path)
+    ws.write("task_plan.md", "x")
+    assert ws.match(PLAN) == []
+
+
+def test_match_returns_every_match_sorted(tmp_path):
+    ws = _workspace(tmp_path)
+    ws.write(".planning/b/task_plan.md", "x")
+    ws.write(".planning/a/task_plan.md", "x")
+    assert ws.match(PLAN) == [".planning/a/task_plan.md", ".planning/b/task_plan.md"]
+
+
+def test_a_wildcard_never_crosses_a_slash(tmp_path):
+    ws = _workspace(tmp_path)
+    ws.write("a/b/x.md", "x")
+    assert ws.match("*/x.md") == []
+
+
+def test_a_directory_is_never_a_match(tmp_path):
+    ws = _workspace(tmp_path)
+    ws.write("out/a.md", "x")
+    (tmp_path / "out" / "sub").mkdir()
+    assert ws.match("out/*") == ["out/a.md"]
+
+
+def test_matching_is_case_sensitive_on_every_platform(tmp_path):
+    ws = _workspace(tmp_path)
+    ws.write("Task_Plan.md", "x")
+    assert ws.match("task_*.md") == []
+
+
+def test_a_dot_slash_prefix_changes_nothing(tmp_path):
+    ws = _workspace(tmp_path)
+    ws.write(".planning/run/task_plan.md", "x")
+    assert ws.match("./" + PLAN) == [".planning/run/task_plan.md"]
+
+
+@posix_only
+def test_a_fifo_is_never_a_match_and_is_never_opened(tmp_path):
+    ws = _workspace(tmp_path)
+    os.mkfifo(tmp_path / "report.md")
+    assert promptly(lambda: ws.match("*.md")) == []
+
+
+@posix_only
+def test_a_symlinked_directory_is_not_followed(tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (outside / "x.md").write_text("secret", encoding="utf-8")
+    inside = tmp_path / "ws"
+    inside.mkdir()
+    os.symlink(outside, inside / "link")
+    ws = _workspace(inside)
+    assert ws.match("*/x.md") == []
+
+
+@posix_only
+def test_a_symlink_to_a_file_is_a_candidate_and_the_read_decides(tmp_path):
+    ws = _workspace(tmp_path)
+    ws.write("real.md", "body")
+    os.symlink(tmp_path / "real.md", tmp_path / "alias.md")
+    assert ws.match("alias*.md") == ["alias.md"]
+    assert ws.read("alias.md") == "body"
+
+
+@pytest.mark.parametrize(
+    ("pattern", "fragment"),
+    [
+        ("**/task_plan.md", "'\\*\\*'"),
+        (".planning/**/task_plan.md", "'\\*\\*'"),
+        ("task_plan.md", "no wildcard"),
+        ("../*.md", "'\\.\\.'"),
+        ("/abs/*.md", "not a relative path"),
+        ("", "must not be empty"),
+        ("report[1.md", "no closing"),
+        (".planning\\*\\task_plan.md", "backslash"),
+    ],
+)
+def test_check_glob_pattern_refuses_what_could_never_work(pattern, fragment):
+    with pytest.raises(PathRefused, match=fragment):
+        check_glob_pattern(pattern)
+
+
+@pytest.mark.parametrize(
+    "pattern", [PLAN, "out/report-??.md", "logs/[0-9]*.log", "x[]]*.md", "[!.]*.md"]
+)
+def test_check_glob_pattern_accepts_one_level_patterns(pattern):
+    check_glob_pattern(pattern)
+
+
+def test_match_refuses_a_bad_pattern_before_touching_the_disk(tmp_path):
+    with pytest.raises(PathRefused, match="'\\*\\*'"):
+        _workspace(tmp_path).match("**/x.md")

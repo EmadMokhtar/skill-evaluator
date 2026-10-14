@@ -12,13 +12,14 @@ surface it as an infra failure instead.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 import shutil
 import stat
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from skill_lens.models import WorkspaceSpec
 
@@ -165,6 +166,96 @@ def stat_regular(target: Path, candidate: str) -> os.stat_result | None:
     return result
 
 
+# The characters that make a `file_glob` a pattern. A pattern with none of
+# them is a `file:` spelled longer, so `check_glob_pattern` refuses it.
+_WILDCARDS = frozenset("*?[")
+
+
+def _has_unclosed_bracket(segment: str) -> bool:
+    """True when a `[` in `segment` has no closing `]`.
+
+    Reads a set the way `fnmatch.translate` does: an optional `!`, then a `]`
+    that is a member of the set rather than its end. `fnmatch` treats an
+    unclosed `[` as a literal character, so `report[1.md` would silently look
+    for a file with a bracket in its name.
+    """
+    index = 0
+    while index < len(segment):
+        if segment[index] != "[":
+            index += 1
+            continue
+        end = index + 1
+        if end < len(segment) and segment[end] == "!":
+            end += 1
+        if end < len(segment) and segment[end] == "]":
+            end += 1
+        close = segment.find("]", end)
+        if close == -1:
+            return True
+        index = close + 1
+    return False
+
+
+def check_glob_pattern(pattern: str) -> None:
+    """Raise PathRefused unless `pattern` is a usable `file_glob`.
+
+    Root-independent, like `check_relative_path`, so the loader calls it at
+    load time. Every refusal is the author's mistake: a pattern that can
+    never match what its author meant.
+    """
+    check_relative_path(pattern)
+    if "\\" in pattern:
+        raise PathRefused(
+            f"refused: {pattern!r} contains a backslash; separate directories with '/'"
+        )
+    segments = PurePosixPath(pattern.strip()).parts
+    if any("**" in segment for segment in segments):
+        raise PathRefused(
+            f"refused: {pattern!r} uses '**'; a wildcard matches within one "
+            "directory, so write one '*' for each level"
+        )
+    if not any(_WILDCARDS & set(segment) for segment in segments):
+        raise PathRefused(
+            f"refused: {pattern!r} has no wildcard (*, ?, [...]); use 'file:' for a literal path"
+        )
+    for segment in segments:
+        if _has_unclosed_bracket(segment):
+            raise PathRefused(f"refused: {pattern!r} has a '[' with no closing ']'")
+
+
+def _entries(directory: Path) -> list[os.DirEntry[str]]:
+    """The entries of one directory, or none if it cannot be listed."""
+    try:
+        with os.scandir(directory) as iterator:
+            return list(iterator)
+    except OSError:
+        return []
+
+
+def _is_real_directory(entry: os.DirEntry[str]) -> bool:
+    """A directory the walk may enter. A symlinked directory is not one."""
+    try:
+        return entry.is_dir(follow_symlinks=False)
+    except OSError:
+        return False
+
+
+def _is_file_candidate(entry: os.DirEntry[str]) -> bool:
+    """A name a glob may match: a regular file, or a symlink to anything but a directory.
+
+    A FIFO, a device or a socket is never a match, decided from `lstat`
+    without an `open`. A symlink is a candidate even when it dangles or
+    loops; `Workspace.read` then refuses it, so the check fails with the
+    refusal as its evidence, as it would for the same link named by `file:`.
+    """
+    try:
+        if entry.is_symlink():
+            return not entry.is_dir()
+        return entry.is_file(follow_symlinks=False)
+    except OSError:
+        return True
+
+
 @dataclass(frozen=True)
 class Workspace:
     """A contained directory the agent may read and write.
@@ -213,6 +304,32 @@ class Workspace:
             item.relative_to(self.root).as_posix()
             for item in self.root.rglob("*")
             if item.is_file()
+        )
+
+    def match(self, pattern: str) -> list[str]:
+        """Every file `pattern` matches, relative to the root, sorted.
+
+        One directory listing per segment, never a recursive walk, and a
+        symlinked directory is never entered, so the walk cannot leave the
+        root. Matching is `fnmatch.fnmatchcase`, per segment, so a run gives
+        the same answer on macOS and Linux. Deciding what one match, none or
+        several *means* is the caller's job.
+        """
+        check_glob_pattern(pattern)
+        *parents, last = PurePosixPath(pattern.strip()).parts
+        directories = [self.root]
+        for segment in parents:
+            directories = [
+                Path(entry.path)
+                for directory in directories
+                for entry in _entries(directory)
+                if fnmatch.fnmatchcase(entry.name, segment) and _is_real_directory(entry)
+            ]
+        return sorted(
+            Path(entry.path).relative_to(self.root).as_posix()
+            for directory in directories
+            for entry in _entries(directory)
+            if fnmatch.fnmatchcase(entry.name, last) and _is_file_candidate(entry)
         )
 
     def _totals(self) -> tuple[int, int]:
