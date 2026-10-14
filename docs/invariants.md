@@ -782,6 +782,24 @@ there.
 any case runs — a case with no filesystem can never satisfy either, so scoring it as a
 failure would blame the skill for a check that could not have held under any output.
 
+### A `file_glob` must match exactly one regular file
+
+`Workspace.match` is the one matcher, used by `AssertionEvaluator` and the judge's
+`_artifacts`. No match and several matches are both failed checks, never errors and never
+passes: two plan directories must not pass by luck, and a missing file is the skill's
+doing. `**`, a pattern with no wildcard, a backslash and an unclosed `[` are authoring
+errors from `check_glob_pattern`, at load time. A FIFO or a device is never a match, and
+a symlinked directory is never entered. The single match is then read through
+`Workspace.read`, so every existing read rule applies to it unchanged.
+
+### A matched path never reaches the judge prompt
+
+A glob artifact is named in the prompt by its pattern, which the author wrote. The path it
+matched was chosen by the model, so it is untrusted, and it is never interpolated into the
+prompt as a name or anywhere else. Several matches render `several_matches(n)`, a fixed
+sentinel naming a count, which, like every sentinel, spends none of the artifact content
+budget.
+
 ### Judge artifact bytes are capped, and truncation is visible
 
 `MAX_ARTIFACT_BYTES` and `MAX_ARTIFACTS_TOTAL_BYTES` bound the untrusted, model-produced

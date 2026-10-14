@@ -71,6 +71,15 @@ output text.
         file: report.md
 ```
 
+For a file whose path the model chooses, use `file_glob` instead of `file`: one-level
+wildcards (`*`, `?`, `[...]`, no `**`), and it must match exactly one file, or the check
+fails. A judge artifact takes the same pattern as `- glob: <pattern>`.
+
+```yaml
+      - kind: file-produced
+        file_glob: .planning/*/task_plan.md
+```
+
 `file:` on any assertion in a case with no `workspace:` block is an authoring error — there
 would be no file to look at.
 

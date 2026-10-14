@@ -376,6 +376,22 @@ gave it, but the content itself is read as data, never as instructions, even one
 like it is trying to talk to the judge. `artifacts` on a case with no `workspace:` block, or
 naming a file no case could ever produce, is an authoring error.
 
+An entry may be a pattern instead of a path, under the same exactly-one rule as
+[`file_glob`](#matching-a-file-by-pattern):
+
+```yaml
+    judge:
+      artifacts:
+        - glob: .planning/*/progress.md
+      rubric:
+        - progress.md has an entry for this session
+```
+
+The judge sees the artifact under its pattern. The path the agent chose never enters the
+prompt. No match is shown as `(not produced)`; several as
+`(matched N files; exactly one is required)`. The same text as a path and as a glob in one
+list is an authoring error.
+
 Judging costs money, so it is opted into explicitly with `judge = "pydantic-ai"` (or
 `"langchain"`, or an installed product — `"copilot"`, `"claude-code"`, `"cli"` — which
 needs no API key, but spends the product's own quota) in
@@ -504,6 +520,35 @@ bundled script planted that points outside the workspace, a FIFO, a symlink loop
 file larger than `max_file_bytes` — **fails** the assertion, with the refusal as the
 check's evidence: that is the skill's doing, not the author's. See
 [The workspace](runners.md#the-workspace) for the read rules.
+
+### Matching a file by pattern
+
+Some skills write to a path the model chooses: `planning-with-files` puts its plan in
+`.planning/<date>-<slug>/`. `file_glob` is the pattern form of `file`, accepted on every
+kind that accepts `file`:
+
+```yaml
+    assertions:
+      - kind: file-produced
+        file_glob: .planning/*/task_plan.md
+      - kind: regex
+        value: "(?m)^## Goal"
+        file_glob: .planning/*/task_plan.md
+```
+
+- `*`, `?` and `[...]` match within one directory level; a wildcard never crosses `/`, and
+  `*` matches a leading dot. `**` is refused. Matching is case-sensitive on every platform.
+- The pattern must match **exactly one** file. No match fails the check and lists the
+  workspace; two or more fails it and names the matches. Neither is an error, and neither
+  is a pass.
+- A directory is never a match, and a symbolic link to a directory is never entered.
+- A pattern with no wildcard, `**`, `..`, an absolute path, a backslash, an unclosed `[`,
+  or `file` and `file_glob` on one assertion is an authoring error (exit `2`).
+- The single match is read under the same rules as `file:`. A match that is a symbolic
+  link pointing outside the workspace fails the check, with the refusal as evidence.
+- A pattern can match the skill's own files, because a product runner delivers the skill
+  into the workspace (`.claude/skills/<name>/`, `.agents/skills/<name>/`). With one-level
+  wildcards that happens only if you write those directory names yourself.
 
 ## Per-check results
 
