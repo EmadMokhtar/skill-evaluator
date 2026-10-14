@@ -1373,3 +1373,32 @@ def test_an_unknown_evals_json_key_aborts_the_run(tmp_path):
     )
     with pytest.raises(CaseParseError, match="'kind'"):
         run_evals(load_skills(skill_dir), [FakeRunner()])
+
+
+def test_a_file_glob_finds_a_file_in_a_directory_the_run_named(tmp_path):
+    runner = FakeRunner(
+        default=RunResult(output="done"),
+        writes={"t": {".planning/2026-10-14-todo/task_plan.md": "## Goal\nship it\n"}},
+    )
+    case = _case(
+        workspace=WorkspaceSpec(),
+        assertions=[
+            AssertionSpec(kind="file-produced", file_glob=".planning/*/task_plan.md"),
+            AssertionSpec(kind="regex", value="(?m)^## Goal", file_glob=".planning/*/task_plan.md"),
+        ],
+    )
+    report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    assert report.passed == 1
+
+
+def test_a_run_that_starts_two_plans_fails_a_file_glob(tmp_path):
+    runner = FakeRunner(
+        default=RunResult(output="done"),
+        writes={"t": {".planning/a/task_plan.md": "x", ".planning/b/task_plan.md": "x"}},
+    )
+    case = _case(
+        workspace=WorkspaceSpec(),
+        assertions=[AssertionSpec(kind="file-produced", file_glob=".planning/*/task_plan.md")],
+    )
+    report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    assert report.failed == 1
