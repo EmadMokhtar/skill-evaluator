@@ -541,10 +541,18 @@ kind that accepts `file`:
 - The pattern must match **exactly one** file. No match fails the check and lists the
   workspace; two or more fails it and names the matches. Neither is an error, and neither
   is a pass.
-- A directory is never a match, and a symbolic link to a directory is never entered. Any
-  other symbolic link counts as a match, even a dangling one, and the read then decides.
-- A pattern with no wildcard, `**`, `..`, an absolute path, a backslash, an unclosed `[`,
-  or `file` and `file_glob` on one assertion is an authoring error (exit `2`).
+- Only a regular file is a match, reached directly or through a symbolic link. A
+  directory, a dangling link and a link to a FIFO are not, and a symbolic link to a
+  directory is never entered.
+- A pattern with no wildcard, `**`, `..`, an absolute path, a backslash, a trailing `/`,
+  an unclosed `[`, a reversed range such as `[z-a]`, or `file` and `file_glob` on one
+  assertion is an authoring error (exit `2`).
+- Quote a pattern that starts with `*` or `[`: `file_glob: "*.md"`. Unquoted, YAML reads
+  `*` as an alias and `[` as the start of a list, and the file does not load.
+- A pattern also matches the files the case seeds under `workspace: files:`. A content
+  check may read a seeded file back, because the agent may have edited it, but a
+  `file-produced` whose pattern matches a seeded file is an authoring error: it would pass
+  whatever the skill did.
 - The single match is read under the same rules as `file:`. A match that is a symbolic
   link pointing outside the workspace fails the check, with the refusal as evidence.
 - A pattern can match the skill's own files, because a product runner delivers the skill

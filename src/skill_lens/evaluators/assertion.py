@@ -10,7 +10,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as SchemaViolation
 
 from skill_lens.models import AssertionSpec, CheckResult, EvalCase, EvalScore, RunResult
-from skill_lens.workspace import PathRefused, Workspace, check_glob_pattern, check_relative_path
+from skill_lens.workspace import PathRefused, Workspace, check_relative_path
 
 
 class UnknownAssertionKind(Exception):
@@ -59,74 +59,79 @@ def _workspace_of(result: RunResult) -> Workspace:
     return Workspace(root=result.workspace)
 
 
+def _elide(entries: list[str]) -> str:
+    """The first `_LISTING_LIMIT` entries, and a truthful count of the rest."""
+    shown = ", ".join(entries[:_LISTING_LIMIT])
+    if len(entries) > _LISTING_LIMIT:
+        shown = f"{shown}, +{len(entries) - _LISTING_LIMIT} more"
+    return shown
+
+
 def _listing(workspace: Workspace) -> str:
     entries = workspace.listing()
     if not entries:
         return "the workspace was empty"
-    shown = ", ".join(entries[:_LISTING_LIMIT])
-    if len(entries) > _LISTING_LIMIT:
-        shown = f"{shown}, +{len(entries) - _LISTING_LIMIT} more"
-    return f"workspace held {shown}"
+    return f"workspace held {_elide(entries)}"
 
 
 def _describe(spec: AssertionSpec) -> str:
-    if spec.kind == "file-produced":
-        if spec.file_glob is not None:
-            return f"file-produced(file_glob={spec.file_glob!r})"
-        return f"file-produced({spec.file!r})"
-    if spec.kind == "json-schema":
-        if spec.file_glob is not None:
-            return f"json-schema(file_glob={spec.file_glob!r})"
-        return f"json-schema({spec.file!r})" if spec.file else "json-schema(output)"
-    if spec.file_glob is not None:
-        target = f", file_glob={spec.file_glob!r}"
-    else:
-        target = f", file={spec.file!r}" if spec.file else ""
-    return f"{spec.kind}({spec.value!r}{target})"
+    target = spec.target()
+    if spec.kind in ("file-produced", "json-schema"):
+        if target is None:
+            return f"{spec.kind}(output)"
+        key, value = target
+        return f"{spec.kind}({value!r})" if key == "file" else f"{spec.kind}({key}={value!r})"
+    named = f", {target[0]}={target[1]!r}" if target else ""
+    return f"{spec.kind}({spec.value!r}{named})"
 
 
 def _authored_path(spec: AssertionSpec) -> str:
-    """The `file:` or `file_glob:` the author wrote, or raise if it could never work.
+    """The `file:` the author wrote, or raise if it could never name a workspace file.
 
-    An empty, absolute or `..`-bearing path, a recursive or wildcard-free
-    pattern, or both keys at once is a mistake in the eval file, so it
-    aborts the run as an authoring error. Everything *about the target* --
-    what the run actually put there -- is judged later, by `Workspace`, and
-    is the skill's doing rather than the author's.
+    An empty, absolute or `..`-bearing path is a mistake in the eval file,
+    so it aborts the run as an authoring error. A `file_glob` is checked by
+    `AssertionSpec` itself and again by `Workspace.match`. Everything *about
+    the target* -- what the run actually put there -- is judged later, by
+    `Workspace`, and is the skill's doing rather than the author's.
     """
-    if spec.file is not None and spec.file_glob is not None:
-        raise InvalidAssertionValue("an assertion sets both file and file_glob; use one")
     try:
-        if spec.file_glob is not None:
-            check_glob_pattern(spec.file_glob)
-            return spec.file_glob
         check_relative_path(spec.file or "")
     except PathRefused as exc:
         raise InvalidAssertionValue(str(exc)) from exc
     return spec.file or ""
 
 
-def _locate(spec: AssertionSpec, workspace: Workspace) -> tuple[str, str]:
+# Matches already found in one `evaluate` call, by pattern. Local to the
+# call, so the evaluator stays stateless and safe to share across threads.
+_Matches = dict[str, list[str]]
+
+
+def _locate(spec: AssertionSpec, workspace: Workspace, found: _Matches) -> tuple[str, str]:
     """(the path to check, '') or ('', why no single file was found).
 
     A pattern must match exactly one file. None and several both fail the
     check: two plan directories must never pass by luck.
     """
-    authored = _authored_path(spec)
-    if spec.file_glob is None:
-        return authored, ""
-    matches = workspace.match(authored)
+    pattern = spec.file_glob
+    if pattern is None:
+        return _authored_path(spec), ""
+    if pattern not in found:
+        try:
+            found[pattern] = workspace.match(pattern)
+        except PathRefused as exc:
+            # Reachable only for a spec that skipped validation (model_construct).
+            raise InvalidAssertionValue(str(exc)) from exc
+    matches = found[pattern]
     if not matches:
-        return "", f"no file matched {authored}; {_listing(workspace)}"
+        return "", f"no file matched {pattern}; {_listing(workspace)}"
     if len(matches) > 1:
-        shown = ", ".join(matches[:_LISTING_LIMIT])
-        if len(matches) > _LISTING_LIMIT:
-            shown = f"{shown}, +{len(matches) - _LISTING_LIMIT} more"
-        return "", f"{authored} matched {len(matches):,} files: {shown}; exactly one is required"
+        return "", (
+            f"{pattern} matched {len(matches):,} files: {_elide(matches)}; exactly one is required"
+        )
     return matches[0], ""
 
 
-def _subject_text(spec: AssertionSpec, result: RunResult) -> tuple[str, str]:
+def _subject_text(spec: AssertionSpec, result: RunResult, found: _Matches) -> tuple[str, str]:
     """The text this assertion looks at, or ('', why it could not be read).
 
     A file that is missing or unreadable makes the assertion **fail**, not
@@ -139,7 +144,7 @@ def _subject_text(spec: AssertionSpec, result: RunResult) -> tuple[str, str]:
     if spec.file is None and spec.file_glob is None:
         return result.output, ""
     workspace = _workspace_of(result)
-    file, missing = _locate(spec, workspace)
+    file, missing = _locate(spec, workspace, found)
     if missing:
         return "", missing
     try:
@@ -152,11 +157,11 @@ def _subject_text(spec: AssertionSpec, result: RunResult) -> tuple[str, str]:
         return "", f"expected {file}; {_listing(workspace)}"
 
 
-def _check(spec: AssertionSpec, result: RunResult) -> tuple[bool, str]:
+def _check(spec: AssertionSpec, result: RunResult, found: _Matches) -> tuple[bool, str]:
     """(held, why). `why` is '' when it held, and explains the failure otherwise."""
     if spec.kind == "file-produced":
         workspace = _workspace_of(result)
-        file, missing = _locate(spec, workspace)
+        file, missing = _locate(spec, workspace, found)
         if missing:
             return False, missing
         try:
@@ -167,7 +172,7 @@ def _check(spec: AssertionSpec, result: RunResult) -> tuple[bool, str]:
             return True, ""
         return False, f"expected {file}; {_listing(workspace)}"
 
-    text, unreadable = _subject_text(spec, result)
+    text, unreadable = _subject_text(spec, result, found)
     if unreadable:
         return False, unreadable
 
@@ -220,8 +225,9 @@ class AssertionEvaluator:
             return EvalScore(evaluator=self.name, passed=True, score=1.0, detail="no assertions")
         checks: list[CheckResult] = []
         failures: list[str] = []
+        found: _Matches = {}
         for index, spec in enumerate(case.assertions):
-            held, why = _check(spec, result)
+            held, why = _check(spec, result, found)
             description = _describe(spec)
             if not held:
                 failures.append(f"{description}: {why}")

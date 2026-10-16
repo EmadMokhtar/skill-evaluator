@@ -1623,7 +1623,7 @@ def test_a_glob_artifact_with_no_workspace_is_refused_naming_the_pattern(tmp_pat
 
 def test_an_unusable_glob_artifact_is_refused(tmp_path):
     path = _artifact_case(tmp_path, "        - glob: '**/progress.md'\n")
-    with pytest.raises(CaseParseError, match="names judge artifact"):
+    with pytest.raises(CaseParseError, match="'\\*\\*'"):
         parse_cases_file(path)
 
 
@@ -1637,3 +1637,30 @@ def test_the_same_text_as_a_path_and_as_a_glob_is_refused(tmp_path):
     path = _artifact_case(tmp_path, "        - '*/progress.md'\n        - glob: '*/progress.md'\n")
     with pytest.raises(CaseParseError, match="once as a path and once as a glob"):
         parse_cases_file(path)
+
+
+_SEEDED_CASE = (
+    "cases:\n  - name: n\n    task: t\n    workspace:\n      files:\n        notes.md: hi\n"
+    "    assertions:\n{assertions}"
+)
+
+
+def test_file_produced_with_a_glob_matching_a_seeded_file_is_refused(tmp_path):
+    path = _write(
+        tmp_path,
+        _SEEDED_CASE.format(assertions="      - kind: file-produced\n        file_glob: '*.md'\n"),
+    )
+    with pytest.raises(CaseParseError, match="matches the seeded file 'notes.md'"):
+        parse_cases_file(path)
+
+
+def test_a_content_check_may_glob_a_seeded_file(tmp_path):
+    # The agent may edit a seeded file; reading it back is a real check.
+    path = _write(
+        tmp_path,
+        _SEEDED_CASE.format(
+            assertions="      - kind: contains\n        value: hi\n        file_glob: '*.md'\n"
+        ),
+    )
+    [case] = parse_cases_file(path)
+    assert case.assertions[0].file_glob == "*.md"

@@ -28,7 +28,7 @@ from skill_lens.cases.tool_libraries import (
 )
 from skill_lens.models import ArtifactGlob, EvalCase, Skill, ToolRef, artifact_name
 from skill_lens.runners.tools import BUILTIN_TOOL_NAMES, skill_tool_name
-from skill_lens.workspace import PathRefused, check_glob_pattern, check_relative_path
+from skill_lens.workspace import PathRefused, check_relative_path, glob_matches_path
 from skill_lens.yaml_loading import safe_load
 
 EVALS_DIRNAME = "evals"
@@ -235,11 +235,6 @@ def _validate_assertions(path: Path, case: EvalCase) -> None:
             raise CaseParseError(
                 f"{where} has unknown kind {spec.kind!r}. Known kinds: {known}."
             ) from None
-        if spec.file is not None and spec.file_glob is not None:
-            raise CaseParseError(
-                f"{where} sets both file and file_glob. Use file for a literal path "
-                f"or file_glob for a pattern, not both."
-            )
         present = {name for name in _ASSERTION_FIELD_NAMES if getattr(spec, name) is not None}
         # file_glob is the pattern form of file: the table says `file` and means either.
         if "file_glob" in present:
@@ -256,12 +251,11 @@ def _validate_assertions(path: Path, case: EvalCase) -> None:
                 f"{where} ({spec.kind}) does not accept {', '.join(extra)}. "
                 f"It would assert nothing, so it is a mistake rather than a check."
             )
-        key, target = ("file", spec.file)
-        if spec.file is None:
-            key, target = "file_glob", spec.file_glob
+        target = spec.target()
         if target is not None and case.workspace is None:
+            key, value = target
             raise CaseParseError(
-                f"{where} targets {key} {target!r}, but the case declares no "
+                f"{where} targets {key} {value!r}, but the case declares no "
                 f"'workspace:' block. There would be no file to look at, so the "
                 f"assertion could never hold."
             )
@@ -306,8 +300,8 @@ def _validate_workspace(path: Path, case: EvalCase) -> None:
     just no longer the only place a YAML-authored case's escape is caught,
     and now catches it before the runner has spent anything on the case.
 
-    A `file_glob` and a glob artifact get `check_glob_pattern`, which also
-    refuses `**` and a pattern with no wildcard.
+    A `file_glob` and a glob artifact are checked by their models; here a
+    `file-produced` glob is refused when a seeded file already satisfies it.
     """
     if case.workspace is not None:
         for name in case.workspace.files:
@@ -328,24 +322,28 @@ def _validate_workspace(path: Path, case: EvalCase) -> None:
                     f"once as a path and once as a glob. The judge would see one "
                     f"name for two different things; keep one."
                 )
+            if isinstance(entry, ArtifactGlob):
+                continue  # the model already refused an unusable pattern
             try:
-                if isinstance(entry, ArtifactGlob):
-                    check_glob_pattern(entry.glob)
-                else:
-                    check_relative_path(entry)
+                check_relative_path(entry)
             except PathRefused as exc:
                 raise CaseParseError(
                     f"{path}: case {case.name!r} names judge artifact {name!r}: {exc}"
                 ) from exc
     for position, spec in enumerate(case.assertions, start=1):
-        if spec.file_glob is not None:
-            try:
-                check_glob_pattern(spec.file_glob)
-            except PathRefused as exc:
+        if spec.file_glob is not None and spec.kind == "file-produced" and case.workspace:
+            # A seeded file is there before the agent starts, so the check
+            # would hold whatever the skill did. Content checks may read a
+            # seeded file back: the agent may have edited it.
+            seeded = [
+                name for name in case.workspace.files if glob_matches_path(spec.file_glob, name)
+            ]
+            if seeded:
                 raise CaseParseError(
-                    f"{path}: case {case.name!r} assertion #{position} targets file_glob "
-                    f"{spec.file_glob!r}: {exc}"
-                ) from exc
+                    f"{path}: case {case.name!r} assertion #{position} (file-produced) "
+                    f"file_glob {spec.file_glob!r} matches the seeded file {seeded[0]!r}, "
+                    f"so it would pass without the skill writing anything."
+                )
         if spec.file is None:
             continue
         try:

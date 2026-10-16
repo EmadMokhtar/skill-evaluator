@@ -787,12 +787,16 @@ failure would blame the skill for a check that could not have held under any out
 `Workspace.match` is the one matcher, used by `AssertionEvaluator` and the judge's
 `_artifacts`. No match and several matches are both failed checks, never errors and never
 passes: two plan directories must not pass by luck, and a missing file is the skill's
-doing. `**`, a pattern with no wildcard, a backslash and an unclosed `[` are authoring
-errors from `check_glob_pattern`, at load time. A FIFO or a device is never a match, and
-a symlinked directory is never entered. A symbolic link counts as a match whatever it
-points to, unless it points to a directory: a dangling link or a link outside the root is
-still a match, and the read then refuses it as a failed check. The single match is then read through
-`Workspace.read`, so every existing read rule applies to it unchanged.
+doing. `**`, a pattern with no wildcard, a backslash, a trailing `/`, an unclosed `[`
+and a reversed range are authoring errors from `check_glob_pattern`, run by
+`AssertionSpec` and `ArtifactGlob` themselves, so a case built in code gets them too. A
+match is a regular file, reached directly or through a symbolic link, decided by `stat`
+without an `open`: a FIFO, a device, a dangling link and a link loop are never matches,
+and a symlinked directory is never entered. A link to a regular file outside the root is a
+match, and the read then refuses it as a failed check. The single match is read through
+`Workspace.read`, so every existing read rule applies to it unchanged. A `file-produced`
+whose pattern matches a seeded `workspace.files` key is an authoring error, because it
+would hold whatever the skill did.
 
 ### A matched path never reaches the judge prompt
 

@@ -171,29 +171,40 @@ def stat_regular(target: Path, candidate: str) -> os.stat_result | None:
 _WILDCARDS = frozenset("*?[")
 
 
-def _has_unclosed_bracket(segment: str) -> bool:
-    """True when a `[` in `segment` has no closing `]`.
+def _bracket_problem(segment: str) -> str | None:
+    """Why a `[...]` set in `segment` could never match as written, or None.
 
     Reads a set the way `fnmatch.translate` does: an optional `!`, then a `]`
     that is a member of the set rather than its end. `fnmatch` treats an
     unclosed `[` as a literal character, so `report[1.md` would silently look
-    for a file with a bracket in its name.
+    for a file with a bracket in its name; it drops a reversed range such as
+    `z-a`, so `[z-a]` would silently match nothing.
     """
     index = 0
     while index < len(segment):
         if segment[index] != "[":
             index += 1
             continue
-        end = index + 1
-        if end < len(segment) and segment[end] == "!":
-            end += 1
-        if end < len(segment) and segment[end] == "]":
-            end += 1
+        start = index + 1
+        if start < len(segment) and segment[start] == "!":
+            start += 1
+        end = start + 1 if start < len(segment) and segment[start] == "]" else start
         close = segment.find("]", end)
         if close == -1:
-            return True
+            return "has a '[' with no closing ']'"
+        members = segment[start:close]
+        position = 0
+        while position < len(members):
+            # A range is `low-high`; a `-` first or last in the set is literal.
+            if position + 2 < len(members) and members[position + 1] == "-":
+                low, high = members[position], members[position + 2]
+                if low > high:
+                    return f"has a reversed range '{low}-{high}', which matches nothing"
+                position += 3
+            else:
+                position += 1
         index = close + 1
-    return False
+    return None
 
 
 def check_glob_pattern(pattern: str) -> None:
@@ -204,6 +215,10 @@ def check_glob_pattern(pattern: str) -> None:
     never match what its author meant.
     """
     check_relative_path(pattern)
+    if pattern.strip().endswith("/"):
+        raise PathRefused(
+            f"refused: {pattern!r} ends with '/'; a pattern names files, not directories"
+        )
     if "\\" in pattern:
         raise PathRefused(
             f"refused: {pattern!r} contains a backslash; separate directories with '/'"
@@ -219,8 +234,23 @@ def check_glob_pattern(pattern: str) -> None:
             f"refused: {pattern!r} has no wildcard (*, ?, [...]); use 'file:' for a literal path"
         )
     for segment in segments:
-        if _has_unclosed_bracket(segment):
-            raise PathRefused(f"refused: {pattern!r} has a '[' with no closing ']'")
+        problem = _bracket_problem(segment)
+        if problem is not None:
+            raise PathRefused(f"refused: {pattern!r} {problem}")
+
+
+def glob_matches_path(pattern: str, path: str) -> bool:
+    """Would `pattern` match a file at `path`? Pure: no filesystem involved.
+
+    The same per-segment `fnmatchcase` rule `Workspace.match` applies, so the
+    loader can compare a pattern against the files a case seeds before any
+    directory exists.
+    """
+    wanted = PurePosixPath(pattern.strip()).parts
+    actual = PurePosixPath(path.strip()).parts
+    return len(wanted) == len(actual) and all(
+        fnmatch.fnmatchcase(name, segment) for name, segment in zip(actual, wanted, strict=True)
+    )
 
 
 def _entries(directory: Path) -> list[os.DirEntry[str]]:
@@ -241,19 +271,19 @@ def _is_real_directory(entry: os.DirEntry[str]) -> bool:
 
 
 def _is_file_candidate(entry: os.DirEntry[str]) -> bool:
-    """A name a glob may match: a regular file, or a symlink to anything but a directory.
+    """A name a glob may match: a regular file, reached directly or through a symlink.
 
-    A FIFO, a device or a socket is never a match, decided from `lstat`
-    without an `open`. A symlink is a candidate even when it dangles or
-    loops; `Workspace.read` then refuses it, so the check fails with the
-    refusal as its evidence, as it would for the same link named by `file:`.
+    Decided from `stat` without an `open`, so a FIFO, a device or a socket is
+    never a match and never blocks. A dangling link, a link loop and a link
+    to anything but a regular file are not matches either, so a stale link
+    cannot stand in for, or sit beside, the one file a run wrote. A link to a
+    regular file outside the root *is* a match; `Workspace.read` then refuses
+    it, so the check fails with the refusal as its evidence.
     """
     try:
-        if entry.is_symlink():
-            return not entry.is_dir()
-        return entry.is_file(follow_symlinks=False)
+        return entry.is_file()
     except OSError:
-        return True
+        return False
 
 
 @dataclass(frozen=True)

@@ -10,7 +10,9 @@ and confirms it with you, scaffolds and fills in the suite, runs it, and triages
 failures — distinguishing an eval that is wrong from a skill that is wrong, and proposing
 changes to your `SKILL.md` rather than making them silently. It also audits suites you
 already have: missing negative controls, cases that assert nothing, rubric entries no
-evidence could support.
+evidence could support. When a skill writes to a path the model chooses, such as a dated
+plan directory, it checks the file through a [`file_glob`](eval-files.md#matching-a-file-by-pattern)
+pattern rather than a fixed `file:`.
 
 ## Installing it
 

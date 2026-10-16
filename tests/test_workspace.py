@@ -472,6 +472,8 @@ def test_a_symlink_to_a_file_is_a_candidate_and_the_read_decides(tmp_path):
         ("", "must not be empty"),
         ("report[1.md", "no closing"),
         (".planning\\*\\task_plan.md", "backslash"),
+        ("report[z-a].md", "reversed range"),
+        ("plans/*/", "ends with '/'"),
     ],
 )
 def test_check_glob_pattern_refuses_what_could_never_work(pattern, fragment):
@@ -492,12 +494,13 @@ def test_match_refuses_a_bad_pattern_before_touching_the_disk(tmp_path):
 
 
 @posix_only
-def test_a_dangling_symlink_counts_as_a_match_and_the_read_refuses_it(tmp_path):
-    # Pinned because the published invariant says so: a link is a candidate
-    # unless it points to a directory, so it cannot hide a second plan.
+def test_a_symlink_is_a_match_only_when_it_points_to_a_regular_file(tmp_path):
+    # A stale dangling link, a link to a FIFO or a self-loop must not make a
+    # second "match" beside the one file the run really wrote.
     ws = _workspace(tmp_path)
     ws.write("out/a.md", "x")
     os.symlink(tmp_path / "nowhere.md", tmp_path / "out" / "dangle.md")
-    assert ws.match("out/*.md") == ["out/a.md", "out/dangle.md"]
-    with pytest.raises(OSError):
-        ws.read("out/dangle.md")
+    os.mkfifo(tmp_path / "pipe")
+    os.symlink(tmp_path / "pipe", tmp_path / "out" / "pipe.md")
+    os.symlink(tmp_path / "out" / "loop.md", tmp_path / "out" / "loop.md")
+    assert promptly(lambda: ws.match("out/*.md")) == ["out/a.md"]

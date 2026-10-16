@@ -231,6 +231,44 @@ class AssertionSpec(BaseModel):
     file_glob: str | None = None
     json_schema: dict[str, Any] | None = None
 
+    @model_validator(mode="after")
+    def _one_usable_target(self) -> AssertionSpec:
+        """`file` and `file_glob` are exclusive, and a pattern must be usable.
+
+        On the model, like `CallArgsSpec`'s shape rules, so a case built in
+        code gets the same refusal a YAML case does.
+        """
+        if self.file is not None and self.file_glob is not None:
+            raise ValueError(
+                "an assertion sets both file and file_glob. Use file for a literal "
+                "path or file_glob for a pattern, not both."
+            )
+        if self.file_glob is not None:
+            _check_glob(self.file_glob)
+        return self
+
+    def target(self) -> tuple[str, str] | None:
+        """The key naming the file this assertion reads, and its value; None for the output."""
+        if self.file_glob is not None:
+            return "file_glob", self.file_glob
+        if self.file is not None:
+            return "file", self.file
+        return None
+
+
+def _check_glob(pattern: str) -> None:
+    """`check_glob_pattern`, raising the ValueError a Pydantic validator needs.
+
+    Imported here, not at the top: `workspace.py` imports this module, so a
+    top-level import would be circular.
+    """
+    from skill_lens.workspace import PathRefused, check_glob_pattern
+
+    try:
+        check_glob_pattern(pattern)
+    except PathRefused as exc:
+        raise ValueError(str(exc)) from exc
+
 
 class ToolResponse(BaseModel):
     """One entry of a `returns:` lookup: what a mock tool hands back when the
@@ -422,6 +460,12 @@ class ArtifactGlob(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     glob: str
+
+    @field_validator("glob")
+    @classmethod
+    def _usable(cls, value: str) -> str:
+        _check_glob(value)
+        return value
 
 
 def artifact_name(entry: str | ArtifactGlob) -> str:

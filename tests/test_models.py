@@ -647,3 +647,27 @@ def test_an_assertion_carries_a_file_glob():
     spec = AssertionSpec(kind="file-produced", file_glob=".planning/*/task_plan.md")
     assert spec.file_glob == ".planning/*/task_plan.md"
     assert spec.file is None
+
+
+def test_an_assertion_refuses_file_and_file_glob_together():
+    with pytest.raises(ValidationError, match="both file and file_glob"):
+        AssertionSpec(kind="file-produced", file="a.md", file_glob="*.md")
+
+
+def test_an_assertion_refuses_an_unusable_file_glob():
+    with pytest.raises(ValidationError, match="'\\*\\*'"):
+        AssertionSpec(kind="file-produced", file_glob="**/x.md")
+
+
+def test_an_artifact_glob_refuses_an_unusable_pattern():
+    with pytest.raises(ValidationError, match="'\\*\\*'"):
+        ArtifactGlob(glob="plans/**/x.md")
+
+
+def test_an_assertion_names_the_key_and_value_of_its_target():
+    assert AssertionSpec(kind="contains", value="x").target() is None
+    assert AssertionSpec(kind="contains", value="x", file="a.md").target() == ("file", "a.md")
+    assert AssertionSpec(kind="contains", value="x", file_glob="*.md").target() == (
+        "file_glob",
+        "*.md",
+    )

@@ -5,6 +5,7 @@ import os
 import pytest
 
 from promptly import promptly
+from skill_lens.evaluators.assertion import InvalidAssertionValue
 from skill_lens.evaluators.base import Evaluator
 from skill_lens.evaluators.judge import (
     BUDGET_EXHAUSTED,
@@ -463,3 +464,11 @@ def test_a_path_and_a_glob_naming_one_file_are_two_artifacts(tmp_path):
         RunResult(output="o", workspace=tmp_path),
     )
     assert request.artifacts == {"run/progress.md": "body", "*/progress.md": "body"}
+
+
+def test_a_glob_artifact_that_bypassed_validation_is_an_authoring_error(tmp_path):
+    # The assertion evaluator raises for the same pattern; the judge must not
+    # score the author's mistake as "(not produced)".
+    bad = ArtifactGlob.model_construct(glob="plans/**/x.md")
+    with pytest.raises(InvalidAssertionValue, match="'\\*\\*'"):
+        build_request(_case(bad), RunResult(output="o", workspace=tmp_path))

@@ -13,6 +13,7 @@ from skill_lens.evaluators.assertion import (
 )
 from skill_lens.evaluators.base import Evaluator
 from skill_lens.models import AssertionSpec, EvalCase, RunResult, WorkspaceSpec
+from skill_lens.workspace import Workspace
 
 
 def test_assertion_evaluator_satisfies_the_evaluator_protocol():
@@ -578,13 +579,30 @@ def test_a_matched_symlink_pointing_outside_is_a_failed_check(tmp_path):
     assert "resolves outside" in score.checks[0].evidence
 
 
-def test_a_programmatic_case_with_both_file_and_file_glob_is_an_authoring_error(tmp_path):
-    spec = AssertionSpec(kind="file-produced", file="a.md", file_glob="*.md")
-    with pytest.raises(InvalidAssertionValue, match="both file and file_glob"):
-        AssertionEvaluator().evaluate(_case(spec), _tree(tmp_path, {}))
-
-
-def test_a_programmatic_case_with_a_recursive_glob_is_an_authoring_error(tmp_path):
-    spec = AssertionSpec(kind="file-produced", file_glob="**/x.md")
+def test_a_glob_that_bypassed_validation_is_still_an_authoring_error(tmp_path):
+    spec = AssertionSpec.model_construct(
+        kind="file-produced", value=None, file=None, file_glob="**/x.md", json_schema=None
+    )
+    case = EvalCase.model_construct(
+        name="n", task="t", workspace=WorkspaceSpec(), assertions=[spec], tools=[]
+    )
     with pytest.raises(InvalidAssertionValue, match="'\\*\\*'"):
-        AssertionEvaluator().evaluate(_case(spec), _tree(tmp_path, {}))
+        AssertionEvaluator().evaluate(case, _tree(tmp_path, {}))
+
+
+def test_one_evaluation_walks_the_workspace_once_per_pattern(tmp_path, monkeypatch):
+    result = _tree(tmp_path, {".planning/x/task_plan.md": "## Goal"})
+    seen: list[str] = []
+    real_match = Workspace.match
+
+    def counting_match(self, pattern):
+        seen.append(pattern)
+        return real_match(self, pattern)
+
+    monkeypatch.setattr(Workspace, "match", counting_match)
+    case = _case(
+        AssertionSpec(kind="file-produced", file_glob=PLAN),
+        AssertionSpec(kind="contains", value="Goal", file_glob=PLAN),
+    )
+    assert AssertionEvaluator().evaluate(case, result).passed is True
+    assert seen == [PLAN]

@@ -6,6 +6,7 @@ constructor injection, so no agent framework enters `evaluators/`.
 
 from __future__ import annotations
 
+from skill_lens.evaluators.assertion import InvalidAssertionValue
 from skill_lens.judges.base import Judge
 from skill_lens.models import (
     ArtifactGlob,
@@ -129,9 +130,10 @@ def _artifacts(spec: JudgeSpec, result: RunResult) -> dict[str, str]:
         if isinstance(entry, ArtifactGlob):
             try:
                 matches = workspace.match(entry.glob)
-            except PathRefused:
-                artifacts[name] = NOT_PRODUCED
-                continue
+            except PathRefused as exc:
+                # The author's mistake, never the skill's: reachable only for
+                # an ArtifactGlob that skipped validation (model_construct).
+                raise InvalidAssertionValue(str(exc)) from exc
             if not matches:
                 artifacts[name] = NOT_PRODUCED
                 continue
