@@ -9,6 +9,7 @@ targets 127.0.0.1 and must FAIL.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -24,6 +25,10 @@ from skill_lens.scripts import ScriptPolicy, ScriptRuntime, probe_sandbox, run_s
 from skill_lens.workspace import Workspace, create_workspace
 
 STATUS = probe_sandbox("auto")
+# CI's macOS job sets this, so a runner whose sandbox stops working fails the
+# job instead of skipping every test here and passing.
+if os.environ.get("SKILL_LENS_REQUIRE_SANDBOX") and STATUS.backend == "none":
+    raise RuntimeError(f"SKILL_LENS_REQUIRE_SANDBOX is set, but no sandbox works: {STATUS.detail}")
 pytestmark = pytest.mark.skipif(
     STATUS.backend == "none", reason=f"no sandbox on this machine: {STATUS.detail}"
 )

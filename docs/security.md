@@ -228,7 +228,9 @@ A skill may ship code under `scripts/`. skill-lens can execute it, and the trust
   exits), and cannot read anything under the system temporary directory except the
   workspace, the scratch directory and the skill's own bundle — so other arms' and other
   cases' workspaces are hidden from it. On macOS the directories above those three keep
-  their metadata (`stat`), never their listing, so `mkdir -p "$PWD/x"` works. One gap to know about: `bwrap`'s `--unshare-net`
+  their metadata (`stat`), never their listing, so `mkdir -p "$PWD/x"` works. That metadata
+  includes the temporary directory's entry count and modification time, so a script can see
+  how many entries it holds and when they change; their names and contents stay hidden. One gap to know about: `bwrap`'s `--unshare-net`
   isolates the network stack only and does not block a Unix-domain socket reachable
   through the filesystem, so on a runner whose user can reach `/var/run/docker.sock` a
   script can talk to the Docker daemon — a full escape on that host; macOS's `(deny
