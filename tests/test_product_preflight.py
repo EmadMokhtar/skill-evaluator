@@ -229,3 +229,71 @@ def test_a_product_tool_name_reaches_a_preset_from_yaml_beside_a_workspace(tmp_p
     cases = parse_cases_file(path)
     status = ProductRunner(_product()).preflight([_skill()], {"ping": cases})
     assert status.name == "claude-code"
+
+
+def _workspace_case(**kwargs) -> EvalCase:
+    from skill_lens.models import WorkspaceSpec
+
+    return _case(workspace=WorkspaceSpec(), **kwargs)
+
+
+@pytest.mark.parametrize(
+    "assertion",
+    [
+        {"kind": "file-produced", "file_glob": "*/*/*/SKILL.md"},
+        {"kind": "file-produced", "file": ".claude/skills/ping/SKILL.md"},
+        {"kind": "contains", "value": "m", "file_glob": ".claude/skills/*/SKILL.md"},
+    ],
+)
+def test_a_file_check_that_reaches_the_delivered_skill_is_refused(assertion):
+    from skill_lens.models import AssertionSpec
+
+    case = _workspace_case(assertions=[AssertionSpec(**assertion)])
+    with pytest.raises(
+        ProductSetupError, match="copy of the skill the claude-code runner delivers"
+    ):
+        ProductRunner(_product()).preflight([_skill()], {"ping": [case]})
+
+
+def test_a_judge_artifact_that_reaches_the_delivered_skill_is_refused():
+    from skill_lens.models import JudgeSpec
+
+    case = _workspace_case(
+        judge=JudgeSpec(rubric=["r"], artifacts=[{"glob": ".claude/*/ping/SKILL.md"}])
+    )
+    with pytest.raises(ProductSetupError, match="copy of the skill"):
+        ProductRunner(_product()).preflight([_skill()], {"ping": [case]})
+
+
+def test_a_bundled_file_counts_as_delivered(tmp_path):
+    from skill_lens.models import AssertionSpec
+
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "init.sh").write_text("echo", encoding="utf-8")
+    skill = Skill(
+        name="ping",
+        description="d",
+        instructions="i",
+        path=tmp_path / "SKILL.md",
+        markdown="m",
+        bundle_root=tmp_path,
+    )
+    case = _workspace_case(
+        assertions=[
+            AssertionSpec(kind="file-produced", file_glob=".claude/skills/ping/scripts/*.sh")
+        ]
+    )
+    with pytest.raises(ProductSetupError, match="copy of the skill"):
+        ProductRunner(_product()).preflight([skill], {"ping": [case]})
+
+
+def test_a_file_check_on_the_skill_s_own_output_is_accepted():
+    from skill_lens.models import AssertionSpec, JudgeSpec
+
+    case = _workspace_case(
+        assertions=[AssertionSpec(kind="file-produced", file_glob=".planning/*/task_plan.md")],
+        judge=JudgeSpec(
+            rubric=["r"], artifacts=["progress.md", {"glob": ".planning/*/progress.md"}]
+        ),
+    )
+    ProductRunner(_product()).preflight([_skill()], {"ping": [case]})

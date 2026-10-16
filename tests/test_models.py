@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from skill_lens.models import (
+    ArtifactGlob,
     AssertionSpec,
     BudgetSpec,
     CallArgsSpec,
@@ -27,6 +28,7 @@ from skill_lens.models import (
     ToolSpec,
     TrajectorySpec,
     WorkspaceSpec,
+    artifact_name,
 )
 
 
@@ -618,3 +620,69 @@ def test_a_tool_ref_accepts_every_returns_shape():
         ToolRef(ref="t", returns=[])
     with pytest.raises(ValidationError, match="not a mix"):
         ToolRef(ref="t", returns=["a", {"value": "b"}])
+
+
+def test_an_artifact_entry_is_a_path_or_a_glob():
+    spec = JudgeSpec.model_validate(
+        {"rubric": ["r"], "artifacts": ["a.md", {"glob": ".planning/*/b.md"}]}
+    )
+    assert spec.artifacts == ["a.md", ArtifactGlob(glob=".planning/*/b.md")]
+
+
+def test_an_artifact_glob_forbids_unknown_keys():
+    with pytest.raises(ValidationError):
+        JudgeSpec.model_validate({"rubric": ["r"], "artifacts": [{"glob": "*.md", "path": "x"}]})
+
+
+def test_an_artifact_glob_hashes_so_duplicates_collapse():
+    assert len({ArtifactGlob(glob="a*"), ArtifactGlob(glob="a*")}) == 1
+
+
+def test_an_artifact_is_named_by_what_the_author_wrote():
+    assert artifact_name("report.md") == "report.md"
+    assert artifact_name(ArtifactGlob(glob=".planning/*/progress.md")) == ".planning/*/progress.md"
+
+
+def test_an_assertion_carries_a_file_glob():
+    spec = AssertionSpec(kind="file-produced", file_glob=".planning/*/task_plan.md")
+    assert spec.file_glob == ".planning/*/task_plan.md"
+    assert spec.file is None
+
+
+def test_an_assertion_refuses_file_and_file_glob_together():
+    with pytest.raises(ValidationError, match="both file and file_glob"):
+        AssertionSpec(kind="file-produced", file="a.md", file_glob="*.md")
+
+
+def test_an_assertion_refuses_an_unusable_file_glob():
+    with pytest.raises(ValidationError, match="'\\*\\*'"):
+        AssertionSpec(kind="file-produced", file_glob="**/x.md")
+
+
+def test_an_artifact_glob_refuses_an_unusable_pattern():
+    with pytest.raises(ValidationError, match="'\\*\\*'"):
+        ArtifactGlob(glob="plans/**/x.md")
+
+
+def test_an_assertion_names_the_key_and_value_of_its_target():
+    assert AssertionSpec(kind="contains", value="x").target() is None
+    assert AssertionSpec(kind="contains", value="x", file="a.md").target() == ("file", "a.md")
+    assert AssertionSpec(kind="contains", value="x", file_glob="*.md").target() == (
+        "file_glob",
+        "*.md",
+    )
+
+
+def test_a_file_produced_glob_a_seeded_file_satisfies_is_refused_by_the_model():
+    with pytest.raises(ValidationError, match="matches the seeded file 'notes.md'"):
+        EvalCase(
+            name="n",
+            task="t",
+            workspace=WorkspaceSpec(files={"notes.md": "hi"}),
+            assertions=[AssertionSpec(kind="file-produced", file_glob="*.md")],
+        )
+
+
+def test_one_text_as_a_path_and_as_a_glob_artifact_is_refused_by_the_model():
+    with pytest.raises(ValidationError, match="once as a path and once as a glob"):
+        JudgeSpec(rubric=["r"], artifacts=["a*.md", {"glob": "a*.md"}])

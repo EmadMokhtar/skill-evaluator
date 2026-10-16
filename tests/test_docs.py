@@ -639,3 +639,11 @@ def test_no_milestone_labels_outside_the_roadmap():
     paths += [DOCS / name for name in sorted(_site_pages()) if name not in MILESTONE_ALLOWED]
     hits = [hit for path in paths for hit in _milestone_hits(path)]
     assert not hits, "milestone labels found:\n" + "\n".join(hits)
+
+
+def test_file_glob_is_documented_for_users_and_in_the_skill():
+    assert "`file_glob`" in _page("eval-files.md")
+    syntax = (
+        REPO_ROOT / "plugins/skill-lens/skills/writing-skill-evals/references/eval-file-syntax.md"
+    ).read_text(encoding="utf-8")
+    assert "file_glob" in syntax

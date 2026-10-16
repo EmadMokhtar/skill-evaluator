@@ -782,6 +782,45 @@ there.
 any case runs — a case with no filesystem can never satisfy either, so scoring it as a
 failure would blame the skill for a check that could not have held under any output.
 
+### A `file_glob` must match exactly one regular file
+
+`paths.segment_matches` is the one rule for one level: `Workspace.match` walks the disk
+with it for `AssertionEvaluator` and the judge's `_artifacts`, and `glob_matches_path`
+compares a known path with it for the checks that run before any directory exists. No match
+and several matches are both failed checks, never errors and never passes: two plan
+directories must not pass by luck, and a missing file is the skill's doing. `**`, a
+pattern with no wildcard, a backslash, a trailing `/` or `/.`, an unclosed `[` and a set
+that `fnmatch` itself reads as matching nothing are `PatternRefused` from
+`check_glob_pattern`, run by `AssertionSpec` and `ArtifactGlob` themselves, so a case built
+in code gets them too; one that skipped validation (`model_construct`) raises it from
+`Workspace.match`, and `cli.py` counts it as an authoring error. A
+match is a regular file, reached directly or through a symbolic link, decided by `stat`
+without an `open`: a FIFO, a device, a dangling link and a link loop are never matches,
+and a symlinked directory is never entered. A link to a regular file outside the root is a
+match, and the read then refuses it as a failed check. The single match is read through
+`Workspace.read`, so every existing read rule applies to it unchanged. A `file-produced`
+whose pattern matches a seeded `workspace.files` key, and one text used as both a path and
+a glob artifact, are refused by `EvalCase` and `JudgeSpec`, because the first would hold
+whatever the skill did and the second would show the judge one name for two things.
+
+### A file check that reaches the delivered skill is refused in preflight
+
+A product runner delivers the skill into the workspace and leaves it there, so
+`--keep-workspace` shows what the product saw. A `file:`, `file_glob` or judge artifact that
+names or matches a delivered file (`runners.product.delivered_paths`: `SKILL.md` and the
+three bundle directories, under the runner's `skills_dir`) would read the harness's copy,
+not the skill's output, and hold whatever the skill did. `ProductRunner.preflight` refuses
+it (`ProductSetupError`, exit 2, before any spend), per runner, because only the runner
+knows its `skills_dir`.
+
+### A matched path never reaches the judge prompt
+
+A glob artifact is named in the prompt by its pattern, which the author wrote. The path it
+matched was chosen by the model, so it is untrusted, and it is never interpolated into the
+prompt as a name or anywhere else. Several matches render `several_matches(n)`, a fixed
+sentinel naming a count, which, like every sentinel, spends none of the artifact content
+budget.
+
 ### Judge artifact bytes are capped, and truncation is visible
 
 `MAX_ARTIFACT_BYTES` and `MAX_ARTIFACTS_TOTAL_BYTES` bound the untrusted, model-produced

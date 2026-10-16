@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from skill_lens.judges.base import Judge
 from skill_lens.models import (
+    ArtifactGlob,
     CheckResult,
     EvalCase,
     EvalScore,
@@ -15,6 +16,7 @@ from skill_lens.models import (
     JudgeSpec,
     RubricCheck,
     RunResult,
+    artifact_name,
 )
 from skill_lens.workspace import FileTooLarge, PathRefused, Workspace
 
@@ -39,6 +41,17 @@ NOT_PRODUCED = "(not produced)"
 NOT_TEXT = "(not valid UTF-8 text)"
 TOO_LARGE = "(too large to read)"
 BUDGET_EXHAUSTED = "(omitted, artifact budget exhausted)"
+
+
+def several_matches(count: int) -> str:
+    """Rendered in place of content when a glob artifact matched more than one file.
+
+    Fixed harness text like every sentinel above, so it never spends the
+    content budget. It names a count, never the paths: those were chosen by
+    the model and stay out of the prompt.
+    """
+    return f"(matched {count:,} files; exactly one is required)"
+
 
 # Room reserved out of `budget`, not added on top of it, for the marker
 # `_truncate` appends. 64 bytes comfortably fits the marker's fixed text plus
@@ -81,6 +94,9 @@ def _truncate(text: str, budget: int) -> str:
 def _artifacts(spec: JudgeSpec, result: RunResult) -> dict[str, str]:
     """The named files, in the author's order, deduplicated and capped.
 
+    A glob entry is read from its one match; none is `NOT_PRODUCED`, several
+    is `several_matches`. Either way it is named by its pattern.
+
     `remaining` tracks only untrusted, model-produced *content* bytes --
     never a sentinel's. The three properties that gives:
 
@@ -98,17 +114,33 @@ def _artifacts(spec: JudgeSpec, result: RunResult) -> dict[str, str]:
        Sentinels are trusted text and are excluded by construction, so
        there is no overshoot to allow for.
     """
-    names = list(dict.fromkeys(spec.artifacts))
-    if not names:
+    entries = list(dict.fromkeys(spec.artifacts))
+    if not entries:
         return {}
     if result.workspace is None:
-        return {name: NOT_PRODUCED for name in names}
+        return {artifact_name(entry): NOT_PRODUCED for entry in entries}
     workspace = Workspace(root=result.workspace)
     remaining = MAX_ARTIFACTS_TOTAL_BYTES
     artifacts: dict[str, str] = {}
-    for name in names:
+    for entry in entries:
+        # The prompt names an artifact by what its author wrote. For a glob
+        # that is the pattern, never the path the model chose.
+        name = artifact_name(entry)
+        if isinstance(entry, ArtifactGlob):
+            # A pattern that skipped validation (model_construct) raises
+            # PatternRefused here, which cli.py counts as an authoring error.
+            matches = workspace.match(entry.glob)
+            if not matches:
+                artifacts[name] = NOT_PRODUCED
+                continue
+            if len(matches) > 1:
+                artifacts[name] = several_matches(len(matches))
+                continue
+            target = matches[0]
+        else:
+            target = entry
         try:
-            content = workspace.read(name)
+            content = workspace.read(target)
         except UnicodeDecodeError:
             artifacts[name] = NOT_TEXT
             continue

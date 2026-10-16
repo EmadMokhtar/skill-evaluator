@@ -33,11 +33,12 @@ import time
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from skill_lens.bundle import BUNDLE_DIRS
-from skill_lens.models import EvalCase, ProductStatus, RunResult, Skill
+from skill_lens.models import ArtifactGlob, EvalCase, ProductStatus, RunResult, Skill
+from skill_lens.paths import glob_matches_path
 from skill_lens.process import group_kwargs, read_capped_handle, reap_and_kill_group
 from skill_lens.runners.mcp import (
     CLAUDE_CODE_MCP,
@@ -302,6 +303,50 @@ def read_trace(product: Product, invocation: Invocation) -> Trace:
     return trace
 
 
+def delivered_paths(skill: Skill, skills_dir: str) -> list[str]:
+    """Every file `deliver_skill` writes for `skill`, relative to the working directory.
+
+    The same rule as `deliver_skill`: nothing for a skill with no markdown,
+    else `SKILL.md` and the files of the three bundle directories.
+    """
+    if not skill.markdown:
+        return []
+    base = PurePosixPath(skills_dir) / skill.name
+    paths = [(base / SKILL_FILENAME).as_posix()]
+    if skill.bundle_root is not None:
+        for name in BUNDLE_DIRS:
+            source = skill.bundle_root / name
+            if source.is_dir():
+                paths += [
+                    (base / name / item.relative_to(source).as_posix()).as_posix()
+                    for item in sorted(source.rglob("*"))
+                    if item.is_file()
+                ]
+    return paths
+
+
+def _reaches_delivered(case: EvalCase, delivered: list[str]) -> str | None:
+    """The first file check in `case` that would read the delivered skill, as written.
+
+    A `file:` or literal artifact that names a delivered file, or a pattern
+    that matches one, checks harness files rather than anything the skill
+    did, so it would hold whatever the skill did.
+    """
+    targets: list[tuple[str, str]] = [t for t in (s.target() for s in case.assertions) if t]
+    if case.judge is not None:
+        targets += [
+            ("glob", entry.glob) if isinstance(entry, ArtifactGlob) else ("file", entry)
+            for entry in case.judge.artifacts
+        ]
+    for key, value in targets:
+        if key == "file":
+            if PurePosixPath(value.strip()).as_posix() in delivered:
+                return value
+        elif any(glob_matches_path(value, path) for path in delivered):
+            return value
+    return None
+
+
 def deliver_skill(skill: Skill, cwd: Path, skills_dir: str) -> bool:
     """Write the skill where the product discovers it. False when there is nothing to write.
 
@@ -545,8 +590,18 @@ class ProductRunner:
         bridged = False
         for skill in skills:
             _check_skill_name(skill.name)
+            delivered = delivered_paths(skill, product.skills_dir)
             for case in cases_by_skill.get(skill.name, []):
                 where = f"case {case.name!r} of skill {skill.name!r}"
+                reached = _reaches_delivered(case, delivered) if case.workspace else None
+                if reached is not None:
+                    raise ProductSetupError(
+                        f"{where} checks {reached!r}, which reaches the copy of the skill the "
+                        f"{product.name} runner delivers into the workspace "
+                        f"({product.skills_dir}/{skill.name}/). That file is the harness's, "
+                        "not the skill's output, so the check would hold whatever the skill "
+                        "did; check a file the skill writes instead"
+                    )
                 if case.tools:
                     if product.mcp is None:
                         raise ProductSetupError(

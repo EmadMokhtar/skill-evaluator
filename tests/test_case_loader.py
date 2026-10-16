@@ -1523,3 +1523,144 @@ def test_a_ref_lookup_is_checked_against_the_library_contract(tmp_path):
         match=r"tool 'lookup_order' returns\[0\]\.when names 'id'.*declares order_id",
     ):
         parse_cases_file(path)
+
+
+# --- file_glob ---------------------------------------------------------------
+
+_GLOB_CASE = "cases:\n  - name: n\n    task: t\n    workspace: {{}}\n    assertions:\n{assertions}"
+
+
+def _glob_case(tmp_path, assertions: str):
+    return _write(tmp_path, _GLOB_CASE.format(assertions=assertions))
+
+
+def test_file_produced_accepts_a_file_glob(tmp_path):
+    path = _glob_case(
+        tmp_path, "      - kind: file-produced\n        file_glob: .planning/*/task_plan.md\n"
+    )
+    [case] = parse_cases_file(path)
+    assert case.assertions[0].file_glob == ".planning/*/task_plan.md"
+
+
+def test_a_content_kind_accepts_a_file_glob(tmp_path):
+    path = _glob_case(
+        tmp_path,
+        "      - kind: regex\n        value: '(?m)^## Goal'\n"
+        "        file_glob: .planning/*/task_plan.md\n",
+    )
+    [case] = parse_cases_file(path)
+    assert case.assertions[0].file_glob == ".planning/*/task_plan.md"
+
+
+def test_file_and_file_glob_together_are_refused(tmp_path):
+    path = _glob_case(
+        tmp_path,
+        "      - kind: file-produced\n        file: task_plan.md\n"
+        "        file_glob: .planning/*/task_plan.md\n",
+    )
+    with pytest.raises(CaseParseError, match="both file and file_glob"):
+        parse_cases_file(path)
+
+
+def test_file_produced_with_neither_names_both_keys(tmp_path):
+    path = _glob_case(tmp_path, "      - kind: file-produced\n")
+    with pytest.raises(CaseParseError, match=r"requires file \(or file_glob\)"):
+        parse_cases_file(path)
+
+
+def test_a_file_glob_with_no_workspace_is_refused(tmp_path):
+    path = _write(
+        tmp_path,
+        "cases:\n  - name: n\n    task: t\n    assertions:\n"
+        "      - kind: file-produced\n        file_glob: .planning/*/task_plan.md\n",
+    )
+    with pytest.raises(CaseParseError, match="targets file_glob"):
+        parse_cases_file(path)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "fragment"),
+    [
+        ("'**/task_plan.md'", "'\\*\\*'"),
+        ("task_plan.md", "no wildcard"),
+        ("'../*.md'", "'\\.\\.'"),
+        ("'report[1.md'", "no closing"),
+        ("'.planning\\*\\task_plan.md'", "backslash"),
+    ],
+)
+def test_an_unusable_file_glob_is_refused_at_load(tmp_path, pattern, fragment):
+    path = _glob_case(tmp_path, f"      - kind: file-produced\n        file_glob: {pattern}\n")
+    with pytest.raises(CaseParseError, match=fragment):
+        parse_cases_file(path)
+
+
+_ARTIFACT_CASE = (
+    "cases:\n  - name: n\n    task: t\n{workspace}    assertions:\n"
+    "      - kind: contains\n        value: x\n"
+    "    judge:\n      rubric: [it has a total]\n      artifacts:\n{artifacts}"
+)
+
+
+def _artifact_case(tmp_path, artifacts: str, workspace: str = "    workspace: {}\n"):
+    return _write(tmp_path, _ARTIFACT_CASE.format(workspace=workspace, artifacts=artifacts))
+
+
+def test_a_glob_artifact_loads(tmp_path):
+    from skill_lens.models import ArtifactGlob
+
+    path = _artifact_case(tmp_path, "        - glob: .planning/*/progress.md\n")
+    [case] = parse_cases_file(path)
+    assert case.judge.artifacts == [ArtifactGlob(glob=".planning/*/progress.md")]
+
+
+def test_a_glob_artifact_with_no_workspace_is_refused_naming_the_pattern(tmp_path):
+    path = _artifact_case(tmp_path, "        - glob: .planning/*/progress.md\n", workspace="")
+    with pytest.raises(
+        CaseParseError, match=r"names judge artifacts \['\.planning/\*/progress\.md'\]"
+    ):
+        parse_cases_file(path)
+
+
+def test_an_unusable_glob_artifact_is_refused(tmp_path):
+    path = _artifact_case(tmp_path, "        - glob: '**/progress.md'\n")
+    with pytest.raises(CaseParseError, match="'\\*\\*'"):
+        parse_cases_file(path)
+
+
+def test_a_glob_artifact_with_an_unknown_key_is_refused(tmp_path):
+    path = _artifact_case(tmp_path, "        - glob: '*/progress.md'\n          path: x\n")
+    with pytest.raises(CaseParseError):
+        parse_cases_file(path)
+
+
+def test_the_same_text_as_a_path_and_as_a_glob_is_refused(tmp_path):
+    path = _artifact_case(tmp_path, "        - '*/progress.md'\n        - glob: '*/progress.md'\n")
+    with pytest.raises(CaseParseError, match="once as a path and once as a glob"):
+        parse_cases_file(path)
+
+
+_SEEDED_CASE = (
+    "cases:\n  - name: n\n    task: t\n    workspace:\n      files:\n        notes.md: hi\n"
+    "    assertions:\n{assertions}"
+)
+
+
+def test_file_produced_with_a_glob_matching_a_seeded_file_is_refused(tmp_path):
+    path = _write(
+        tmp_path,
+        _SEEDED_CASE.format(assertions="      - kind: file-produced\n        file_glob: '*.md'\n"),
+    )
+    with pytest.raises(CaseParseError, match="matches the seeded file 'notes.md'"):
+        parse_cases_file(path)
+
+
+def test_a_content_check_may_glob_a_seeded_file(tmp_path):
+    # The agent may edit a seeded file; reading it back is a real check.
+    path = _write(
+        tmp_path,
+        _SEEDED_CASE.format(
+            assertions="      - kind: contains\n        value: hi\n        file_glob: '*.md'\n"
+        ),
+    )
+    [case] = parse_cases_file(path)
+    assert case.assertions[0].file_glob == "*.md"

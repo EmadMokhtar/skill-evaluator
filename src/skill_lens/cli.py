@@ -34,6 +34,7 @@ from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.mcp_import import McpImportError, parse_tools_list, render_tool_mocks
 from skill_lens.models import Skill
 from skill_lens.orchestrator import RunOptions, run_evals
+from skill_lens.paths import PatternRefused
 from skill_lens.reporters.console import render_console
 from skill_lens.reporters.failure_context import OUTPUT_LIMIT
 from skill_lens.reporters.json_reporter import render_json
@@ -76,6 +77,9 @@ _AUTHORING_ERRORS = (
     ConfigError,
     UnknownAssertionKind,
     InvalidAssertionValue,
+    # a file_glob or glob artifact only an author could write, reaching an
+    # evaluator from a case built in code that skipped the model's validation
+    PatternRefused,
     MissingAPIKey,
     # a trajectory: naming a tool the runner cannot offer the case, found in
     # the framework runners' preflight

@@ -69,8 +69,9 @@ def _artifact_block(name: str, content: str) -> str:
     get a guessable fence id that a LATER artifact could echo as a forged
     closer, landing after genuine content in some other block. Salting means
     no artifact id is a constant anyone can know in advance. The name is
-    interpolated unfenced because it comes from `case.judge.artifacts`, which
-    the eval author wrote -- only the content is untrusted.
+    interpolated unfenced because it comes from `case.judge.artifacts` (a path
+    or a glob pattern), which the eval author wrote -- only the content is
+    untrusted, and a glob's matched path never reaches here.
     """
     nonce = hashlib.sha256(f"{name}\0{content}".encode()).hexdigest()[:12]
     return f'<artifact id="{nonce}" name="{name}">\n{content}\n</artifact id="{nonce}">'

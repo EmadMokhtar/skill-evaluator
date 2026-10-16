@@ -376,6 +376,22 @@ gave it, but the content itself is read as data, never as instructions, even one
 like it is trying to talk to the judge. `artifacts` on a case with no `workspace:` block, or
 naming a file no case could ever produce, is an authoring error.
 
+An entry may be a pattern instead of a path, under the same exactly-one rule as
+[`file_glob`](#matching-a-file-by-pattern):
+
+```yaml
+    judge:
+      artifacts:
+        - glob: .planning/*/progress.md
+      rubric:
+        - progress.md has an entry for this session
+```
+
+The judge sees the artifact under its pattern. The path the agent chose never enters the
+prompt. No match is shown as `(not produced)`; several as
+`(matched N files; exactly one is required)`. The same text as a path and as a glob in one
+list is an authoring error.
+
 Judging costs money, so it is opted into explicitly with `judge = "pydantic-ai"` (or
 `"langchain"`, or an installed product — `"copilot"`, `"claude-code"`, `"cli"` — which
 needs no API key, but spends the product's own quota) in
@@ -504,6 +520,49 @@ bundled script planted that points outside the workspace, a FIFO, a symlink loop
 file larger than `max_file_bytes` — **fails** the assertion, with the refusal as the
 check's evidence: that is the skill's doing, not the author's. See
 [The workspace](runners.md#the-workspace) for the read rules.
+
+### Matching a file by pattern
+
+Some skills write to a path the model chooses: `planning-with-files` puts its plan in
+`.planning/<date>-<slug>/`. `file_glob` is the pattern form of `file`, accepted on every
+kind that accepts `file`:
+
+```yaml
+    assertions:
+      - kind: file-produced
+        file_glob: .planning/*/task_plan.md
+      - kind: regex
+        value: "(?m)^## Goal"
+        file_glob: .planning/*/task_plan.md
+```
+
+- `*`, `?` and `[...]` match within one directory level; a wildcard never crosses `/`, and
+  `*` matches a leading dot. `**` is refused. Matching is case-sensitive on every platform.
+- The pattern must match **exactly one** file. No match fails the check and lists the
+  workspace; two or more fails it and names the matches. Neither is an error, and neither
+  is a pass.
+- Only a regular file is a match, reached directly or through a symbolic link. A
+  directory, a dangling link and a link to a FIFO are not, and a symbolic link to a
+  directory is never entered.
+- A pattern with no wildcard, `**`, `..`, an absolute path, a backslash, a trailing `/`
+  or `/.`, an unclosed `[`, a `[...]` set that matches nothing (such as `[z-a]`; a set is
+  read exactly as Python's `fnmatch` reads it), or `file` and `file_glob` on one assertion
+  is an authoring error (exit `2`).
+- Quote a pattern that starts with `*` or `[`: `file_glob: "*.md"`. Unquoted, YAML reads
+  `*` as an alias and `[` as the start of a list, and the file does not load.
+- A pattern also matches the files the case seeds under `workspace: files:`. A content
+  check may read a seeded file back, because the agent may have edited it, but a
+  `file-produced` whose pattern matches a seeded file is an authoring error: it would pass
+  whatever the skill did. So is one text used both as a path and as a glob in
+  `judge.artifacts`. These rules belong to the case itself, so a case built in code gets
+  them too.
+- The single match is read under the same rules as `file:`. A match that is a symbolic
+  link pointing outside the workspace fails the check, with the refusal as evidence.
+- A product runner delivers the skill into the workspace (`.claude/skills/<name>/`,
+  `.agents/skills/<name>/`, or `skills_dir` under `cli`), and leaves it there so
+  `--keep-workspace` shows what the product saw. A `file:`, `file_glob` or judge artifact
+  that reaches that copy would check harness files, not the skill's output, so the runner
+  refuses it before any case runs (exit `2`). `*/*/*/SKILL.md` is refused this way.
 
 ## Per-check results
 
