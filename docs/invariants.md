@@ -938,7 +938,12 @@ under the workspace and scratch (and `file-write-data` on `/dev/null`), denies `
 under the resolved system temporary directory, then re-allows reads under the workspace,
 scratch and the bundle; `bwrap` mounts an empty `tmpfs` over the temporary directory and
 binds the same three back in (the bundle read-only). The bundle must be re-allowed because a
-`--baseline previous` bundle is extracted *under* the temporary directory. The temp-dir
+`--baseline previous` bundle is extracted *under* the temporary directory. On macOS a last
+rule allows `file-read-metadata` on each directory between the temporary directory and those
+three, as `literal`s, because BSD `mkdir -p "$PWD/x"` stats every parent; it is never
+emitted without a path, since an unfiltered rule would allow metadata everywhere, and it
+never allows a listing. What it does expose, and the docs say so, is the temporary
+directory's entry count and modification time, never a sibling's name or contents. The temp-dir
 denial is a `subpath`, not a regex: an escaped path in a regex literal would silently stop
 matching on any metacharacter — a fail-open the blanket `subpath` cannot have. Reads
 elsewhere are allowed; the docs say so rather than pretend otherwise.

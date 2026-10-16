@@ -641,7 +641,10 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **The sandbox hides other skill-lens temporary directories, and re-allows the bundle
   explicitly.** It denies reads under the system temp directory, then re-allows the
   workspace, the scratch directory and the bundle — the bundle explicitly, because a
-  `--baseline previous` bundle is extracted under the temp dir. Reads elsewhere are allowed;
+  `--baseline previous` bundle is extracted under the temp dir. On macOS the directories
+  between the temp dir and those three keep `file-read-metadata` (as `literal`s, never an
+  empty rule, never a listing), so `mkdir -p "$PWD/x"` works; the temp dir's entry count and
+  mtime show, and the docs say so. Reads elsewhere are allowed;
   say so.
 - **`bwrap` does not block Unix-domain sockets** (`/var/run/docker.sock`); macOS's
   `(deny network*)` does. Documented in the Linux row and the guarantee paragraph.

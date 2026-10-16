@@ -679,7 +679,12 @@ network*)` covers Unix sockets too. A runner whose user can reach the Docker soc
 not run scripts you would not run by hand.
 
 The bundle is allowed back explicitly because a `--baseline previous` bundle is extracted
-under that temporary directory. Reads anywhere else are allowed (see below).
+under that temporary directory. On macOS the directories between the temporary directory and
+those three keep their metadata, so a script can `stat` its workspace's parents: BSD
+`mkdir -p "$PWD/x"` checks every parent on the way down. Listing them stays denied, so the
+names and contents of sibling workspaces stay hidden. One thing does show: a directory's
+metadata includes its entry count and modification time, so a script can tell how many
+entries the temporary directory holds and when that changes, but not what they are. Reads anywhere else are allowed (see below).
 
 | | Backend | How |
 | --- | --- | --- |
