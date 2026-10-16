@@ -6,7 +6,6 @@ constructor injection, so no agent framework enters `evaluators/`.
 
 from __future__ import annotations
 
-from skill_lens.evaluators.assertion import InvalidAssertionValue
 from skill_lens.judges.base import Judge
 from skill_lens.models import (
     ArtifactGlob,
@@ -128,12 +127,9 @@ def _artifacts(spec: JudgeSpec, result: RunResult) -> dict[str, str]:
         # that is the pattern, never the path the model chose.
         name = artifact_name(entry)
         if isinstance(entry, ArtifactGlob):
-            try:
-                matches = workspace.match(entry.glob)
-            except PathRefused as exc:
-                # The author's mistake, never the skill's: reachable only for
-                # an ArtifactGlob that skipped validation (model_construct).
-                raise InvalidAssertionValue(str(exc)) from exc
+            # A pattern that skipped validation (model_construct) raises
+            # PatternRefused here, which cli.py counts as an authoring error.
+            matches = workspace.match(entry.glob)
             if not matches:
                 artifacts[name] = NOT_PRODUCED
                 continue

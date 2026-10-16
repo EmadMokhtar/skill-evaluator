@@ -544,20 +544,25 @@ kind that accepts `file`:
 - Only a regular file is a match, reached directly or through a symbolic link. A
   directory, a dangling link and a link to a FIFO are not, and a symbolic link to a
   directory is never entered.
-- A pattern with no wildcard, `**`, `..`, an absolute path, a backslash, a trailing `/`,
-  an unclosed `[`, a reversed range such as `[z-a]`, or `file` and `file_glob` on one
-  assertion is an authoring error (exit `2`).
+- A pattern with no wildcard, `**`, `..`, an absolute path, a backslash, a trailing `/`
+  or `/.`, an unclosed `[`, a `[...]` set that matches nothing (such as `[z-a]`; a set is
+  read exactly as Python's `fnmatch` reads it), or `file` and `file_glob` on one assertion
+  is an authoring error (exit `2`).
 - Quote a pattern that starts with `*` or `[`: `file_glob: "*.md"`. Unquoted, YAML reads
   `*` as an alias and `[` as the start of a list, and the file does not load.
 - A pattern also matches the files the case seeds under `workspace: files:`. A content
   check may read a seeded file back, because the agent may have edited it, but a
   `file-produced` whose pattern matches a seeded file is an authoring error: it would pass
-  whatever the skill did.
+  whatever the skill did. So is one text used both as a path and as a glob in
+  `judge.artifacts`. These rules belong to the case itself, so a case built in code gets
+  them too.
 - The single match is read under the same rules as `file:`. A match that is a symbolic
   link pointing outside the workspace fails the check, with the refusal as evidence.
-- A pattern can match the skill's own files, because a product runner delivers the skill
-  into the workspace (`.claude/skills/<name>/`, `.agents/skills/<name>/`). With one-level
-  wildcards that happens only if you write those directory names yourself.
+- A product runner delivers the skill into the workspace (`.claude/skills/<name>/`,
+  `.agents/skills/<name>/`, or `skills_dir` under `cli`), and leaves it there so
+  `--keep-workspace` shows what the product saw. A `file:`, `file_glob` or judge artifact
+  that reaches that copy would check harness files, not the skill's output, so the runner
+  refuses it before any case runs (exit `2`). `*/*/*/SKILL.md` is refused this way.
 
 ## Per-check results
 

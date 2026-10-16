@@ -13,6 +13,7 @@ from skill_lens.evaluators.assertion import (
 )
 from skill_lens.evaluators.base import Evaluator
 from skill_lens.models import AssertionSpec, EvalCase, RunResult, WorkspaceSpec
+from skill_lens.paths import PatternRefused
 from skill_lens.workspace import Workspace
 
 
@@ -586,7 +587,7 @@ def test_a_glob_that_bypassed_validation_is_still_an_authoring_error(tmp_path):
     case = EvalCase.model_construct(
         name="n", task="t", workspace=WorkspaceSpec(), assertions=[spec], tools=[]
     )
-    with pytest.raises(InvalidAssertionValue, match="'\\*\\*'"):
+    with pytest.raises(PatternRefused, match="'\\*\\*'"):
         AssertionEvaluator().evaluate(case, _tree(tmp_path, {}))
 
 

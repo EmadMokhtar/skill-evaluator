@@ -357,12 +357,18 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **`file:` or `judge.artifacts` in a case with no `workspace:` block is an authoring error**
   (exit 2), and so is a `judge.artifacts` entry that could never be produced.
 - **A `file_glob` must match exactly one regular file.** Zero or several is a failed check,
-  never an error and never a pass; `**`, no wildcard, a backslash, a trailing `/`, an
-  unclosed `[` and a reversed range are authoring errors from `check_glob_pattern`, run by
-  the models themselves. `Workspace.match` is the one matcher; a match is a regular file,
-  directly or through a link (a dangling link or a FIFO never is), and is then read through
-  `Workspace.read`, so every read rule still applies. A `file-produced` glob that a seeded
-  file satisfies is refused at load.
+  never an error and never a pass; `**`, no wildcard, a backslash, a trailing `/` or `/.`,
+  an unclosed `[` and a set `fnmatch` reads as matching nothing are `PatternRefused` from
+  `check_glob_pattern`, run by the models themselves (an authoring error in `cli.py` too).
+  `paths.segment_matches` is the one per-level rule, for `Workspace.match` on disk and
+  `glob_matches_path` before it; a match is a regular file, directly or through a link (a
+  dangling link or a FIFO never is), and is then read through `Workspace.read`, so every read
+  rule still applies. `EvalCase` refuses a `file-produced` glob a seeded file satisfies, and
+  `JudgeSpec` one text as both a path and a glob artifact.
+- **A file check that reaches the delivered skill is refused in preflight.** The copy stays
+  in the workspace for `--keep-workspace`; a `file:`, `file_glob` or artifact matching
+  `delivered_paths` would read harness files, so `ProductRunner.preflight` raises
+  `ProductSetupError` (exit 2), per runner, since only the runner knows `skills_dir`.
 - **A matched path never reaches the judge prompt.** A glob artifact is named by its
   pattern; the model-chosen path is untrusted, and several matches render a count-only
   sentinel that spends no content budget.

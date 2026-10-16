@@ -12,29 +12,27 @@ surface it as an infra failure instead.
 
 from __future__ import annotations
 
-import fnmatch
 import os
 import re
 import shutil
 import stat
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from skill_lens.models import WorkspaceSpec
+from skill_lens.paths import (
+    PathRefused,
+    check_glob_pattern,
+    check_relative_path,
+    glob_segments,
+    segment_matches,
+)
 
 WORKSPACE_PREFIX = "skill-lens-"
 
 _LABEL_MAX = 60
 _UNSAFE_LABEL_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
-
-
-class PathRefused(Exception):
-    """A path the workspace will not read or write.
-
-    The message is written for the model: a built-in tool catches this and
-    returns the text as an ordinary tool result.
-    """
 
 
 class FileTooLarge(PathRefused):
@@ -87,45 +85,6 @@ def sanitise_label(label: str) -> str:
     return (cleaned or "case")[:_LABEL_MAX]
 
 
-def check_relative_path(candidate: str) -> None:
-    """Raise PathRefused unless `candidate` is a plain path inside a workspace.
-
-    Root-independent on purpose: `cases/loader.py` calls it to validate a
-    case's declared `files:` keys at load time, long before any directory
-    exists. `Workspace.resolve` calls it too and then adds the one check that
-    does need a root.
-    """
-    text = candidate.strip()
-    if not text:
-        raise PathRefused("refused: the path must not be empty")
-    if "\x00" in text:
-        raise PathRefused(f"refused: {candidate!r} contains a null byte")
-    if any("\ud800" <= char <= "\udfff" for char in text):
-        raise PathRefused(
-            f"refused: {candidate!r} contains an unpaired UTF-16 surrogate, "
-            "which cannot be encoded as UTF-8"
-        )
-    path = Path(text)
-    if not path.parts:
-        raise PathRefused(
-            f"refused: {candidate!r} names the working directory itself, not a file in it"
-        )
-    # Three separate checks, not one: Path("C:foo") on Windows is
-    # drive-relative but not absolute, and Path("\\foo") has a root and no
-    # drive. Either would escape a test that only asked is_absolute().
-    if path.is_absolute() or path.drive or path.root:
-        raise PathRefused(
-            f"refused: {candidate!r} is not a relative path; "
-            "all paths are relative to the working directory"
-        )
-    # Checked before resolution so the message can name what is wrong, rather
-    # than reporting a location the author never wrote.
-    if ".." in path.parts:
-        raise PathRefused(
-            f"refused: {candidate!r} contains '..'; paths may not leave the working directory"
-        )
-
-
 def resolve_under(base: Path, candidate: str) -> Path:
     """`base / candidate` with every symlink followed, or raise if the OS cannot.
 
@@ -164,93 +123,6 @@ def stat_regular(target: Path, candidate: str) -> os.stat_result | None:
     if not (stat.S_ISREG(result.st_mode) or stat.S_ISDIR(result.st_mode)):
         raise PathRefused(f"refused: {candidate!r} is not a regular file")
     return result
-
-
-# The characters that make a `file_glob` a pattern. A pattern with none of
-# them is a `file:` spelled longer, so `check_glob_pattern` refuses it.
-_WILDCARDS = frozenset("*?[")
-
-
-def _bracket_problem(segment: str) -> str | None:
-    """Why a `[...]` set in `segment` could never match as written, or None.
-
-    Reads a set the way `fnmatch.translate` does: an optional `!`, then a `]`
-    that is a member of the set rather than its end. `fnmatch` treats an
-    unclosed `[` as a literal character, so `report[1.md` would silently look
-    for a file with a bracket in its name; it drops a reversed range such as
-    `z-a`, so `[z-a]` would silently match nothing.
-    """
-    index = 0
-    while index < len(segment):
-        if segment[index] != "[":
-            index += 1
-            continue
-        start = index + 1
-        if start < len(segment) and segment[start] == "!":
-            start += 1
-        end = start + 1 if start < len(segment) and segment[start] == "]" else start
-        close = segment.find("]", end)
-        if close == -1:
-            return "has a '[' with no closing ']'"
-        members = segment[start:close]
-        position = 0
-        while position < len(members):
-            # A range is `low-high`; a `-` first or last in the set is literal.
-            if position + 2 < len(members) and members[position + 1] == "-":
-                low, high = members[position], members[position + 2]
-                if low > high:
-                    return f"has a reversed range '{low}-{high}', which matches nothing"
-                position += 3
-            else:
-                position += 1
-        index = close + 1
-    return None
-
-
-def check_glob_pattern(pattern: str) -> None:
-    """Raise PathRefused unless `pattern` is a usable `file_glob`.
-
-    Root-independent, like `check_relative_path`, so the loader calls it at
-    load time. Every refusal is the author's mistake: a pattern that can
-    never match what its author meant.
-    """
-    check_relative_path(pattern)
-    if pattern.strip().endswith("/"):
-        raise PathRefused(
-            f"refused: {pattern!r} ends with '/'; a pattern names files, not directories"
-        )
-    if "\\" in pattern:
-        raise PathRefused(
-            f"refused: {pattern!r} contains a backslash; separate directories with '/'"
-        )
-    segments = PurePosixPath(pattern.strip()).parts
-    if any("**" in segment for segment in segments):
-        raise PathRefused(
-            f"refused: {pattern!r} uses '**'; a wildcard matches within one "
-            "directory, so write one '*' for each level"
-        )
-    if not any(_WILDCARDS & set(segment) for segment in segments):
-        raise PathRefused(
-            f"refused: {pattern!r} has no wildcard (*, ?, [...]); use 'file:' for a literal path"
-        )
-    for segment in segments:
-        problem = _bracket_problem(segment)
-        if problem is not None:
-            raise PathRefused(f"refused: {pattern!r} {problem}")
-
-
-def glob_matches_path(pattern: str, path: str) -> bool:
-    """Would `pattern` match a file at `path`? Pure: no filesystem involved.
-
-    The same per-segment `fnmatchcase` rule `Workspace.match` applies, so the
-    loader can compare a pattern against the files a case seeds before any
-    directory exists.
-    """
-    wanted = PurePosixPath(pattern.strip()).parts
-    actual = PurePosixPath(path.strip()).parts
-    return len(wanted) == len(actual) and all(
-        fnmatch.fnmatchcase(name, segment) for name, segment in zip(actual, wanted, strict=True)
-    )
 
 
 def _entries(directory: Path) -> list[os.DirEntry[str]]:
@@ -341,25 +213,25 @@ class Workspace:
 
         One directory listing per segment, never a recursive walk, and a
         symlinked directory is never entered, so the walk cannot leave the
-        root. Matching is `fnmatch.fnmatchcase`, per segment, so a run gives
+        root. Matching is `paths.segment_matches`, per segment, so a run gives
         the same answer on macOS and Linux. Deciding what one match, none or
         several *means* is the caller's job.
         """
         check_glob_pattern(pattern)
-        *parents, last = PurePosixPath(pattern.strip()).parts
+        *parents, last = glob_segments(pattern)
         directories = [self.root]
         for segment in parents:
             directories = [
                 Path(entry.path)
                 for directory in directories
                 for entry in _entries(directory)
-                if fnmatch.fnmatchcase(entry.name, segment) and _is_real_directory(entry)
+                if segment_matches(entry.name, segment) and _is_real_directory(entry)
             ]
         return sorted(
             Path(entry.path).relative_to(self.root).as_posix()
             for directory in directories
             for entry in _entries(directory)
-            if fnmatch.fnmatchcase(entry.name, last) and _is_file_candidate(entry)
+            if segment_matches(entry.name, last) and _is_file_candidate(entry)
         )
 
     def _totals(self) -> tuple[int, int]:

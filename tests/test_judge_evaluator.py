@@ -5,7 +5,6 @@ import os
 import pytest
 
 from promptly import promptly
-from skill_lens.evaluators.assertion import InvalidAssertionValue
 from skill_lens.evaluators.base import Evaluator
 from skill_lens.evaluators.judge import (
     BUDGET_EXHAUSTED,
@@ -30,6 +29,7 @@ from skill_lens.models import (
     RunResult,
     WorkspaceSpec,
 )
+from skill_lens.paths import PatternRefused
 
 RESULT = RunResult(output="The return window is 30 days.")
 
@@ -470,5 +470,5 @@ def test_a_glob_artifact_that_bypassed_validation_is_an_authoring_error(tmp_path
     # The assertion evaluator raises for the same pattern; the judge must not
     # score the author's mistake as "(not produced)".
     bad = ArtifactGlob.model_construct(glob="plans/**/x.md")
-    with pytest.raises(InvalidAssertionValue, match="'\\*\\*'"):
+    with pytest.raises(PatternRefused, match="'\\*\\*'"):
         build_request(_case(bad), RunResult(output="o", workspace=tmp_path))

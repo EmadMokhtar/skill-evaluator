@@ -116,11 +116,9 @@ def _locate(spec: AssertionSpec, workspace: Workspace, found: _Matches) -> tuple
     if pattern is None:
         return _authored_path(spec), ""
     if pattern not in found:
-        try:
-            found[pattern] = workspace.match(pattern)
-        except PathRefused as exc:
-            # Reachable only for a spec that skipped validation (model_construct).
-            raise InvalidAssertionValue(str(exc)) from exc
+        # A pattern that skipped validation (model_construct) raises
+        # PatternRefused here, which cli.py counts as an authoring error.
+        found[pattern] = workspace.match(pattern)
     matches = found[pattern]
     if not matches:
         return "", f"no file matched {pattern}; {_listing(workspace)}"

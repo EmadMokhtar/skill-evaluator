@@ -28,7 +28,7 @@ from skill_lens.cases.tool_libraries import (
 )
 from skill_lens.models import ArtifactGlob, EvalCase, Skill, ToolRef, artifact_name
 from skill_lens.runners.tools import BUILTIN_TOOL_NAMES, skill_tool_name
-from skill_lens.workspace import PathRefused, check_relative_path, glob_matches_path
+from skill_lens.workspace import PathRefused, check_relative_path
 from skill_lens.yaml_loading import safe_load
 
 EVALS_DIRNAME = "evals"
@@ -300,8 +300,9 @@ def _validate_workspace(path: Path, case: EvalCase) -> None:
     just no longer the only place a YAML-authored case's escape is caught,
     and now catches it before the runner has spent anything on the case.
 
-    A `file_glob` and a glob artifact are checked by their models; here a
-    `file-produced` glob is refused when a seeded file already satisfies it.
+    A `file_glob`, a glob artifact, a path/glob name collision and a
+    `file-produced` glob a seeded file satisfies are all refused by the
+    models themselves, so a case built in code gets those refusals too.
     """
     if case.workspace is not None:
         for name in case.workspace.files:
@@ -312,38 +313,16 @@ def _validate_workspace(path: Path, case: EvalCase) -> None:
                     f"{path}: case {case.name!r} declares workspace file {name!r}: {exc}"
                 ) from exc
     if case.judge is not None:
-        kinds: dict[str, str] = {}
         for entry in case.judge.artifacts:
-            name = artifact_name(entry)
-            kind = "glob" if isinstance(entry, ArtifactGlob) else "path"
-            if kinds.setdefault(name, kind) != kind:
-                raise CaseParseError(
-                    f"{path}: case {case.name!r} names judge artifact {name!r} "
-                    f"once as a path and once as a glob. The judge would see one "
-                    f"name for two different things; keep one."
-                )
             if isinstance(entry, ArtifactGlob):
                 continue  # the model already refused an unusable pattern
             try:
                 check_relative_path(entry)
             except PathRefused as exc:
                 raise CaseParseError(
-                    f"{path}: case {case.name!r} names judge artifact {name!r}: {exc}"
+                    f"{path}: case {case.name!r} names judge artifact {entry!r}: {exc}"
                 ) from exc
     for position, spec in enumerate(case.assertions, start=1):
-        if spec.file_glob is not None and spec.kind == "file-produced" and case.workspace:
-            # A seeded file is there before the agent starts, so the check
-            # would hold whatever the skill did. Content checks may read a
-            # seeded file back: the agent may have edited it.
-            seeded = [
-                name for name in case.workspace.files if glob_matches_path(spec.file_glob, name)
-            ]
-            if seeded:
-                raise CaseParseError(
-                    f"{path}: case {case.name!r} assertion #{position} (file-produced) "
-                    f"file_glob {spec.file_glob!r} matches the seeded file {seeded[0]!r}, "
-                    f"so it would pass without the skill writing anything."
-                )
         if spec.file is None:
             continue
         try:

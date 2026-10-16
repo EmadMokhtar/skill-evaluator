@@ -474,6 +474,7 @@ def test_a_symlink_to_a_file_is_a_candidate_and_the_read_decides(tmp_path):
         (".planning\\*\\task_plan.md", "backslash"),
         ("report[z-a].md", "reversed range"),
         ("plans/*/", "ends with '/'"),
+        ("plans/*/.", "ends with '/'"),
     ],
 )
 def test_check_glob_pattern_refuses_what_could_never_work(pattern, fragment):
@@ -504,3 +505,52 @@ def test_a_symlink_is_a_match_only_when_it_points_to_a_regular_file(tmp_path):
     os.symlink(tmp_path / "pipe", tmp_path / "out" / "pipe.md")
     os.symlink(tmp_path / "out" / "loop.md", tmp_path / "out" / "loop.md")
     assert promptly(lambda: ws.match("out/*.md")) == ["out/a.md"]
+
+
+def test_a_set_fnmatch_reads_as_matching_something_is_accepted():
+    # fnmatch reads [c-a-z] as the set {-, z}: drop the reversed c-a, keep -z.
+    # The check follows fnmatch, not a reading of its own.
+    import fnmatch
+
+    check_glob_pattern("[c-a-z]")
+    assert fnmatch.fnmatchcase("z", "[c-a-z]")
+
+
+@pytest.mark.parametrize(
+    "segment", ["[z-a]", "[c-a-z]", "[a-cz-b]", "[!a]", "[]a]", "[[]", "x[0-9]y"]
+)
+def test_check_glob_pattern_refuses_a_set_exactly_when_fnmatch_matches_nothing(segment):
+    import fnmatch
+    import string
+
+    matches_nothing = not any(
+        fnmatch.fnmatchcase(name, segment)
+        for name in [
+            *string.printable,
+            *(a + b + c for a in "x" for b in string.printable for c in "y"),
+        ]
+    )
+    try:
+        check_glob_pattern(segment)
+        refused = False
+    except PathRefused:
+        refused = True
+    assert refused == matches_nothing
+
+
+@pytest.mark.parametrize(
+    ("pattern", "path"),
+    [
+        (".planning/*/task_plan.md", ".planning/2026-x/task_plan.md"),
+        ("*/x.md", "a/b/x.md"),
+        ("task_*.md", "Task_Plan.md"),
+        ("*.md", ".hidden.md"),
+        ("out/[0-9]*.log", "out/7.log"),
+    ],
+)
+def test_the_disk_walk_and_the_path_check_apply_one_rule(tmp_path, pattern, path):
+    from skill_lens.paths import glob_matches_path
+
+    ws = _workspace(tmp_path)
+    ws.write(path, "x")
+    assert (ws.match(pattern) == [path]) == glob_matches_path(pattern, path)
