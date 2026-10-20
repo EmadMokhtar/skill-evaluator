@@ -1505,3 +1505,12 @@ def test_an_unsupported_base_url_is_a_user_error_not_an_errored_case(tmp_path, m
     assert result.exit_code == 2, result.output
     assert "runner pydantic-ai" in plain(result.output)
     assert "deepseek" in plain(result.output)
+
+
+def test_a_refused_glob_pattern_is_an_authoring_error():
+    # A pattern only an author writes; a case built in code that skipped the
+    # model's validation still exits 2, never a failed or errored case.
+    from skill_lens.cli import _AUTHORING_ERRORS
+    from skill_lens.paths import PatternRefused
+
+    assert issubclass(PatternRefused, _AUTHORING_ERRORS)

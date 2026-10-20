@@ -59,32 +59,40 @@ def _workspace_of(result: RunResult) -> Workspace:
     return Workspace(root=result.workspace)
 
 
+def _elide(entries: list[str]) -> str:
+    """The first `_LISTING_LIMIT` entries, and a truthful count of the rest."""
+    shown = ", ".join(entries[:_LISTING_LIMIT])
+    if len(entries) > _LISTING_LIMIT:
+        shown = f"{shown}, +{len(entries) - _LISTING_LIMIT} more"
+    return shown
+
+
 def _listing(workspace: Workspace) -> str:
     entries = workspace.listing()
     if not entries:
         return "the workspace was empty"
-    shown = ", ".join(entries[:_LISTING_LIMIT])
-    if len(entries) > _LISTING_LIMIT:
-        shown = f"{shown}, +{len(entries) - _LISTING_LIMIT} more"
-    return f"workspace held {shown}"
+    return f"workspace held {_elide(entries)}"
 
 
 def _describe(spec: AssertionSpec) -> str:
-    if spec.kind == "file-produced":
-        return f"file-produced({spec.file!r})"
-    if spec.kind == "json-schema":
-        return f"json-schema({spec.file!r})" if spec.file else "json-schema(output)"
-    target = f", file={spec.file!r}" if spec.file else ""
-    return f"{spec.kind}({spec.value!r}{target})"
+    target = spec.target()
+    if spec.kind in ("file-produced", "json-schema"):
+        if target is None:
+            return f"{spec.kind}(output)"
+        key, value = target
+        return f"{spec.kind}({value!r})" if key == "file" else f"{spec.kind}({key}={value!r})"
+    named = f", {target[0]}={target[1]!r}" if target else ""
+    return f"{spec.kind}({spec.value!r}{named})"
 
 
 def _authored_path(spec: AssertionSpec) -> str:
     """The `file:` the author wrote, or raise if it could never name a workspace file.
 
-    An empty, absolute or `..`-bearing path is a mistake in the eval file, so
-    it aborts the run as an authoring error. Everything *about the target*
-    -- what the run actually put at a well-formed path -- is judged later,
-    by `Workspace`, and is the skill's doing rather than the author's.
+    An empty, absolute or `..`-bearing path is a mistake in the eval file,
+    so it aborts the run as an authoring error. A `file_glob` is checked by
+    `AssertionSpec` itself and again by `Workspace.match`. Everything *about
+    the target* -- what the run actually put there -- is judged later, by
+    `Workspace`, and is the skill's doing rather than the author's.
     """
     try:
         check_relative_path(spec.file or "")
@@ -93,7 +101,35 @@ def _authored_path(spec: AssertionSpec) -> str:
     return spec.file or ""
 
 
-def _subject_text(spec: AssertionSpec, result: RunResult) -> tuple[str, str]:
+# Matches already found in one `evaluate` call, by pattern. Local to the
+# call, so the evaluator stays stateless and safe to share across threads.
+_Matches = dict[str, list[str]]
+
+
+def _locate(spec: AssertionSpec, workspace: Workspace, found: _Matches) -> tuple[str, str]:
+    """(the path to check, '') or ('', why no single file was found).
+
+    A pattern must match exactly one file. None and several both fail the
+    check: two plan directories must never pass by luck.
+    """
+    pattern = spec.file_glob
+    if pattern is None:
+        return _authored_path(spec), ""
+    if pattern not in found:
+        # A pattern that skipped validation (model_construct) raises
+        # PatternRefused here, which cli.py counts as an authoring error.
+        found[pattern] = workspace.match(pattern)
+    matches = found[pattern]
+    if not matches:
+        return "", f"no file matched {pattern}; {_listing(workspace)}"
+    if len(matches) > 1:
+        return "", (
+            f"{pattern} matched {len(matches):,} files: {_elide(matches)}; exactly one is required"
+        )
+    return matches[0], ""
+
+
+def _subject_text(spec: AssertionSpec, result: RunResult, found: _Matches) -> tuple[str, str]:
     """The text this assertion looks at, or ('', why it could not be read).
 
     A file that is missing or unreadable makes the assertion **fail**, not
@@ -103,10 +139,12 @@ def _subject_text(spec: AssertionSpec, result: RunResult) -> tuple[str, str]:
     over `max_file_bytes` -- because a bundled script can create any of
     those. Only a malformed *authored* path raises.
     """
-    if spec.file is None:
+    if spec.file is None and spec.file_glob is None:
         return result.output, ""
     workspace = _workspace_of(result)
-    file = _authored_path(spec)
+    file, missing = _locate(spec, workspace, found)
+    if missing:
+        return "", missing
     try:
         return workspace.read(file), ""
     except PathRefused as exc:
@@ -117,11 +155,13 @@ def _subject_text(spec: AssertionSpec, result: RunResult) -> tuple[str, str]:
         return "", f"expected {file}; {_listing(workspace)}"
 
 
-def _check(spec: AssertionSpec, result: RunResult) -> tuple[bool, str]:
+def _check(spec: AssertionSpec, result: RunResult, found: _Matches) -> tuple[bool, str]:
     """(held, why). `why` is '' when it held, and explains the failure otherwise."""
     if spec.kind == "file-produced":
         workspace = _workspace_of(result)
-        file = _authored_path(spec)
+        file, missing = _locate(spec, workspace, found)
+        if missing:
+            return False, missing
         try:
             target = workspace.resolve(file)
         except PathRefused as exc:
@@ -130,7 +170,7 @@ def _check(spec: AssertionSpec, result: RunResult) -> tuple[bool, str]:
             return True, ""
         return False, f"expected {file}; {_listing(workspace)}"
 
-    text, unreadable = _subject_text(spec, result)
+    text, unreadable = _subject_text(spec, result, found)
     if unreadable:
         return False, unreadable
 
@@ -183,8 +223,9 @@ class AssertionEvaluator:
             return EvalScore(evaluator=self.name, passed=True, score=1.0, detail="no assertions")
         checks: list[CheckResult] = []
         failures: list[str] = []
+        found: _Matches = {}
         for index, spec in enumerate(case.assertions):
-            held, why = _check(spec, result)
+            held, why = _check(spec, result, found)
             description = _describe(spec)
             if not held:
                 failures.append(f"{description}: {why}")

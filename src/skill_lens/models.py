@@ -10,6 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from skill_lens.matching import structural_match
+from skill_lens.paths import PathRefused, check_glob_pattern, glob_matches_path
 
 CaseStatus = Literal["passed", "failed", "errored"]
 ToolParamType = Literal["string", "integer", "number", "boolean"]
@@ -216,6 +217,12 @@ class AssertionSpec(BaseModel):
     `json_schema`, not `schema`: Pydantic refuses a field name that shadows an
     attribute on BaseModel, and an alias would be machinery bought for a
     cosmetic gain.
+
+    `file_glob` is the pattern form of `file`: a one-level glob that must
+    match exactly one workspace file. A spec carries one of the two, never
+    both, and `_one_usable_target` below enforces it, so a case built in code
+    gets the refusal too; `cases/loader.py` treats `file_glob` as `file` in
+    its per-kind table.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -223,7 +230,40 @@ class AssertionSpec(BaseModel):
     kind: str
     value: str | None = None
     file: str | None = None
+    file_glob: str | None = None
     json_schema: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _one_usable_target(self) -> AssertionSpec:
+        """`file` and `file_glob` are exclusive, and a pattern must be usable.
+
+        On the model, like `CallArgsSpec`'s shape rules, so a case built in
+        code gets the same refusal a YAML case does.
+        """
+        if self.file is not None and self.file_glob is not None:
+            raise ValueError(
+                "an assertion sets both file and file_glob. Use file for a literal "
+                "path or file_glob for a pattern, not both."
+            )
+        if self.file_glob is not None:
+            _check_glob(self.file_glob)
+        return self
+
+    def target(self) -> tuple[str, str] | None:
+        """The key naming the file this assertion reads, and its value; None for the output."""
+        if self.file_glob is not None:
+            return "file_glob", self.file_glob
+        if self.file is not None:
+            return "file", self.file
+        return None
+
+
+def _check_glob(pattern: str) -> None:
+    """`check_glob_pattern`, raising the ValueError a Pydantic validator needs."""
+    try:
+        check_glob_pattern(pattern)
+    except PathRefused as exc:
+        raise ValueError(str(exc)) from exc
 
 
 class ToolResponse(BaseModel):
@@ -404,6 +444,31 @@ class BudgetSpec(BaseModel):
     max_latency_ms: int | None = None
 
 
+class ArtifactGlob(BaseModel):
+    """A judge artifact named by a pattern rather than a path.
+
+    The pattern, not the file it matches, is the artifact's name in the
+    prompt: the author wrote the pattern, the model chose the path. Frozen
+    so it hashes, because `_artifacts` deduplicates entries with
+    `dict.fromkeys`.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    glob: str
+
+    @field_validator("glob")
+    @classmethod
+    def _usable(cls, value: str) -> str:
+        _check_glob(value)
+        return value
+
+
+def artifact_name(entry: str | ArtifactGlob) -> str:
+    """What an artifact is called in the judge prompt: the text its author wrote."""
+    return entry if isinstance(entry, str) else entry.glob
+
+
 class JudgeSpec(BaseModel):
     """What "good" looks like, in prose, for an LLM judge to check.
 
@@ -421,7 +486,25 @@ class JudgeSpec(BaseModel):
 
     expected: str = ""
     rubric: list[str] = Field(default_factory=list)
-    artifacts: list[str] = Field(default_factory=list)
+    artifacts: list[str | ArtifactGlob] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _one_meaning_per_name(self) -> JudgeSpec:
+        """One text may not name an artifact both as a path and as a glob.
+
+        The prompt names an artifact by its text, so the two would reach the
+        judge under one name, and one would silently replace the other.
+        """
+        kinds: dict[str, str] = {}
+        for entry in self.artifacts:
+            name = artifact_name(entry)
+            kind = "glob" if isinstance(entry, ArtifactGlob) else "path"
+            if kinds.setdefault(name, kind) != kind:
+                raise ValueError(
+                    f"judge artifact {name!r} is named once as a path and once as a glob. "
+                    f"The judge would see one name for two different things; keep one."
+                )
+        return self
 
 
 class WorkspaceSpec(BaseModel):
@@ -456,6 +539,29 @@ class EvalCase(BaseModel):
     judge: JudgeSpec | None = None
     workspace: WorkspaceSpec | None = None
     tags: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _no_seeded_file_produced_glob(self) -> EvalCase:
+        """A `file-produced` glob that a seeded file satisfies checks nothing.
+
+        The seed is there before the agent starts, so the check would hold
+        whatever the skill did. Content checks may read a seeded file back:
+        the agent may have edited it.
+        """
+        if self.workspace is None:
+            return self
+        for position, spec in enumerate(self.assertions, start=1):
+            if spec.kind != "file-produced" or spec.file_glob is None:
+                continue
+            pattern = spec.file_glob
+            seeded = [name for name in self.workspace.files if glob_matches_path(pattern, name)]
+            if seeded:
+                raise ValueError(
+                    f"assertion #{position} (file-produced) file_glob {pattern!r} matches "
+                    f"the seeded file {seeded[0]!r}, so it would pass without the skill "
+                    f"writing anything."
+                )
+        return self
 
 
 class BaselineNote(BaseModel):

@@ -21,19 +21,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from skill_lens.models import WorkspaceSpec
+from skill_lens.paths import (
+    PathRefused,
+    check_glob_pattern,
+    check_relative_path,
+    glob_segments,
+    segment_matches,
+)
 
 WORKSPACE_PREFIX = "skill-lens-"
 
 _LABEL_MAX = 60
 _UNSAFE_LABEL_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
-
-
-class PathRefused(Exception):
-    """A path the workspace will not read or write.
-
-    The message is written for the model: a built-in tool catches this and
-    returns the text as an ordinary tool result.
-    """
 
 
 class FileTooLarge(PathRefused):
@@ -86,45 +85,6 @@ def sanitise_label(label: str) -> str:
     return (cleaned or "case")[:_LABEL_MAX]
 
 
-def check_relative_path(candidate: str) -> None:
-    """Raise PathRefused unless `candidate` is a plain path inside a workspace.
-
-    Root-independent on purpose: `cases/loader.py` calls it to validate a
-    case's declared `files:` keys at load time, long before any directory
-    exists. `Workspace.resolve` calls it too and then adds the one check that
-    does need a root.
-    """
-    text = candidate.strip()
-    if not text:
-        raise PathRefused("refused: the path must not be empty")
-    if "\x00" in text:
-        raise PathRefused(f"refused: {candidate!r} contains a null byte")
-    if any("\ud800" <= char <= "\udfff" for char in text):
-        raise PathRefused(
-            f"refused: {candidate!r} contains an unpaired UTF-16 surrogate, "
-            "which cannot be encoded as UTF-8"
-        )
-    path = Path(text)
-    if not path.parts:
-        raise PathRefused(
-            f"refused: {candidate!r} names the working directory itself, not a file in it"
-        )
-    # Three separate checks, not one: Path("C:foo") on Windows is
-    # drive-relative but not absolute, and Path("\\foo") has a root and no
-    # drive. Either would escape a test that only asked is_absolute().
-    if path.is_absolute() or path.drive or path.root:
-        raise PathRefused(
-            f"refused: {candidate!r} is not a relative path; "
-            "all paths are relative to the working directory"
-        )
-    # Checked before resolution so the message can name what is wrong, rather
-    # than reporting a location the author never wrote.
-    if ".." in path.parts:
-        raise PathRefused(
-            f"refused: {candidate!r} contains '..'; paths may not leave the working directory"
-        )
-
-
 def resolve_under(base: Path, candidate: str) -> Path:
     """`base / candidate` with every symlink followed, or raise if the OS cannot.
 
@@ -163,6 +123,39 @@ def stat_regular(target: Path, candidate: str) -> os.stat_result | None:
     if not (stat.S_ISREG(result.st_mode) or stat.S_ISDIR(result.st_mode)):
         raise PathRefused(f"refused: {candidate!r} is not a regular file")
     return result
+
+
+def _entries(directory: Path) -> list[os.DirEntry[str]]:
+    """The entries of one directory, or none if it cannot be listed."""
+    try:
+        with os.scandir(directory) as iterator:
+            return list(iterator)
+    except OSError:
+        return []
+
+
+def _is_real_directory(entry: os.DirEntry[str]) -> bool:
+    """A directory the walk may enter. A symlinked directory is not one."""
+    try:
+        return entry.is_dir(follow_symlinks=False)
+    except OSError:
+        return False
+
+
+def _is_file_candidate(entry: os.DirEntry[str]) -> bool:
+    """A name a glob may match: a regular file, reached directly or through a symlink.
+
+    Decided from `stat` without an `open`, so a FIFO, a device or a socket is
+    never a match and never blocks. A dangling link, a link loop and a link
+    to anything but a regular file are not matches either, so a stale link
+    cannot stand in for, or sit beside, the one file a run wrote. A link to a
+    regular file outside the root *is* a match; `Workspace.read` then refuses
+    it, so the check fails with the refusal as its evidence.
+    """
+    try:
+        return entry.is_file()
+    except OSError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -213,6 +206,32 @@ class Workspace:
             item.relative_to(self.root).as_posix()
             for item in self.root.rglob("*")
             if item.is_file()
+        )
+
+    def match(self, pattern: str) -> list[str]:
+        """Every file `pattern` matches, relative to the root, sorted.
+
+        One directory listing per segment, never a recursive walk, and a
+        symlinked directory is never entered, so the walk cannot leave the
+        root. Matching is `paths.segment_matches`, per segment, so a run gives
+        the same answer on macOS and Linux. Deciding what one match, none or
+        several *means* is the caller's job.
+        """
+        check_glob_pattern(pattern)
+        *parents, last = glob_segments(pattern)
+        directories = [self.root]
+        for segment in parents:
+            directories = [
+                Path(entry.path)
+                for directory in directories
+                for entry in _entries(directory)
+                if segment_matches(entry.name, segment) and _is_real_directory(entry)
+            ]
+        return sorted(
+            Path(entry.path).relative_to(self.root).as_posix()
+            for directory in directories
+            for entry in _entries(directory)
+            if segment_matches(entry.name, last) and _is_file_candidate(entry)
         )
 
     def _totals(self) -> tuple[int, int]:

@@ -138,7 +138,9 @@ Add flags with `[runners.<name>] args` (for example, a model); replace the whole
 declares one, a fresh temporary directory otherwise) holds `SKILL.md` **verbatim (its text
 as written; line endings are normalised)** — products honour frontmatter keys skill-lens
 does not model, such as `allowed-tools` — and beside it `scripts/`, `references/` and
-`assets/`, nothing else.
+`assets/`, nothing else. The copy stays in a workspace after the run, so `--keep-workspace`
+shows exactly what the product saw; a case whose `file:`, `file_glob` or judge artifact would
+read that copy is refused in preflight, because it would check the harness's files.
 
 The prompt is the case's `task`, verbatim: the product owns its system prompt, and
 skill-lens adds no preamble. `mode: loaded` invokes the skill through the product's own
