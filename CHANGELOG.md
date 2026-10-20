@@ -1,3 +1,13 @@
+## v0.22.0 (2026-10-20)
+
+### Feat
+
+- match workspace files by glob pattern in assertions and judge artifacts (#90)
+
+### Fix
+
+- let a sandboxed script create directories by absolute path on macOS (#101)
+
 ## v0.21.0 (2026-10-05)
 
 ### Feat
