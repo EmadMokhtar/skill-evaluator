@@ -30,7 +30,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
@@ -38,7 +38,7 @@ from typing import Any
 
 from skill_lens.bundle import BUNDLE_DIRS
 from skill_lens.models import ArtifactGlob, EvalCase, ProductStatus, RunResult, Skill
-from skill_lens.paths import glob_matches_path
+from skill_lens.paths import glob_entries, glob_matches_path
 from skill_lens.process import group_kwargs, read_capped_handle, reap_and_kill_group
 from skill_lens.runners.mcp import (
     CLAUDE_CODE_MCP,
@@ -332,18 +332,22 @@ def _reaches_delivered(case: EvalCase, delivered: list[str]) -> str | None:
     that matches one, checks harness files rather than anything the skill
     did, so it would hold whatever the skill did.
     """
-    targets: list[tuple[str, str]] = [t for t in (s.target() for s in case.assertions) if t]
+    targets: list[tuple[str, str | Sequence[str]]] = [
+        t for t in (s.target() for s in case.assertions) if t
+    ]
     if case.judge is not None:
         targets += [
             ("glob", entry.glob) if isinstance(entry, ArtifactGlob) else ("file", entry)
             for entry in case.judge.artifacts
         ]
     for key, value in targets:
-        if key == "file":
+        if key == "file" and isinstance(value, str):
             if PurePosixPath(value.strip()).as_posix() in delivered:
                 return value
-        elif any(glob_matches_path(value, path) for path in delivered):
-            return value
+            continue
+        entries = glob_entries(value)
+        if any(glob_matches_path(entry, path) for entry in entries for path in delivered):
+            return " or ".join(entries)
     return None
 
 

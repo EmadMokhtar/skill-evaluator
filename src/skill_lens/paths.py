@@ -8,6 +8,7 @@ Imports nothing from the rest of the project.
 from __future__ import annotations
 
 import fnmatch
+from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 
 
@@ -115,13 +116,42 @@ def _bracket_problem(segment: str) -> str | None:
     return None
 
 
-def check_glob_pattern(pattern: str) -> None:
-    """Raise PatternRefused unless `pattern` is a usable `file_glob`.
+def glob_entries(value: str | Sequence[str]) -> tuple[str, ...]:
+    """A `file_glob` as its entries: one pattern, or a list of alternatives."""
+    return (value,) if isinstance(value, str) else tuple(value)
 
-    Root-independent, like `check_relative_path`, so a model can call it as
-    it validates. Every refusal is the author's mistake: a pattern that can
-    never match what its author meant.
+
+def check_glob_pattern(value: str | Sequence[str]) -> None:
+    """Raise PatternRefused unless `value` is a usable `file_glob`.
+
+    One pattern, or a list of at least two different alternatives, each of
+    which may be a literal path: "the plan is at the root, or in a named
+    directory" needs a literal entry. A single string still needs a
+    wildcard, or it is a `file:` spelled longer. Root-independent, like
+    `check_relative_path`, so a model can call it as it validates. Every
+    refusal is the author's mistake: a pattern that can never match what
+    its author meant.
     """
+    if isinstance(value, str):
+        _check_one(value, literal_ok=False)
+        return
+    entries = tuple(value)
+    if len(entries) < 2:
+        raise PatternRefused(
+            "refused: a file_glob list needs at least two entries; write one pattern as a string"
+        )
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, str):
+            raise PatternRefused(f"refused: {entry!r} in a file_glob list is not a string")
+        if entry.strip() in seen:
+            raise PatternRefused(f"refused: the file_glob list names {entry!r} twice")
+        seen.add(entry.strip())
+        _check_one(entry, literal_ok=True)
+
+
+def _check_one(pattern: str, *, literal_ok: bool) -> None:
+    """The rules for one entry; `literal_ok` lets a list entry have no wildcard."""
     try:
         check_relative_path(pattern)
     except PathRefused as exc:
@@ -140,7 +170,7 @@ def check_glob_pattern(pattern: str) -> None:
             f"refused: {pattern!r} uses '**'; a wildcard matches within one "
             "directory, so write one '*' for each level"
         )
-    if not any(_WILDCARDS & set(segment) for segment in segments):
+    if not literal_ok and not any(_WILDCARDS & set(segment) for segment in segments):
         raise PatternRefused(
             f"refused: {pattern!r} has no wildcard (*, ?, [...]); use 'file:' for a literal path"
         )

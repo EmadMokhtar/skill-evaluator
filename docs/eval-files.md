@@ -541,6 +541,18 @@ kind that accepts `file`:
 - The pattern must match **exactly one** file. No match fails the check and lists the
   workspace; two or more fails it and names the matches. Neither is an error, and neither
   is a pass.
+- For a file that may be in one of several places, give a list. The check then needs
+  exactly one file across all the entries together, and an entry may be a literal path:
+
+  ```yaml
+      - kind: file-produced
+        file_glob: [task_plan.md, .planning/*/task_plan.md]   # the root, or a named plan
+  ```
+
+  A list needs at least two different entries (one pattern is written as a string), and
+  every other rule here applies to each entry. A judge artifact takes a list the same way,
+  `- glob: [progress.md, .planning/*/progress.md]`, and is named in the prompt by its
+  entries joined with ` | `.
 - Only a regular file is a match, reached directly or through a symbolic link. A
   directory, a dangling link and a link to a FIFO are not, and a symbolic link to a
   directory is never entered.

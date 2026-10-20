@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError as SchemaViolation
 
 from skill_lens.models import AssertionSpec, CheckResult, EvalCase, EvalScore, RunResult
+from skill_lens.paths import glob_entries
 from skill_lens.workspace import PathRefused, Workspace, check_relative_path
 
 
@@ -103,7 +104,7 @@ def _authored_path(spec: AssertionSpec) -> str:
 
 # Matches already found in one `evaluate` call, by pattern. Local to the
 # call, so the evaluator stays stateless and safe to share across threads.
-_Matches = dict[str, list[str]]
+_Matches = dict[tuple[str, ...], list[str]]
 
 
 def _locate(spec: AssertionSpec, workspace: Workspace, found: _Matches) -> tuple[str, str]:
@@ -115,16 +116,18 @@ def _locate(spec: AssertionSpec, workspace: Workspace, found: _Matches) -> tuple
     pattern = spec.file_glob
     if pattern is None:
         return _authored_path(spec), ""
-    if pattern not in found:
+    entries = glob_entries(pattern)
+    if entries not in found:
         # A pattern that skipped validation (model_construct) raises
         # PatternRefused here, which cli.py counts as an authoring error.
-        found[pattern] = workspace.match(pattern)
-    matches = found[pattern]
+        found[entries] = workspace.match(pattern)
+    matches = found[entries]
+    label = " or ".join(entries)
     if not matches:
-        return "", f"no file matched {pattern}; {_listing(workspace)}"
+        return "", f"no file matched {label}; {_listing(workspace)}"
     if len(matches) > 1:
         return "", (
-            f"{pattern} matched {len(matches):,} files: {_elide(matches)}; exactly one is required"
+            f"{label} matched {len(matches):,} files: {_elide(matches)}; exactly one is required"
         )
     return matches[0], ""
 

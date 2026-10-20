@@ -472,3 +472,10 @@ def test_a_glob_artifact_that_bypassed_validation_is_an_authoring_error(tmp_path
     bad = ArtifactGlob.model_construct(glob="plans/**/x.md")
     with pytest.raises(PatternRefused, match="'\\*\\*'"):
         build_request(_case(bad), RunResult(output="o", workspace=tmp_path))
+
+
+def test_a_glob_list_artifact_is_read_from_either_place(tmp_path):
+    _put(tmp_path, "progress.md", "Session 1: done")
+    entry = ArtifactGlob(glob=["progress.md", ".planning/*/progress.md"])
+    request = build_request(_case(entry), RunResult(output="o", workspace=tmp_path))
+    assert request.artifacts == {"progress.md | .planning/*/progress.md": "Session 1: done"}

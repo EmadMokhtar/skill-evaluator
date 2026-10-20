@@ -297,3 +297,15 @@ def test_a_file_check_on_the_skill_s_own_output_is_accepted():
         ),
     )
     ProductRunner(_product()).preflight([_skill()], {"ping": [case]})
+
+
+def test_a_file_glob_list_with_one_entry_on_the_delivered_skill_is_refused():
+    from skill_lens.models import AssertionSpec
+
+    case = _workspace_case(
+        assertions=[
+            AssertionSpec(kind="file-produced", file_glob=["*.md", ".claude/skills/*/SKILL.md"])
+        ]
+    )
+    with pytest.raises(ProductSetupError, match="copy of the skill"):
+        ProductRunner(_product()).preflight([_skill()], {"ping": [case]})

@@ -76,7 +76,9 @@ wildcards (`*`, `?`, `[...]`, no `**`), and it must match exactly one file, or t
 fails. A judge artifact takes the same pattern as `- glob: <pattern>`. Quote a pattern that
 starts with `*` or `[` (`file_glob: "*.md"`), or YAML will not load the file. A pattern also
 matches seeded `workspace:` files, so a `file-produced` glob that a seeded file satisfies is
-refused.
+refused. For a file that may be in one of several places, give a list of at least two
+entries, which may include literal paths; exactly one file across them must exist:
+`file_glob: [task_plan.md, .planning/*/task_plan.md]`.
 
 ```yaml
       - kind: file-produced

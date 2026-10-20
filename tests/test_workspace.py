@@ -554,3 +554,43 @@ def test_the_disk_walk_and_the_path_check_apply_one_rule(tmp_path, pattern, path
     ws = _workspace(tmp_path)
     ws.write(path, "x")
     assert (ws.match(pattern) == [path]) == glob_matches_path(pattern, path)
+
+
+# --- file_glob lists: one of several places ---------------------------------
+
+ROOT_OR_NAMED = ["task_plan.md", ".planning/*/task_plan.md"]
+
+
+@pytest.mark.parametrize(
+    ("value", "fragment"),
+    [
+        (["*.md"], "at least two"),
+        ([], "at least two"),
+        (["a.md", "a.md"], "twice"),
+        (["a.md", "**/a.md"], "'\\*\\*'"),
+        (["a.md", "../a.md"], "'\\.\\.'"),
+        (["a.md", "plans/"], "ends with '/'"),
+    ],
+)
+def test_check_glob_pattern_refuses_an_unusable_list(value, fragment):
+    with pytest.raises(PathRefused, match=fragment):
+        check_glob_pattern(value)
+
+
+@pytest.mark.parametrize("value", [ROOT_OR_NAMED, ["a.md", "b.md"], ["out/*.json", "*.json"]])
+def test_check_glob_pattern_accepts_a_list_whose_entries_may_be_literal(value):
+    check_glob_pattern(value)
+
+
+def test_match_over_a_list_finds_the_file_in_either_place(tmp_path):
+    ws = _workspace(tmp_path)
+    ws.write("task_plan.md", "x")
+    assert ws.match(ROOT_OR_NAMED) == ["task_plan.md"]
+    ws.write(".planning/run/task_plan.md", "x")
+    assert ws.match(ROOT_OR_NAMED) == [".planning/run/task_plan.md", "task_plan.md"]
+
+
+def test_match_over_a_list_counts_a_file_once(tmp_path):
+    ws = _workspace(tmp_path)
+    ws.write("a.md", "x")
+    assert ws.match(["a.md", "*.md"]) == ["a.md"]
