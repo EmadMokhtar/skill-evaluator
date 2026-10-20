@@ -1,3 +1,9 @@
+## v0.22.1 (2026-10-20)
+
+### Fix
+
+- fail loudly when a tagged release is not on PyPI (#104)
+
 ## v0.22.0 (2026-10-20)
 
 ### Feat
