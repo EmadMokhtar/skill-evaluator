@@ -454,12 +454,28 @@ re-upload of a version that already exists, which is why every gate here fails c
 corollary is that there is **no manual path to PyPI**; a locally bumped and pushed tag
 produces a run with nothing to release.
 
-### A merge with no releasable commit publishes nothing and fails nothing
+### A merge with no releasable commit publishes nothing, and fails only for a tag PyPI does not have
 
 `cz bump` signals "nothing to release" through its exit code — `21` (`NoneIncrementExit`)
 and `3` (`NoCommitsFoundError`) — so the bump step deliberately runs without `set -e`, which
 would discard the code before it could be read, and checks every other command by hand
-instead.
+instead. That no-op is where one more check runs. A version can be tagged and never
+published: `publish` waits for a reviewer inside the `pypi` environment, and if the approval
+never comes the run ends with the tag on `main` and nothing on PyPI; every later run reads
+only the commits since that tag, so nothing else would notice (issue #103, `v0.21.0`).
+`scripts/check_tags_published.py` reads every release tag on `origin` (`git ls-remote`, its
+exit status checked apart from its output) against PyPI's release list, with no credentials,
+and fails for a tag whose version PyPI does not list with at least one file — naming the
+release run that should have published it (the `release.yml` run on the tag commit's
+parent) and whether GitHub's 30-day re-run window is still open. It runs only when this run
+released nothing, so a release in flight is never failed over an older tag; `security.yml`
+runs the same command, spelled byte for byte alike, on its weekly schedule and on demand, so
+a stranded tag is found even when nothing merges. A PyPI or `origin` the check cannot read
+is "could not check", exit `2` — never "missing", and never a silent pass; a tag PyPI has is
+never re-uploaded. `scripts/spent-tags.txt` is the one exception list: a tag acknowledged as
+never going to be published, with its reason. It only grows, by a reviewed commit, and an
+entry for a tag PyPI does have fails the check, so the list can never hide a release that
+exists.
 
 ### A run that `main` outran publishes nothing and fails nothing
 
