@@ -607,3 +607,50 @@ def test_one_evaluation_walks_the_workspace_once_per_pattern(tmp_path, monkeypat
     )
     assert AssertionEvaluator().evaluate(case, result).passed is True
     assert seen == [PLAN]
+
+
+ROOT_OR_NAMED = ["task_plan.md", ".planning/*/task_plan.md"]
+
+
+def test_a_file_glob_list_reads_the_file_in_either_place(tmp_path):
+    for layout in ("task_plan.md", ".planning/run-1/task_plan.md"):
+        root = tmp_path / layout.replace("/", "_")
+        root.mkdir()
+        result = _tree(root, {layout: "## Goal\n"})
+        spec = AssertionSpec(kind="regex", value="(?m)^## Goal", file_glob=ROOT_OR_NAMED)
+        assert AssertionEvaluator().evaluate(_case(spec), result).passed is True, layout
+
+
+def test_a_file_glob_list_matching_in_two_places_fails(tmp_path):
+    result = _tree(tmp_path, {"task_plan.md": "x", ".planning/a/task_plan.md": "x"})
+    score = AssertionEvaluator().evaluate(
+        _case(AssertionSpec(kind="file-produced", file_glob=ROOT_OR_NAMED)), result
+    )
+    assert score.passed is False
+    assert "matched 2 files: .planning/a/task_plan.md, task_plan.md" in score.checks[0].evidence
+
+
+def test_a_file_glob_list_matching_nothing_names_every_entry(tmp_path):
+    result = _tree(tmp_path, {"todo.py": "x"})
+    score = AssertionEvaluator().evaluate(
+        _case(AssertionSpec(kind="file-produced", file_glob=ROOT_OR_NAMED)), result
+    )
+    assert "no file matched task_plan.md or .planning/*/task_plan.md" in score.checks[0].evidence
+
+
+def test_two_checks_on_one_list_walk_the_workspace_once(tmp_path, monkeypatch):
+    result = _tree(tmp_path, {"task_plan.md": "## Goal"})
+    seen = []
+    real_match = Workspace.match
+
+    def counting_match(self, pattern):
+        seen.append(pattern)
+        return real_match(self, pattern)
+
+    monkeypatch.setattr(Workspace, "match", counting_match)
+    case = _case(
+        AssertionSpec(kind="file-produced", file_glob=ROOT_OR_NAMED),
+        AssertionSpec(kind="contains", value="Goal", file_glob=ROOT_OR_NAMED),
+    )
+    assert AssertionEvaluator().evaluate(case, result).passed is True
+    assert len(seen) == 1

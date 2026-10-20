@@ -17,6 +17,7 @@ import re
 import shutil
 import stat
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from skill_lens.paths import (
     PathRefused,
     check_glob_pattern,
     check_relative_path,
+    glob_entries,
     glob_segments,
     segment_matches,
 )
@@ -208,16 +210,25 @@ class Workspace:
             if item.is_file()
         )
 
-    def match(self, pattern: str) -> list[str]:
+    def match(self, pattern: str | Sequence[str]) -> list[str]:
         """Every file `pattern` matches, relative to the root, sorted.
 
-        One directory listing per segment, never a recursive walk, and a
-        symlinked directory is never entered, so the walk cannot leave the
-        root. Matching is `paths.segment_matches`, per segment, so a run gives
-        the same answer on macOS and Linux. Deciding what one match, none or
-        several *means* is the caller's job.
+        `pattern` is one glob or a list of alternatives; a file several
+        entries match is listed once. One directory listing per segment,
+        never a recursive walk, and a symlinked directory is never entered,
+        so the walk cannot leave the root. Matching is
+        `paths.segment_matches`, per segment, so a run gives the same answer
+        on macOS and Linux. Deciding what one match, none or several *means*
+        is the caller's job.
         """
         check_glob_pattern(pattern)
+        found: set[str] = set()
+        for entry in glob_entries(pattern):
+            found.update(self._walk(entry))
+        return sorted(found)
+
+    def _walk(self, pattern: str) -> list[str]:
+        """The files one validated entry matches, level by level."""
         *parents, last = glob_segments(pattern)
         directories = [self.root]
         for segment in parents:
@@ -227,12 +238,12 @@ class Workspace:
                 for entry in _entries(directory)
                 if segment_matches(entry.name, segment) and _is_real_directory(entry)
             ]
-        return sorted(
+        return [
             Path(entry.path).relative_to(self.root).as_posix()
             for directory in directories
             for entry in _entries(directory)
             if segment_matches(entry.name, last) and _is_file_candidate(entry)
-        )
+        ]
 
     def _totals(self) -> tuple[int, int]:
         """(file count, total bytes) as they are on disk right now."""

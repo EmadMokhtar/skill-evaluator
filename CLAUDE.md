@@ -365,7 +365,8 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **`file:` or `judge.artifacts` in a case with no `workspace:` block is an authoring error**
   (exit 2), and so is a `judge.artifacts` entry that could never be produced.
 - **A `file_glob` must match exactly one regular file.** Zero or several is a failed check,
-  never an error and never a pass; `**`, no wildcard, a backslash, a trailing `/` or `/.`,
+  never an error and never a pass, and a list of alternatives is one check (exactly one file
+  across all its entries, which may be literal paths; at least two different entries); `**`, no wildcard, a backslash, a trailing `/` or `/.`,
   an unclosed `[` and a set `fnmatch` reads as matching nothing are `PatternRefused` from
   `check_glob_pattern`, run by the models themselves (an authoring error in `cli.py` too).
   `paths.segment_matches` is the one per-level rule, for `Workspace.match` on disk and

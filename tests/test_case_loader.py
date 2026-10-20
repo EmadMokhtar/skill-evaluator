@@ -1664,3 +1664,19 @@ def test_a_content_check_may_glob_a_seeded_file(tmp_path):
     )
     [case] = parse_cases_file(path)
     assert case.assertions[0].file_glob == "*.md"
+
+
+def test_a_file_glob_list_loads_from_yaml(tmp_path):
+    path = _glob_case(
+        tmp_path,
+        "      - kind: file-produced\n"
+        "        file_glob: [task_plan.md, .planning/*/task_plan.md]\n",
+    )
+    [case] = parse_cases_file(path)
+    assert case.assertions[0].file_glob == ["task_plan.md", ".planning/*/task_plan.md"]
+
+
+def test_a_one_entry_file_glob_list_is_refused_at_load(tmp_path):
+    path = _glob_case(tmp_path, "      - kind: file-produced\n        file_glob: ['*.md']\n")
+    with pytest.raises(CaseParseError, match="at least two"):
+        parse_cases_file(path)

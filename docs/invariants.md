@@ -802,7 +802,10 @@ failure would blame the skill for a check that could not have held under any out
 
 `paths.segment_matches` is the one rule for one level: `Workspace.match` walks the disk
 with it for `AssertionEvaluator` and the judge's `_artifacts`, and `glob_matches_path`
-compares a known path with it for the checks that run before any directory exists. No match
+compares a known path with it for the checks that run before any directory exists. A list
+of alternatives is one check: its entries' matches are pooled, a file two entries match
+counts once, and exactly one file across them all is required; an entry of a list may be a
+literal path, and a list needs at least two different entries. No match
 and several matches are both failed checks, never errors and never passes: two plan
 directories must not pass by luck, and a missing file is the skill's doing. `**`, a
 pattern with no wildcard, a backslash, a trailing `/` or `/.`, an unclosed `[` and a set

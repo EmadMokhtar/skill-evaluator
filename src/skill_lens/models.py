@@ -10,7 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from skill_lens.matching import structural_match
-from skill_lens.paths import PathRefused, check_glob_pattern, glob_matches_path
+from skill_lens.paths import PathRefused, check_glob_pattern, glob_entries, glob_matches_path
 
 CaseStatus = Literal["passed", "failed", "errored"]
 ToolParamType = Literal["string", "integer", "number", "boolean"]
@@ -230,7 +230,7 @@ class AssertionSpec(BaseModel):
     kind: str
     value: str | None = None
     file: str | None = None
-    file_glob: str | None = None
+    file_glob: str | list[str] | None = None
     json_schema: dict[str, Any] | None = None
 
     @model_validator(mode="after")
@@ -249,7 +249,7 @@ class AssertionSpec(BaseModel):
             _check_glob(self.file_glob)
         return self
 
-    def target(self) -> tuple[str, str] | None:
+    def target(self) -> tuple[str, str | list[str]] | None:
         """The key naming the file this assertion reads, and its value; None for the output."""
         if self.file_glob is not None:
             return "file_glob", self.file_glob
@@ -258,7 +258,7 @@ class AssertionSpec(BaseModel):
         return None
 
 
-def _check_glob(pattern: str) -> None:
+def _check_glob(pattern: str | list[str] | tuple[str, ...]) -> None:
     """`check_glob_pattern`, raising the ValueError a Pydantic validator needs."""
     try:
         check_glob_pattern(pattern)
@@ -455,18 +455,18 @@ class ArtifactGlob(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    glob: str
+    glob: str | tuple[str, ...]
 
     @field_validator("glob")
     @classmethod
-    def _usable(cls, value: str) -> str:
+    def _usable(cls, value: str | tuple[str, ...]) -> str | tuple[str, ...]:
         _check_glob(value)
         return value
 
 
 def artifact_name(entry: str | ArtifactGlob) -> str:
     """What an artifact is called in the judge prompt: the text its author wrote."""
-    return entry if isinstance(entry, str) else entry.glob
+    return entry if isinstance(entry, str) else " | ".join(glob_entries(entry.glob))
 
 
 class JudgeSpec(BaseModel):
@@ -554,7 +554,11 @@ class EvalCase(BaseModel):
             if spec.kind != "file-produced" or spec.file_glob is None:
                 continue
             pattern = spec.file_glob
-            seeded = [name for name in self.workspace.files if glob_matches_path(pattern, name)]
+            seeded = [
+                name
+                for name in self.workspace.files
+                if any(glob_matches_path(entry, name) for entry in glob_entries(pattern))
+            ]
             if seeded:
                 raise ValueError(
                     f"assertion #{position} (file-produced) file_glob {pattern!r} matches "

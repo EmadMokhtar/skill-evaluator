@@ -686,3 +686,31 @@ def test_a_file_produced_glob_a_seeded_file_satisfies_is_refused_by_the_model():
 def test_one_text_as_a_path_and_as_a_glob_artifact_is_refused_by_the_model():
     with pytest.raises(ValidationError, match="once as a path and once as a glob"):
         JudgeSpec(rubric=["r"], artifacts=["a*.md", {"glob": "a*.md"}])
+
+
+def test_an_assertion_takes_a_list_of_places():
+    spec = AssertionSpec(
+        kind="file-produced", file_glob=["task_plan.md", ".planning/*/task_plan.md"]
+    )
+    assert spec.target() == ("file_glob", ["task_plan.md", ".planning/*/task_plan.md"])
+
+
+def test_an_assertion_refuses_a_one_entry_list():
+    with pytest.raises(ValidationError, match="at least two"):
+        AssertionSpec(kind="file-produced", file_glob=["*.md"])
+
+
+def test_a_glob_artifact_takes_a_list_and_is_named_by_its_entries():
+    entry = ArtifactGlob(glob=["progress.md", ".planning/*/progress.md"])
+    assert artifact_name(entry) == "progress.md | .planning/*/progress.md"
+    assert len({entry, ArtifactGlob(glob=["progress.md", ".planning/*/progress.md"])}) == 1
+
+
+def test_a_file_produced_list_with_a_seeded_alternative_is_refused():
+    with pytest.raises(ValidationError, match="matches the seeded file 'notes.md'"):
+        EvalCase(
+            name="n",
+            task="t",
+            workspace=WorkspaceSpec(files={"notes.md": "hi"}),
+            assertions=[AssertionSpec(kind="file-produced", file_glob=["notes.md", "*/notes.md"])],
+        )
