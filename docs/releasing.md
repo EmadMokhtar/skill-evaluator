@@ -295,16 +295,19 @@ run the Security workflow by hand (**Actions → Security → Run workflow**) to
 go green.
 
 When the window has closed, or there is nothing to re-run — the artifacts were never built,
-or the tag was pushed by hand and no release run exists — the version is spent. Record the
-tag in `scripts/spent-tags.txt`, one per line with the date and the reason after a `#`:
+or the tag was pushed by hand, in which case the run on its parent commit *succeeded* and the
+message says so: that run stranded nothing and has no failed jobs — the version is spent.
+Record the tag in `scripts/spent-tags.txt`, one per line with the date and the reason after a
+`#`:
 
 ```
 v0.21.0  # 2026-11-05: publish was never approved and the 30-day re-run window closed
 ```
 
 The check accepts a listed tag and says so in its output. The file only grows, by a reviewed
-commit, and an entry for a tag PyPI *does* have fails the check with "Remove the entry": the
-list exists to acknowledge a gap, never to hide a release. There is no automated recovery
+commit; an entry with no reason is refused (exit `2`), and an entry for a tag PyPI *does* have
+fails the check with "Remove the entry": the list exists to acknowledge a gap, never to hide a
+release. There is no automated recovery
 after the window yet; rebuilding from the tag would publish bytes this run's `verify` did not
 test, and is left to a later change.
 
@@ -312,7 +315,9 @@ Two things the check never does. It never re-uploads a version PyPI lists — Py
 anyway, and the check only reads. And it never turns an outage into a finding: a PyPI or
 `origin` it cannot read (three attempts for PyPI) is reported as "Could not check … Nothing
 was verified", exit `2`, so a flaky network is a red run that says so rather than either a
-false "missing" or a silent pass. Exit `1` is a finding; exit `0` is every tag accounted for.
+false "missing" or a silent pass. So is a PyPI response without its release list, and an
+`origin` that lists no release tag at all while PyPI has releases — a wrong or empty remote,
+not a clean bill. Exit `1` is a finding; exit `0` is every tag accounted for.
 
 ## There is no manual path to PyPI
 
@@ -338,7 +343,7 @@ the run records "nothing to release": no build, no artifact, no `publish`. Eithe
 left with a real, permanent tag and no published package behind it, which is worse than doing
 nothing — the tag cannot simply be re-cut, since `vX.Y.Z` would then mean two different things
 depending on which push you ask about. The [tag check](#a-tag-that-never-reached-pypi) reports
-it, with no release run to re-run, until you record it in `scripts/spent-tags.txt`.
+it, with no failed job to re-run, until you record it in `scripts/spent-tags.txt`.
 
 ### Recovering a failed GitHub Release
 

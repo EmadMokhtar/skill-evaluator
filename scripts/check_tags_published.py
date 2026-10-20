@@ -54,9 +54,10 @@ RERUN_WINDOW = timedelta(days=30)
 # `https://github.com/o/r.git`, `git@github.com:o/r.git`, `ssh://git@github.com/o/r`.
 REPOSITORY_RE = re.compile(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
 
-# What a version starts like under Commitizen's scheme; `v0` or `v1.0.0-docs`
-# under the prefix is not a release tag.
-VERSION_RE = re.compile(r"^\d+\.\d+\.\d+")
+# What Commitizen's PEP 440 scheme emits -- `0.22.0`, `0.22.0rc1`, `0.22.0.post1`,
+# `0.22.0.dev3` -- and nothing looser: `v0` or `v1.0.0-docs` under the prefix is
+# not a release tag, and PyPI could never list it.
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?$")
 
 
 class CheckUnavailable(Exception):
@@ -142,21 +143,35 @@ def parse_ls_remote(output: str, fmt: TagFormat) -> tuple[list[ReleaseTag], list
 
 def pypi_versions(payload: dict) -> tuple[set[str], set[str]]:
     """The versions PyPI lists with at least one file, and those with none.
-    A release whose files were all deleted is listed but cannot be installed."""
-    releases = payload.get("releases") or {}
+    A release whose files were all deleted is listed but cannot be installed.
+
+    PyPI documents `releases` as deprecated. The day it is dropped, reading
+    it as empty would report every tag missing; so a payload without it is
+    `CheckUnavailable` instead."""
+    releases = payload.get("releases")
+    if not isinstance(releases, dict):
+        raise CheckUnavailable(
+            "PyPI's response has no releases list (see https://docs.pypi.org/api/json/)"
+        )
     with_files = {version for version, files in releases.items() if files}
     without_files = set(releases) - with_files
     return with_files, without_files
 
 
 def parse_spent(text: str) -> dict[str, str]:
-    """`tag  # reason` per line; `#` starts a comment; blank lines are skipped."""
+    """`tag  # reason` per line; `#` starts a comment; blank lines are skipped.
+    An entry with no reason has lost the why the file exists to keep."""
     spent: dict[str, str] = {}
-    for line in text.splitlines():
+    for number, line in enumerate(text.splitlines(), start=1):
         tag, _, reason = line.partition("#")
-        tag = tag.strip()
-        if tag:
-            spent[tag] = reason.strip()
+        tag, reason = tag.strip(), reason.strip()
+        if not tag:
+            continue
+        if not reason:
+            raise CheckUnavailable(
+                f"{SPENT_NAME}:{number}: {tag} has no reason; write `{tag}  # <date>: <why>`"
+            )
+        spent[tag] = reason
     return spent
 
 
@@ -292,7 +307,14 @@ def describe_run(repo: str | None, tag: ReleaseTag, now: datetime) -> list[str]:
         # pushed the tag is the one whose head is the tag commit's parent.
         listing = fetch_github(f"/repos/{repo}/actions/runs?head_sha={parent}&event=push")
         runs = [r for r in listing.get("workflow_runs") or [] if r.get("path") == RELEASE_WORKFLOW]
-    except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError) as exc:
+    except (
+        CheckUnavailable,
+        urllib.error.URLError,
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+    ) as exc:
         return [f"{lead} failed: {exc}."]
     if not runs:
         return [
@@ -300,9 +322,20 @@ def describe_run(repo: str | None, tag: ReleaseTag, now: datetime) -> list[str]:
             "the release workflow did not push this tag."
         ]
     run = runs[0]
+    conclusion = run.get("conclusion") or "in progress"
+    if conclusion == "success":
+        # A run that stranded a tag cannot have succeeded: `publish` ran, so
+        # the version reached PyPI. Every push to main has a release run, so
+        # for a tag pushed by hand this is main's previous tip's run, which
+        # released something else or nothing -- and has no failed jobs.
+        return [
+            f"  The release run on its commit's parent, {run['html_url']}, succeeded, so it "
+            "did not strand this tag: either the tag was pushed outside the workflow, or "
+            "PyPI no longer has a version that run published. There are no failed jobs to "
+            "re-run; the version is spent."
+        ]
     started = _parse_time(str(run["created_at"]))
     deadline = started + RERUN_WINDOW
-    conclusion = run.get("conclusion") or "in progress"
     lines = [
         f"  The run that should have published it: {run['html_url']} "
         f"(started {started:%Y-%m-%d}, {conclusion})."
@@ -341,6 +374,13 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
         project = read_project_name(pyproject_text)
         tags, ignored = parse_ls_remote(ls_remote(), fmt)
         with_files, without_files = pypi_versions(fetch_pypi(project))
+        if with_files and not tags:
+            # origin pointing at the wrong or an empty repository lists nothing
+            # and exits 0; "0 tags, all published" would be a vacuous pass.
+            raise CheckUnavailable(
+                f"PyPI lists {len(with_files)} releases but origin has no release tag "
+                f"under the prefix {fmt.prefix!r}"
+            )
         spent = parse_spent(SPENT_FILE.read_text(encoding="utf-8"))
     except (CheckUnavailable, OSError) as exc:
         line = f"Could not check: {exc}. Nothing was verified."

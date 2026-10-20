@@ -47,6 +47,11 @@ def test_tag_format_derives_the_version_from_the_prefix_and_suffix():
     assert fmt.version("v0.22.0rc1") == "0.22.0rc1"
     assert fmt.version("0.21.0") is None, "no prefix"
     assert fmt.version("v0") is None, "not a version"
+    assert fmt.version("v1.0.0-docs") is None, "a suffix PEP 440 does not know"
+    assert fmt.version("v1.0.0foo") is None
+    assert fmt.version("v0.22.0a0") == "0.22.0a0"
+    assert fmt.version("v0.22.0.post1") == "0.22.0.post1"
+    assert fmt.version("v0.22.0.dev3") == "0.22.0.dev3"
     assert check.TagFormat("rel-", "-final").version("rel-1.2.3-final") == "1.2.3"
     assert check.TagFormat("rel-", "-final").version("rel-1.2.3") is None, "no suffix"
 
@@ -102,23 +107,49 @@ def test_pypi_versions_separates_releases_with_files_from_empty_ones():
 
 def test_pypi_versions_of_a_project_with_no_releases_is_empty():
     assert check.pypi_versions({"releases": {}}) == (set(), set())
-    assert check.pypi_versions({}) == (set(), set())
+
+
+def test_pypi_versions_without_the_releases_key_is_unavailable():
+    """PyPI documents `releases` as deprecated. The day it goes, every tag
+    would read as missing; that must be exit 2, not 24 findings."""
+    with pytest.raises(check.CheckUnavailable, match="releases"):
+        check.pypi_versions({})
+    with pytest.raises(check.CheckUnavailable, match="releases"):
+        check.pypi_versions({"releases": None})
 
 
 # --- spent-tags.txt ------------------------------------------------------------
 
 
 def test_parse_spent_reads_tags_with_reasons_and_skips_comments():
-    text = "# header\n\nv0.3.0  # 2026-01-01: build failed after the tag\nv0.4.0\n"
+    text = (
+        "# header\n\nv0.3.0  # 2026-01-01: build failed after the tag\n"
+        "v0.4.0 # 2026-02-02: pushed by hand\n"
+    )
     assert check.parse_spent(text) == {
         "v0.3.0": "2026-01-01: build failed after the tag",
-        "v0.4.0": "",
+        "v0.4.0": "2026-02-02: pushed by hand",
     }
 
 
-def test_the_spent_file_exists_and_lists_nothing():
-    """v0.21.0 is recoverable (its run can be re-run), so it is not spent."""
-    assert check.parse_spent(check.SPENT_FILE.read_text(encoding="utf-8")) == {}
+def test_parse_spent_refuses_an_entry_without_a_reason():
+    """The file's header promises a date and a reason for every entry; an
+    entry without one has lost the why, and is a malformed exception list."""
+    with pytest.raises(check.CheckUnavailable, match="v0.4.0"):
+        check.parse_spent("v0.4.0\n")
+    with pytest.raises(check.CheckUnavailable, match="v0.4.0"):
+        check.parse_spent("v0.4.0  #\n")
+
+
+def test_the_spent_file_is_well_formed():
+    """Whatever the file lists must be a release tag under the project's
+    prefix, with a reason. (Today it lists nothing: v0.21.0 is recoverable
+    by re-running its run, so it is not spent.)"""
+    fmt = check.read_tag_format(check.PYPROJECT.read_text(encoding="utf-8"))
+    spent = check.parse_spent(check.SPENT_FILE.read_text(encoding="utf-8"))
+    for tag, reason in spent.items():
+        assert fmt.version(tag) is not None, f"{tag} is not a release tag"
+        assert reason, f"{tag} has no reason"
 
 
 # --- the verdict ---------------------------------------------------------------
@@ -271,6 +302,59 @@ def test_a_tag_with_no_release_run_says_the_workflow_did_not_push_it(harness, mo
     assert "Re-run" not in err
 
 
+def test_a_tag_whose_parent_run_succeeded_is_not_told_to_re_run(harness, monkeypatch, capsys):
+    """A tag pushed by hand after a local `cz bump` sits on top of main's
+    previous tip, which has a release run of its own -- a successful one.
+    That run stranded nothing, and has no failed jobs to re-run."""
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
+    succeeded = {**RELEASE_RUN, "conclusion": "success"}
+    monkeypatch.setattr(check, "fetch_github", _github([succeeded]))
+
+    assert check.main([], now=NOW) == 1
+
+    err = capsys.readouterr().err
+    assert (
+        f"The release run on its commit's parent, {RUN_URL}, succeeded, so it did not strand "
+        "this tag: either the tag was pushed outside the workflow, or PyPI no longer has a "
+        "version that run published. There are no failed jobs to re-run; the version is spent."
+    ) in err
+    assert "Re-run its failed jobs" not in err
+    assert "The run that should have published it" not in err
+
+
+def test_no_release_tags_while_pypi_has_releases_is_unknown_not_a_clean_bill(
+    harness, monkeypatch, capsys
+):
+    """`git ls-remote` against the wrong or an empty origin lists nothing and
+    exits 0. With PyPI holding releases, that is never a healthy state, and
+    "0 tags, all published" would be the vacuous pass this project refuses."""
+    monkeypatch.setattr(check, "ls_remote", lambda: "")
+
+    assert check.main([], now=NOW) == 2
+
+    captured = capsys.readouterr()
+    assert "Could not check: PyPI lists 2 releases but origin has no release tag" in captured.err
+    assert "prefix 'v'" in captured.err
+    assert "Every release tag" not in captured.out
+
+
+def test_a_lookup_that_cannot_run_is_a_note_not_a_crash(harness, monkeypatch, capsys):
+    """`_get` refuses a non-https API URL with CheckUnavailable (a GitHub
+    Enterprise Server set to http). Inside the lookup that is a failed
+    lookup like any other, never an uncaught exception."""
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
+
+    def refused(path):
+        raise check.CheckUnavailable("refusing to open a non-https URL: http://ghes/x")
+
+    monkeypatch.setattr(check, "fetch_github", refused)
+
+    assert check.main([], now=NOW) == 1
+
+    err = capsys.readouterr().err
+    assert "Looking up the run that should have published it failed: refusing to open" in err
+
+
 def test_a_failed_lookup_changes_the_message_not_the_verdict(harness, monkeypatch, capsys):
     monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
 
@@ -341,12 +425,14 @@ def test_a_spent_tag_that_pypi_has_is_stale(harness, capsys):
 def test_a_tag_under_the_prefix_that_is_not_a_version_is_listed_not_flagged(
     harness, monkeypatch, capsys
 ):
-    monkeypatch.setattr(check, "ls_remote", lambda: _ls_remote("v0.20.0", "v0.21.0", "v0"))
+    monkeypatch.setattr(
+        check, "ls_remote", lambda: _ls_remote("v0.20.0", "v0.21.0", "v0", "v1.0.0-docs")
+    )
 
     assert check.main([], now=NOW) == 0
 
     out = capsys.readouterr().out
-    assert "Ignored under the tag prefix (not a version): v0" in out
+    assert "Ignored under the tag prefix (not a version): v0, v1.0.0-docs" in out
     assert "Every release tag on origin is on PyPI (2 tags)." in out
 
 
@@ -363,6 +449,16 @@ def test_an_unreadable_pypi_is_unknown_not_missing(harness, monkeypatch, capsys)
         "Could not check: PyPI could not be read after 3 attempts: timed out. Nothing was verified."
         in err
     )
+    assert "not on PyPI" not in err
+
+
+def test_a_pypi_payload_without_releases_is_unknown_not_missing(harness, monkeypatch, capsys):
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: {"info": {"name": "skill-lens"}})
+
+    assert check.main([], now=NOW) == 2
+
+    err = capsys.readouterr().err
+    assert "Could not check: " in err
     assert "not on PyPI" not in err
 
 
