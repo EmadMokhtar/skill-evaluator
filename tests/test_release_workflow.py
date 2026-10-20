@@ -451,19 +451,36 @@ def test_a_rewritten_main_is_not_a_run_that_was_outrun(workflow, tmp_path):
     assert "pushed=" not in output
 
 
+PUSHED = "steps.push.outputs.pushed == 'true'"
+RECOVERED = "steps.recover.outputs.recovered == 'true'"
+EITHER_PATH = f"{PUSHED} || {RECOVERED}"
+
+
 def test_everything_after_the_push_waits_for_it_to_land(workflow):
     """A run that main outran has cut a version it never pushed, so `bumped`
     alone would send the ls-remote check, the build and `publish` after a
     tag that is not on origin. Every later step, and the job output the
-    `publish` job reads, gate on the push step instead."""
+    `publish` job reads, gate on the push step instead -- or, for the three
+    uploads and the outputs, on the recover step, which is the one other
+    way an artifact comes to exist and gates on nothing the bump wrote."""
     steps = workflow["jobs"]["release"]["steps"]
     push_index = next(i for i, step in enumerate(steps) if step.get("id") == "push")
     assert steps[push_index]["if"] == "steps.bump.outputs.bumped == 'true'"
     for step in steps[push_index + 1 :]:
-        assert step.get("if") == "steps.push.outputs.pushed == 'true'", step.get("name")
+        if step.get("id") == "recover":
+            assert step["if"] == "steps.bump.outputs.bumped == 'false'"
+        elif "upload-artifact" in str(step.get("uses", "")):
+            assert step["if"] == EITHER_PATH, step.get("name")
+        else:
+            assert step.get("if") == PUSHED, step.get("name")
     outputs = workflow["jobs"]["release"]["outputs"]
-    assert outputs["bumped"] == "${{ steps.push.outputs.pushed }}"
-    assert outputs["version"] == "${{ steps.bump.outputs.version }}"
+    assert outputs["bumped"] == "${{ " + EITHER_PATH + " }}"
+    assert outputs["version"] == (
+        "${{ steps.bump.outputs.version || steps.recover.outputs.version }}"
+    )
+    assert "steps.bump.outputs.bumped" not in outputs["bumped"], (
+        "a version cut and never pushed must never reach publish"
+    )
 
 
 def test_the_push_step_reads_the_version_from_its_environment(workflow):
@@ -585,6 +602,7 @@ def _step_index(steps: list[dict], **match: str) -> int:
 def test_a_merge_with_nothing_to_release_checks_every_tag_against_pypi(workflow):
     steps = workflow["jobs"]["release"]["steps"]
     check = next(step for step in steps if "check_tags_published" in str(step.get("run", "")))
+    assert check.get("id") == "check", "the recover step reads this step's plan file"
     assert check["if"] == "steps.bump.outputs.bumped == 'false'"
     assert _step_index(steps, id="bump") < steps.index(check) < _step_index(steps, id="push")
     assert check["run"].strip() == "python3 scripts/check_tags_published.py"
@@ -592,6 +610,343 @@ def test_a_merge_with_nothing_to_release_checks_every_tag_against_pypi(workflow)
     # The expression that resolves to the token on the runner, not a token (S105).
     assert check["env"]["GITHUB_TOKEN"] == "${{ github.token }}"  # noqa: S105
     assert (REPO_ROOT / "scripts" / "check_tags_published.py").is_file()
+
+
+# --- Recovering a stranded tag ------------------------------------------------
+#
+# When the check above finds a tag whose run can no longer be re-run -- or that
+# no release run pushed -- it hands that one tag to the recover step through a
+# plan file instead of failing. The step verifies the tag's commit with the
+# same commands `verify` runs, builds from it, and sets the outputs `publish`
+# reads. The design and the reasons for verifying inside `release` rather
+# than in a job ahead of `verify` are in
+# docs/superpowers/specs/2026-10-20-skill-lens-stranded-tag-recovery-design.md.
+
+
+def _recover_step(workflow: dict) -> dict:
+    steps = workflow["jobs"]["release"]["steps"]
+    return next(step for step in steps if step.get("id") == "recover")
+
+
+def _script_lines(step: dict) -> list[str]:
+    return [line.strip() for line in str(step["run"]).splitlines() if line.strip()]
+
+
+def test_a_stranded_tag_is_recovered_on_the_path_that_found_it(workflow):
+    """The recover step runs under the check's own condition, reads the plan
+    file the check wrote, and sits right before the uploads, which is where
+    its artifacts are read from. Nothing reaches it through `${{ }}`: the
+    tests below run its script verbatim."""
+    steps = workflow["jobs"]["release"]["steps"]
+    check = steps[_step_index(steps, id="check")]
+    recover = _recover_step(workflow)
+    assert recover["if"] == check["if"] == "steps.bump.outputs.bumped == 'false'"
+    assert recover["shell"] == "bash"
+    assert "${{" not in recover["run"]
+    plan = check["env"]["RECOVERY_PLAN"]
+    assert plan and "/" not in plan, "the plan lives in the workspace, under a bare name"
+    assert recover["env"]["RECOVERY_PLAN"] == plan
+    uploads = [i for i, step in enumerate(steps) if "upload-artifact" in str(step.get("uses", ""))]
+    assert steps.index(check) < steps.index(recover) < min(uploads)
+
+
+def test_the_recover_step_verifies_the_tag_exactly_as_verify_does(workflow):
+    """Every `run:` command of `verify`, spelled byte for byte, in `verify`'s
+    order, and all of them before the build. Two spellings of the
+    verification would drift the first time one of them changed -- the same
+    reason the audit command is pinned across its copies."""
+    verify_commands = [
+        str(step["run"]).strip() for step in workflow["jobs"]["verify"]["steps"] if "run" in step
+    ]
+    assert len(verify_commands) >= 5, verify_commands
+    lines = _script_lines(_recover_step(workflow))
+    positions = []
+    for command in verify_commands:
+        assert command in lines, f"the recover step does not run {command!r} as verify spells it"
+        positions.append(lines.index(command))
+    assert positions == sorted(positions), "the recover step runs verify's commands out of order"
+    build_at = next(i for i, line in enumerate(lines) if line.startswith("uv build"))
+    assert max(positions) < build_at, "the recover step builds before it has verified"
+
+
+def test_the_recover_step_builds_and_exports_as_the_bump_path_does(workflow):
+    """Same audited backend, same SBOM shape, same notes command -- and
+    every output written outside the worktree, where the shared uploads read."""
+    lines = _script_lines(_recover_step(workflow))
+    script = "\n".join(lines)
+    assert "uv export --frozen --only-group build --no-hashes -o build-constraints.txt" in lines
+    assert "uv build --build-constraint build-constraints.txt --out-dir ../dist" in lines
+    sbom = next(line for line in lines if "cyclonedx" in line)
+    assert "--format cyclonedx1.5" in sbom and "--frozen" in sbom
+    assert "--all-extras" in sbom and "--no-default-groups" in sbom
+    assert re.search(r'-o "\.\./sbom/skill-lens-\$\{?version\}?\.cdx\.json"', script), script
+    notes = next(line for line in lines if "cz changelog" in line)
+    assert "--dry-run" in notes and notes.endswith("> ../notes.md"), notes
+    assert 'uv run cz changelog "$version" --dry-run' in notes
+
+
+def _stranded(tmp_path: Path) -> tuple[Path, Path, str, str]:
+    """The release job's checkout on a later merge that releases nothing:
+    origin holds a bump commit and its annotated tag v9.9.9, nothing was
+    ever published, and main has moved on by one docs commit."""
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
+    seed = _clone(origin, tmp_path / "seed")
+    _commit(seed, "feat: the release that stranded")
+    tag_commit = _commit(seed, "bump: version 0.0.0 → 9.9.9 [skip ci]")
+    _git("tag", "-a", "v9.9.9", "-m", "9.9.9", cwd=seed)
+    _git("push", "-q", "--follow-tags", "origin", "HEAD:main", cwd=seed)
+    _commit(seed, "docs: a later merge that releases nothing")
+    _git("push", "-q", "origin", "HEAD:main", cwd=seed)
+    work = _clone(origin, tmp_path / "work")
+    return origin, work, _git("rev-parse", "HEAD", cwd=work), tag_commit
+
+
+FAKE_UV = r"""#!/bin/sh
+# A stand-in for uv: logs every invocation and writes the files the recover
+# step expects, so the step's own logic can be run without a network, a
+# virtualenv or the real test suite.
+printf '%s\n' "$*" >> "$FAKE_UV_LOG"
+if [ "${FAKE_UV_FAIL:-}" = "$1 $2" ]; then
+  echo "fake uv: $1 $2 failed on purpose" >&2
+  exit 1
+fi
+case "$*" in
+  "run cz version --project") printf '%s\n' "${FAKE_UV_VERSION:-9.9.9}"; exit 0 ;;
+  "run cz changelog "*) printf '## v%s\n' "$4"; exit 0 ;;
+esac
+target=""
+while [ $# -gt 0 ]; do
+  case "$1" in -o|--out-dir) target="$2"; shift ;; esac
+  shift
+done
+case "$target" in
+  "") ;;
+  *.txt|*.json) mkdir -p "$(dirname "$target")"; echo fake > "$target" ;;
+  *) mkdir -p "$target"; echo fake > "$target/skill_lens-9.9.9-py3-none-any.whl"
+     echo fake > "$target/skill_lens-9.9.9.tar.gz" ;;
+esac
+exit 0
+"""
+
+
+def _run_recover_step(
+    workflow: dict,
+    work: Path,
+    github_sha: str,
+    tmp_path: Path,
+    plan: str | None,
+    **fake_env: str,
+) -> tuple[subprocess.CompletedProcess, str, str, list[str]]:
+    """Run the recover step's script the way `shell: bash` does, with a fake
+    `uv` first on PATH. Returns the process, GITHUB_OUTPUT, the step summary
+    and every `uv` invocation in order."""
+    step = _recover_step(workflow)
+    plan_path = work / step["env"]["RECOVERY_PLAN"]
+    if plan is not None:
+        plan_path.write_text(plan, encoding="utf-8")
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir(exist_ok=True)
+    uv = fake_bin / "uv"
+    uv.write_text(FAKE_UV, encoding="utf-8")
+    uv.chmod(0o755)
+    log = tmp_path / "uv.log"
+    log.touch()
+    output = tmp_path / "recover_output"
+    summary = tmp_path / "recover_summary"
+    output.touch()
+    summary.touch()
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "FAKE_UV_LOG": str(log),
+        "GITHUB_SHA": github_sha,
+        "GITHUB_OUTPUT": str(output),
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "RECOVERY_PLAN": step["env"]["RECOVERY_PLAN"],
+        **fake_env,
+    }
+    proc = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+        cwd=work,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+    return proc, output.read_text(encoding="utf-8"), summary.read_text(encoding="utf-8"), calls
+
+
+def _plan(tag_commit: str, tag: str = "v9.9.9", version: str = "9.9.9") -> str:
+    return f"tag={tag}\nversion={version}\ncommit={tag_commit}\n"
+
+
+def test_no_plan_is_a_no_op_that_runs_nothing(workflow, tmp_path):
+    _, work, github_sha, _ = _stranded(tmp_path)
+
+    proc, output, summary, calls = _run_recover_step(workflow, work, github_sha, tmp_path, None)
+
+    assert proc.returncode == 0, proc.stderr
+    assert output == ""
+    assert calls == [], "uv was run with no tag to recover"
+    # The log says so; the summary does not, since the check's own line
+    # already covers the ordinary case and this is the ordinary case.
+    assert "No stranded tag to recover" in proc.stdout
+    assert summary == ""
+    assert not (work / "recover").exists()
+
+
+def test_a_planned_tag_is_verified_then_built_from_its_own_commit(workflow, tmp_path):
+    origin, work, github_sha, tag_commit = _stranded(tmp_path)
+    verify_commands = [
+        str(step["run"]).strip() for step in workflow["jobs"]["verify"]["steps"] if "run" in step
+    ]
+
+    proc, output, summary, calls = _run_recover_step(
+        workflow, work, github_sha, tmp_path, _plan(tag_commit)
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "recovered=true" in output and "version=9.9.9" in output, output
+    # The worktree is the tag's commit, not main's tip.
+    assert _git("rev-parse", "HEAD", cwd=work / "recover") == tag_commit
+    # verify's commands, in verify's order, all before anything builds.
+    assert ["uv " + call for call in calls[: len(verify_commands)]] == verify_commands, calls
+    build_at = next(i for i, call in enumerate(calls) if call.startswith("build "))
+    assert build_at >= len(verify_commands)
+    assert any(call.startswith("run cz version --project") for call in calls)
+    # The artifacts, where the uploads read them.
+    assert sorted(p.name for p in (work / "dist").iterdir()) == [
+        "skill_lens-9.9.9-py3-none-any.whl",
+        "skill_lens-9.9.9.tar.gz",
+    ]
+    assert (work / "sbom" / "skill-lens-9.9.9.cdx.json").is_file()
+    assert (work / "notes.md").read_text(encoding="utf-8").startswith("## v9.9.9")
+    assert "v9.9.9" in summary and tag_commit[:7] in summary
+    # The tag was read, never written.
+    assert _git("rev-parse", "v9.9.9^{commit}", cwd=origin) == tag_commit
+    assert _git("rev-parse", "main", cwd=origin) == github_sha
+
+
+def _assert_nothing_recovered(proc, output, work: Path, calls: list[str]) -> None:
+    assert proc.returncode != 0
+    assert "recovered=" not in output, output
+    assert not any(call.startswith("build ") for call in calls), calls
+    assert not (work / "dist").exists()
+    assert not (work / "sbom").exists()
+
+
+def test_a_plan_whose_commit_the_tag_no_longer_points_at_is_refused(workflow, tmp_path):
+    """The plan carries the commit the check saw on origin. A tag that points
+    elsewhere by the time the step runs -- in the clone, or on origin -- is
+    not the tag the check stood behind, and nothing is built from it."""
+    _, work, github_sha, tag_commit = _stranded(tmp_path)
+
+    proc, output, _, calls = _run_recover_step(
+        workflow, work, github_sha, tmp_path, _plan(github_sha)
+    )
+
+    _assert_nothing_recovered(proc, output, work, calls)
+    assert calls == [], "uv was run before the tag was checked"
+    assert "points at" in proc.stderr and tag_commit[:7] in proc.stderr, proc.stderr
+
+
+def test_a_tag_moved_on_origin_after_the_clone_is_refused(workflow, tmp_path):
+    origin, work, github_sha, tag_commit = _stranded(tmp_path)
+    other = _clone(origin, tmp_path / "other")
+    moved = _commit(other, "chore: where the tag was moved to")
+    _git("tag", "-f", "-a", "v9.9.9", "-m", "moved", cwd=other)
+    _git("push", "-q", "--force", "origin", "refs/tags/v9.9.9", cwd=other)
+    assert _git("rev-parse", "v9.9.9^{commit}", cwd=origin) == moved
+
+    proc, output, _, calls = _run_recover_step(
+        workflow, work, github_sha, tmp_path, _plan(tag_commit)
+    )
+
+    _assert_nothing_recovered(proc, output, work, calls)
+    assert calls == []
+    # The clone's tag is left as it was, too: the step only reads tags.
+    assert _git("rev-parse", "v9.9.9^{commit}", cwd=work) == tag_commit
+
+
+def test_a_tag_whose_commit_is_not_on_main_is_refused(workflow, tmp_path):
+    """A tag in the release's namespace pointing at a branch, or at a commit
+    main was rewritten away from: code main does not carry is never
+    published, whatever version it spells."""
+    origin, work, github_sha, _ = _stranded(tmp_path)
+    other = _clone(origin, tmp_path / "other")
+    _git("checkout", "-q", "-b", "side", cwd=other)
+    side = _commit(other, "feat: on a branch, not on main")
+    _git("tag", "-f", "-a", "v9.9.9", "-m", "on a branch", cwd=other)
+    _git("push", "-q", "--force", "origin", "refs/tags/v9.9.9", cwd=other)
+    _git("fetch", "-q", "--force", "origin", "refs/tags/v9.9.9:refs/tags/v9.9.9", cwd=work)
+
+    proc, output, _, calls = _run_recover_step(workflow, work, github_sha, tmp_path, _plan(side))
+
+    _assert_nothing_recovered(proc, output, work, calls)
+    assert calls == []
+    assert "not on main" in proc.stderr, proc.stderr
+
+
+def test_a_tree_that_spells_another_version_is_refused(workflow, tmp_path):
+    """The version about to be published must be the one the tree spells,
+    or a tag at the wrong commit would build -- and upload -- a version
+    that is not the stranded one, possibly one PyPI already lists."""
+    _, work, github_sha, tag_commit = _stranded(tmp_path)
+
+    proc, output, _, calls = _run_recover_step(
+        workflow, work, github_sha, tmp_path, _plan(tag_commit), FAKE_UV_VERSION="1.2.3"
+    )
+
+    _assert_nothing_recovered(proc, output, work, calls)
+    assert "1.2.3" in proc.stderr and "9.9.9" in proc.stderr, proc.stderr
+    assert not (work / "notes.md").exists()
+
+
+def test_a_red_suite_on_the_tag_builds_nothing(workflow, tmp_path):
+    """Nothing publishes that has not been verified in the same run: the
+    tag's own run passed these tests once, but this run has to pass them
+    again, on this tree, before a byte of it is built."""
+    _, work, github_sha, tag_commit = _stranded(tmp_path)
+
+    proc, output, _, calls = _run_recover_step(
+        workflow, work, github_sha, tmp_path, _plan(tag_commit), FAKE_UV_FAIL="run pytest"
+    )
+
+    _assert_nothing_recovered(proc, output, work, calls)
+    assert calls[-1] == "run pytest", calls
+    assert not any("cz" in call for call in calls)
+
+
+def test_a_vulnerable_lockfile_on_the_tag_builds_nothing(workflow, tmp_path):
+    """An advisory published since the tag was cut fails the audit of the
+    tag's lockfile, and the version stays unpublished -- the same rule
+    `verify` applies to a fresh release."""
+    _, work, github_sha, tag_commit = _stranded(tmp_path)
+
+    proc, output, _, calls = _run_recover_step(
+        workflow,
+        work,
+        github_sha,
+        tmp_path,
+        _plan(tag_commit),
+        FAKE_UV_FAIL="audit --preview-features",
+    )
+
+    _assert_nothing_recovered(proc, output, work, calls)
+    assert calls[-1].startswith("audit "), calls
+
+
+def test_a_malformed_plan_is_refused(workflow, tmp_path):
+    _, work, github_sha, tag_commit = _stranded(tmp_path)
+
+    proc, output, _, calls = _run_recover_step(
+        workflow, work, github_sha, tmp_path, f"tag=v9.9.9\ncommit={tag_commit}\n"
+    )
+
+    _assert_nothing_recovered(proc, output, work, calls)
+    assert calls == []
+    assert "version" in proc.stderr, proc.stderr
 
 
 def test_the_release_job_may_read_workflow_runs(workflow):
