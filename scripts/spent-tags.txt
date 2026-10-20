@@ -1,0 +1,12 @@
+# Release tags that exist on origin and will never be on PyPI.
+#
+# scripts/check_tags_published.py fails the release workflow's no-release path
+# and the weekly Security run for every release tag whose version PyPI does not
+# have. A tag listed here is accepted instead: the version is spent, and the
+# docs say why that can happen (docs/releasing.md, "A tag that never reached
+# PyPI"). One tag per line, with the date and the reason after a `#`:
+#
+#   v0.3.0  # 2026-01-01: the build failed after the tag; the artifacts never existed
+#
+# This file only grows, by a reviewed commit, and an entry for a tag PyPI does
+# have fails the check -- the list must never hide a release that exists.
