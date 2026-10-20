@@ -249,8 +249,16 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **Nothing publishes that has not been verified in the same run.** `publish` is reachable
   only through `needs:` on a green `verify`; publishing is irreversible, since PyPI refuses a
   re-upload of a version that already exists.
-- **A merge with no releasable commit publishes nothing and fails nothing.** `cz bump` exit
-  codes 21 and 3 are no-ops, not errors.
+- **A merge with no releasable commit publishes nothing, and fails only for a tag PyPI does
+  not have.** `cz bump` exit codes 21 and 3 are no-ops, not errors. On that path
+  `scripts/check_tags_published.py` reads every release tag on `origin` against PyPI's
+  file-bearing releases, with no credentials, and fails for a tag PyPI lacks — naming the
+  `release.yml` run on the tag commit's parent and whether its 30-day re-run window is open
+  (issue #103, `v0.21.0`: `publish` waited for approval that never came). Never while a
+  release is in flight; `security.yml` runs the same command, spelled identically, weekly and
+  on demand. An unreadable PyPI or `origin` is exit 2, never "missing"; a tag PyPI has is
+  never re-uploaded; `scripts/spent-tags.txt` is the one exception list, it only grows, and
+  an entry for a tag PyPI has fails.
 - **A run that `main` outran publishes nothing and fails nothing.** The `concurrency` group
   never cancels a run but does not keep one alone from start to finish (it is checked per job),
   and a merge that lands during `verify` moves `main` anyway; the earlier run's `--atomic` push

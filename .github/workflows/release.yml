@@ -56,6 +56,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # For the tag check below: naming the run that should have published a
+      # stranded tag lists workflow runs with this job's token, and a token
+      # without `actions: read` is refused on that endpoint.
+      actions: read
     outputs:
       # `bumped` is read from the push step, not the bump step: a run that
       # main outran cuts a version it never pushes, and `publish` must not
@@ -126,6 +130,26 @@ jobs:
           fi
           echo "bumped=true" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check every release tag reached PyPI
+        # A version can be tagged and never published: `publish` waits for a
+        # reviewer inside the `pypi` environment, and if that approval never
+        # comes the run ends with the tag on main and nothing on PyPI. Every
+        # later run reads only the commits since that tag, so nothing would
+        # ever notice (issue #103, v0.21.0). This step is what notices: every
+        # release tag on origin against PyPI's release list, no credentials,
+        # failing for a tag PyPI does not have and naming the run that should
+        # have published it so its failed jobs can be re-run.
+        #
+        # Only when this run released nothing: a release in flight must never
+        # fail over an older tag, and the `publish` job that follows a bump is
+        # exactly what this check waits for. security.yml runs the same command
+        # weekly, so a stranded tag is found even when nothing merges; the two
+        # must stay spelled identically (tests/test_security_checks.py).
+        if: steps.bump.outputs.bumped == 'false'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/check_tags_published.py
 
       - name: Push the bump commit and its tag
         id: push

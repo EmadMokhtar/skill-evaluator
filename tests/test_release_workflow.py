@@ -565,3 +565,38 @@ def test_a_lookup_that_fails_is_reported_as_unknown_not_as_missing(workflow, tmp
     assert proc.returncode != 0
     assert "unknown" in proc.stderr, proc.stderr
     assert "is not on origin" not in proc.stderr
+
+
+# --- A tagged version that never reached PyPI ---------------------------------
+#
+# `publish` waits for a reviewer inside the `pypi` environment. If that approval
+# never comes, the run ends with the tag on main and nothing on PyPI, and every
+# later run reads only the commits since that tag (issue #103, v0.21.0). The
+# release job therefore checks every release tag against PyPI -- but only when
+# it released nothing itself: a release in flight must never fail over an older
+# tag, and security.yml's weekly job covers that case.
+
+
+def _step_index(steps: list[dict], **match: str) -> int:
+    key, value = next(iter(match.items()))
+    return next(i for i, step in enumerate(steps) if step.get(key) == value)
+
+
+def test_a_merge_with_nothing_to_release_checks_every_tag_against_pypi(workflow):
+    steps = workflow["jobs"]["release"]["steps"]
+    check = next(step for step in steps if "check_tags_published" in str(step.get("run", "")))
+    assert check["if"] == "steps.bump.outputs.bumped == 'false'"
+    assert _step_index(steps, id="bump") < steps.index(check) < _step_index(steps, id="push")
+    assert check["run"].strip() == "python3 scripts/check_tags_published.py"
+    assert "${{" not in check["run"]
+    # The expression that resolves to the token on the runner, not a token (S105).
+    assert check["env"]["GITHUB_TOKEN"] == "${{ github.token }}"  # noqa: S105
+    assert (REPO_ROOT / "scripts" / "check_tags_published.py").is_file()
+
+
+def test_the_release_job_may_read_workflow_runs(workflow):
+    """The check names the run that should have published a stranded tag.
+    Listing runs with the job's token needs `actions: read`; a token without
+    it is refused on that endpoint, and an unauthenticated call from a shared
+    runner address is rate-limited."""
+    assert workflow["jobs"]["release"]["permissions"] == {"contents": "write", "actions": "read"}

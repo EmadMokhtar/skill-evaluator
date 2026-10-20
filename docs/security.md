@@ -74,7 +74,10 @@ Five sites in `src/` are suppressed, each with the reason on the line itself:
 `/tmp/...` strings as fake path values in fixtures; `scripts/`
 (the CI helpers) may run `git`. Those are per-directory ignores in `pyproject.toml`.
 Anything else is suppressed inline, at the site, with a reason — a rule is never switched
-off for the whole codebase because one site trips it.
+off for the whole codebase because one site trips it. One such site is
+`scripts/check_tags_published.py`, which opens two `https://` URLs built from constants:
+`S310` wants a scheme it can read in a literal, so the function refuses any other scheme
+first and carries the suppression beside that check.
 
 ## Where it runs
 
@@ -88,6 +91,11 @@ off for the whole codebase because one site trips it.
 
 The scheduled run is what makes this a monitor rather than a one-off check: the
 pull-request and push triggers only look when someone changes the repository.
+
+The same schedule carries a second monitor, the `published` job: it runs
+`scripts/check_tags_published.py`, which compares every release tag on `origin` with PyPI's
+release list and fails for a version that was tagged but never published. See
+[A tag that never reached PyPI](releasing.md#a-tag-that-never-reached-pypi).
 
 ## Running it locally
 
