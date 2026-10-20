@@ -13,11 +13,21 @@ as never going to be published. A tag that is on origin, not on PyPI with at
 least one file, and not spent is a finding, reported with the release run
 that should have published it so a maintainer can re-run its failed jobs.
 
+When the environment variable RECOVERY_PLAN names a file, one finding whose
+run can no longer be re-run (GitHub's 30-day window closed, or no release run
+pushed the tag) is written to it -- `tag=`, `version=`, `commit=` -- and is
+not a failure: the release workflow's recover step reads the file, verifies
+that commit, builds from it and hands the result to the environment-gated
+`publish`. Only the release workflow sets it; security.yml has no `publish`
+to hand anything to and leaves it unset. The file is written only when the
+check otherwise passes, so a red check never leaves a plan behind.
+
 Standard library only, so it runs where nothing has been installed.
 
 Usage: check_tags_published.py
 
-Exit 0: every release tag is on PyPI (or acknowledged as spent).
+Exit 0: every release tag is on PyPI, acknowledged as spent, or handed to
+        recovery (with RECOVERY_PLAN set).
 Exit 1: a tag is missing, or spent-tags.txt lists a tag PyPI does have.
 Exit 2: the check could not run (origin or PyPI unreadable); nothing verified.
 """
@@ -42,6 +52,8 @@ PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
 SPENT_FILE = Path(__file__).resolve().parent / "spent-tags.txt"
 SPENT_NAME = "scripts/spent-tags.txt"
 DOCS_SECTION = 'docs/releasing.md, "A tag that never reached PyPI"'
+# The file the release workflow's recover step reads; see the module docstring.
+RECOVERY_PLAN_VAR = "RECOVERY_PLAN"
 
 PYPI_URL = "https://pypi.org/pypi/{name}/json"
 PYPI_ATTEMPTS = 3
@@ -290,23 +302,54 @@ def _parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def describe_run(repo: str | None, tag: ReleaseTag, now: datetime) -> list[str]:
-    """The lines after a finding's first line: the release run that pushed
-    the tag, and whether its failed jobs can still be re-run. Best effort --
-    a lookup that fails changes these lines, never the verdict."""
-    lead = "  Looking up the run that should have published it"
+@dataclass(frozen=True)
+class RunInfo:
+    """What is known about the release run that should have published a tag.
+
+    `status` is one of: `unknown_repo` (no lookup possible), `no_parent`,
+    `lookup_failed`, `no_run` (no release run on the tag commit's parent),
+    `succeeded`, `open` (failed or cancelled, re-runnable until `deadline`)
+    and `closed` (failed or cancelled, the window has passed). Only `closed`
+    and `no_run` are *positive* knowledge that nothing can be re-run; every
+    other status is reported, never acted on."""
+
+    status: str
+    parent: str = ""
+    url: str = ""
+    conclusion: str = ""
+    started: datetime | None = None
+    deadline: datetime | None = None
+    detail: str = ""
+
+    @property
+    def recoverable(self) -> bool:
+        return self.status in ("closed", "no_run")
+
+
+def lookup_run(repo: str | None, tag: ReleaseTag, now: datetime) -> RunInfo:
+    """The release run that pushed the tag, and whether its failed jobs can
+    still be re-run. Best effort -- a lookup that fails is a `RunInfo` like
+    any other, with `lookup_failed`, never a different verdict."""
     if repo is None:
-        return [f"{lead} was skipped: the repository is unknown (set GITHUB_REPOSITORY)."]
+        return RunInfo("unknown_repo")
     try:
         commit = fetch_github(f"/repos/{repo}/commits/{tag.commit}")
         parents = commit.get("parents") or []
         if not parents:
-            return [f"{lead} was skipped: {tag.commit[:7]} has no parent commit."]
+            return RunInfo("no_parent")
         parent = str(parents[0]["sha"])
         # The bump commit sits on top of the pushed commit, so the run that
         # pushed the tag is the one whose head is the tag commit's parent.
         listing = fetch_github(f"/repos/{repo}/actions/runs?head_sha={parent}&event=push")
         runs = [r for r in listing.get("workflow_runs") or [] if r.get("path") == RELEASE_WORKFLOW]
+        if not runs:
+            return RunInfo("no_run", parent=parent)
+        run = runs[0]
+        url = str(run["html_url"])
+        conclusion = str(run.get("conclusion") or "in progress")
+        if conclusion == "success":
+            return RunInfo("succeeded", parent=parent, url=url, conclusion=conclusion)
+        started = _parse_time(str(run["created_at"]))
     except (
         CheckUnavailable,
         urllib.error.URLError,
@@ -315,42 +358,73 @@ def describe_run(repo: str | None, tag: ReleaseTag, now: datetime) -> list[str]:
         KeyError,
         TypeError,
     ) as exc:
-        return [f"{lead} failed: {exc}."]
-    if not runs:
+        return RunInfo("lookup_failed", detail=str(exc))
+    deadline = started + RERUN_WINDOW
+    status = "open" if now <= deadline else "closed"
+    return RunInfo(status, parent, url, conclusion, started, deadline)
+
+
+# How a recoverable tag will be recovered, by who is reading the message.
+THIS_RUN = "This run rebuilds it from its commit and publishes it."
+NEXT_MERGE = (
+    "The next merge to main that releases nothing rebuilds it from its commit and publishes "
+    "it through the release workflow."
+)
+
+
+def describe_run(info: RunInfo, recovery: str) -> list[str]:
+    """The lines after a finding's first line. `recovery` says what happens
+    to a recoverable tag: `THIS_RUN`, `NEXT_MERGE`, or a line of its own
+    for a tag that waits behind another."""
+    lead = "  Looking up the run that should have published it"
+    if info.status == "unknown_repo":
+        return [f"{lead} was skipped: the repository is unknown (set GITHUB_REPOSITORY)."]
+    if info.status == "no_parent":
+        return [f"{lead} was skipped: the tag's commit has no parent commit."]
+    if info.status == "lookup_failed":
+        return [f"{lead} failed: {info.detail}."]
+    if info.status == "no_run":
         return [
-            f"  No release run exists for its commit's parent {parent[:7]}: "
-            "the release workflow did not push this tag."
+            f"  No release run exists for its commit's parent {info.parent[:7]}: "
+            f"the release workflow did not push this tag. {recovery}"
         ]
-    run = runs[0]
-    conclusion = run.get("conclusion") or "in progress"
-    if conclusion == "success":
+    if info.status == "succeeded":
         # A run that stranded a tag cannot have succeeded: `publish` ran, so
         # the version reached PyPI. Every push to main has a release run, so
         # for a tag pushed by hand this is main's previous tip's run, which
         # released something else or nothing -- and has no failed jobs.
         return [
-            f"  The release run on its commit's parent, {run['html_url']}, succeeded, so it "
+            f"  The release run on its commit's parent, {info.url}, succeeded, so it "
             "did not strand this tag: either the tag was pushed outside the workflow, or "
             "PyPI no longer has a version that run published. There are no failed jobs to "
             "re-run; the version is spent."
         ]
-    started = _parse_time(str(run["created_at"]))
-    deadline = started + RERUN_WINDOW
+    if info.started is None or info.deadline is None:  # open/closed always carry both
+        return [f"{lead} returned a run with no start time."]
     lines = [
-        f"  The run that should have published it: {run['html_url']} "
-        f"(started {started:%Y-%m-%d}, {conclusion})."
+        f"  The run that should have published it: {info.url} "
+        f"(started {info.started:%Y-%m-%d}, {info.conclusion})."
     ]
-    if now <= deadline:
+    if info.status == "open":
         lines.append(
-            f"  Re-run its failed jobs; GitHub allows that until {deadline:%Y-%m-%d} "
+            f"  Re-run its failed jobs; GitHub allows that until {info.deadline:%Y-%m-%d} "
             f"({RERUN_WINDOW.days} days after the run started)."
         )
     else:
         lines.append(
             f"  Re-running it is no longer possible: GitHub's {RERUN_WINDOW.days}-day window "
-            f"closed on {deadline:%Y-%m-%d}."
+            f"closed on {info.deadline:%Y-%m-%d}. {recovery}"
         )
     return lines
+
+
+def write_plan(path: Path, tag: ReleaseTag) -> None:
+    """The three lines the recover step reads. The commit is the one the
+    annotated tag pointed at on origin when the check ran; the step refuses
+    a tag that points anywhere else by the time it runs."""
+    path.write_text(
+        f"tag={tag.name}\nversion={tag.version}\ncommit={tag.commit}\n", encoding="utf-8"
+    )
 
 
 def _summarise(lines: list[str]) -> None:
@@ -367,6 +441,12 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     now = now or datetime.now(UTC)
+    plan_path = os.environ.get(RECOVERY_PLAN_VAR)
+    plan = Path(plan_path) if plan_path else None
+    if plan is not None:
+        # Written only at the end, and only when the check otherwise passes.
+        # A file left from an earlier step must not outlive a check that fails.
+        plan.unlink(missing_ok=True)
 
     try:
         pyproject_text = PYPROJECT.read_text(encoding="utf-8")
@@ -396,30 +476,65 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
         reason = spent[tag.name] or "no reason given"
         print(f"Spent, accepted by {SPENT_NAME}: {tag.name} ({reason})")
 
-    findings: list[str] = []
     repo = repository() if verdict.missing or verdict.empty else None
+    missing = [(tag, lookup_run(repo, tag, now)) for tag in verdict.missing]
+    # The check fails unless every finding is a missing tag this run can
+    # recover. A red check hands nothing to recovery: the recover step must
+    # never act on a plan written beside a failure.
+    failing = (
+        plan is None
+        or bool(verdict.empty or verdict.stale)
+        or any(not info.recoverable for _, info in missing)
+    )
+    lines: list[str] = []
+    planned: ReleaseTag | None = None
     footer = f"  Otherwise record the tag in {SPENT_NAME} with the reason. See {DOCS_SECTION}."
-    for tag in verdict.missing:
-        findings.append(
-            f"Tag {tag.name} is on origin, but {tag.version} is not on PyPI ({project})."
-        )
-        findings.extend(describe_run(repo, tag, now))
-        findings.append(footer)
+    for tag, info in missing:
+        lines.append(f"Tag {tag.name} is on origin, but {tag.version} is not on PyPI ({project}).")
+        if not info.recoverable:
+            recovery = ""
+        elif plan is None:
+            recovery = NEXT_MERGE
+        elif failing:
+            recovery = (
+                "Not rebuilt by this run, which fails on another finding; a run whose check "
+                "passes rebuilds it from its commit and publishes it."
+            )
+        elif planned is None:
+            # One tag per run: the oldest, since the tags are in version order.
+            planned = tag
+            recovery = THIS_RUN
+        else:
+            recovery = (
+                "A later run rebuilds it: one tag is recovered per run, and this run "
+                f"recovers {planned.name}."
+            )
+        lines.extend(describe_run(info, recovery))
+        lines.append(footer if failing else f"  See {DOCS_SECTION}.")
     for tag in verdict.empty:
-        findings.append(
+        lines.append(
             f"Tag {tag.name} is on origin, but PyPI lists {tag.version} with no files ({project})."
         )
-        findings.extend(describe_run(repo, tag, now))
-        findings.append(footer)
+        lines.extend(describe_run(lookup_run(repo, tag, now), ""))
+        lines.append(
+            "  A release PyPI lists is never rebuilt, even with no files: PyPI refuses a "
+            "filename it has seen before."
+        )
+        lines.append(footer)
     for tag in verdict.stale:
-        findings.append(
+        lines.append(
             f"Tag {tag.name} is listed in {SPENT_NAME}, but {tag.version} is on PyPI. "
             "Remove the entry."
         )
-    if findings:
-        print("\n".join(findings), file=sys.stderr)
-        _summarise(findings)
+    if lines and failing:
+        print("\n".join(lines), file=sys.stderr)
+        _summarise(lines)
         return 1
+    if planned is not None and plan is not None:
+        write_plan(plan, planned)
+        print("\n".join(lines))
+        _summarise(lines)
+        return 0
 
     plural = "tag" if verdict.published == 1 else "tags"
     line = f"Every release tag on origin is on PyPI ({verdict.published} {plural})."

@@ -276,16 +276,28 @@ def test_a_missing_tag_is_a_finding_that_names_the_run_and_the_window(harness, m
     assert "v0.20.0" not in err
 
 
+LATER = datetime(2026, 12, 1, tzinfo=UTC)  # the 30-day window closed on 2026-11-04
+NEXT_MERGE = (
+    "The next merge to main that releases nothing rebuilds it from its commit and publishes "
+    "it through the release workflow."
+)
+THIS_RUN = "This run rebuilds it from its commit and publishes it."
+
+
 def test_a_run_older_than_thirty_days_says_the_window_closed(harness, monkeypatch, capsys):
+    """Without a plan file to hand the tag to (security.yml, a laptop) the
+    finding still fails, and says who will recover it."""
     monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
 
-    assert check.main([], now=datetime(2026, 12, 1, tzinfo=UTC)) == 1
+    assert check.main([], now=LATER) == 1
 
     err = capsys.readouterr().err
     assert (
         "Re-running it is no longer possible: GitHub's 30-day window closed on 2026-11-04." in err
     )
+    assert NEXT_MERGE in err
     assert "Re-run its failed jobs" not in err
+    assert THIS_RUN not in err
 
 
 def test_a_tag_with_no_release_run_says_the_workflow_did_not_push_it(harness, monkeypatch, capsys):
@@ -299,7 +311,175 @@ def test_a_tag_with_no_release_run_says_the_workflow_did_not_push_it(harness, mo
         f"No release run exists for its commit's parent {PARENT[:7]}: "
         "the release workflow did not push this tag." in err
     )
+    assert NEXT_MERGE in err
     assert "Re-run" not in err
+
+
+# --- RECOVERY_PLAN: handing one tag to the release workflow's recover step ------
+
+
+@pytest.fixture
+def plan(monkeypatch, tmp_path):
+    path = tmp_path / "recovery-plan.txt"
+    monkeypatch.setenv("RECOVERY_PLAN", str(path))
+    return path
+
+
+def test_with_a_plan_a_tag_past_its_window_is_handed_to_recovery_not_failed(
+    harness, plan, monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+
+    assert check.main([], now=LATER) == 0
+
+    assert plan.read_text(encoding="utf-8") == (
+        f"tag=v0.21.0\nversion=0.21.0\ncommit={TAG_COMMIT}\n"
+    )
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Tag v0.21.0 is on origin, but 0.21.0 is not on PyPI (skill-lens)." in captured.out
+    assert "GitHub's 30-day window closed on 2026-11-04" in captured.out
+    assert THIS_RUN in captured.out
+    assert "spent-tags" not in captured.out, "a tag being recovered is not one to record as spent"
+    assert "Every release tag on origin is on PyPI" not in captured.out
+    assert THIS_RUN in summary.read_text(encoding="utf-8")
+
+
+def test_with_a_plan_a_tag_with_no_release_run_is_handed_to_recovery(
+    harness, plan, monkeypatch, capsys
+):
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
+    monkeypatch.setattr(check, "fetch_github", _github([CI_RUN]))
+
+    assert check.main([], now=NOW) == 0
+
+    assert plan.read_text(encoding="utf-8").startswith("tag=v0.21.0\n")
+    out = capsys.readouterr().out
+    assert "the release workflow did not push this tag." in out
+    assert THIS_RUN in out
+
+
+def test_with_a_plan_a_tag_still_within_its_window_is_reported_for_a_re_run(
+    harness, plan, monkeypatch, capsys
+):
+    """The re-run uploads the artifact that run itself built and verified;
+    while that is possible it is the better artifact, and the human has to
+    answer the approval either way."""
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
+
+    assert check.main([], now=NOW) == 1
+
+    assert not plan.exists()
+    err = capsys.readouterr().err
+    assert "Re-run its failed jobs; GitHub allows that until 2026-11-04" in err
+    assert THIS_RUN not in err
+
+
+def test_with_a_plan_a_tag_whose_parent_run_succeeded_is_spent_not_recovered(
+    harness, plan, monkeypatch, capsys
+):
+    """A tag pushed by hand on top of a released tip, or a release PyPI no
+    longer has: the detection design's "spent", and a hand-pushed tag in
+    the release's namespace is the thing to stop, not to publish."""
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
+    monkeypatch.setattr(check, "fetch_github", _github([{**RELEASE_RUN, "conclusion": "success"}]))
+
+    assert check.main([], now=LATER) == 1
+
+    assert not plan.exists()
+    err = capsys.readouterr().err
+    assert "the version is spent" in err
+    assert THIS_RUN not in err
+
+
+def test_with_a_plan_an_unknown_repository_recovers_nothing(harness, plan, monkeypatch, capsys):
+    """No lookup, so no positive knowledge that the run cannot be re-run."""
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
+    monkeypatch.setattr(check, "repository", lambda: None)
+    monkeypatch.setattr(check, "fetch_github", _github(None))
+
+    assert check.main([], now=LATER) == 1
+
+    assert not plan.exists()
+    assert THIS_RUN not in capsys.readouterr().err
+
+
+def test_with_a_plan_a_failed_lookup_recovers_nothing(harness, plan, monkeypatch, capsys):
+    """Whether the run can be re-run is unknown, so the conservative answer
+    -- report, do not rebuild -- is the only one the step may act on."""
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
+
+    def refused(path):
+        raise urllib.error.HTTPError(path, 403, "rate limited", hdrs=None, fp=None)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(check, "fetch_github", refused)
+
+    assert check.main([], now=LATER) == 1
+
+    assert not plan.exists()
+    assert THIS_RUN not in capsys.readouterr().err
+
+
+def test_with_a_plan_a_release_pypi_lists_with_no_files_is_never_rebuilt(
+    harness, plan, monkeypatch, capsys
+):
+    """PyPI refuses a filename it has seen before, deleted or not."""
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0", empty=("0.21.0",)))
+
+    assert check.main([], now=LATER) == 1
+
+    assert not plan.exists()
+    err = capsys.readouterr().err
+    assert "PyPI lists 0.21.0 with no files" in err
+    assert "never rebuilt" in err
+    assert THIS_RUN not in err
+
+
+def test_with_a_plan_the_oldest_recoverable_tag_is_planned_and_the_rest_wait(
+    harness, plan, monkeypatch, capsys
+):
+    monkeypatch.setattr(check, "ls_remote", lambda: _ls_remote("v0.20.0", "v0.21.0", "v0.22.0"))
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
+
+    assert check.main([], now=LATER) == 0
+
+    assert plan.read_text(encoding="utf-8").startswith("tag=v0.21.0\n")
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "Tag v0.22.0 is on origin, but 0.22.0 is not on PyPI" in captured.out
+    assert (
+        "A later run rebuilds it: one tag is recovered per run, and this run recovers v0.21.0."
+        in captured.out
+    )
+
+
+def test_with_a_plan_a_recoverable_tag_beside_another_finding_is_not_recovered(
+    harness, plan, monkeypatch, capsys
+):
+    """A red check is never followed by a publish. The plan file is left
+    absent -- and a stale one from an earlier step is removed -- so the
+    recover step cannot act on a plan the check did not stand behind."""
+    plan.write_text("tag=v0.21.0\nversion=0.21.0\ncommit=stale\n", encoding="utf-8")
+    monkeypatch.setattr(check, "ls_remote", lambda: _ls_remote("v0.20.0", "v0.21.0", "v0.22.0"))
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0", empty=("0.22.0",)))
+
+    assert check.main([], now=LATER) == 1
+
+    assert not plan.exists()
+    err = capsys.readouterr().err
+    assert "Tag v0.21.0 is on origin, but 0.21.0 is not on PyPI" in err
+    assert "Tag v0.22.0 is on origin, but PyPI lists 0.22.0 with no files" in err
+    assert THIS_RUN not in err
+
+
+def test_with_a_plan_and_nothing_to_find_no_file_is_written(harness, plan):
+    plan.write_text("stale\n", encoding="utf-8")
+
+    assert check.main([], now=NOW) == 0
+
+    assert not plan.exists()
 
 
 def test_a_tag_whose_parent_run_succeeded_is_not_told_to_re_run(harness, monkeypatch, capsys):
