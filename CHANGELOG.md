@@ -1,3 +1,9 @@
+## v0.23.0 (2026-10-20)
+
+### Feat
+
+- let file_glob take a list of alternative patterns (#106)
+
 ## v0.22.1 (2026-10-20)
 
 ### Fix
