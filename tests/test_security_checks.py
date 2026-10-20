@@ -24,6 +24,7 @@ PRE_COMMIT = REPO_ROOT / ".pre-commit-config.yaml"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 
 AUDIT = "uv audit"
+TAG_CHECK = "check_tags_published"
 
 
 @pytest.fixture
@@ -36,14 +37,19 @@ def pyproject() -> dict:
     return tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
 
 
-def _audit_commands_in(steps: list[dict]) -> list[str]:
-    """Every line in a `run:` block that invokes the audit, stripped."""
+def _commands_in(steps: list[dict], needle: str) -> list[str]:
+    """Every line in a `run:` block that contains `needle`, stripped."""
     found = []
     for step in steps:
         for line in str(step.get("run", "")).splitlines():
-            if AUDIT in line:
+            if needle in line:
                 found.append(line.strip())
     return found
+
+
+def _audit_commands_in(steps: list[dict]) -> list[str]:
+    """Every line in a `run:` block that invokes the audit, stripped."""
+    return _commands_in(steps, AUDIT)
 
 
 def _security_audit_command(workflow: dict) -> str:
@@ -176,3 +182,41 @@ def test_the_build_backend_is_in_the_audited_lockfile(pyproject):
     for requirement in requires:
         name = re.split(r"[<>=!~\[ ]", requirement, maxsplit=1)[0]
         assert name in _locked_versions(), f"{name} is required to build but not in uv.lock"
+
+
+# --- A tagged version that never reached PyPI ---------------------------------
+#
+# release.yml checks every release tag against PyPI when a merge releases
+# nothing. A tag stranded by an approval that never came, with no merge after
+# it, would wait for the next merge to be noticed; the scheduled run here is
+# what finds it on a quiet week (issue #103, v0.21.0).
+
+
+def test_a_stranded_tag_is_found_on_the_schedule_even_when_nothing_merges(workflow):
+    """Only on the schedule and on demand: a stranded tag says nothing about
+    the pull request under review, and a push to main already runs the
+    release workflow's own copy of the check."""
+    job = workflow["jobs"]["published"]
+    assert job["if"] == (
+        "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+    )
+    # `contents: read` for the checkout that holds the script; `actions: read`
+    # to name the run that should have published the tag.
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    assert any("checkout" in str(step.get("uses", "")) for step in job["steps"])
+    (step,) = [step for step in job["steps"] if TAG_CHECK in str(step.get("run", ""))]
+    # The expression that resolves to the token on the runner, not a token (S105).
+    assert step["env"]["GITHUB_TOKEN"] == "${{ github.token }}"  # noqa: S105
+    assert "${{" not in step["run"]
+
+
+def test_every_copy_of_the_tag_check_is_the_same_command(workflow):
+    """Two workflows run the check. Spelled differently, one could grow a flag
+    or a different script the other never gets."""
+    release = safe_load(RELEASE.read_text(encoding="utf-8"))
+    commands = {
+        *_commands_in(workflow["jobs"]["published"]["steps"], TAG_CHECK),
+        *_commands_in(release["jobs"]["release"]["steps"], TAG_CHECK),
+    }
+    assert commands == {"python3 scripts/check_tags_published.py"}, commands
+    assert (REPO_ROOT / "scripts" / "check_tags_published.py").is_file()

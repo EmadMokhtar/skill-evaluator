@@ -5,6 +5,10 @@ name: Security
 # pre-push hook, so it is seen before a branch leaves a laptop. This workflow
 # is the copy that runs on a timer: an advisory can be published against a
 # uv.lock nobody has touched, and only a schedule notices that.
+#
+# The timer carries a second check, `published`: every release tag on origin
+# against PyPI, so a tagged version that was never published is found even on
+# a week when nothing merges.
 on:
   push:
     branches: [main]
@@ -43,3 +47,33 @@ jobs:
         # tests/test_security_checks.py requires this line to be identical to
         # the one in release.yml and in .pre-commit-config.yaml.
         run: uv audit --preview-features audit --locked
+
+  published:
+    # A version can be tagged and never published: release.yml's `publish`
+    # waits for a reviewer inside the `pypi` environment, and if that approval
+    # never comes the run ends with the tag on main and nothing on PyPI. The
+    # release workflow checks for that whenever a merge releases nothing, but
+    # a stranded tag with no merge after it would wait for the next merge to
+    # be noticed (issue #103, v0.21.0). The schedule is what finds it then.
+    #
+    # Only on the schedule and on demand. A stranded tag says nothing about
+    # the pull request under review, and a push to main already runs the
+    # release workflow's own copy. The command is spelled identically there
+    # (tests/test_security_checks.py). Re-run it by hand after re-running the
+    # stranded release's failed jobs to see it go green.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Naming the run that should have published a stranded tag lists
+      # workflow runs with this job's token, and a token without `actions:
+      # read` is refused on that endpoint.
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Check every release tag reached PyPI
+        # Standard library only, so nothing is installed here either. The
+        # tags come from `git ls-remote origin`, not the shallow checkout.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/check_tags_published.py
