@@ -248,17 +248,44 @@ fails if the two drift apart — so a new invariant is added in both places or n
   defaulting to success.
 - **Nothing publishes that has not been verified in the same run.** `publish` is reachable
   only through `needs:` on a green `verify`; publishing is irreversible, since PyPI refuses a
-  re-upload of a version that already exists.
-- **A merge with no releasable commit publishes nothing, and fails only for a tag PyPI does
-  not have.** `cz bump` exit codes 21 and 3 are no-ops, not errors. On that path
-  `scripts/check_tags_published.py` reads every release tag on `origin` against PyPI's
-  file-bearing releases, with no credentials, and fails for a tag PyPI lacks — naming the
-  `release.yml` run on the tag commit's parent and whether its 30-day re-run window is open
-  (issue #103, `v0.21.0`: `publish` waited for approval that never came). Never while a
-  release is in flight; `security.yml` runs the same command, spelled identically, weekly and
-  on demand. An unreadable PyPI or `origin` is exit 2, never "missing"; a tag PyPI has is
-  never re-uploaded; `scripts/spent-tags.txt` is the one exception list, it only grows, and
-  an entry for a tag PyPI has fails.
+  re-upload of a version that already exists. The one artifact `verify` did not test is a
+  recovered stranded tag, so `release`'s recover step runs every `run:` command of `verify`
+  itself, on the tag's commit in a worktree, spelled byte for byte alike and in order, all
+  before `uv build`, in the step that builds; `tests/test_release_workflow.py` requires it
+  and runs the script with a stand-in `uv` to show a red suite builds nothing. A job ahead
+  of `verify` choosing its ref was rejected: it would put a variable checkout in front of
+  every ordinary release (spec: `2026-10-20-skill-lens-stranded-tag-recovery-design.md`).
+- **A merge with no releasable commit cuts no version, and fails only for a tag PyPI does
+  not have that this run cannot recover.** `cz bump` exit codes 21 and 3 are no-ops, not
+  errors. On that path `scripts/check_tags_published.py` reads every release tag on `origin`
+  against PyPI's file-bearing releases, with no credentials, and fails for a tag PyPI lacks —
+  naming the `release.yml` run on the tag commit's parent and whether its 30-day re-run
+  window is open (issue #103, `v0.21.0`: `publish` waited for approval that never came).
+  Never while a release is in flight; `security.yml` runs the same command, spelled
+  identically, weekly and on demand. An unreadable PyPI or `origin` is exit 2, never
+  "missing"; a tag PyPI has is never re-uploaded; `scripts/spent-tags.txt` is the one
+  exception list, it only grows, and an entry for a tag PyPI has fails. In `release.yml` the
+  check step sets `RECOVERY_PLAN` (a file path, the command line unchanged): one missing tag
+  whose run can no longer be re-run is written to it as `tag=`/`version=`/`commit=` and is
+  not a failure — the recover step rebuilds it. One tag per run, the oldest first; a second
+  recoverable tag waits and is not a failure either. The file is written only when the check
+  otherwise passes (a stale one is removed first): any other finding still fails, and then no
+  recovery runs — a red check is never followed by a publish. `security.yml` leaves the
+  variable unset and only reports.
+- **A stranded tag is rebuilt only from its own commit on `main`, spelling its own version,
+  and only once its run can no longer be re-run.** Handed over only on positive knowledge:
+  the parent's release run exists, did not succeed, and started over 30 days ago, or no
+  release run exists for the parent. A window still open is a manual re-run (that uploads the
+  artifact its run verified, under its own attestation); a failed lookup, an unknown
+  repository, a parent run that succeeded, a release PyPI lists with no files (PyPI refuses a
+  filename it has seen) and a spent tag are never rebuilt. The step fetches the tag from
+  `origin` and requires its commit to equal the plan's (a moved tag is refused, and a tag is
+  only ever read), requires that commit to be an ancestor of `GITHUB_SHA`, and after
+  verifying requires `cz version --project` in the worktree to print the version being
+  recovered. Nothing before `publish`'s upload is irreversible: no tag is created, moved or
+  deleted, no commit pushed, so a failed recovery spends nothing. The uploads and the
+  `bumped` output accept `steps.push.outputs.pushed` or `steps.recover.outputs.recovered`,
+  never the bump step's own output; `publish` and `github-release` are unchanged.
 - **A run that `main` outran publishes nothing and fails nothing.** The `concurrency` group
   never cancels a run but does not keep one alone from start to finish (it is checked per job),
   and a merge that lands during `verify` moves `main` anyway; the earlier run's `--atomic` push
@@ -694,11 +721,12 @@ fails if the two drift apart — so a new invariant is added in both places or n
   only when the runtime is set, so a third-party runner written against a version without
   bundled scripts keeps working until someone turns scripts on — at which point the
   `TypeError` is loud rather than the scripts silently never running.
-- **The dependency audit is one command, spelled identically in three places, and its
+- **The dependency audit is one command, spelled identically in four places, and its
   exceptions live in one table.** `uv audit --preview-features audit --locked` runs in
   `security.yml` (every PR, every push to `main`, weekly on a schedule, and on demand), in
-  `release.yml`'s `verify` job, and in the `pre-push` hook; `tests/test_security_checks.py`
-  requires the three to be byte-identical. Exceptions go in `[tool.uv.audit]` in
+  `release.yml`'s `verify` job and in its `release` job's recover step (on a stranded tag's
+  own lockfile), and in the `pre-push` hook; `tests/test_security_checks.py` requires the
+  four to be byte-identical. Exceptions go in `[tool.uv.audit]` in
   `pyproject.toml`, never on a command line, and only as `ignore-until-fixed` — which stops
   hiding an advisory the day a fix ships — never `ignore`. uv does not validate that table, so
   the test rejects any other key rather than let a typo silently keep a finding. Any finding
