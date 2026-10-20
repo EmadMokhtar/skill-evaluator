@@ -73,6 +73,42 @@ def test_the_macos_profile_denies_network_and_writes_then_reallows_the_two_direc
     )
 
 
+def test_the_macos_profile_lets_a_script_stat_the_directories_above_its_own():
+    # `mkdir -p "$PWD/x"` stats every parent (issue #100). Metadata only, and
+    # only for the directories between the temp root and our three, so the
+    # temp root still cannot be listed and siblings still cannot be read.
+    lines = macos_profile(WS, SCRATCH, TEMPDIR, BUNDLE).splitlines()
+    parents = [
+        TEMPDIR,
+        TEMPDIR / "pytest-of-user",
+        TEMPDIR / "pytest-of-user" / "pytest-1",
+        TEMPDIR / "pytest-of-user" / "pytest-1" / "test-case0",
+    ]
+    allow = "(allow file-read-metadata " + " ".join(f'(literal "{p}")' for p in parents) + ")"
+    assert allow in lines
+    assert lines.index(f'(deny file-read* (subpath "{TEMPDIR}"))') < lines.index(allow)
+
+
+def test_the_production_profile_allows_the_metadata_of_the_temp_root_and_nothing_else():
+    # A real run: workspace and scratch directly under the temp root (mkdtemp),
+    # the bundle in the repository. The only parent inside the temp root is the
+    # root itself, so the rule is exactly one literal.
+    workspace = TEMPDIR / "skill-lens-case-candidate-0-abc"
+    scratch = TEMPDIR / "skill-lens-scratch-def"
+    bundle = Path("/Users/someone/repo/skills/demo")
+    lines = macos_profile(workspace, scratch, TEMPDIR, bundle).splitlines()
+    assert lines[-1] == f'(allow file-read-metadata (literal "{TEMPDIR}"))'
+    assert sum("file-read-metadata" in line for line in lines) == 1
+
+
+def test_the_macos_profile_never_allows_metadata_everywhere():
+    # With nothing under the temp root there are no parents to allow, and an
+    # `(allow file-read-metadata)` with no filter would allow every path.
+    elsewhere = Path("/elsewhere")
+    profile = macos_profile(elsewhere / "ws", elsewhere / "s", TEMPDIR, elsewhere / "b")
+    assert "file-read-metadata" not in profile
+
+
 def test_the_macos_profile_escapes_quotes_and_backslashes_in_paths():
     odd = Path('/tmp/we"ird\\dir')
     profile = macos_profile(odd, SCRATCH, TEMPDIR, BUNDLE)

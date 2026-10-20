@@ -9,6 +9,7 @@ targets 127.0.0.1 and must FAIL.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -24,6 +25,10 @@ from skill_lens.scripts import ScriptPolicy, ScriptRuntime, probe_sandbox, run_s
 from skill_lens.workspace import Workspace, create_workspace
 
 STATUS = probe_sandbox("auto")
+# CI's macOS job sets this, so a runner whose sandbox stops working fails the
+# job instead of skipping every test here and passing.
+if os.environ.get("SKILL_LENS_REQUIRE_SANDBOX") and STATUS.backend == "none":
+    raise RuntimeError(f"SKILL_LENS_REQUIRE_SANDBOX is set, but no sandbox works: {STATUS.detail}")
 pytestmark = pytest.mark.skipif(
     STATUS.backend == "none", reason=f"no sandbox on this machine: {STATUS.detail}"
 )
@@ -139,6 +144,50 @@ def test_a_real_workspace_survives_the_temp_dir_deny(tmp_path):
         assert workspace.read("inside.txt") == "from the real workspace"
     finally:
         workspace.cleanup()
+
+
+def test_a_script_can_create_a_directory_by_absolute_path(tmp_path):
+    """BSD `mkdir -p` stats every existing parent on the way down, so a profile
+    that denies even a `stat` of the temp root makes `mkdir -p "$PWD/x"` fail
+    with "Operation not permitted" (issue #100). planning-with-files'
+    init-session.sh builds its plan directory exactly that way. Uses the
+    production layout, a workspace directly under the temp root.
+    """
+    root = tmp_path / "skill"
+    (root / "scripts").mkdir(parents=True)
+    (root / "scripts" / "probe.py").write_text(
+        "import os, subprocess\n"
+        "target = os.path.join(os.getcwd(), '.planning', 'run-1')\n"
+        "done = subprocess.run(['mkdir', '-p', target], capture_output=True, text=True)\n"
+        "print(done.returncode, done.stderr.strip())\n",
+        encoding="utf-8",
+    )
+    workspace = create_workspace(WorkspaceSpec(), label="live")
+    try:
+        result = run_script(
+            SkillBundle(root.resolve()), workspace, "scripts/probe.py", [], _runtime()
+        )
+        assert result.refused is None, result.refused
+        assert result.stdout.strip() == "0", result.stdout
+        assert (workspace.root / ".planning" / "run-1").is_dir()
+    finally:
+        workspace.cleanup()
+
+
+@pytest.mark.skipif(STATUS.backend != "sandbox-exec", reason="bwrap mounts an empty tmpfs there")
+def test_the_temp_root_still_cannot_be_listed(tmp_path):
+    # Allowing a stat of the temp root must not allow listing it: the names
+    # of sibling workspaces stay hidden.
+    import tempfile
+
+    temp_root = str(Path(tempfile.gettempdir()).resolve())
+    source = (
+        "import os\n"
+        f"try:\n    os.listdir({temp_root!r})\n    print('listed')\n"
+        "except OSError:\n    print('refused')\n"
+    )
+    _, out, _, _ = _run(tmp_path, source)
+    assert out.strip() == "refused"
 
 
 def test_what_a_script_plants_in_the_workspace_is_a_failed_check_not_an_abort(tmp_path):

@@ -182,20 +182,38 @@ def macos_profile(workspace: Path, scratch: Path, tempdir: Path, bundle: Path) -
     working bundle (`tmp_path`), so without an explicit allow the blanket
     temp-dir deny above would make the interpreter unable to read the very
     script it was asked to run.
+
+    The directories between the temp directory and those three get their
+    metadata back, and nothing else: BSD `mkdir -p "$PWD/x"` stats every
+    existing parent on the way down, and fails if the temp directory's own
+    `stat` is denied. Metadata says a directory exists; it does not list it,
+    so sibling workspaces stay hidden.
     """
-    return "\n".join(
-        [
-            "(version 1)",
-            "(allow default)",
-            "(deny network*)",
-            "(deny file-write*)",
-            f"(allow file-write* (subpath {_quoted(workspace)}) (subpath {_quoted(scratch)}))",
-            '(allow file-write-data (literal "/dev/null"))',
-            f"(deny file-read* (subpath {_quoted(tempdir)}))",
-            f"(allow file-read* (subpath {_quoted(workspace)}) (subpath {_quoted(scratch)}) "
-            f"(subpath {_quoted(bundle)}))",
-        ]
+    lines = [
+        "(version 1)",
+        "(allow default)",
+        "(deny network*)",
+        "(deny file-write*)",
+        f"(allow file-write* (subpath {_quoted(workspace)}) (subpath {_quoted(scratch)}))",
+        '(allow file-write-data (literal "/dev/null"))',
+        f"(deny file-read* (subpath {_quoted(tempdir)}))",
+        f"(allow file-read* (subpath {_quoted(workspace)}) (subpath {_quoted(scratch)}) "
+        f"(subpath {_quoted(bundle)}))",
+    ]
+    parents = sorted(
+        {
+            parent
+            for path in (workspace, scratch, bundle)
+            for parent in path.parents
+            if parent.is_relative_to(tempdir)
+        }
     )
+    # Never emitted empty: an unfiltered `(allow file-read-metadata)` would
+    # allow every path on the machine.
+    if parents:
+        literals = " ".join(f"(literal {_quoted(parent)})" for parent in parents)
+        lines.append(f"(allow file-read-metadata {literals})")
+    return "\n".join(lines)
 
 
 def bwrap_argv(
