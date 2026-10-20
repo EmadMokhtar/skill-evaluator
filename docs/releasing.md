@@ -253,8 +253,8 @@ later run's `cz bump` reads only the commits since that tag, so a merge with not
 releasable publishes nothing, and the next release publishes the *next* version. That is how
 `v0.21.0` was tagged on 2026-10-05 and PyPI went from `0.20.0` straight to `0.22.0`: for two
 weeks installing `skill-lens` from PyPI gave `0.20.0` while `main`, the changelog and
-`action.yml` said `0.21.0`, and `uses: EmadMokhtar/skill-evaluator@v0.21.0` installed a
-version PyPI did not have. CI did not notice, because `action-smoke` installs the checkout.
+`action.yml` said `0.21.0`, so the composite action pinned at that tag installed a version
+PyPI did not have. CI did not notice, because `action-smoke` installs the checkout.
 
 `scripts/check_tags_published.py` is what notices now. It lists every release tag on
 `origin` with `git ls-remote` (the exit status checked apart from the output, since a failed
