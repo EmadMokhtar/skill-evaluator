@@ -27,8 +27,8 @@ from skill_lens.scripts import ScriptPolicy, ScriptRuntime, probe_sandbox, run_s
 from skill_lens.workspace import Workspace, create_workspace
 
 STATUS = probe_sandbox("auto")
-# CI's two sandbox jobs set this, so a runner whose sandbox stops working fails the
-# job instead of skipping every test here and passing.
+# CI's test and sandbox-macos jobs set this, so a runner whose sandbox stops
+# working fails the job instead of skipping every test here and passing.
 if os.environ.get("SKILL_LENS_REQUIRE_SANDBOX") and STATUS.backend == "none":
     raise RuntimeError(f"SKILL_LENS_REQUIRE_SANDBOX is set, but no sandbox works: {STATUS.detail}")
 pytestmark = pytest.mark.skipif(

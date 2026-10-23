@@ -245,19 +245,22 @@ A skill may ship code under `scripts/`. skill-lens can execute it, and the trust
   never an aborted run.
 - **An OS sandbox applies where one exists** — `sandbox-exec` on macOS, `bwrap` on Linux.
   Under it a script cannot open a network connection, cannot write to the host filesystem
-  outside the workspace and its scratch directory (a write elsewhere under the temporary
-  directory is refused on both backends; under `bwrap`, a write anywhere under `/dev`,
-  `/dev/shm` included, lands in an in-memory mount discarded when the script exits, because
-  POSIX shared memory needs `/dev/shm` writable), and cannot read anything under the system temporary directory except the
-  workspace, the scratch directory and the skill's own bundle — so other arms' and other
-  cases' workspaces are hidden from it. On macOS the directories above those three keep
-  their metadata (`stat`), never their listing, so `mkdir -p "$PWD/x"` works. That metadata
-  includes the temporary directory's entry count and modification time, so a script can see
-  how many entries it holds and when they change; their names and contents stay hidden. One gap to know about: `bwrap`'s `--unshare-net`
-  isolates the network stack only and does not block a Unix-domain socket reachable
-  through the filesystem, so on a runner whose user can reach `/var/run/docker.sock` a
-  script can talk to the Docker daemon — a full escape on that host; macOS's `(deny
-  network*)` covers Unix sockets too. The backend is executed once per
+  outside the workspace and its scratch directory, and cannot read anything under the
+  system temporary directory except the workspace, the scratch directory and the skill's
+  own bundle — so other arms' and other cases' workspaces are hidden from it. A write
+  elsewhere under the temporary directory is refused on both backends, so a script that
+  writes to a hard-coded path such as `/tmp/state.json` fails and should use `$TMPDIR`
+  instead ([Running bundled scripts](runners.md#running-bundled-scripts) has the details).
+  Under `bwrap`, a write anywhere under `/dev`, `/dev/shm` included, is not refused: it
+  lands in an in-memory mount discarded when the script exits, because POSIX shared memory
+  needs `/dev/shm` writable. On macOS the directories above those three keep their metadata
+  (`stat`), never their listing, so `mkdir -p "$PWD/x"` works. That metadata includes the
+  temporary directory's entry count and modification time, so a script can see how many
+  entries it holds and when they change; their names and contents stay hidden. One gap to
+  know about: `bwrap`'s `--unshare-net` isolates the network stack only and does not block a
+  Unix-domain socket reachable through the filesystem, so on a runner whose user can reach
+  `/var/run/docker.sock` a script can talk to the Docker daemon — a full escape on that
+  host; macOS's `(deny network*)` covers Unix sockets too. The backend is executed once per
   run before any case, not merely found on `PATH`; `script_sandbox = "required"` makes its
   absence exit 2, and the report always says which backend applied. `sandbox-exec` is
   marked deprecated in Apple's documentation and remains present and working on current
