@@ -57,6 +57,25 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Install bwrap and allow unprivileged user namespaces
+        # Whether bwrap starts on a stock runner depends on the image: it may
+        # be missing, or AppArmor may refuse it an unprivileged user
+        # namespace. Then tests/test_sandbox_live.py skips, and a broken bwrap
+        # argv stays green. This step installs bwrap and lifts that
+        # restriction, and SKILL_LENS_REQUIRE_SANDBOX on the Test step makes a
+        # bwrap that still cannot start fail the job instead of skipping.
+        run: |
+          if ! command -v bwrap >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y bubblewrap
+          fi
+          # Ubuntu 23.10 and later refuse unprivileged user namespaces through
+          # AppArmor; older kernels do not have this setting at all.
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --version
+
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
@@ -67,6 +86,8 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Test
+        env:
+          SKILL_LENS_REQUIRE_SANDBOX: "1"
         run: uv run pytest -v
 
       - name: Self-check (dogfood the CLI on examples/ and the plugin's skills)
@@ -80,8 +101,8 @@ jobs:
           uv run skill-lens list ./plugins
 
   sandbox-macos:
-    # The sandbox-exec profile is only ever exercised on macOS; every other
-    # job runs on Linux, where tests/test_sandbox_live.py uses bwrap or skips.
+    # The sandbox-exec profile is only ever exercised on macOS. The bwrap
+    # argv is exercised by the test job above, which sets up bwrap itself.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
