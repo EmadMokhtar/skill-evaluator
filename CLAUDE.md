@@ -392,8 +392,8 @@ fails if the two drift apart — so a new invariant is added in both places or n
   the case object itself.
 - **A multi-session case is one outcome: an errored session errors it and stops the rest,
   and every evaluator reads the merged result.** `sessions.merge_results`: the last
-  session's output, every session's tool calls in order, summed spend (kept on error), every
-  distinct `cost_note` / `usage_note`, and `session k of n: ` on the error.
+  session's output, every session's tool calls and hooks in order, summed spend (kept on
+  error), every distinct `cost_note` / `usage_note`, and `session k of n: ` on the error.
   `trajectory.skill_triggered` must hold in every session (`skill_triggered_by_session`);
   `skill_triggered` only summarises "any session". A runner handed the whole case returns
   `refuse_sessions`'s error, never None as the prompt.

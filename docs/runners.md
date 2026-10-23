@@ -199,7 +199,8 @@ declared), its event, its outcome, its exit code (none when the hook reported no
 stdout and its stderr. The outcome is `success`, `error` (any non-zero exit) or `cancelled`
 (the hook was stopped before it finished, because its own `timeout` ran out or the run was
 interrupted; a normal end of run cancels nothing). The JSON report lists them per outcome
-under [`hooks`](gating.md#json-report), and the transcript keeps every `hook_*` event.
+under [`hooks`](gating.md#json-report), and the transcript keeps every `hook_*` event. A
+[`sessions:`](eval-files.md#several-sessions-in-one-workspace) case lists every session's hooks, in order.
 
 A hook whose outcome is anything but `success` is a **failed hook**, and a non-passing case
 shows it under `failed hooks:` in [its failure excerpt](gating.md#what-a-failing-case-shows).
