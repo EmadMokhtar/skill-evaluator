@@ -705,12 +705,23 @@ reading that fact is the eval signal. `run_script` never raises. Standard input 
 
 **The OS sandbox**, where one exists (`script_sandbox = "auto"`, the default), is a second
 layer on top. Under either backend a script cannot open a network connection; cannot write
-to the host filesystem outside the workspace and its scratch directory (under `bwrap`,
-writes under the temporary directory and `/dev/shm` land in an in-memory mount that is
-discarded when the script exits — bounded, like output, only by the timeout); and cannot
-read anything under the system temporary directory except the workspace, the scratch
-directory and the skill's own bundle — so under `--concurrency N` a script cannot read the
-baseline arm's workspace or another case's scratch directory.
+to the host filesystem outside the workspace and its scratch directory; and cannot read
+anything under the system temporary directory except the workspace, the scratch directory
+and the skill's own bundle — so under `--concurrency N` a script cannot read the baseline
+arm's workspace or another case's scratch directory. A write elsewhere under the temporary
+directory is refused on both backends. Under `bwrap`, a write anywhere under `/dev`,
+`/dev/shm` included, is not refused: it lands in an in-memory mount that is discarded when
+the script exits, bounded, like output, only by the timeout. `/dev/shm` stays writable
+because POSIX shared memory needs it.
+
+**A script that writes to a fixed temporary path fails.** A bundled script that writes to a
+hard-coded path such as `/tmp/state.json` gets an error on both backends (`Read-only file
+system` under `bwrap`, `Operation not permitted` under `sandbox-exec`), because the path is
+outside the workspace and the scratch directory. Earlier releases let that write appear to
+succeed under `bwrap`: it went to an in-memory mount and was discarded when the script
+exited. So a skill whose Linux evals passed only because of that now fails there, as it
+already did on macOS. Write temporary files with `tempfile`, or under `$TMPDIR`, which
+points at the scratch directory.
 
 One difference between the two: `bwrap`'s `--unshare-net` isolates the network stack only,
 so a Unix-domain socket the CI user can reach through the filesystem —
@@ -724,20 +735,24 @@ those three keep their metadata, so a script can `stat` its workspace's parents:
 `mkdir -p "$PWD/x"` checks every parent on the way down. Listing them stays denied, so the
 names and contents of sibling workspaces stay hidden. One thing does show: a directory's
 metadata includes its entry count and modification time, so a script can tell how many
-entries the temporary directory holds and when that changes, but not what they are. Reads anywhere else are allowed (see below).
+entries the temporary directory holds and when that changes, but not what they are. Reads
+anywhere else are allowed (see below).
 
 | | Backend | How |
 | --- | --- | --- |
 | macOS | `sandbox-exec` | A profile that allows everything, then denies `network*` and `file-write*`, re-allows writes under the workspace and the scratch directory (plus `file-write-data` on `/dev/null`), denies `file-read*` under the temporary directory, then re-allows reads under the workspace, the scratch directory and the bundle. Later rules win. `sandbox-exec` is marked deprecated in Apple's documentation, is present and working on current macOS, and is what Bazel, Chromium and Claude Code use. |
-| Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install. A stock Ubuntu CI image may not ship `bwrap`, or may refuse unprivileged user namespaces; the report's `sandbox:` line says which. `--unshare-net` does not block Unix-domain sockets (see above). |
+| Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, `--remount-ro` on the temporary directory so the tmpfs refuses writes (the remount is not recursive, so the binds keep their own modes), then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install. A stock Ubuntu CI image may not ship `bwrap`, or may refuse unprivileged user namespaces; the report's `sandbox:` line says which. `--unshare-net` does not block Unix-domain sockets (see above). |
 | Windows | none | The portable guards only. `"required"` refuses to run. |
 
 The probe runs once per run, after discovery and before any case. The backend is *executed*
 — `sandbox-exec -p '(version 1)(allow default)(deny network*)' /usr/bin/true`, or `bwrap
---ro-bind / / --dev /dev --proc /proc --unshare-net --unshare-pid --die-with-parent --
-/bin/true` — not merely found on `PATH`, because present is not the same as working: a stock
-Ubuntu runner may not ship `bwrap` at all, or may refuse unprivileged user namespaces, and
-the first line of that refusal is what the report shows.
+--ro-bind / / --dev /dev --proc /proc --tmpfs <temp dir> --remount-ro <temp dir>
+--unshare-net --unshare-pid --die-with-parent -- /bin/true` — not merely found on `PATH`,
+because present is not the same as working: a stock Ubuntu runner may not ship `bwrap` at
+all, or may refuse unprivileged user namespaces, and the first line of that refusal is what
+the report shows. The `bwrap` probe includes the tmpfs and its read-only remount because
+every script call needs both, so a `bwrap` too old to accept either fails the probe instead
+of failing every script.
 
 The result is on every report that enabled scripts — `scripts: on, sandbox: bwrap`, or
 `scripts: on, sandbox: none (bwrap not found on PATH)` — so you can tell from a log whether

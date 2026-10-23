@@ -497,7 +497,7 @@ The reasons, verbatim:
 | `bwrap not found on PATH` | Linux, and bubblewrap is not installed |
 | `no sandbox backend on <system>` | There is no backend for this platform at all. Windows is the case you will meet |
 | `sandbox-exec probe failed: <detail>` | The backend is installed but would not run. `<detail>` is the first line of its standard error, or `exit <n>` when it printed nothing, or the operating-system error when it could not be started at all |
-| `bwrap probe failed: <detail>` | The same, in the same three shapes. On Linux the usual cause is that unprivileged user namespaces are disabled on the host |
+| `bwrap probe failed: <detail>` | The same, in the same three shapes. On Linux the usual cause is that unprivileged user namespaces are disabled on the host. A `bwrap` too old to accept `--tmpfs` or `--remount-ro` fails here too |
 | `temp directory path contains a double quote, which a sandbox-exec profile cannot express` | The temporary-directory path holds a `"`, which would break the profile's quoting. It fails closed rather than writing a profile it cannot trust |
 
 **What to do.** Pick one, knowingly:
