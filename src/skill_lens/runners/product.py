@@ -664,10 +664,10 @@ class ProductRunner:
         carries.
         """
         product = self._product
+        executable = find_executable(product, "runner")
         refusal = environment_refusal(product, self._sandbox, "runner")
         if refusal is not None:
             raise ProductSetupError(refusal)
-        executable = find_executable(product, "runner")
         with isolate(self._sandbox, product) as isolation:
             version = probe_version(product, executable, "runner", isolation)
             self._check_cases(skills, cases_by_skill, isolation)

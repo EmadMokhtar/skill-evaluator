@@ -45,6 +45,7 @@ greeting = 0.9
 | `max_script_output_bytes` | `20000` | — |
 | `script_interpreters` | `{ py = ["python3"], sh = ["bash"] }` | — |
 | `runners` | `{}` | — |
+| `product_sandbox` | `"auto"` | `--product-sandbox` |
 
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
@@ -213,6 +214,7 @@ max_output_bytes = 8000000                        # default
 | `max_output_bytes` | `8000000` | Cap on the trace, positive; a longer one is an errored case naming this key. |
 | `skills_dir` | `".agents/skills"` | `cli` only. Where the skill is written, relative to the working directory; no absolute path and no `..`. Not read by the judge, which delivers no skill. |
 | `invoke` | `"{task}"` | `cli` only. The prompt in `mode: loaded`; only `{name}` and `{task}` may appear (no other field name, no conversion, no format spec), and `{task}` must appear. Not read by the judge. |
+| `pass_env` | unset | Variable *names* (never values) the product also gets under the [product sandbox](#product-sandbox)'s home isolation, beyond the allowlist and the product's own auth variables. Each must be a variable name; one the isolation sets itself (`HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TMPDIR`, `TMP`, `TEMP`, the four `XDG_*_HOME`, `CLAUDE_CONFIG_DIR`, `COPILOT_HOME`) is a config error. Under home isolation `cli` must set it, `[]` when the command needs nothing. Not read under `product_sandbox = "off"`. |
 
 Two keys with two meanings: drop an isolation flag with `command`, add a model with
 `args`. `skills_dir` or `invoke` under a preset, an unknown table name, a `command` without
@@ -238,6 +240,66 @@ the [MCP bridge](runners.md#mock-tools-under-a-product), whose config is appende
 [Runners](runners.md#product-runners) for what
 each product runner measures, [Judging with a product](runners.md#judging-with-a-product)
 for the judge, and [Security](security.md#product-runners) for what naming one means.
+
+### Product sandbox
+
+`product_sandbox` decides, once per run and before any case, how much a product runner and
+the product judge are isolated from your machine. One decision serves every product in the
+run, and every product line on the report says what applied.
+
+| `product_sandbox` | Home isolation | OS sandbox | When no OS sandbox works |
+| --- | --- | --- | --- |
+| `"auto"` (default) | yes | `sandbox-exec` on macOS, `bwrap` on Linux, when its probe succeeds | home isolation only, and the report says why |
+| `"required"` | yes | yes | exit 2 before any case |
+| `"off"` | no — the whole environment and your real home | no | — |
+
+**Home isolation** gives each case (and each judge call) a fresh temporary home directory,
+deleted when the case ends — `--keep-workspace` keeps the workspace, never the home. `HOME`,
+the four `XDG_*_HOME` directories and `TMPDIR` point into it, so the product's own config
+(`~/.claude`, `~/.claude.json`, `~/.copilot`) starts empty and personal skills, plugins,
+settings, caches and logins stay out of the run. The environment is built from an allowlist:
+`PATH`, the locale, `TZ`, `SHELL`, `USER`, `LOGNAME`, the proxy and CA variables
+(`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY` and their lower-case forms,
+`SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`), the product's own variables, and the
+names in its table's `pass_env`:
+
+| Product | Its own variables |
+| --- | --- |
+| `claude-code` | `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`; `DISABLE_AUTOUPDATER=1` is set, so a fresh home does not start an update |
+| `copilot` | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` |
+| `cli` | none — name what the command needs in `pass_env` |
+
+Home isolation is **not a sandbox**: a process can still read and write any file you can by
+its absolute path. A login kept in your home directory or the OS keychain is out of reach
+too, so the product authenticates from the environment — `CLAUDE_CODE_OAUTH_TOKEN` (from
+`claude setup-token`) or `ANTHROPIC_API_KEY`, and `COPILOT_GITHUB_TOKEN`. Preflight refuses a
+preset with none of its auth variables set and non-empty, or named in `pass_env`, with exit 2
+and the fix; a `command` that names another executable (a wrapper that brings its own auth)
+is not checked. A Bedrock or Vertex setup names its variables in `pass_env`:
+
+```toml
+[runners.claude-code]
+pass_env = ["CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+
+[runners.cli]
+command = ["my-agent", "--prompt", "{prompt}"]
+pass_env = []                    # the command needs nothing from your environment
+```
+
+**The OS sandbox** adds a boundary around the product's whole process tree: it cannot change
+files outside its working directory and its own temporary directories (the home, and the
+[MCP bridge](runners.md#mock-tools-under-a-product)'s directory for a case with `tools:`),
+and cannot read other skill-lens temporary directories, such as the other arm's workspace.
+It can read everything else you can — the products and their runtimes are installed in your
+home directory — and it can reach the network, because the product must reach its provider.
+The product's `--version` (and the bridge, when a case declares `tools:`) is started once
+inside the sandbox before any case, so a product that will not start there is exit 2 up
+front. See [Security](security.md#product-runners) for what each mode guarantees.
+
+`--product-sandbox` overrides the key. `skill-lens.toml` is inside the trust boundary — in a
+`pull_request` workflow a pull request can set `product_sandbox = "off"` for itself — so a
+workflow that runs untrusted pull requests should pass `product-sandbox: required` in the
+action (see [CI integration](ci.md#running-under-a-product)).
 
 ## Bundled scripts
 

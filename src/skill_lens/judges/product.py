@@ -270,10 +270,10 @@ class ProductJudge:
                         f"the judge's own {' '.join(product.judge_args)!r} cannot override "
                         "it); grade under another judge or drop the flag"
                     )
+        executable = find_executable(product, "judge")
         refusal = environment_refusal(product, self._sandbox, "judge")
         if refusal is not None:
             raise ProductSetupError(refusal)
-        executable = find_executable(product, "judge")
         with isolate(self._sandbox, product) as isolation:
             version = probe_version(product, executable, "judge", isolation)
         return ProductStatus(

@@ -50,6 +50,11 @@ from skill_lens.runners.preflight import (
     check_api_key,
 )
 from skill_lens.runners.product import ProductRunner, ProductSetupError
+from skill_lens.runners.product_sandbox import (
+    PRODUCT_SANDBOX_OFF,
+    ProductSandbox,
+    decide_product_sandbox,
+)
 from skill_lens.runners.pydantic_ai import PydanticAIRunner
 from skill_lens.scaffold import render_scaffold, scaffold_target
 from skill_lens.scripts import ScriptSetupError
@@ -160,9 +165,16 @@ def _resolve_runners(flag: list[str] | None, configured: str | list[str]) -> lis
     return names
 
 
-def _build_runner(name: str, settings: Config, model_name: str, base_url: str = "") -> Runner:
+def _build_runner(
+    name: str,
+    settings: Config,
+    model_name: str,
+    base_url: str = "",
+    sandbox: ProductSandbox | None = None,
+) -> Runner:
     """One runner by name: `fake` takes nothing, a keyed runner takes the shared
-    model and endpoint, a product runner takes its `[runners.<name>]` table."""
+    model and endpoint, a product runner takes its `[runners.<name>]` table and
+    the run's one product sandbox decision (None: `off`)."""
     if name == "fake":
         return FakeRunner()
     if name in _KEYED_RUNNERS:
@@ -173,10 +185,16 @@ def _build_runner(name: str, settings: Config, model_name: str, base_url: str = 
             retry_backoff_seconds=settings.retry_backoff_seconds,
             base_url=base_url,
         )
-    return ProductRunner(settings.product(name))
+    return ProductRunner(settings.product(name), sandbox=sandbox or PRODUCT_SANDBOX_OFF)
 
 
-def _build_judge(name: str, settings: Config, model_name: str, base_url: str = "") -> Judge:
+def _build_judge(
+    name: str,
+    settings: Config,
+    model_name: str,
+    base_url: str = "",
+    sandbox: ProductSandbox | None = None,
+) -> Judge:
     """One judge by name, the way `_build_runner` builds a runner."""
     if name == "fake":
         return FakeJudge()
@@ -188,7 +206,7 @@ def _build_judge(name: str, settings: Config, model_name: str, base_url: str = "
             retry_backoff_seconds=settings.retry_backoff_seconds,
             base_url=base_url,
         )
-    return ProductJudge(settings.product(name))
+    return ProductJudge(settings.product(name), sandbox=sandbox or PRODUCT_SANDBOX_OFF)
 
 
 @app.command()
@@ -268,6 +286,13 @@ def run(
             help="Run scripts bundled under the skill's scripts/ directory (off by default).",
         ),
     ] = None,
+    product_sandbox: Annotated[
+        str | None,
+        typer.Option(
+            "--product-sandbox",
+            help="Isolate product runners and judges: auto, required or off.",
+        ),
+    ] = None,
 ) -> None:
     """Discover skills, run their eval cases, and gate on the results."""
     try:
@@ -289,6 +314,11 @@ def run(
         resolved_allow_scripts = (
             allow_scripts if allow_scripts is not None else settings.allow_scripts
         )
+        resolved_product_sandbox = (
+            product_sandbox if product_sandbox is not None else settings.product_sandbox
+        )
+        if resolved_product_sandbox not in ("auto", "required", "off"):
+            raise typer.BadParameter(f"unknown product sandbox: {resolved_product_sandbox}")
         # None means "no cap" to every reporter.
         output_limit = None if resolved_full_output else OUTPUT_LIMIT
         workspace_limits = WorkspaceLimits(
@@ -352,8 +382,19 @@ def run(
             # Once for the whole matrix: every keyed runner shares one model.
             _require_a_model("--model", model_name)
             check_api_key(model_name, os.environ)
+        # Once per run, before any case, and only when a product runs: one
+        # decision shared by every product runner and the product judge, so
+        # they can never disagree. A run with no product probes nothing --
+        # the flag is a policy a shared workflow sets once, not a value
+        # something must read.
+        sandbox = (
+            decide_product_sandbox(resolved_product_sandbox)
+            if uses_product or judge_name in PRODUCT_NAMES
+            else PRODUCT_SANDBOX_OFF
+        )
         active_runners = [
-            _build_runner(name, settings, model_name, resolved_base_url) for name in runner_names
+            _build_runner(name, settings, model_name, resolved_base_url, sandbox)
+            for name in runner_names
         ]
         # An empty judge_model means "grade with the same model you run with",
         # so a project opting into real judging only has to name one model.
@@ -372,7 +413,7 @@ def run(
             _require_a_model("--judge-model", resolved_judge_model)
             check_api_key(resolved_judge_model, os.environ)
         active_judge = _build_judge(
-            judge_name, settings, resolved_judge_model, resolved_judge_base_url
+            judge_name, settings, resolved_judge_model, resolved_judge_base_url, sandbox
         )
         if needs_key or uses_product:
             # A ceiling, not a forecast. Printed for keyed and product

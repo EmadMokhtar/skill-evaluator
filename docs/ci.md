@@ -231,6 +231,27 @@ falls back to it, and so is `judge-model` when the file's `judge` is a product
 [Judging with a product](runners.md#judging-with-a-product)); set the product's model with
 `[runners.<name>] args` in `skill-lens.toml`, which serves the runner and the judge alike.
 
+The product runs under the [product sandbox](configuration.md#product-sandbox): by default a
+temporary home directory and an allowlisted environment, so it signs in from its token
+(`COPILOT_GITHUB_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`), never from a login on the runner, and the
+rest of the job's `env` is not passed to it. On a stock `ubuntu-latest` runner `bwrap` may be
+missing, or unprivileged user namespaces refused, and then no OS sandbox applies; the product
+line on the report says which. The `product-sandbox` input passes `--product-sandbox`. Unset,
+`skill-lens.toml` decides — and in a `pull_request` workflow that file comes from the pull
+request, which can set `product_sandbox = "off"` for itself. Where the checkout is a pull
+request you do not trust, pass `required`, so the run stops (exit 2) rather than running
+without a sandbox:
+
+```yaml
+  - uses: EmadMokhtar/skill-evaluator@v0.24.3
+    with:
+      path: ./skills
+      runner: claude-code
+      product-sandbox: required
+    env:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
 ## Without the action
 
 ```yaml

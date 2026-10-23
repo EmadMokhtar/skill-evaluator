@@ -12,6 +12,7 @@ skill-lens run <path> [--evals <path>] [--runner <name>]... [--model <name>]
                       [--keep-workspace | --no-keep-workspace]
                       [--full-output | --no-full-output]
                       [--allow-scripts | --no-allow-scripts]
+                      [--product-sandbox <mode>]
 skill-lens list <path> [--evals <path>]
 skill-lens init <path> [--force]
 skill-lens mcp-import <source> [--tool <name>]...
@@ -49,6 +50,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--keep-workspace` / `--no-keep-workspace` | unset | Keep each case's temporary directory instead of deleting it. Overrides the `keep_workspace` config key in either direction; omitting both flags leaves the config file's value in effect. Every kept directory is printed, under a `Kept workspaces` section, whichever of the flag or the config turned keeping on |
 | `--full-output` / `--no-full-output` | unset | Print a failing case's whole output instead of the first 500 characters. Overrides the `full_output` config key in either direction; omitting both flags leaves the config file's value in effect |
 | `--allow-scripts` / `--no-allow-scripts` | unset | Run the scripts a skill bundles under `scripts/`. Off by default: a `SKILL.md` under evaluation is unvetted code. Overrides the `allow_scripts` config key in either direction; omitting both flags leaves the config file's value in effect. Every run that enables scripts prints `scripts: on, sandbox: <backend>` so the log shows whether an OS sandbox applied, and exits 2 before any case runs if a bundled script's interpreter is missing or `script_sandbox = "required"` finds no sandbox. See [Running bundled scripts](runners.md#running-bundled-scripts) |
+| `--product-sandbox <mode>` | unset | Isolate product runners and the product judge: `auto`, `required` or `off`. Overrides the `product_sandbox` config key (default `auto`). `auto` gives every product run a temporary home directory and an allowlisted environment, inside `sandbox-exec` or `bwrap` where one works; `required` exits 2 before any case when none works; `off` is the full environment and your real home. Decided once per run, and only when a product runner or product judge is named — on any other run the flag is accepted and unused. Every product line on the report says what applied. See [Product sandbox](configuration.md#product-sandbox) |
 
 Each flag overrides the corresponding key in [configuration](configuration.md).
 Exit codes are documented in [Gating](gating.md). `--baseline`, `--repeat` and `--min-delta`

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import string
 import tomllib
 from dataclasses import replace
@@ -25,6 +26,7 @@ from skill_lens.runners.product import (
 from skill_lens.runners.product import (
     DEFAULT_TIMEOUT_SECONDS as PRODUCT_DEFAULT_TIMEOUT_SECONDS,
 )
+from skill_lens.runners.product_sandbox import CONTROLLED_ENV
 from skill_lens.scripts import (
     DEFAULT_INTERPRETERS,
     DEFAULT_MAX_OUTPUT_BYTES,
@@ -36,6 +38,7 @@ from skill_lens.workspace import DEFAULT_LIMITS, PathRefused, check_relative_pat
 CONFIG_FILENAME = "skill-lens.toml"
 DEFAULT_MODEL = "openai:gpt-4o-mini"
 PRODUCT_NAMES: tuple[str, ...] = (*PRESETS, "cli")
+_VARIABLE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 class ConfigError(Exception):
@@ -79,6 +82,12 @@ class ProductSettings(BaseModel):
     model with `args`. `skills_dir` and `invoke` are accepted for `cli` only;
     a preset is the verified spelling for its product. No secret lives here:
     the product reads its own auth.
+
+    `pass_env` names the variables a product gets under home isolation
+    (`product_sandbox` not "off") beyond the allowlist and its own auth
+    variables -- names only, because a value would be a secret in a
+    committed file. None means unset, which a `cli` product may not leave it
+    under isolation; `[]` says it needs nothing.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -91,6 +100,27 @@ class ProductSettings(BaseModel):
     max_output_bytes: int = Field(default=PRODUCT_DEFAULT_MAX_OUTPUT_BYTES, gt=0)
     skills_dir: str | None = None
     invoke: str | None = None
+    pass_env: list[str] | None = None
+
+    @field_validator("pass_env")
+    @classmethod
+    def _variable_names_the_isolation_does_not_own(
+        cls, value: list[str] | None
+    ) -> list[str] | None:
+        """A name, never a value; never one the isolation sets or drops on purpose,
+        which would point the product back at the real home."""
+        if value is None:
+            return None
+        for name in value:
+            if not _VARIABLE_NAME.fullmatch(name):
+                raise ValueError(f"pass_env names {name!r}, which is not a variable name")
+            if name in CONTROLLED_ENV:
+                raise ValueError(
+                    f"pass_env names {name}, which home isolation sets itself; passing it "
+                    'would undo the isolation -- set product_sandbox = "off" to run the '
+                    "product with your own home"
+                )
+        return value
 
     @field_validator("command")
     @classmethod
@@ -251,6 +281,13 @@ class Config(BaseModel):
     (`copilot`, `claude-code`, `cli`); see `ProductSettings`. Config-only:
     which product a repository evaluates under, and how, is repository
     policy.
+
+    `product_sandbox` is the run's product sandbox (issue #99): `auto` (the
+    default) gives every product run a temporary home and an allowlisted
+    environment, inside `sandbox-exec` or `bwrap` where one works;
+    `required` exits 2 when none works; `off` is the full environment and
+    the real home. `--product-sandbox` overrides it, because this file is
+    inside the trust boundary: a pull request can set `off` for itself.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -289,6 +326,7 @@ class Config(BaseModel):
         default_factory=lambda: {ext: list(argv) for ext, argv in DEFAULT_INTERPRETERS.items()}
     )
     runners: dict[str, ProductSettings] = Field(default_factory=dict)
+    product_sandbox: SandboxMode = "auto"
 
     @field_validator("base_url", "judge_base_url")
     @classmethod
@@ -408,12 +446,14 @@ class Config(BaseModel):
                     version_command=base.version_command if same_executable else None,
                     judge_args=base.judge_args if same_executable else (),
                     mcp=base.mcp if same_executable else None,
+                    wrapper=not same_executable,
                 )
         return replace(
             base,
             argv=(*base.argv, *settings.args),
             timeout_seconds=settings.timeout_seconds,
             max_output_bytes=settings.max_output_bytes,
+            pass_env=tuple(settings.pass_env) if settings.pass_env is not None else None,
         )
 
 
