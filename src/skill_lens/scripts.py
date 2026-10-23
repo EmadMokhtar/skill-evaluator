@@ -247,7 +247,14 @@ def product_macos_profile(writable: Sequence[Path], tempdir: Path) -> str:
 def product_bwrap_argv(writable: Sequence[Path], tempdir: Path, argv: Sequence[str]) -> list[str]:
     """The `bwrap` command line for a product: `bwrap_argv`'s, minus the
     network denial and the read-only bundle, with each writable directory
-    bound back in after the tmpfs that would otherwise hide it."""
+    bound back in after the tmpfs that would otherwise hide it.
+
+    The tmpfs is then remounted read-only, so a write elsewhere under the
+    temp directory is refused, as `sandbox-exec` refuses it, rather than
+    landing in memory and vanishing. After the binds, because bwrap creates
+    their mount points inside the tmpfs; `--remount-ro` is not recursive,
+    so the binds keep their own, writable, mode.
+    """
     binds = [element for path in writable for element in ("--bind", str(path), str(path))]
     return [
         "bwrap",
@@ -256,6 +263,7 @@ def product_bwrap_argv(writable: Sequence[Path], tempdir: Path, argv: Sequence[s
         "--proc", "/proc",
         "--tmpfs", str(tempdir),
         *binds,
+        "--remount-ro", str(tempdir),
         "--unshare-pid",
         "--die-with-parent",
         "--new-session",

@@ -200,10 +200,15 @@ profile allows it. Otherwise the rules are the script rules, rebuilt from the sa
 ```
 bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs <tempdir>
       --bind <cwd> <cwd> --bind <root> <root> [--bind <bridge dir> <bridge dir>]
+      --remount-ro <tempdir>
       --unshare-pid --die-with-parent --new-session -- <argv>
 ```
 
-No `--unshare-net`. `--unshare-pid` with `--die-with-parent` means killing `bwrap` kills
+No `--unshare-net`. `--remount-ro <tempdir>` after the binds (added during implementation,
+matching PR #120 for scripts): without it a write elsewhere under the temp directory lands
+in the tmpfs and vanishes instead of being refused, unlike `sandbox-exec`. It is not
+recursive, so the binds keep their writable mode, and it must follow them, because bwrap
+creates their mount points inside the tmpfs. `--unshare-pid` with `--die-with-parent` means killing `bwrap` kills
 every process the product started, as it does for scripts.
 
 So, under either backend, the product:
@@ -324,8 +329,9 @@ sentence, so a product serving both seats is still one line.
   under the sandbox, so no rule here depends on which files are delivered.
 - **#96** adds `--include-hook-events` to the `claude-code` argv. This design adds no argv
   flag to the preset; the changes to `PRESETS` are new fields (`auth_env`, `env`) only.
-- **#95** (several sessions per case) can reuse one temporary home per work item, so
-  sessions share a home the way a user's sessions do.
+- **#95** (several sessions per case) makes one `Runner.run` call per session (corrected
+  during implementation, from its notes), so each session gets its own temporary home; what
+  the sessions share is the workspace, which is what #95 measures.
 - **#94** (spend ceiling) is unaffected: spend is still read from the trace.
 
 ## Invariants
@@ -393,7 +399,8 @@ PR is opened, and the PR records the result.
 
 ## Calls made without asking
 
-- Home isolation is per work item, not per process, so #95's sessions can share it.
+- Home isolation is per `Runner.run` call (one work item, or one #95 session), not per
+  process.
 - The temporary home is always deleted, `--keep-workspace` or not.
 - `CLAUDE_CONFIG_DIR` and `COPILOT_HOME` are dropped, not set.
 - `DISABLE_AUTOUPDATER=1` for `claude-code` under isolation.

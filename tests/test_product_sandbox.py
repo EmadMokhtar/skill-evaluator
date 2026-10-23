@@ -306,6 +306,12 @@ def test_the_product_bwrap_argv_shares_the_network():
     assert [argv[i + 1] for i in binds] == [str(WORKSPACE), str(HOME_ROOT)]
     assert all(argv[i + 1] == argv[i + 2] for i in binds)
     assert all(i > tmpfs for i in binds)
+    # The tmpfs is made read-only after the binds (bwrap creates their mount
+    # points inside it, and --remount-ro is not recursive), so a write under
+    # the temp dir is refused, as sandbox-exec refuses it -- not discarded.
+    remount = argv.index("--remount-ro")
+    assert argv[remount + 1] == str(TEMPDIR)
+    assert all(remount > i for i in binds)
     assert argv[-7:] == [
         "--unshare-pid", "--die-with-parent", "--new-session", "--", "agent", "-p", "hi",
     ]  # fmt: skip
