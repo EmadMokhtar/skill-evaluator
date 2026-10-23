@@ -137,13 +137,16 @@ def test_the_network_is_reachable(tmp_path, workspace, listener):
 
 def test_the_product_can_write_its_own_standard_streams(tmp_path, workspace):
     # `echo msg >/dev/stderr` is a common idiom in hooks and scripts; under
-    # `set -e` a refusal would abort them and score the case as failed.
+    # `set -e` a refusal would abort them and score the case as failed. The
+    # check is the exit status, not the content: on Linux `>/dev/stdout`
+    # reopens the capture file and truncates it (macOS duplicates the
+    # descriptor), so only the last write to stdout is asserted.
     product = Product(
         name="cli",
         argv=(
             "/bin/bash",
             "-c",
-            "set -e; echo e >/dev/stderr; echo o >/dev/stdout; echo f >/dev/fd/1",
+            "set -e; echo e >/dev/stderr; echo e >/dev/fd/2; : >/dev/stdout; echo ok",
             "{prompt}",
         ),
         skills_dir=".agents/skills",
@@ -156,4 +159,4 @@ def test_the_product_can_write_its_own_standard_streams(tmp_path, workspace):
     case = EvalCase(name="streams", task="x", workspace=WorkspaceSpec())
     result = ProductRunner(product, sandbox=SANDBOX).run(skill, case, workspace)
     assert result.error is None, result.error
-    assert result.output == "o\nf"
+    assert result.output == "ok"
