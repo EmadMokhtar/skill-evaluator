@@ -620,9 +620,7 @@ def test_pass_env_refuses_a_name_the_isolation_owns(name):
     with pytest.raises(ValidationError) as caught:
         ProductSettings(pass_env=[name])
     assert name in str(caught.value)
-    assert 'product_sandbox = "off"' in str(caught.value) or (
-        'product_sandbox = "off"' in str(caught.value)
-    )
+    assert 'product_sandbox = "off"' in str(caught.value)
 
 
 def test_a_wrapper_command_marks_the_product(tmp_path):
