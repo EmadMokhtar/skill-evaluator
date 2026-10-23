@@ -224,7 +224,11 @@ def bwrap_argv(
     writable directories and the read-only bundle bound back in, no network,
     and `--die-with-parent` so a killed harness takes the script with it.
     Order matters: the tmpfs must be mounted before the binds it would
-    otherwise hide.
+    otherwise hide, and remounted read-only after them. An empty tmpfs is
+    still writable, so without the remount a write elsewhere under the temp
+    directory would land in memory and vanish instead of being refused. The
+    remount is not recursive, so the binds keep their own modes; it comes
+    last because bwrap creates their mount points inside the tmpfs.
     """
     return [
         "bwrap",
@@ -235,6 +239,7 @@ def bwrap_argv(
         "--bind", str(workspace), str(workspace),
         "--bind", str(scratch), str(scratch),
         "--ro-bind", str(bundle), str(bundle),
+        "--remount-ro", str(tempdir),
         "--unshare-net",
         "--unshare-pid",
         "--die-with-parent",

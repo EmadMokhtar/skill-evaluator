@@ -705,9 +705,10 @@ reading that fact is the eval signal. `run_script` never raises. Standard input 
 
 **The OS sandbox**, where one exists (`script_sandbox = "auto"`, the default), is a second
 layer on top. Under either backend a script cannot open a network connection; cannot write
-to the host filesystem outside the workspace and its scratch directory (under `bwrap`,
-writes under the temporary directory and `/dev/shm` land in an in-memory mount that is
-discarded when the script exits — bounded, like output, only by the timeout); and cannot
+to the host filesystem outside the workspace and its scratch directory (a write elsewhere
+under the temporary directory is refused on both backends; under `bwrap`, a write to
+`/dev/shm` lands in an in-memory mount that is discarded when the script exits — bounded,
+like output, only by the timeout); and cannot
 read anything under the system temporary directory except the workspace, the scratch
 directory and the skill's own bundle — so under `--concurrency N` a script cannot read the
 baseline arm's workspace or another case's scratch directory.
@@ -729,7 +730,7 @@ entries the temporary directory holds and when that changes, but not what they a
 | | Backend | How |
 | --- | --- | --- |
 | macOS | `sandbox-exec` | A profile that allows everything, then denies `network*` and `file-write*`, re-allows writes under the workspace and the scratch directory (plus `file-write-data` on `/dev/null`), denies `file-read*` under the temporary directory, then re-allows reads under the workspace, the scratch directory and the bundle. Later rules win. `sandbox-exec` is marked deprecated in Apple's documentation, is present and working on current macOS, and is what Bazel, Chromium and Claude Code use. |
-| Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install. A stock Ubuntu CI image may not ship `bwrap`, or may refuse unprivileged user namespaces; the report's `sandbox:` line says which. `--unshare-net` does not block Unix-domain sockets (see above). |
+| Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, `--remount-ro` on the temporary directory so the tmpfs refuses writes (the remount is not recursive, so the binds keep their own modes), then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install. A stock Ubuntu CI image may not ship `bwrap`, or may refuse unprivileged user namespaces; the report's `sandbox:` line says which. `--unshare-net` does not block Unix-domain sockets (see above). |
 | Windows | none | The portable guards only. `"required"` refuses to run. |
 
 The probe runs once per run, after discovery and before any case. The backend is *executed*

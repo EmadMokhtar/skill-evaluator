@@ -135,6 +135,23 @@ def test_the_bwrap_argv_binds_the_two_directories_and_the_bundle_over_a_read_onl
     assert argv[-3:] == ["--", "python3", "x.py"]
 
 
+def test_the_bwrap_tmpfs_is_remounted_read_only_after_the_binds():
+    # An empty tmpfs is still writable: without the remount, a write under the
+    # temp dir lands in the tmpfs and vanishes instead of being refused, as
+    # sandbox-exec refuses it. The remount is not recursive, so the three binds
+    # keep their own modes. It must come after them, because bwrap creates
+    # their mount points inside the tmpfs, and it cannot once it is read-only.
+    argv = bwrap_argv(WS, SCRATCH, TEMPDIR, ["python3", "x.py"], BUNDLE)
+    remount = argv.index("--remount-ro")
+    assert argv[remount + 1] == str(TEMPDIR)
+    binds = [
+        i for i, arg in enumerate(argv) if arg in ("--bind", "--ro-bind") and argv[i + 1] != "/"
+    ]
+    assert len(binds) == 3
+    assert remount > max(binds)
+    assert remount < argv.index("--")
+
+
 def test_wrap_leaves_argv_alone_without_a_backend():
     assert wrap("none", ["python3", "x.py"], WS, SCRATCH, TEMPDIR, BUNDLE) == [
         "python3",

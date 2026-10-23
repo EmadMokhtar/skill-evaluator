@@ -1084,7 +1084,11 @@ The macOS profile allows by default, denies `network*` and `file-write*`, re-all
 under the workspace and scratch (and `file-write-data` on `/dev/null`), denies `file-read*`
 under the resolved system temporary directory, then re-allows reads under the workspace,
 scratch and the bundle; `bwrap` mounts an empty `tmpfs` over the temporary directory and
-binds the same three back in (the bundle read-only). The bundle must be re-allowed because a
+binds the same three back in (the bundle read-only), then remounts the `tmpfs` read-only.
+An empty `tmpfs` is still writable, so without the remount a write under the temporary
+directory would vanish with the mount instead of being refused, as `sandbox-exec` refuses
+it. The remount is not recursive, so the binds keep their own modes, and it comes after them
+because `bwrap` creates their mount points inside the `tmpfs`. The bundle must be re-allowed because a
 `--baseline previous` bundle is extracted *under* the temporary directory. On macOS a last
 rule allows `file-read-metadata` on each directory between the temporary directory and those
 three, as `literal`s, because BSD `mkdir -p "$PWD/x"` stats every parent; it is never

@@ -245,9 +245,9 @@ A skill may ship code under `scripts/`. skill-lens can execute it, and the trust
   never an aborted run.
 - **An OS sandbox applies where one exists** — `sandbox-exec` on macOS, `bwrap` on Linux.
   Under it a script cannot open a network connection, cannot write to the host filesystem
-  outside the workspace and its scratch directory (under `bwrap`, writes under the
-  temporary directory and `/dev/shm` land in an in-memory mount discarded when the script
-  exits), and cannot read anything under the system temporary directory except the
+  outside the workspace and its scratch directory (a write elsewhere under the temporary
+  directory is refused on both backends; under `bwrap`, a write to `/dev/shm` lands in an
+  in-memory mount discarded when the script exits), and cannot read anything under the system temporary directory except the
   workspace, the scratch directory and the skill's own bundle — so other arms' and other
   cases' workspaces are hidden from it. On macOS the directories above those three keep
   their metadata (`stat`), never their listing, so `mkdir -p "$PWD/x"` works. That metadata
