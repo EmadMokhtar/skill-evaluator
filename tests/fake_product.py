@@ -2,8 +2,9 @@
 
 Started by the tests as `python fake_product.py -p <prompt> ...`. It records
 what it saw to the JSON file named by FAKE_PRODUCT_RECORD -- its cwd, its
-argv, the prompt after `-p`, and every file under the directory named by
-FAKE_PRODUCT_SKILLS_DIR (relative to cwd) -- then behaves as FAKE_PRODUCT_MODE
+argv, the prompt after `-p`, every file under the directory named by
+FAKE_PRODUCT_SKILLS_DIR (relative to cwd), its HOME and TMPDIR and the names
+in its environment -- then behaves as FAKE_PRODUCT_MODE
 says:
 
   ok       print the file named by FAKE_PRODUCT_TRACE to stdout, exit 0 (default)
@@ -132,6 +133,9 @@ def main(argv: list[str]) -> int:
                     "prompt": prompt,
                     "skill_files": files,
                     "mcp": mcp,
+                    "home": os.environ.get("HOME"),
+                    "tmpdir": os.environ.get("TMPDIR"),
+                    "env_keys": sorted(os.environ),
                 }
             ),
             encoding="utf-8",

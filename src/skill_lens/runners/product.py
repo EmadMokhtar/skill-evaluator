@@ -9,10 +9,12 @@ own trace. The skill is measured under the product's system prompt, tools
 and loading mechanics, none of which skill-lens can emulate from outside.
 
 The trust model is the product's, not skill-lens's: permission prompts are
-disabled (the product cannot run non-interactively otherwise) and the full
-environment is inherited (the product needs its own auth). Nothing here is
-sandboxed; `ProductStatus.trust` says so on every report. Naming a product
-runner is the decision.
+disabled (the product cannot run non-interactively otherwise). What else
+applies is the run's product sandbox (`product_sandbox.py`, issue #99): under
+`off` the full environment is inherited and nothing is sandboxed; otherwise a
+temporary home and an allowlisted environment, inside `sandbox-exec` or
+`bwrap` where one works. `ProductStatus.trust` says which on every report.
+Naming a product runner is the decision.
 
 A case's `tools:` reach the product through a stdio MCP server skill-lens
 ships (`mcp_bridge.py`) and the product starts from a config file this
@@ -50,7 +52,14 @@ from skill_lens.runners.mcp import (
     restore_tool_names,
     write_bridge,
 )
-from skill_lens.runners.product_sandbox import TRUST_NOTE, ProductSetupError
+from skill_lens.runners.product_sandbox import (
+    PRODUCT_SANDBOX_OFF,
+    TRUST_NOTE,
+    Isolation,
+    ProductSandbox,
+    ProductSetupError,
+    isolate,
+)
 from skill_lens.runners.traces import Trace, parse_claude_code, parse_copilot
 from skill_lens.skills.loader import SKILL_FILENAME
 from skill_lens.workspace import PathRefused, Workspace, check_relative_path
@@ -195,12 +204,20 @@ class Invocation:
 
 
 def invoke(
-    product: Product, prompt: str, cwd: Path, extra_args: tuple[str, ...] = ()
+    product: Product,
+    prompt: str,
+    cwd: Path,
+    extra_args: tuple[str, ...] = (),
+    isolation: Isolation | None = None,
+    writable: Sequence[Path] = (),
 ) -> Invocation:
     """Start the product once with `prompt`, in `cwd`; never raises.
 
     `extra_args` go after everything else -- after the table's `args` -- and
-    are how the MCP bridge's config reaches the product. Output goes to
+    are how the MCP bridge's config reaches the product. `isolation` is the
+    work item's product sandbox (`product_sandbox.isolate`): its environment,
+    and its launcher, which may also write `writable`; None is the whole
+    environment and no wrapper, as before issue #99. Output goes to
     files in a scratch directory and is read back through the handles the
     harness opened (see `process.read_capped_handle`). The process group is
     killed after every exit, timeout or not.
@@ -214,6 +231,9 @@ def invoke(
         *(prompt if element == PROMPT_PLACEHOLDER else element for element in product.argv[1:]),
         *extra_args,
     ]
+    env = os.environ.copy() if isolation is None else isolation.env
+    if isolation is not None:
+        argv = isolation.launch(argv, cwd, writable)
     try:
         scratch = Path(tempfile.mkdtemp(prefix=SCRATCH_PREFIX)).resolve()
     except OSError as exc:
@@ -229,9 +249,9 @@ def invoke(
                 process = subprocess.Popen(  # noqa: S603 - argv list, shell=False, prompt is one element
                     argv,
                     cwd=cwd,
-                    # The whole environment, on purpose: the product needs its
-                    # own auth. The opposite of `scripts.script_environment`.
-                    env=os.environ.copy(),
+                    # Under `product_sandbox = "off"`, the whole environment:
+                    # the product needs its own auth. Otherwise the built one.
+                    env=env,
                     stdin=subprocess.DEVNULL,
                     stdout=stdout_handle,
                     stderr=stderr_handle,
@@ -480,13 +500,21 @@ class ProductRunner:
 
     needs_api_key = False
 
-    def __init__(self, product: Product) -> None:
+    def __init__(self, product: Product, *, sandbox: ProductSandbox = PRODUCT_SANDBOX_OFF) -> None:
+        """`sandbox` is the run's product sandbox decision, shared by every
+        product runner and the judge; the default, `off`, is the behaviour
+        before issue #99."""
         self._product = product
+        self._sandbox = sandbox
         self.name = product.name
 
     @property
     def product(self) -> Product:
         return self._product
+
+    @property
+    def sandbox(self) -> ProductSandbox:
+        return self._sandbox
 
     def run(
         self,
@@ -521,7 +549,11 @@ class ProductRunner:
 
         private: Path | None = None
         bridge: Bridge | None = None
+        stack = ExitStack()
         try:
+            # Entered first, so the temporary home outlives every process
+            # this work item starts and is removed however the run ends.
+            isolation = stack.enter_context(isolate(self._sandbox, product))
             if workspace is not None:
                 cwd = workspace.root
             else:
@@ -539,7 +571,10 @@ class ProductRunner:
                 bridge = write_bridge(case.tools, product.mcp)
                 extra_args = bridge.argv()
             deliver_skill(skill, cwd, product.skills_dir)
-            trace = read_trace(product, invoke(product, prompt, cwd, extra_args))
+            writable = (bridge.directory,) if bridge is not None else ()
+            trace = read_trace(
+                product, invoke(product, prompt, cwd, extra_args, isolation, writable)
+            )
             if bridge is not None and trace.error is None and not bridge.connected():
                 # The product ran, but never asked the bridge for its tools:
                 # the model had none. Infra, not a skill that failed to call
@@ -562,6 +597,7 @@ class ProductRunner:
                 bridge.cleanup()
             if private is not None:
                 shutil.rmtree(private, ignore_errors=True)
+            stack.close()
 
         # One set of spend fields for both results below, so an errored run
         # and a clean one can never disagree about what the trace reported.

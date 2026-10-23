@@ -30,7 +30,8 @@ import os
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -243,3 +244,49 @@ def product_environment(
             LOCALAPPDATA=str(home / "AppData" / "Local"),
         )
     return env
+
+
+@dataclass(frozen=True)
+class Isolation:
+    """What one work item's product processes start under.
+
+    `root` is the private directory holding the temporary home, or None
+    under `off`, where `env` is the whole harness environment and `launch`
+    wraps nothing -- the behaviour before issue #99, byte for byte.
+    """
+
+    sandbox: ProductSandbox
+    root: Path | None
+    env: dict[str, str]
+
+    def launch(self, argv: Sequence[str], cwd: Path, writable: Sequence[Path] = ()) -> list[str]:
+        """`argv` as it must start: wrapped in the backend, which may write
+        only `cwd`, the temporary home and `writable` (the MCP bridge's
+        directory, for a `tools:` case)."""
+        if self.root is None:
+            return list(argv)
+        return self.sandbox.wrap(argv, [cwd, self.root, *writable])
+
+
+@contextmanager
+def isolate(sandbox: ProductSandbox, product: Product) -> Iterator[Isolation]:
+    """One work item's isolation: a fresh private directory, removed however
+    the block ends -- an error or a killed product included -- and never
+    kept, `--keep-workspace` or not: it may hold what the product wrote
+    about its own login.
+
+    `mkdtemp` is atomic, so two arms or two concurrent cases never share a
+    home. Every product process the work item starts uses the same one.
+    Raises `OSError` when the directory cannot be made, which a caller that
+    must not raise turns into its own error.
+    """
+    if not sandbox.home_isolated:
+        yield Isolation(sandbox=sandbox, root=None, env=os.environ.copy())
+        return
+    root = Path(tempfile.mkdtemp(prefix=HOME_PREFIX)).resolve()
+    try:
+        (root / "home").mkdir()
+        (root / "tmp").mkdir()
+        yield Isolation(sandbox=sandbox, root=root, env=product_environment(product, root))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
