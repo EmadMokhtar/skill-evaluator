@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from skill_lens.models import ToolCall
+from skill_lens.models import HookRun, ToolCall
 from skill_lens.runners.traces import parse_claude_code, parse_copilot, parse_lines
 
 FIXTURES = Path(__file__).parent / "fixtures" / "products"
@@ -141,6 +141,121 @@ def test_claude_code_without_usage_says_tokens_were_not_reported():
     assert trace.output_tokens == 0
     assert trace.usage_note == "claude-code did not report token usage"
     assert trace.error is None
+
+
+# The hook fixture is built from the `hook_response` schema Claude Code 2.1.289
+# declares for its SDK, and checked against a live 2.1.289 run of a skill with
+# UserPromptSubmit, PreToolUse, PostToolUse and Stop hooks: the same keys in
+# the same order, `hook_name` spelled `<event>:<matcher>`, and `output` equal
+# to stdout then stderr. That run had no cancelled hook and no `hook_progress`
+# (its hooks were too short); those two lines rest on the binary alone:
+# `cancelled` is written only for a hook stopped by its own timeout or by an
+# interrupted run, `exit_code` is absent when the hook had none, and
+# `hook_progress` is a partial read of a hook still running.
+
+
+def test_claude_code_hooks_are_the_hook_response_events_in_order():
+    trace = parse_claude_code(_fixture("claude-code-hooks.jsonl"))
+    assert trace.error is None
+    assert trace.hooks == [
+        HookRun(
+            name="UserPromptSubmit",
+            event="UserPromptSubmit",
+            outcome="success",
+            exit_code=0,
+            stdout="[plan] no task_plan.md yet\n",
+        ),
+        HookRun(name="PreToolUse:Write", event="PreToolUse", outcome="success", exit_code=0),
+        HookRun(
+            name="PostToolUse:Write",
+            event="PostToolUse",
+            outcome="error",
+            exit_code=127,
+            stderr="check-complete.sh: line 4: jq: command not found\n",
+        ),
+        HookRun(name="Stop", event="Stop", outcome="cancelled", exit_code=None),
+    ]
+
+
+def test_claude_code_hook_events_stay_in_the_transcript():
+    trace = parse_claude_code(_fixture("claude-code-hooks.jsonl"))
+    subtypes = [event.get("subtype") for event in trace.transcript if event["type"] == "system"]
+    assert subtypes.count("hook_started") == 4
+    assert subtypes.count("hook_progress") == 1
+    assert subtypes.count("hook_response") == 4
+
+
+def test_claude_code_hooks_do_not_change_what_the_result_event_reports():
+    trace = parse_claude_code(_fixture("claude-code-hooks.jsonl"))
+    assert trace.output == "Plan written."
+    assert trace.tool_calls == [
+        ToolCall(name="Write", arguments={"file_path": "task_plan.md", "content": "# Plan"})
+    ]
+    assert trace.input_tokens == 3 + 100 + 210
+    assert trace.output_tokens == 13
+    assert trace.cost_usd == pytest.approx(0.0512)
+
+
+def test_claude_code_a_trace_without_hook_events_has_no_hooks():
+    assert parse_claude_code(_fixture("claude-code-trigger.jsonl")).hooks == []
+
+
+def test_claude_code_hooks_seen_before_a_cut_are_still_parsed():
+    # The parser reports what the trace said; the runner decides that an
+    # incomplete trace is an error and keeps none of it.
+    lines = _fixture("claude-code-hooks.jsonl").splitlines()
+    trace = parse_claude_code("\n".join(lines[:4]))
+    assert trace.complete is False
+    assert [hook.name for hook in trace.hooks] == ["UserPromptSubmit"]
+
+
+@pytest.mark.parametrize("broken", [{"hook_name": 7}, {"outcome": ["error"]}])
+def test_claude_code_a_hook_response_without_a_string_name_or_outcome_is_skipped(broken):
+    event = {
+        "type": "system",
+        "subtype": "hook_response",
+        "hook_name": "Stop",
+        "hook_event": "Stop",
+        "outcome": "success",
+        **broken,
+    }
+    result = {"type": "result", "subtype": "success", "is_error": False, "result": "ok"}
+    trace = parse_claude_code(json.dumps(event) + "\n" + json.dumps(result))
+    assert trace.hooks == []
+    assert trace.error is None
+
+
+@pytest.mark.parametrize("event_field", [{}, {"hook_event": None}])
+def test_claude_code_a_hook_response_without_a_string_event_is_kept(event_field):
+    # The name already carries the event, and the report never shows it; a
+    # failed hook must not vanish because one field was missing.
+    event = {
+        "type": "system",
+        "subtype": "hook_response",
+        "hook_name": "Stop",
+        "outcome": "error",
+        "exit_code": 1,
+        **event_field,
+    }
+    result = {"type": "result", "subtype": "success", "is_error": False, "result": "ok"}
+    trace = parse_claude_code(json.dumps(event) + "\n" + json.dumps(result))
+    assert trace.hooks == [HookRun(name="Stop", event="", outcome="error", exit_code=1)]
+
+
+def test_claude_code_a_hook_responses_odd_streams_and_exit_code_do_not_raise():
+    event = {
+        "type": "system",
+        "subtype": "hook_response",
+        "hook_name": "Stop",
+        "hook_event": "Stop",
+        "outcome": "error",
+        "stdout": None,
+        "stderr": 3,
+        "exit_code": True,
+    }
+    result = {"type": "result", "subtype": "success", "is_error": False, "result": "ok"}
+    trace = parse_claude_code(json.dumps(event) + "\n" + json.dumps(result))
+    assert trace.hooks == [HookRun(name="Stop", event="Stop", outcome="error", exit_code=None)]
 
 
 # --- Copilot ---

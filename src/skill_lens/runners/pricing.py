@@ -31,3 +31,23 @@ def calculate_cost(usage: Any, model_name: str, provider_id: str) -> tuple[float
     except Exception as exc:
         label = f"{provider_id}:{model_name}" if provider_id else model_name
         return 0.0, f"no price data for {label} ({type(exc).__name__})"
+
+
+def unpriced_model(model: Any) -> str:
+    """Why a configured `provider:name` model has no price, or "" when it has one.
+
+    Asked before a run with a spend ceiling, so a ceiling that could never
+    see a dollar is refused before one is spent. The lookup is the question,
+    not the amount, so one token each way is priced. A model *object* says
+    nothing about its price until it answers, so it gets "": the ceiling
+    still fails closed on the first unpriced outcome.
+    """
+    if not isinstance(model, str):
+        return ""
+    try:
+        from genai_prices import Usage
+    except ImportError:  # pragma: no cover - genai-prices ships with both extras
+        return "genai-prices is not installed; cost not calculated"
+    name = model.split(":", 1)[1] if ":" in model else model
+    _, note = calculate_cost(Usage(input_tokens=1, output_tokens=1), name, provider_of(model))
+    return note

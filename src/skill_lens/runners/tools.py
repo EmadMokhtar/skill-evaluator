@@ -384,6 +384,8 @@ def build_bundle_tools(
     def list_skill_files(**_extra: Any) -> str:
         try:
             entries = bundle.listing()
+        except PathRefused as exc:  # BundleTooLarge: the skill ships past the cap
+            return str(exc)
         except OSError as exc:  # pragma: no cover - a directory the loader just saw
             return f"refused: cannot list the skill's files: {exc}"
         return "\n".join(entries) if entries else "(empty)"
@@ -405,8 +407,8 @@ def build_bundle_tools(
         AgentTool(
             name="list_skill_files",
             description=(
-                "List the files bundled with the loaded skill, one path per line, relative "
-                "to the skill's directory (scripts/, references/, assets/)."
+                "List the files the loaded skill ships, one path per line, relative to "
+                "the skill's directory."
             ),
             json_schema=_empty_schema(),
             call=list_skill_files,
@@ -414,8 +416,8 @@ def build_bundle_tools(
         AgentTool(
             name="read_skill_file",
             description=(
-                "Read a file bundled with the loaded skill. `path` is relative to the "
-                "skill's directory, for example `references/style.md`."
+                "Read a file the loaded skill ships. `path` is relative to the skill's "
+                "directory, for example `references/style.md`."
             ),
             json_schema=_path_schema(),
             call=read_skill_file,

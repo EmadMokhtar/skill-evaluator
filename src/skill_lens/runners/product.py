@@ -38,10 +38,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from skill_lens.bundle import BUNDLE_DIRS
+from skill_lens.bundle import BundleTooLarge, bundle_files
 from skill_lens.models import ArtifactGlob, EvalCase, ProductStatus, RunResult, Skill
 from skill_lens.paths import glob_entries, glob_matches_path
 from skill_lens.process import group_kwargs, read_capped_handle, reap_and_kill_group
+from skill_lens.runners.base import refuse_sessions
 from skill_lens.runners.mcp import (
     CLAUDE_CODE_MCP,
     COPILOT_MCP,
@@ -125,6 +126,19 @@ class Product:
     # True when a preset's `command` names another executable: a wrapper may
     # bring its own auth, so it is not auth-checked.
     wrapper: bool = False
+    # Why the product's spend can never be priced in US dollars, for one
+    # whose trace parser is known never to report a cost; see `unpriced`.
+    unpriced_note: str = ""
+
+    def unpriced(self) -> str:
+        """Why this product's spend can never be priced in US dollars, or "".
+
+        A product with no trace parser (`cli`) reports nothing at all; a
+        preset whose trace carries no cost says why in `unpriced_note`.
+        """
+        if self.parse is None:
+            return f"the {self.name} product does not report cost"
+        return self.unpriced_note
 
 
 PRESETS: dict[str, Product] = {
@@ -160,14 +174,18 @@ PRESETS: dict[str, Product] = {
         judge_args=("--available-tools=skill-lens-none",),
         tool_flag="--available-tools",
         mcp=COPILOT_MCP,
+        unpriced_note="copilot bills per premium request, not in US dollars",
     ),
     "claude-code": Product(
         name="claude-code",
-        # --verbose is what stream-json needs in print mode. --setting-sources
-        # project and --strict-mcp-config keep the user's own hooks, plugins
-        # and MCP servers out of the eval (verified: the project skill is
-        # still discovered and OAuth still works); --no-session-persistence
-        # writes nothing under ~/.claude.
+        # --verbose is what stream-json needs in print mode.
+        # --include-hook-events writes a `hook_response` event for every hook
+        # the skill declares, not only SessionStart's (verified against
+        # 2.1.289: the flag only turns those events on; the `result` event is
+        # unchanged). --setting-sources project and --strict-mcp-config keep
+        # the user's own hooks, plugins and MCP servers out of the eval
+        # (verified: the project skill is still discovered and OAuth still
+        # works); --no-session-persistence writes nothing under ~/.claude.
         argv=(
             "claude",
             "-p",
@@ -175,6 +193,7 @@ PRESETS: dict[str, Product] = {
             "--output-format",
             "stream-json",
             "--verbose",
+            "--include-hook-events",
             "--dangerously-skip-permissions",
             "--setting-sources",
             "project",
@@ -341,22 +360,25 @@ def delivered_paths(skill: Skill, skills_dir: str) -> list[str]:
     """Every file `deliver_skill` writes for `skill`, relative to the working directory.
 
     The same rule as `deliver_skill`: nothing for a skill with no markdown,
-    else `SKILL.md` and the files of the three bundle directories.
+    else `SKILL.md` and every file the skill ships (`bundle.bundle_files`).
     """
     if not skill.markdown:
         return []
     base = PurePosixPath(skills_dir) / skill.name
-    paths = [(base / SKILL_FILENAME).as_posix()]
-    if skill.bundle_root is not None:
-        for name in BUNDLE_DIRS:
-            source = skill.bundle_root / name
-            if source.is_dir():
-                paths += [
-                    (base / name / item.relative_to(source).as_posix()).as_posix()
-                    for item in sorted(source.rglob("*"))
-                    if item.is_file()
-                ]
-    return paths
+    return [(base / SKILL_FILENAME).as_posix()] + [
+        (base / relative).as_posix() for relative in _shipped_files(skill)
+    ]
+
+
+def _shipped_files(skill: Skill) -> list[str]:
+    """`bundle.bundle_files` for the skill, or `ProductSetupError` past the cap:
+    exit 2 from preflight, `RunResult.error` from a run."""
+    if skill.bundle_root is None:
+        return []
+    try:
+        return bundle_files(skill.bundle_root)
+    except BundleTooLarge as exc:
+        raise ProductSetupError(f"skill {skill.name!r}: {exc}") from exc
 
 
 def _reaches_delivered(case: EvalCase, delivered: list[str]) -> str | None:
@@ -392,10 +414,14 @@ def deliver_skill(skill: Skill, cwd: Path, skills_dir: str) -> bool:
     endings are normalised (the loader reads the file in text mode, so a
     `\\r\\n` in the source is already a bare `\\n` by the time it reaches here)
     -- `newline=""` so no platform's text-mode translation turns that `\\n`
-    back into a `\\r\\n` on the way out; beside it go `scripts/`, `references/`
-    and `assets/` from the bundle -- those three and nothing else, so an eval
-    file beside `SKILL.md` never reaches the product. Symlinks are copied as
-    symlinks, as `git archive` preserved them.
+    back into a `\\r\\n` on the way out; beside it goes every file the skill
+    ships, as an install copies it (issue #92), except what `bundle.withheld`
+    names -- the on-disk `SKILL.md`, the eval files, version control,
+    dependency directories and secret files, at any depth --
+    so an eval file never reaches the product. Exactly the regular files
+    `delivered_paths` reports are written, each read through any link: a link
+    is never copied as a link, so one to the skill's own directory or out of
+    it delivers nothing, and a FIFO is never opened.
 
     `skill.name` is checked here, not trusted from the caller: under
     `--baseline previous` it comes from a historical `SKILL.md`'s
@@ -406,14 +432,14 @@ def deliver_skill(skill: Skill, cwd: Path, skills_dir: str) -> bool:
     if not skill.markdown:
         return False
     _check_skill_name(skill.name)
+    files = _shipped_files(skill)
     target = cwd / skills_dir / skill.name
     target.mkdir(parents=True, exist_ok=True)
     (target / SKILL_FILENAME).write_text(skill.markdown, encoding="utf-8", newline="")
-    if skill.bundle_root is not None:
-        for name in BUNDLE_DIRS:
-            source = skill.bundle_root / name
-            if source.is_dir():
-                shutil.copytree(source, target / name, symlinks=True, dirs_exist_ok=True)
+    for relative in files:
+        destination = target / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(skill.bundle_root / relative, destination)
     return True
 
 
@@ -534,6 +560,10 @@ class ProductRunner:
     def sandbox(self) -> ProductSandbox:
         return self._sandbox
 
+    def unpriced(self) -> str:
+        """Why this runner's spend can never be priced; see `Product.unpriced`."""
+        return self._product.unpriced()
+
     def run(
         self,
         skill: Skill,
@@ -543,6 +573,9 @@ class ProductRunner:
     ) -> RunResult:
         """`scripts` is accepted for protocol symmetry and ignored: the product
         brings its own tools, and its shell can already reach the bundle."""
+        refused = refuse_sessions(case)
+        if refused is not None:
+            return refused
         product = self._product
         started = time.monotonic()
 
@@ -631,7 +664,15 @@ class ProductRunner:
             # Errored, but the product may still have spent: a run stopped by
             # its own budget reports what it cost. Dropping that would make
             # every total under-count by exactly the runs that cost the most.
-            return RunResult(error=trace.error, latency_ms=elapsed(), **spend)
+            # A complete trace keeps its hooks too: a hook that kept blocking
+            # the model is often why the product gave up. A trace that ended
+            # early keeps none, because it is never a partial parse.
+            return RunResult(
+                error=trace.error,
+                latency_ms=elapsed(),
+                hooks=list(trace.hooks) if trace.complete else [],
+                **spend,
+            )
         return RunResult(
             output=trace.output,
             tool_calls=(
@@ -639,6 +680,7 @@ class ProductRunner:
                 if bridge is not None
                 else list(trace.tool_calls)
             ),
+            hooks=list(trace.hooks),
             transcript=list(trace.transcript),
             latency_ms=elapsed(),
             **spend,

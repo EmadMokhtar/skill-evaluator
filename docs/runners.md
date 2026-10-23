@@ -114,7 +114,7 @@ skill-lens run ./skills --runner copilot --runner pydantic-ai --model openai:gpt
 | Runner | Starts | Skill directory | Trace |
 | --- | --- | --- | --- |
 | `copilot` | `copilot -p <prompt> --allow-all-tools --output-format json --no-custom-instructions --no-auto-update` | `.agents/skills/<name>/` | Copilot's JSONL (one JSON object per line) |
-| `claude-code` | `claude -p <prompt> --output-format stream-json --verbose --dangerously-skip-permissions --setting-sources project --strict-mcp-config --no-session-persistence` | `.claude/skills/<name>/` | Claude Code's `stream-json` |
+| `claude-code` | `claude -p <prompt> --output-format stream-json --verbose --include-hook-events --dangerously-skip-permissions --setting-sources project --strict-mcp-config --no-session-persistence` | `.claude/skills/<name>/` | Claude Code's `stream-json` |
 | `cli` | the `command` in `[runners.cli]` | `skills_dir` (default `.agents/skills`) | none — stdout is the output |
 
 The flags are the verified minimum: what the product needs to run without a terminal, what
@@ -122,6 +122,9 @@ emits the trace, and what keeps *your* setup out of the eval.
 
 - `--no-custom-instructions` stops a stray `AGENTS.md` or a personal instructions file
   shaping a Copilot run;
+- `--include-hook-events` makes Claude Code write an event for every hook the skill
+  declares, not only its `SessionStart` and `Setup` hooks; it changes nothing else in the
+  trace (verified against Claude Code 2.1.289);
 - `--setting-sources project --strict-mcp-config` keeps your own hooks, plugins and MCP
   servers out of a Claude Code run while the project skill is still discovered and
   OAuth auth still works;
@@ -140,12 +143,14 @@ Add flags with `[runners.<name>] args` (for example, a model); replace the whole
 **What the product sees.** The eval's working directory (the case's workspace when it
 declares one, a fresh temporary directory otherwise) holds `SKILL.md` **verbatim (its text
 as written; line endings are normalised)** — products honour frontmatter keys skill-lens
-does not model, such as `allowed-tools` — and beside it `scripts/`, `references/` and
-`assets/`, nothing else. The copy stays in a workspace after the run, so `--keep-workspace`
+does not model, such as `allowed-tools` — and beside it every file the skill ships, as an
+install copies it, except the eval files, version control, dependency directories and secret
+files (the list is under [Bundled files and scripts](#bundled-files-and-scripts)). Each file is
+written as a regular file, read through any link; a link is never copied as a link. The copy stays in a workspace after the run, so `--keep-workspace`
 shows exactly what the product saw; a case whose `file:`, `file_glob` or judge artifact would
 read that copy is refused in preflight, because it would check the harness's files. Under
-home isolation its `HOME`, `XDG_*_HOME` and `TMPDIR` point into a temporary directory of its
-own, deleted when the case ends — `--keep-workspace` keeps the workspace, never that home,
+home isolation the product's `HOME`, `XDG_*_HOME` and `TMPDIR` point into a temporary
+directory of its own, deleted when the case ends — `--keep-workspace` keeps the workspace, never that home,
 which may hold what the product wrote about its own login.
 
 The prompt is the case's `task`, verbatim: the product owns its system prompt, and
@@ -160,6 +165,14 @@ Under `--baseline none` the baseline arm has no skill directory and gets the bar
 both modes; under `--baseline previous` the previous version is delivered with its own
 bundle.
 
+A case with [`sessions:`](eval-files.md#several-sessions-in-one-workspace) starts the
+product once per session, in the same working directory. Each session's prompt is that
+session's task, invoked by the same rule as above. The skill is delivered again before every
+session: `SKILL.md` and every file the skill ships are written over the old copy, so an edit
+a session made to a delivered file is undone before the next session. Delivery never deletes,
+so a file a session *added* inside the delivered skill directory is still there for the next
+one. The MCP bridge is started fresh for every session too.
+
 **What a product runner can measure.**
 
 | | `copilot` | `claude-code` | `cli` |
@@ -171,6 +184,7 @@ bundle.
 | `budget: max_cost_usd` | failing "not evaluated" check — Copilot bills per premium request (its billing unit: one counted request, not tokens), and the note says how many | yes, at list price (the provider's published per-token price), as the product reports it in `total_cost_usd`; a `result` event with no number there is a failing "not evaluated" check | failing "not evaluated" check |
 | `budget: max_latency_ms` | yes | yes | yes |
 | `tools:` (mock tools) | yes, through the [MCP bridge](#mock-tools-under-a-product) | yes, through the [MCP bridge](#mock-tools-under-a-product) | no — an authoring error |
+| Hooks the skill declares (`hooks`) | no — not read from Copilot's trace | yes — reported, never checked ([below](#hooks-under-claude-code)) | no |
 
 Token counts under a product runner include the product's own system prompt and tool
 definitions — tens of thousands of tokens for a one-line answer under Claude Code. A
@@ -180,6 +194,30 @@ set a separate budget, or run budget cases through the framework runners only.
 Tool calls are what the model *requested* (Copilot's `toolRequests`, Claude Code's
 `tool_use` blocks), not what executed — a refused call was still the model's choice, the
 same rule the framework runners apply.
+
+#### Hooks under Claude Code
+
+A skill can declare lifecycle hooks (commands Claude Code runs at fixed points, such as
+`PreToolUse` before every tool call or `Stop` when the model ends its turn). Under
+`claude-code`, every hook that ran is recorded in order from its `hook_response` event: its
+name as Claude Code spells it (`PreToolUse:Write` — the event, then the matcher the hook
+declared), its event, its outcome, its exit code (none when the hook reported none), its
+stdout and its stderr. The outcome is `success`, `error` (any non-zero exit) or `cancelled`
+(the hook was stopped before it finished, because its own `timeout` ran out or the run was
+interrupted; a normal end of run cancels nothing). The JSON report lists them per outcome
+under [`hooks`](gating.md#json-report), and the transcript keeps every `hook_*` event. A
+[`sessions:`](eval-files.md#several-sessions-in-one-workspace) case lists every session's hooks, in order.
+
+A hook whose outcome is anything but `success` is a **failed hook**, and a non-passing case
+shows it under `failed hooks:` in [its failure excerpt](gating.md#what-a-failing-case-shows).
+Exit code `2` is how a hook blocks on purpose, and Claude Code reports that as `error` too,
+so read the exit code before blaming the hook.
+
+Hooks are reported, never judged: nothing checks them yet, so a failed hook never fails,
+errors or passes a case by itself. An errored case keeps its hooks when Claude Code finished
+its trace — a run that gave up (`error_max_turns`) because a hook kept blocking the model
+shows that hook — and reports none when the trace was cut short, as it reports no tool
+calls then.
 
 A case the runner cannot serve is an **authoring error** (exit 2) found in preflight, before
 any case runs and before any quota is spent — never a vacuous pass. A `trajectory:` name is
@@ -602,11 +640,22 @@ describe themselves.
 after scoring, for inspecting exactly what a run wrote. Every kept directory is printed,
 however keeping was turned on.
 
+**Sessions share it.** A case with [`sessions:`](eval-files.md#several-sessions-in-one-workspace)
+calls the runner once per session, each call a fresh session with no conversation history,
+and every call gets the same workspace. It is created and seeded once, before the first
+session, and deleted once, after the case is scored. Nothing else carries over: each session
+builds its tools again, so a mock tool's `returns:` list starts from its first entry in every
+session. The runner never sees `sessions:` — it is handed one ordinary case per session,
+whose `task` is that session's text — so every runner, a third-party one included, runs
+sessions without a change. Each arm and each `--repeat` repetition still gets a workspace
+of its own.
+
 ## Bundled files and scripts
 
-The Agent Skills layout puts three directories beside `SKILL.md`: `scripts/`,
-`references/` and `assets/`. When at least one of them exists, a case with a `workspace:`
-block also gets:
+The Agent Skills layout puts three directories beside `SKILL.md` — `scripts/`,
+`references/` and `assets/` — and a skill may ship more, such as `templates/` or a
+`reference.md`. Every file it ships is its **bundle**. When there is at least one, a case with
+a `workspace:` block also gets:
 
 | Tool | Does | Needs |
 | --- | --- | --- |
@@ -614,11 +663,20 @@ block also gets:
 | `read_skill_file` | Read one bundled text file, e.g. `references/style.md` | a bundle |
 | `run_script` | Run a file under `scripts/` with the workspace as its current directory | a file under `scripts/` **and** `allow_scripts` |
 
-Only those three directories are reachable. `SKILL.md` itself, `*.eval.yaml` and `evals/`
-are refused — `refused: 'SKILL.md' is not under scripts/, references/ or assets/; only
-those three directories are readable` — because an eval file holds the expected answers,
-and a tool that could read it would hand the agent its answer key. A binary file under
-`assets/` gets the same `not valid UTF-8 text` message `read_file` gives; copying one into
+Everything the skill ships is reachable except, at any depth and in any letter case:
+`SKILL.md` itself; the eval files (`evals/`, `*.eval.yaml`, `evals.json`); version control
+(`.git`, `.hg`, `.svn`); dependency and cache directories (`node_modules`, `.venv`,
+`__pycache__`); secret files (`.env`, `.env.*`, `.npmrc`, `.netrc`, `.pypirc`); and
+`skill-lens.toml`. A link that resolves onto one of those, or out of the skill's directory,
+is refused too: `refused: 'evals/cases.yaml' is not a file the skill ships; SKILL.md, eval
+files (evals/, *.eval.yaml, evals.json), version control, dependency directories and secret
+files (.env, .npmrc, ...) are never readable`. An eval file holds the expected answers, and a
+tool that could read it would hand the agent its answer key, so keep anything the agent must
+not see — a mock tool library, an expected output — under `evals/`. A skill that ships more
+than 1,000 files or 100 MB is refused: a product runner's preflight exits `2`, and
+`list_skill_files` returns the refusal; that is almost always a `SKILL.md` at a repository
+root, which would otherwise ship the whole repository. A binary
+file gets the same `not valid UTF-8 text` message `read_file` gives; copying one into
 the workspace is not supported yet. The tools describe themselves without naming the skill:
 the instruction to run `scripts/count.py` comes from `SKILL.md`, which is what is under
 measurement, and the workspace preamble is unchanged and still identical in both arms.
@@ -727,12 +785,23 @@ reading that fact is the eval signal. `run_script` never raises. Standard input 
 
 **The OS sandbox**, where one exists (`script_sandbox = "auto"`, the default), is a second
 layer on top. Under either backend a script cannot open a network connection; cannot write
-to the host filesystem outside the workspace and its scratch directory (under `bwrap`,
-writes under the temporary directory and `/dev/shm` land in an in-memory mount that is
-discarded when the script exits — bounded, like output, only by the timeout); and cannot
-read anything under the system temporary directory except the workspace, the scratch
-directory and the skill's own bundle — so under `--concurrency N` a script cannot read the
-baseline arm's workspace or another case's scratch directory.
+to the host filesystem outside the workspace and its scratch directory; and cannot read
+anything under the system temporary directory except the workspace, the scratch directory
+and the skill's own bundle — so under `--concurrency N` a script cannot read the baseline
+arm's workspace or another case's scratch directory. A write elsewhere under the temporary
+directory is refused on both backends. Under `bwrap`, a write anywhere under `/dev`,
+`/dev/shm` included, is not refused: it lands in an in-memory mount that is discarded when
+the script exits, bounded, like output, only by the timeout. `/dev/shm` stays writable
+because POSIX shared memory needs it.
+
+**A script that writes to a fixed temporary path fails.** A bundled script that writes to a
+hard-coded path such as `/tmp/state.json` gets an error on both backends (`Read-only file
+system` under `bwrap`, `Operation not permitted` under `sandbox-exec`), because the path is
+outside the workspace and the scratch directory. Earlier releases let that write appear to
+succeed under `bwrap`: it went to an in-memory mount and was discarded when the script
+exited. So a skill whose Linux evals passed only because of that now fails there, as it
+already did on macOS. Write temporary files with `tempfile`, or under `$TMPDIR`, which
+points at the scratch directory.
 
 One difference between the two: `bwrap`'s `--unshare-net` isolates the network stack only,
 so a Unix-domain socket the CI user can reach through the filesystem —
@@ -746,20 +815,24 @@ those three keep their metadata, so a script can `stat` its workspace's parents:
 `mkdir -p "$PWD/x"` checks every parent on the way down. Listing them stays denied, so the
 names and contents of sibling workspaces stay hidden. One thing does show: a directory's
 metadata includes its entry count and modification time, so a script can tell how many
-entries the temporary directory holds and when that changes, but not what they are. Reads anywhere else are allowed (see below).
+entries the temporary directory holds and when that changes, but not what they are. Reads
+anywhere else are allowed (see below).
 
 | | Backend | How |
 | --- | --- | --- |
 | macOS | `sandbox-exec` | A profile that allows everything, then denies `network*` and `file-write*`, re-allows writes under the workspace and the scratch directory (plus `file-write-data` on `/dev/null`), denies `file-read*` under the temporary directory, then re-allows reads under the workspace, the scratch directory and the bundle. Later rules win. `sandbox-exec` is marked deprecated in Apple's documentation, is present and working on current macOS, and is what Bazel, Chromium and Claude Code use. |
-| Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install. A stock Ubuntu CI image may not ship `bwrap`, or may refuse unprivileged user namespaces; the report's `sandbox:` line says which. `--unshare-net` does not block Unix-domain sockets (see above). |
+| Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, `--remount-ro` on the temporary directory so the tmpfs refuses writes (the remount is not recursive, so the binds keep their own modes), then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install. A stock Ubuntu CI image may not ship `bwrap`, or may refuse unprivileged user namespaces; the report's `sandbox:` line says which. `--unshare-net` does not block Unix-domain sockets (see above). |
 | Windows | none | The portable guards only. `"required"` refuses to run. |
 
 The probe runs once per run, after discovery and before any case. The backend is *executed*
 — `sandbox-exec -p '(version 1)(allow default)(deny network*)' /usr/bin/true`, or `bwrap
---ro-bind / / --dev /dev --proc /proc --unshare-net --unshare-pid --die-with-parent --
-/bin/true` — not merely found on `PATH`, because present is not the same as working: a stock
-Ubuntu runner may not ship `bwrap` at all, or may refuse unprivileged user namespaces, and
-the first line of that refusal is what the report shows.
+--ro-bind / / --dev /dev --proc /proc --tmpfs <temp dir> --remount-ro <temp dir>
+--unshare-net --unshare-pid --die-with-parent -- /bin/true` — not merely found on `PATH`,
+because present is not the same as working: a stock Ubuntu runner may not ship `bwrap` at
+all, or may refuse unprivileged user namespaces, and the first line of that refusal is what
+the report shows. The `bwrap` probe includes the tmpfs and its read-only remount because
+every script call needs both, so a `bwrap` too old to accept either fails the probe instead
+of failing every script.
 
 The result is on every report that enabled scripts — `scripts: on, sandbox: bwrap`, or
 `scripts: on, sandbox: none (bwrap not found on PATH)` — so you can tell from a log whether
@@ -788,8 +861,8 @@ second layer that limits damage); the `allow_scripts` opt-in is the decision. Do
 scripts for a skill you would not run by hand. See
 [Security](security.md#running-bundled-scripts).
 
-**Under `--baseline previous`**, the previous version's `scripts/`, `references/` and
-`assets/` come from git too, so the old instructions are never paired with the new scripts.
+**Under `--baseline previous`**, the files the previous version shipped come from git too,
+by the same rule, so the old instructions are never paired with the new scripts.
 They are extracted — `git archive`, then `tarfile` with its `data` filter, which is why
 skill-lens requires Python 3.11.4 or later — from the commit that last edited `SKILL.md` at
 the previous version, out of the directory the skill had then (it may have moved since), into
@@ -802,7 +875,7 @@ that `SKILL.md` edit is invisible to the baseline, and a very large historical `
 hit the 10-second git timeout, which is reported as a baseline note (`cannot archive commit
 <sha>`), never an error.
 
-A commit with none of the three directories gives the baseline no bundle tools — never the
+A commit that shipped no file besides `SKILL.md` and its evals gives the baseline no bundle tools — never the
 candidate's. `--baseline none` has no bundle: there is no skill. See [How `previous` is
 resolved](comparative-evals.md#how-previous-is-resolved).
 
@@ -841,11 +914,66 @@ The same rule applies to tokens. A runner that cannot count tokens sets `usage_n
 every limit. Today that is the `cli` product runner, and `copilot` when its trace reports
 no usage; see [Product runners](#product-runners).
 
+A case with [`sessions:`](eval-files.md#several-sessions-in-one-workspace) is held to one
+budget for all of its sessions: tokens, cost and latency are each summed over every session
+that ran. When one session could not be priced or counted, the total is missing that
+session's share, so its note is kept on the case and `max_cost_usd` or `max_tokens` fails
+as *not evaluated* — the same rule as for one run. Under `pydantic-ai` and `langchain`, each
+session is also [stopped](#stopping-a-runaway-case) at what the earlier sessions left of
+`max_tokens`, not at the whole limit again, and a session that was stopped is the last one to
+run: the case is over its budget already.
+
 If you are upgrading from a version of `skill-lens` where this budget block previously passed
 some other way, note the change: a repo that runs an unpriced model with a `budget:` block
 mixing a priced limit (e.g. `max_tokens`) and `max_cost_usd` will now see those cases turn red
 — they always failed to verify the cost limit; only the reporting of `passed` has caught up
 with `score`.
+
+### Stopping a runaway case
+
+Budget checks run after a case finishes, so on their own they cannot stop a case that loops.
+Under `pydantic-ai` and `langchain`, `max_tokens` is therefore also handed to the framework
+itself: the run stops at the first model response that takes its token total over the limit.
+The stopped run is not an error. It is scored as far as it got, and its `max_tokens` check
+fails, with evidence that says the run was cut off:
+
+```
+[FAIL] pdf :: summarises the report (pydantic-ai)
+        budget: used 120 tokens, limit is 100; pydantic-ai stopped the run before the agent finished, at the case's max_tokens
+```
+
+Its output is whatever the last model response said, and its tool calls and transcript are
+the ones it made before it stopped, so the failure shows what the agent was doing when it
+ran away. Going over budget is a fact about the skill, so the case is **failed**, the same
+verdict a run that finished over budget gets — and in a comparative run both arms are
+treated alike, so a baseline that runs away is a failed baseline, not one dropped from the
+delta. A run that ends at or under the limit is not affected.
+
+Every figure on a result — tokens, cost, the tool calls — is the run's last attempt, so the
+budget measures one run of the skill. When a transient failure was retried, what the
+discarded attempts cost is reported apart as `retry_cost_usd`: the cost totals and the
+[spend ceiling](gating.md#the-spend-ceiling) count it, the budget does not. The limit applies
+to each attempt on its own, never to their sum. An errored run keeps what its last attempt
+spent too; a run that failed before any response arrived spent nothing, and its `0` carries
+no `cost_note`.
+
+A stop needs the provider to report token usage. One that reports none leaves the counts at
+`0`, which is not a measurement: the run sets `usage_note` and `cost_note` (`pydantic-ai
+received no token usage from the provider`), so `max_tokens` fails as *not evaluated* rather
+than passing on a zero, and the spend ceiling does not take its `$0.00` for free.
+
+Only `max_tokens` is handed over. Neither framework can stop on `max_cost_usd` (PydanticAI
+has no cost limit at the version this project supports; LangChain has none), and
+`max_latency_ms` stays a check after the run. Without `max_tokens`, PydanticAI still stops at
+its own default of 50 model requests, while a LangChain run continues until LangGraph's
+recursion limit, which is 10,000 graph steps by default. Product runners are not covered:
+`claude-code` can stop itself on spend with its own flag
+(`args = ["--max-budget-usd", "0.50"]` under `[runners.claude-code]`), reported as errored
+with the spend its trace reported; `copilot` has no such flag.
+
+To bound what a whole run spends, across every case and every runner, set `max_spend_usd` in
+`skill-lens.toml` or pass `--max-spend`: once the run has recorded that much, no new case
+starts. See [The spend ceiling](gating.md#the-spend-ceiling).
 
 ## Comparative runs and the baseline arm
 

@@ -7,17 +7,20 @@ problem (errored) apart from a low score (failed).
 
 from __future__ import annotations
 
+import functools
 import inspect
 import json
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from skill_lens.bundle import SkillBundle
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
-from skill_lens.runners.base import RunnerDependencyError
+from skill_lens.runners.base import RunnerDependencyError, refuse_sessions
+from skill_lens.runners.limits import no_usage_notes, stop_note, token_limit
 from skill_lens.runners.preflight import UnsupportedBaseURL, check_trajectory_names
-from skill_lens.runners.pricing import calculate_cost, provider_of
+from skill_lens.runners.pricing import calculate_cost, provider_of, unpriced_model
 from skill_lens.runners.prompting import instructions
 from skill_lens.runners.retry import run_with_retries, transient_status
 from skill_lens.runners.tools import (
@@ -83,6 +86,85 @@ def resolve_model(model: Any, base_url: str) -> Any:
     return infer_model(model, provider_factory=provider)
 
 
+@functools.cache
+def _meter_class() -> type:
+    """A model wrapper that records every response its model returns.
+
+    Built on first use, because the framework is imported lazily. PydanticAI
+    raises `UsageLimitExceeded` *before* it appends the response that crossed
+    the limit to the message history, so the history alone would under-count
+    a stopped run by exactly that response. Every response passes through
+    `request`, which makes `responses` the complete record of what the
+    attempt was billed for -- on an attempt that raised as much as on one
+    that finished.
+    """
+    from pydantic_ai.models.wrapper import WrapperModel
+
+    class Meter(WrapperModel):
+        def __init__(self, wrapped: Any) -> None:
+            super().__init__(wrapped)
+            self.responses: list[Any] = []
+
+        async def request(self, messages: Any, model_settings: Any, parameters: Any) -> Any:
+            response = await super().request(messages, model_settings, parameters)
+            self.responses.append(response)
+            return response
+
+    return Meter
+
+
+@dataclass
+class _Attempt:
+    """One attempt at a run: its metered model, and the history it built.
+
+    `history` is PydanticAI's own record, captured with
+    `capture_run_messages`, so an attempt that raised still has the turns it
+    got through.
+    """
+
+    meter: Any
+    history: list[Any] = field(default_factory=list)
+
+
+def _spend(attempt: _Attempt | None, runner: str, configured: str) -> dict[str, Any]:
+    """What one attempt's responses were billed for, as `RunResult` fields.
+
+    No response means nothing was billed: a measured zero, so it is not
+    priced and gets no note. Responses that carried no usage at all are no
+    measurement, and say so (`no_usage_notes`).
+    """
+    from pydantic_ai.usage import RunUsage
+
+    responses = attempt.meter.responses if attempt is not None else []
+    if not responses:
+        return {"model": configured}
+    usage = RunUsage()
+    for response in responses:
+        usage.incr(response.usage)
+    model_name = _model_name(responses, configured)
+    if usage.input_tokens + usage.output_tokens == 0:
+        return {"model": model_name, **no_usage_notes(runner)}
+    cost_usd, cost_note = calculate_cost(usage, model_name, provider_of(configured))
+    return {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "cost_usd": cost_usd,
+        "cost_note": cost_note,
+        "model": model_name,
+    }
+
+
+def _retry_cost(attempts: list[_Attempt], runner: str, configured: str) -> tuple[float, str]:
+    """What the attempts a retry discarded cost, and the first note saying
+    part of that could not be priced."""
+    cost, note = 0.0, ""
+    for attempt in attempts:
+        spend = _spend(attempt, runner, configured)
+        cost += spend.get("cost_usd", 0.0)
+        note = note or spend.get("cost_note", "")
+    return cost, note
+
+
 def _arguments(args: Any) -> dict[str, Any]:
     """Normalise tool-call arguments to a dict.
 
@@ -135,6 +217,40 @@ def _model_name(messages: list[Any], fallback: str) -> str:
     return fallback
 
 
+def _responses(messages: list[Any]) -> list[Any]:
+    from pydantic_ai.messages import ModelResponse
+
+    return [message for message in messages if isinstance(message, ModelResponse)]
+
+
+def _text(response: Any) -> str:
+    """The text a response carried: what a stopped run had said when it stopped."""
+    from pydantic_ai.messages import TextPart
+
+    return "".join(part.content for part in response.parts if isinstance(part, TextPart))
+
+
+def _stopped_history(attempt: _Attempt) -> list[Any]:
+    """The history of an attempt PydanticAI stopped at its token limit.
+
+    PydanticAI raises `UsageLimitExceeded` before it appends the response
+    that crossed the limit, so that response is taken from the meter, where
+    every response is recorded as it arrives -- appended only when the
+    history does not already end with it.
+    """
+    messages = list(attempt.history)
+    crossing = attempt.meter.responses[-1]
+    if not messages or messages[-1] is not crossing:
+        messages.append(crossing)
+    return messages
+
+
+def _is_usage_limit(exc: Exception) -> bool:
+    from pydantic_ai.exceptions import UsageLimitExceeded
+
+    return isinstance(exc, UsageLimitExceeded)
+
+
 def _is_transient(exc: Exception) -> bool:
     from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 
@@ -166,6 +282,10 @@ class PydanticAIRunner:
         self._retry_backoff_seconds = retry_backoff_seconds
         self._sleep = sleep
         self._base_url = base_url
+
+    def unpriced(self) -> str:
+        """Why this runner's model has no price, or ""; see `unpriced_model`."""
+        return unpriced_model(self._model)
 
     def _model_settings(self) -> Any:
         """Reasoning models reject any temperature but 1, so 'unset' sends none."""
@@ -205,27 +325,12 @@ class PydanticAIRunner:
             )
             for agent_tool in built
         ]
+        # Metered, so an attempt that raises still says what it spent; the
+        # agent's `model` is the meter, which is how `run` reads it back.
         return Agent(
-            resolve_model(self._model, self._base_url),
+            _meter_class()(resolve_model(self._model, self._base_url)),
             instructions=instructions(skill, case, workspace is not None),
             tools=tools,
-        )
-
-    def _run_with_retries(self, build_agent: Callable[[], Any], task: str) -> Any:
-        """Build a fresh agent for every attempt, then run it.
-
-        A retry is a new conversation, and its tools must be new too: a mock
-        whose `returns:` is consumed in call order keeps its counter in the
-        built tool, so an agent reused across attempts would hand the second
-        attempt's first call the sequence's second entry.
-        """
-        settings = self._model_settings()
-        return run_with_retries(
-            lambda: build_agent().run_sync(task, model_settings=settings),
-            _is_transient,
-            self._retries,
-            self._retry_backoff_seconds,
-            self._sleep,
         )
 
     def preflight(self, skills: list[Skill], cases_by_skill: dict[str, list[EvalCase]]) -> None:
@@ -262,38 +367,102 @@ class PydanticAIRunner:
         workspace: Workspace | None = None,
         scripts: ScriptRuntime | None = None,
     ) -> RunResult:
+        """Run the case, building a fresh agent for every attempt.
+
+        A retry is a new conversation, and its tools must be new too: a mock
+        whose `returns:` is consumed in call order keeps its counter in the
+        built tool, so an agent reused across attempts would hand the second
+        attempt's first call the sequence's second entry.
+
+        The case's `max_tokens` becomes PydanticAI's `total_tokens_limit`,
+        checked after every response, so a runaway case stops as soon as it
+        crosses its budget. Every other limit keeps PydanticAI's default,
+        `request_limit=50` included -- the same limits a call with no
+        `usage_limits` gets. A stopped attempt is returned as far as it got,
+        with `stop_note` set, and is never retried.
+
+        Every figure on the result is the last attempt's, so `budget:`
+        measures one run of the skill; what the attempts before it cost is
+        `retry_cost_usd`.
+        """
         _require_pydantic_ai()
+        refused = refuse_sessions(case)
+        if refused is not None:
+            return refused
+        from pydantic_ai import capture_run_messages
+        from pydantic_ai.usage import UsageLimits
+
         configured = self._model if isinstance(self._model, str) else ""
         offered = skill_tool_name(skill.name) if case.mode == "offered" else None
+        settings = self._model_settings()
+        limit = token_limit(case)
+        limits = UsageLimits(total_tokens_limit=limit)
+        attempts: list[_Attempt] = []
+
+        def attempt() -> Any:
+            agent = self._build_agent(skill, case, workspace, scripts)
+            record = _Attempt(meter=agent.model)
+            attempts.append(record)
+            with capture_run_messages() as history:
+                record.history = history
+                return agent.run_sync(case.task, model_settings=settings, usage_limits=limits)
+
+        def triggered(tool_calls: list[ToolCall]) -> bool | None:
+            return None if offered is None else any(call.name == offered for call in tool_calls)
+
         started = time.monotonic()
         try:
-            result = self._run_with_retries(
-                lambda: self._build_agent(skill, case, workspace, scripts), case.task
+            result = run_with_retries(
+                attempt, _is_transient, self._retries, self._retry_backoff_seconds, self._sleep
             )
+            retry_cost, retry_note = _retry_cost(attempts[:-1], self.name, configured)
             messages = result.all_messages()
             usage = result.usage
             model_name = _model_name(messages, configured)
-            cost_usd, cost_note = calculate_cost(usage, model_name, provider_of(configured))
+            if usage.input_tokens + usage.output_tokens == 0 and _responses(messages):
+                priced: dict[str, Any] = no_usage_notes(self.name)
+            else:
+                cost_usd, cost_note = calculate_cost(usage, model_name, provider_of(configured))
+                priced = {"cost_usd": cost_usd, "cost_note": cost_note}
+            priced["cost_note"] = priced["cost_note"] or retry_note
             tool_calls = _tool_calls(messages)
-            run_result = RunResult(
+            return RunResult(
                 output=result.output if isinstance(result.output, str) else str(result.output),
                 tool_calls=tool_calls,
                 transcript=_transcript(messages),
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
                 latency_ms=int((time.monotonic() - started) * 1000),
-                cost_usd=cost_usd,
-                cost_note=cost_note,
                 model=model_name,
-                skill_triggered=(
-                    None if offered is None else any(call.name == offered for call in tool_calls)
-                ),
+                skill_triggered=triggered(tool_calls),
+                retry_cost_usd=retry_cost,
+                **priced,
             )
         except Exception as exc:
+            last = attempts[-1] if attempts else None
+            retry_cost, retry_note = _retry_cost(attempts[:-1], self.name, configured)
+            spend = _spend(last, self.name, configured)
+            spend["cost_note"] = spend.get("cost_note", "") or retry_note
+            latency_ms = int((time.monotonic() - started) * 1000)
+            tokens = spend.get("input_tokens", 0) + spend.get("output_tokens", 0)
+            if last is not None and limit is not None and tokens > limit and _is_usage_limit(exc):
+                messages = _stopped_history(last)
+                tool_calls = _tool_calls(messages)
+                return RunResult(
+                    output=_text(last.meter.responses[-1]),
+                    tool_calls=tool_calls,
+                    transcript=_transcript(messages),
+                    latency_ms=latency_ms,
+                    skill_triggered=triggered(tool_calls),
+                    stop_note=stop_note(self.name),
+                    retry_cost_usd=retry_cost,
+                    **spend,
+                )
+            # A run that failed twenty turns in was billed for what it got
+            # back, so the attempt's spend stays on the errored result.
             return RunResult(
                 error=f"{type(exc).__name__}: {exc}",
-                latency_ms=int((time.monotonic() - started) * 1000),
-                model=configured,
+                latency_ms=latency_ms,
+                retry_cost_usd=retry_cost,
+                **spend,
             )
-
-        return run_result

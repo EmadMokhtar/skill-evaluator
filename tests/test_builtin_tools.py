@@ -211,6 +211,16 @@ def test_list_skill_files_lists_the_bundle(tmp_path):
     assert tools["list_skill_files"].call() == "references/style.md\nscripts/hello.py"
 
 
+def test_list_skill_files_over_the_cap_returns_the_refusal_not_an_exception(tmp_path, monkeypatch):
+    """A built-in tool never raises: a skill shipping past the cap is a message
+    the model reads, not an infra error."""
+    from skill_lens import bundle as bundle_module
+
+    monkeypatch.setattr(bundle_module, "MAX_BUNDLE_FILES", 1)
+    _, tools = _bundle_tools(tmp_path)
+    assert "ships more than 1 files (the cap is 1)" in tools["list_skill_files"].call()
+
+
 def test_read_skill_file_reads_and_refuses(tmp_path):
     _, tools = _bundle_tools(tmp_path)
     assert tools["read_skill_file"].call(path="references/style.md") == "# Style\n"

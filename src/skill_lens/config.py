@@ -277,6 +277,14 @@ class Config(BaseModel):
     Setting them while `allow_scripts` is false is the normal state of a
     repository that turns execution on only in one CI job.
 
+    `max_spend_usd` is the run's spend ceiling in US dollars (`--max-spend`):
+    once the run has recorded that much spend -- runs and judges, both arms,
+    errored runs included -- no new case starts, and the gate fails if any
+    was left unstarted. Unset, the default, means no ceiling, so upgrading
+    never stops a run on its own. `gt=0` and `allow_inf_nan=False` live here
+    because a ceiling of zero would run nothing and one of infinity is none;
+    the flag is checked the same way in the CLI.
+
     `runners` holds one `[runners.<name>]` table per product runner or judge
     (`copilot`, `claude-code`, `cli`); see `ProductSettings`. Config-only:
     which product a repository evaluates under, and how, is repository
@@ -327,6 +335,7 @@ class Config(BaseModel):
     )
     runners: dict[str, ProductSettings] = Field(default_factory=dict)
     product_sandbox: SandboxMode = "auto"
+    max_spend_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
     @field_validator("base_url", "judge_base_url")
     @classmethod

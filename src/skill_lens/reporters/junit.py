@@ -11,13 +11,14 @@ import re
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 from skill_lens.comparison import Delta
-from skill_lens.gating import GateResult
-from skill_lens.models import CaseOutcome, ProductStatus, RunReport
+from skill_lens.gating import GateResult, spend_ceiling_reasons
+from skill_lens.models import CaseOutcome, NotRunItem, ProductStatus, RunReport
 from skill_lens.reporters.failure_context import (
     OUTPUT_LIMIT,
     cut_note,
     failure_context,
     more_calls_note,
+    more_hooks_note,
 )
 
 # XML 1.0 forbids most control characters outright -- a document containing one
@@ -50,7 +51,7 @@ def _message(body: str) -> str:
 
 
 def _context_lines(outcome: CaseOutcome, output_limit: int | None) -> list[str]:
-    """The output and tool calls, as plain lines appended to a body."""
+    """The output, tool calls and failed hooks, as plain lines appended to a body."""
     context = failure_context(outcome, limit=output_limit)
     if context is None:
         return []
@@ -62,12 +63,17 @@ def _context_lines(outcome: CaseOutcome, output_limit: int | None) -> list[str]:
         lines.extend(context.tool_calls)
         if context.more_calls:
             lines.append(more_calls_note(context))
+    if context.failed_hooks:
+        lines.append("failed hooks:")
+        lines.extend(context.failed_hooks)
+        if context.more_hooks:
+            lines.append(more_hooks_note(context))
     return lines
 
 
 def _failure_body(outcome: CaseOutcome, output_limit: int | None) -> str:
     """Why this case failed: each failing evaluator, then each failing check,
-    then the agent's output and tool calls.
+    then the agent's output, tool calls and failed hooks.
 
     `no evidence given` matches the console reporter deliberately -- a check
     that passed on nothing is the judge's characteristic failure mode, and a
@@ -89,7 +95,7 @@ def _failure_body(outcome: CaseOutcome, output_limit: int | None) -> str:
 
 def _error_body(outcome: CaseOutcome, output_limit: int | None) -> str:
     """Why this case errored -- from the runner, or from an evaluator --
-    then the agent's output and tool calls.
+    then the agent's output, tool calls and failed hooks.
 
     `errored` covers both: a runner that blew up, and an evaluator that did
     (a judge endpoint returning 500). Only the runner sets `RunResult.error`,
@@ -106,7 +112,7 @@ def _error_body(outcome: CaseOutcome, output_limit: int | None) -> str:
     return "\n".join([head, *_context_lines(outcome, output_limit)])
 
 
-def _case_name(outcome: CaseOutcome, repeat: int, name_the_runner: bool) -> str:
+def _case_name(outcome: CaseOutcome | NotRunItem, repeat: int, name_the_runner: bool) -> str:
     """Repetitions and runners need distinct names: consumers key on
     classname+name and silently collapse duplicates. Both suffixes are added
     only when something would otherwise collide, so the ordinary
@@ -120,10 +126,12 @@ def _case_name(outcome: CaseOutcome, repeat: int, name_the_runner: bool) -> str:
     return name
 
 
-def _by_skill(outcomes: list[CaseOutcome]) -> dict[str, list[CaseOutcome]]:
-    groups: dict[str, list[CaseOutcome]] = {}
-    for outcome in outcomes:
-        groups.setdefault(outcome.skill_name, []).append(outcome)
+def _by_skill(
+    entries: list[CaseOutcome | NotRunItem],
+) -> dict[str, list[CaseOutcome | NotRunItem]]:
+    groups: dict[str, list[CaseOutcome | NotRunItem]] = {}
+    for entry in entries:
+        groups.setdefault(entry.skill_name, []).append(entry)
     return groups
 
 
@@ -215,16 +223,33 @@ def render_junit(
     root = Element("testsuites", name="skill-lens")
     tests = failures = errors = skipped = 0
     total_time = 0.0
+    # A candidate item the spend ceiling kept from starting is a <skipped>
+    # case beside the ones that ran, so a CI UI lists what was not measured.
+    entries: list[CaseOutcome | NotRunItem] = [
+        *report.candidate_outcomes,
+        *(item for item in report.not_run if item.arm == "candidate"),
+    ]
     # Only disambiguate by runner when the matrix actually has more than one,
     # so the ordinary single-runner report keeps its clean case names.
-    name_the_runner = len({o.runner for o in report.candidate_outcomes}) > 1
+    name_the_runner = len({entry.runner for entry in entries}) > 1
 
-    for skill_name, outcomes in _by_skill(report.candidate_outcomes).items():
+    for skill_name, outcomes in _by_skill(entries).items():
         suite = SubElement(root, "testsuite", name=_xml_safe(skill_name))
         _run_properties(suite, report)
-        suite_failures = suite_errors = 0
+        suite_failures = suite_errors = suite_skipped = 0
         suite_time = 0.0
         for outcome in outcomes:
+            if isinstance(outcome, NotRunItem):
+                suite_skipped += 1
+                case = SubElement(
+                    suite,
+                    "testcase",
+                    classname=_xml_safe(skill_name),
+                    name=_xml_safe(_case_name(outcome, report.repeat, name_the_runner)),
+                    time="0.000",
+                )
+                SubElement(case, "skipped", message="not run: the spend ceiling stopped the run")
+                continue
             seconds = outcome.result.latency_ms / 1000 if outcome.result else 0.0
             suite_time += seconds
             case = SubElement(
@@ -245,11 +270,12 @@ def render_junit(
         suite.set("tests", str(len(outcomes)))
         suite.set("failures", str(suite_failures))
         suite.set("errors", str(suite_errors))
-        suite.set("skipped", "0")
+        suite.set("skipped", str(suite_skipped))
         suite.set("time", f"{suite_time:.3f}")
         tests += len(outcomes)
         failures += suite_failures
         errors += suite_errors
+        skipped += suite_skipped
         total_time += suite_time
 
     # A skill with no coverage is exactly what JUnit's <skipped> is for, and it
@@ -302,6 +328,31 @@ def render_junit(
             suite, "testcase", classname="skill-lens", name="no eval cases ran", time="0.000"
         )
         SubElement(case, "error", message=_message(reasons)).text = _xml_safe(reasons)
+        tests += 1
+        errors += 1
+
+    ceiling_reasons = spend_ceiling_reasons(report)
+    if ceiling_reasons:
+        # Skipped cases render green or grey in most CI UIs, which would
+        # contradict exit code 1 for a run that every case it ran passed --
+        # the same reason a zero-case run gets an <error>. The reasons are
+        # the gate's own, so the CI UI and the console say the same thing.
+        body = "\n".join(ceiling_reasons)
+        suite = SubElement(
+            root,
+            "testsuite",
+            name="skill-lens",
+            tests="1",
+            failures="0",
+            errors="1",
+            skipped="0",
+            time="0.000",
+        )
+        _run_properties(suite, report)
+        case = SubElement(
+            suite, "testcase", classname="skill-lens", name="spend ceiling", time="0.000"
+        )
+        SubElement(case, "error", message=_message(body)).text = _xml_safe(body)
         tests += 1
         errors += 1
 

@@ -88,8 +88,8 @@ flowchart LR
 | --- | --- |
 | `models.py` | Every Pydantic model in the project. No other module defines a data shape. |
 | `cli.py` | Typer entry point. Wires config → loaders → runner → orchestrator → reporters → gate, and owns the exit-code contract. |
-| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. `RunOptions` bundles the per-run settings (kept workspaces, the workspace caps, the script policy); when scripts are on it runs `scripts.preflight` once between discovery and execution; between discovery and execution it also calls every runner's optional `preflight` hook, once each with the candidate-arm cases planned for it, then the judge's optional `preflight()` (no arguments), and puts what they return on `RunReport.products`, a status already present listed once; and `_BaselineStore` owns the directory previous bundles are extracted into, deleted in a `finally`. |
-| `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. |
+| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. `RunOptions` bundles the per-run settings (kept workspaces, the workspace caps, the script policy, the spend ceiling); with a ceiling, every runner's and the judge's optional `unpriced()` is asked first (`SpendCeilingError` when one can never price its spend), then `_SpendLedger` — locked, the one state the workers share — is checked as each item starts and records each item's spend before its worker moves on, and an item it refuses lands on `RunReport.not_run` instead of `outcomes`; when scripts are on it runs `scripts.preflight` once between discovery and execution; between discovery and execution it also calls every runner's optional `preflight` hook, once each with the candidate-arm cases planned for it, then the judge's optional `preflight()` (no arguments), and puts what they return on `RunReport.products`, a status already present listed once; and `_BaselineStore` owns the directory previous bundles are extracted into, deleted in a `finally`. |
+| `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. `spend_ceiling_reasons` is the ceiling's part, shared with the JUnit reporter. |
 | `config.py` | Loads `skill-lens.toml` by explicit path or upward discovery. Never reads secrets. Owns `ProductSettings` (one `[runners.<name>]` table) and `Config.product`, which turns a preset plus its table into the `Product` a runner starts; `PRODUCT_NAMES` is the list the CLI accepts. |
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
@@ -102,9 +102,10 @@ flowchart LR
 | `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. `scaffold_target` decides where `init` writes. |
 | `mcp_import.py` | Turns a saved MCP `tools/list` response into mock-tool YAML: `parse_tools_list` (three accepted shapes, every refusal a `McpImportError`) and `render_tool_mocks` (a pasteable `tools:` block). Pure: text in, text out; `cli.py` reads the file or stdin. Never touches the network. |
 | `workspace.py` | The per-case temporary directory: creation, seeding, path containment, and cleanup. Framework-neutral, like every other top-level module. Its methods **raise** (`PathRefused`, `WorkspaceError`) for `cases/loader.py` and the evaluators to catch as authoring or infra errors; `runners/tools.py`'s built-in tools catch those same exceptions and turn them into ordinary tool-result strings instead. |
-| `bundle.py` | A read-only view of the three Agent Skills directories beside `SKILL.md` (`scripts/`, `references/`, `assets/`) and nothing else — an eval file beside `SKILL.md` is never readable by the agent. Same "methods raise, tools catch" split as `workspace.py`. |
+| `bundle.py` | A read-only view of every file a skill ships beside `SKILL.md`, and `withheld`, the one rule for what is never part of it — `SKILL.md`, the eval files, version control, dependency directories and secret files, at any depth and in any letter case — shared by product delivery and the previous baseline's extraction, with a 1,000-file / 100 MB cap. Same "methods raise, tools catch" split as `workspace.py`. |
 | `scripts.py` | Runs a bundled script: the policy, the once-per-run preflight (interpreters on `PATH`, the sandbox probe), the allowlisted environment, the scratch directory, the process-group timeout and the capped output read through the harness's own descriptors (both via `process.py`), and the `sandbox-exec` / `bwrap` wrapping — for scripts, and the product profile and argv `runners/product_sandbox.py` uses (network open, writes confined to the product's directories). Never raises for a script that will not run; raises `ScriptSetupError` only from preflight. |
 | `process.py` | Starts a child in its own process group, waits with a timeout, kills the group after every exit, and reads output through the harness's own handle. Shared by `scripts.py` and `runners/product.py`; imports nothing from the rest of the project. |
+| `sessions.py` | Runs one work item's runner calls: one for a `task:` case (the case object itself), one per session for a `sessions:` case, each with a copy whose `task` is that session's text, all against the one workspace `_run_one` created, stopping at the first errored session; `merge_results` turns them into the one `RunResult` the evaluators read (last output, every tool call, summed spend, every note). A runner never sees `sessions:`. |
 | `paths.py` | The path and pattern checks that need no filesystem: `PathRefused`, `check_relative_path`, `check_glob_pattern` (raising `PatternRefused`, an authoring error) and `glob_matches_path`, plus `segment_matches`, the one per-level glob rule `Workspace.match` also walks the disk with. Pure string work, so `models.py` validates a case with it and `workspace.py` imports it; imports nothing from the rest of the project. |
 | `matching.py` | `structural_match`: one author's mapping against a call's recorded arguments — a subset at every level, or exact under `exact=True`; lists element by element at equal length; a bool only ever equals a bool. Shared by `trajectory.call_args` (`evaluators/trajectory.py`), a mock's `when:` (`ToolResponse.matches` in `models.py`) and the MCP bridge's `tools/call` (`mcp_bridge.py`); imports nothing from the rest of the project. |
 | `mcp_bridge.py` | The stdio MCP server a product starts to reach a case's mock tools (`python -m skill_lens.mcp_bridge <spec>`): `initialize`, `ping`, `tools/list` and `tools/call` over JSON-RPC 2.0, one message per line, `returns:` answered in all three shapes by the rules `runners/tools.py` applies (one value; a sequence in call order; a `when:` lookup through `matching.structural_match`), every list and call appended to the record file the spec names; `--check` drives the handlers in-process for preflight. Imports only `matching.py` from the project. |
@@ -112,6 +113,7 @@ flowchart LR
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/prompting.py` | The three preambles and the system-prompt builder every runner calls. Framework-free, so the rules `--min-delta` measures against exist once. |
 | `runners/retry.py` | The transient-retry loop and the HTTP status policy every adapter shares; each adapter supplies its own `is_transient`. |
+| `runners/limits.py` | The case limit both keyed adapters hand their framework (`token_limit`, a case's `budget.max_tokens`), the `stop_note` a stopped run carries, and `no_usage_notes` for a provider that reported no token usage. Framework-free, so the two adapters stop at the same number and say so in the same words. |
 | `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of the four modules that import an agent framework.** |
 | `runners/langchain.py` | The LangChain runner adapter. **One of the four modules that import an agent framework.** |
 | `runners/traces.py` | The Copilot JSONL and Claude Code `stream-json` parsers, each producing one `Trace`. Pure functions; a structural problem is `Trace.error`, never a raise. |
@@ -120,7 +122,7 @@ flowchart LR
 | `runners/mcp.py` | The runner's side of the MCP bridge: `McpSupport` (each product's config flag, tool spelling, config-entry keys and hiding flags, as verified against the product), `write_bridge` (the spec — each tool's schema and its `returns:` in whichever shape — and the product's config in a fresh directory), `Bridge.connected` (the record's `list` event), `restore_tool_names` (the product's spelling back to the case's) and `probe_bridge` (the once-per-run `--check`). Imports no agent framework. |
 | `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block — one canned value, a sequence consumed in call order, or a lookup by argument — the built-in workspace tools, and the bundle tools (`list_skill_files`, `read_skill_file`, and `run_script` when the bundle has scripts and the run enabled them). Owns the six-name `BUILTIN_TOOL_NAMES` the case loader reads. |
 | `runners/preflight.py` | What a framework runner verifies before any spend: the provider API key, that every `trajectory:` name is a tool the case will have (`check_trajectory_names`, called from the three framework runners' `preflight`), and the `UnsupportedBaseURL` the two keyed adapters raise for a `base_url` their provider cannot take. |
-| `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
+| `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. `unpriced_model` says, before a run, whether a configured model has a price, for the spend ceiling's preflight. |
 | `evaluators/base.py` | The `Evaluator` protocol. |
 | `evaluators/assertion.py` | Rule-based scoring of the final output text. |
 | `evaluators/trajectory.py` | Scoring which tools were called, in what order, how many times, and with what arguments. |
@@ -134,23 +136,23 @@ flowchart LR
 | `judges/langchain.py` | The LangChain judge adapter. **The last of the four.** |
 | `judges/product.py` | The product judge: the shared judge prompt as one text turn closed by a JSON-only line, sent through `runners/product.py`'s `invoke`/`read_trace` from an empty directory with no skill; the first balanced JSON object in the reply validated as `JudgeOutput`, everything else `JudgeVerdict.error`. Defines the judge's `preflight()`. Imports no agent framework. |
 | `reporters/console.py` | Human-readable run summary. |
-| `reporters/failure_context.py` | The excerpt a non-passing case shows — output, cut count, tool-call lines. One helper for all three reporters; no markup. |
+| `reporters/failure_context.py` | The excerpt a non-passing case shows — output, cut count, tool-call lines, failed-hook lines. One helper for all three reporters; no markup. |
 | `reporters/json_reporter.py` | Machine-readable run report. |
-| `reporters/junit.py` | JUnit XML for CI test panes. `failed`/`errored` map onto `<failure>`/`<error>`, candidate arm only. |
+| `reporters/junit.py` | JUnit XML for CI test panes. `failed`/`errored` map onto `<failure>`/`<error>`, candidate arm only; a case the spend ceiling kept from starting is `<skipped>`, beside one `<error>` case stating the ceiling's reasons. |
 | `reporters/markdown.py` | GitHub-flavored Markdown for step summaries and PR comments, with optional `max_chars` truncation. |
 
 ## Data flow
 
 ```
 path
-  └─ skills/loader (walk for SKILL.md) ──────────────► [Skill] (bundle_root if scripts/, references/ or assets/ exists)
+  └─ skills/loader (walk for SKILL.md) ──────────────► [Skill] (bundle_root if it ships any file besides SKILL.md and evals)
         └─ per skill: skills/baseline (once, if --baseline) ──► baseline Skill (+ its own bundle) | note
         └─ per skill: cases/loader (evals/ dir or *.eval.yaml; evals.json → cases/evals_json; tool_libraries: → cases/tool_libraries; ref: resolved) ──► [EvalCase]
   └─ scripts.preflight (once, only if allow_scripts) ──► ScriptRuntime | ScriptSetupError (exit 2)
   └─ each Runner.preflight(skills, cases_by_skill), then Judge.preflight() (once, where defined) ──► [ProductStatus] | ProductSetupError (exit 2)
 
 matrix: for each (skill × case × arm × repeat × runner)
-    Runner.run ──► RunResult ──► each Evaluator ──► [EvalScore]
+    Runner.run (once, or once per session) ──► RunResult (sessions merged) ──► each Evaluator ──► [EvalScore]
                                                        └─► CaseOutcome (arm, repeat_index)
 
 aggregate ──► RunReport ──► comparison.build_delta ──► Delta | None
@@ -169,9 +171,10 @@ All live in `models.py`.
 | Model | Carries |
 | --- | --- |
 | `Skill` | name, description, instructions, `version` (declared frontmatter version, `""` if absent), path, `variant` (`"candidate"` or `"baseline"`), `bundle_root` (the directory whose `scripts/`, `references/` and `assets/` the agent may read; `None` when the skill ships none), `markdown` (the `SKILL.md` text verbatim — its text as written, though line endings are normalised — for a product runner to deliver; `""` for the `--baseline none` skill, so no directory is written) |
-| `EvalCase` | name, task, `tools`, `assertions`, `trajectory`, `budget`, `tags` |
+| `EvalCase` | name, `task` or `sessions` (exactly one; `sessions` needs a `workspace` and two entries or more), `tools`, `assertions`, `trajectory`, `budget`, `tags` |
 | `ToolSpec` | one mock tool: name, description, `parameters` or `input_schema`, and `returns` — a string for every call, a `list[str]` consumed in call order, or a `list[ToolResponse]` (`when:` argument subset → `value`) matched per call; `ToolRef` (`ref` + optional `returns` in the same shapes) is what a case writes to import one from a library |
-| `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, `usage_note` (why the token split is `0` when the runner could not count — a declared `max_tokens` then fails as not evaluated), model, `error` |
+| `RunResult` | output, tool calls, `hooks` (a list of `HookRun`; empty under every framework runner), transcript, token split, latency, cost, `cost_note`, `usage_note` (why the token split is `0` when the runner could not count — a declared `max_tokens` then fails as not evaluated), model, `skill_triggered` and, for a `sessions:` case, `skill_triggered_by_session` (each session's own answer, what `trajectory.skill_triggered` reads), `error` |
+| `HookRun` | one lifecycle hook a product reported running: `name` as the product spells it (`PreToolUse:Write`), `event` (empty when not reported), `outcome` (the product's own word, kept as written), `exit_code` (`None` when not reported), `stdout`, `stderr`; `failed` is true for any outcome but `success` |
 | `CheckResult` | one check's `id`, `passed`, `evidence` — emitted by the judge and by assertion/trajectory/budget alike |
 | `EvalScore` | one evaluator's `passed` / `score` / `detail`, plus its `checks: list[CheckResult]` |
 | `BaselineNote` | why a skill or case has no baseline arm: `kind` (`"unavailable"` or `"skipped"`) plus a reason |
@@ -220,7 +223,9 @@ rather than writing either again — both adapters must measure the same thing �
 the agent, tools included, *inside* the retried callable, so a mock whose `returns:` is
 consumed in call order starts from the top on every attempt. A runner that
 must refuse a run before any case executes defines the optional `preflight` hook and raises
-an authoring error from it.
+an authoring error from it. A runner is handed one session's task at a time; start `run` with
+`runners/base.refuse_sessions`, so a caller that bypasses the orchestrator with a
+`sessions:` case gets an errored result rather than a prompt of None.
 
 **Adding a judge.** The same shape under `judges/`: a keyed adapter is registered in
 `cli._KEYED_JUDGES` and receives the shared model, `judge_temperature` and the retry

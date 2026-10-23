@@ -33,8 +33,10 @@ class Skill(BaseModel):
     `variant` says which arm of a comparative run this copy belongs to; the
     orchestrator sets it, and `FakeRunner` scripts against it.
 
-    `bundle_root` is the directory whose `scripts/`, `references/` and `assets/`
-    the agent may read -- None when the skill ships none. Only the skill
+    `bundle_root` is the directory whose files the agent may read -- every file
+    the skill ships except what `bundle.withheld` names (`SKILL.md`, its eval
+    files, version control, dependency directories, secret files) -- None when
+    the skill ships none. Only the skill
     loader and the baseline resolver ever set it, so a Skill built by hand
     and the `--baseline none` skill both carry no bundle by default: keying
     the bundle tools on `path` instead would leak the candidate's scripts into
@@ -66,6 +68,34 @@ class ToolCall(BaseModel):
 
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class HookRun(BaseModel):
+    """One lifecycle hook a product ran, as its trace reported it.
+
+    `name` is the product's spelling (`PreToolUse:Write`: the event, then the
+    matcher when the hook declared one); `event` is empty when the product did
+    not report one. `outcome` is the product's own word, kept as written:
+    Claude Code 2.1.289 writes `success`, `error` (any non-zero exit,
+    including a deliberate block with exit code 2) or `cancelled` (the hook
+    was stopped before it finished: its own timeout ran out, or the run was
+    interrupted; never at a normal end of run). A later version may add a
+    word, and a hook that did not report `success` is shown as failed rather
+    than refused. `exit_code` is None when the hook reported none.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    event: str
+    outcome: str
+    exit_code: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+
+    @property
+    def failed(self) -> bool:
+        return self.outcome != "success"
 
 
 class CheckResult(BaseModel):
@@ -146,12 +176,34 @@ class RunResult(BaseModel):
     could not count them (a product that reports no token usage). It is to
     tokens what `cost_note` is to cost: `BudgetEvaluator` refuses to evaluate
     `max_tokens` against a zero it knows is not a measurement.
+
+    `stop_note` says why the runner stopped the run before the agent
+    finished -- its framework stopped it at the case's `max_tokens` -- and is
+    empty for a run that finished. A stopped run is not errored: it ran, and
+    it went over its budget, which its `max_tokens` check reports as a
+    failure carrying this note.
+
+    `retry_cost_usd` is what the attempts a retry discarded cost. Every
+    other figure here is the attempt that produced this result, so
+    `budget:` measures one run of the skill; the spend totals and the spend
+    ceiling add this, because the discarded attempts were billed too.
+
+    `hooks` are the lifecycle hooks a product reported running, in order;
+    empty for a runner whose trace has none (every framework runner).
+
+    `skill_triggered_by_session` is each session's own `skill_triggered`, in
+    order, for a `sessions:` case in `mode: offered`; empty otherwise. Set by
+    `sessions.merge_results`, never by a runner. `skill_triggered` is then
+    true when any session loaded the skill, but the trajectory check reads
+    this list, because one flag cannot say both "no session fired" and
+    "every session fired".
     """
 
     model_config = ConfigDict(extra="forbid")
 
     output: str = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
+    hooks: list[HookRun] = Field(default_factory=list)
     transcript: list[dict[str, Any]] = Field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
@@ -161,8 +213,11 @@ class RunResult(BaseModel):
     usage_note: str = ""
     model: str = ""
     skill_triggered: bool | None = None
+    skill_triggered_by_session: list[bool | None] = Field(default_factory=list)
     workspace: Path | None = None
     error: str | None = None
+    stop_note: str = ""
+    retry_cost_usd: float = 0.0
 
     @property
     def tokens(self) -> int:
@@ -528,12 +583,20 @@ class WorkspaceSpec(BaseModel):
 
 
 class EvalCase(BaseModel):
-    """A single eval case: a task prompt, the environment it runs in, and how to score it."""
+    """A single eval case: a task prompt, the environment it runs in, and how to score it.
+
+    A case carries exactly one of `task` and `sessions`. `sessions` is a list
+    of tasks, each sent to a fresh runner call against one shared workspace,
+    and the case is scored once, after the last. The orchestrator hands a
+    runner one session at a time, as a copy whose `task` is that session's
+    text, so a runner only ever reads `task`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    task: str
+    task: str | None = None
+    sessions: list[str] | None = None
     tools: list[ToolSpec] = Field(default_factory=list)
     assertions: list[AssertionSpec] = Field(default_factory=list)
     trajectory: TrajectorySpec | None = None
@@ -542,6 +605,39 @@ class EvalCase(BaseModel):
     judge: JudgeSpec | None = None
     workspace: WorkspaceSpec | None = None
     tags: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _one_prompt(self) -> EvalCase:
+        """`task` or `sessions`, never both and never neither.
+
+        `sessions` needs at least two entries -- one is `task:` spelled
+        longer -- and a workspace, because the workspace is the only thing
+        that carries over from one session to the next. Without one the case
+        would run unrelated tasks and score only the last.
+        """
+        if self.task is not None and self.sessions is not None:
+            raise ValueError(
+                "the case sets both task: and sessions:. Use task: for one session, "
+                "or sessions: for several that share one workspace, not both."
+            )
+        if self.sessions is None:
+            if self.task is None:
+                raise ValueError("the case needs a task: (or sessions: for several sessions)")
+            return self
+        if len(self.sessions) < 2:
+            raise ValueError(
+                "sessions: needs at least two entries; for one session, write task: instead"
+            )
+        for position, text in enumerate(self.sessions, start=1):
+            if not text.strip():
+                raise ValueError(f"session {position} is blank, so it would ask nothing")
+        if self.workspace is None:
+            raise ValueError(
+                "sessions: needs a 'workspace:' block. The workspace is the only thing "
+                "that carries over from one session to the next; without one the "
+                "sessions would be unrelated tasks."
+            )
+        return self
 
     @model_validator(mode="after")
     def _no_seeded_file_produced_glob(self) -> EvalCase:
@@ -696,6 +792,71 @@ class CaseOutcome(BaseModel):
     arm: Arm = "candidate"
     repeat_index: int = 0
 
+    @property
+    def spent_usd(self) -> float:
+        """What this outcome cost: its run, the attempts a retry discarded, and
+        every evaluator. The one definition `RunReport.spent_usd` and the
+        spend ceiling both read."""
+        spent = sum(score.cost_usd for score in self.scores)
+        if self.result is not None:
+            spent += self.result.cost_usd + self.result.retry_cost_usd
+        return spent
+
+    @property
+    def unpriced_note(self) -> str:
+        """The first note saying part of `spent_usd` could not be priced -- the
+        run's own, then each evaluator's -- or "" when all of it was."""
+        if self.result is not None and self.result.cost_note:
+            return self.result.cost_note
+        return next((score.cost_note for score in self.scores if score.cost_note), "")
+
+
+class NotRunItem(BaseModel):
+    """A work item the spend ceiling kept from starting.
+
+    Not a `CaseOutcome`, and not a fourth `CaseStatus`: an outcome is a case
+    that ran, with a result and scores, and every aggregate and every JSON
+    consumer reads `status` as one of three verdicts. An item that never
+    started has neither and is a verdict on nothing, so it lives in its own
+    list -- the gate fails on it whatever the pass rate says.
+    """
+
+    skill_name: str
+    case_name: str
+    runner: str
+    arm: Arm = "candidate"
+    repeat_index: int = 0
+
+    def describe(
+        self, repeat: int, code: Callable[[str], str] = str, plain: Callable[[str], str] = str
+    ) -> str:
+        """The one wording every reporter prints for this item.
+
+        The arm is named only for a baseline item, and the repetition only
+        when the run had more than one, counted from 1 as JUnit and the
+        Markdown failure list count it. `code` and `plain` format names and
+        prose, as in `ScriptNote.describe`.
+        """
+        detail = [self.runner]
+        if self.arm == "baseline":
+            detail.append("baseline")
+        if repeat > 1:
+            detail.append(f"run {self.repeat_index + 1}/{repeat}")
+        return f"{code(self.skill_name)} :: {code(self.case_name)} ({plain(', '.join(detail))})"
+
+
+class SpendCeiling(BaseModel):
+    """The run's `max_spend_usd`, and whether it could see every dollar spent.
+
+    `unpriced` names the first outcome, in submission order, whose spend --
+    the run's or a judge's -- could not be priced, with the note saying why;
+    empty when every outcome was priced. An unpriced `0.0` is not free, so a
+    ceiling that met one could not be honoured: the run stopped there.
+    """
+
+    max_spend_usd: float
+    unpriced: str = ""
+
 
 class RunReport(BaseModel):
     """Aggregated results for a whole run.
@@ -704,6 +865,10 @@ class RunReport(BaseModel):
     the skill was unnecessary, not that CI should go red, so baseline outcomes
     are reported but never gated on. With no baseline the two sets are
     identical and none of these numbers move.
+
+    `not_run` is every work item, of either arm and in submission order, that
+    the spend ceiling kept from starting; none of them is in `outcomes`, so
+    no aggregate counts them. `spend_ceiling` is None when the run set none.
     """
 
     outcomes: list[CaseOutcome] = Field(default_factory=list)
@@ -716,6 +881,8 @@ class RunReport(BaseModel):
     scripts: ScriptStatus | None = None
     script_notes: list[ScriptNote] = Field(default_factory=list)
     products: list[ProductStatus] = Field(default_factory=list)
+    not_run: list[NotRunItem] = Field(default_factory=list)
+    spend_ceiling: SpendCeiling | None = None
 
     @property
     def candidate_outcomes(self) -> list[CaseOutcome]:
@@ -784,13 +951,20 @@ class RunReport(BaseModel):
 
     @property
     def total_cost_usd(self) -> float:
-        """Cost across **both** arms. See `total_tokens` for why."""
-        return sum(o.result.cost_usd for o in self.outcomes if o.result)
+        """Cost across **both** arms, the attempts a retry discarded included.
+        See `total_tokens` for why."""
+        return sum(o.result.cost_usd + o.result.retry_cost_usd for o in self.outcomes if o.result)
 
     @property
     def total_latency_ms(self) -> int:
         """Latency across **both** arms. See `total_tokens` for why."""
         return sum(o.result.latency_ms for o in self.outcomes if o.result)
+
+    @property
+    def spent_usd(self) -> float:
+        """Everything the run was recorded as spending, both arms: what
+        `max_spend_usd` reads, summed from `CaseOutcome.spent_usd`."""
+        return sum(outcome.spent_usd for outcome in self.outcomes)
 
     @property
     def pricing_degraded(self) -> bool:

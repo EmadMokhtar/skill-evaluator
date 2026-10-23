@@ -8,6 +8,10 @@ from skill_lens.models import BudgetSpec, CheckResult, EvalCase, EvalScore, RunR
 def _checks(spec: BudgetSpec, result: RunResult) -> tuple[list[CheckResult], int]:
     """One CheckResult per declared limit, plus how many were actually evaluated.
 
+    A run its framework stopped at `max_tokens` (`result.stop_note`) went
+    over that limit by construction, so its `max_tokens` check fails and its
+    evidence carries the note.
+
     A cost limit is declared but not evaluated when `result.cost_note` is
     non-empty, and a token limit when `result.usage_note` is: `calculate_cost`
     degrades to 0.0 for an unpriced model, and `0.0 > max_cost_usd` is always
@@ -30,13 +34,12 @@ def _checks(spec: BudgetSpec, result: RunResult) -> tuple[list[CheckResult], int
         else:
             evaluated += 1
             held = result.tokens <= spec.max_tokens
-            checks.append(
-                CheckResult(
-                    id="max_tokens",
-                    passed=held,
-                    evidence=f"used {result.tokens} tokens, limit is {spec.max_tokens}",
-                )
-            )
+            evidence = f"used {result.tokens} tokens, limit is {spec.max_tokens}"
+            if result.stop_note:
+                # The run did not end on its own, and the reader must not
+                # take its output for the agent's finished answer.
+                evidence = f"{evidence}; {result.stop_note}"
+            checks.append(CheckResult(id="max_tokens", passed=held, evidence=evidence))
     if spec.max_cost_usd is not None:
         if result.cost_note:
             checks.append(

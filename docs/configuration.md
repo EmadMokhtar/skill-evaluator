@@ -46,6 +46,7 @@ greeting = 0.9
 | `script_interpreters` | `{ py = ["python3"], sh = ["bash"] }` | — |
 | `runners` | `{}` | — |
 | `product_sandbox` | `"auto"` | `--product-sandbox` |
+| `max_spend_usd` | unset (no ceiling) | `--max-spend` |
 
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
@@ -78,6 +79,21 @@ raising it overlaps waiting, not computation; the practical ceiling is your prov
 limit, not your CPU. Runners and evaluators are shared across threads, so a custom one must
 have no mutable state its `run`/`evaluate` touches.
 
+`max_spend_usd` is the run's spend ceiling in US dollars. Once the spend the run has recorded
+reaches it, no new case starts: cases already running finish and are scored, every case left
+is reported as not run, and the gate fails. Unset, the default, means no ceiling, so
+upgrading never stops a run on its own. It must be a positive, finite amount; `0`, a negative
+number, `inf` and `nan` are config errors (exit 2), because a ceiling of zero would run
+nothing and one of infinity is no ceiling. A ceiling must be able to see what is spent, so a
+run with a `copilot` or `cli` runner or judge, or a keyed one whose model has no price, is
+refused before it starts (exit 2), and spend that turns out unpriced during a run stops it.
+The whole rule, and how it meets `--concurrency`, is in
+[The spend ceiling](gating.md#the-spend-ceiling).
+
+```toml
+max_spend_usd = 5.00
+```
+
 `keep_workspace` keeps each case's temporary directory instead of deleting it after the run,
 so you can inspect what a case actually wrote. `--keep-workspace` / `--no-keep-workspace`
 override it in either direction; leaving both unset keeps the config file's value. Every kept
@@ -86,7 +102,7 @@ turned keeping on — a setting that silently filled a disk with no on-screen ex
 be a trap.
 
 `full_output` lifts the 500-character cap on the agent output printed under a non-passing
-case, in every reporter. `--full-output` / `--no-full-output` override it in either
+case, and the 200-character cap on each stream of a failed hook, in every reporter. `--full-output` / `--no-full-output` override it in either
 direction; leaving both unset keeps the config file's value. The cap is never silent — a cut
 output always states exactly how many characters were removed — so the default is safe to
 leave in CI, where a long red log helps nobody, and `true` is the right committed value for
@@ -310,7 +326,7 @@ action (see [CI integration](ci.md#running-under-a-product)).
 that executes it. It is off by default because a `SKILL.md` under evaluation is, by
 construction, code nobody has vetted, and skill-lens is built to run in CI — running that
 code is a decision the operator of the run states, never something an eval file can turn
-on. Reading the bundle (`references/`, `assets/`, `scripts/`) needs no opt-in.
+on. Reading the rest of what the skill ships (`references/`, `templates/`, …) needs no opt-in.
 
 With execution off, every discovered skill that bundles scripts is named on the report
 (`skill log-triage bundles 1 script; execution is off (allow_scripts = true or

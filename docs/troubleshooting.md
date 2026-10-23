@@ -192,7 +192,7 @@ the note, after the colon in the gate reason. Each one has a different fix.
 | `SKILL.md is not tracked by git` | The file exists but was never committed. Commit it. There is no earlier version until there is a first one. |
 | `cannot read <path>/SKILL.md: <the OS or decoding error>` | The working copy cannot be read: file permissions, or a file that is not UTF-8 text. |
 | `no earlier version of SKILL.md found in the last 50 commits` | Every one of the last 50 commits touching this `SKILL.md` carries the same `version:`, or the same content where there is no `version:`. Bump `version:` in the same commit as the edit. Quote it (`version: "1.2"`), because YAML reads an unquoted `1.20` and `1.2` as the same number — an unquoted two-part version is itself an exit-2 authoring error. |
-| `cannot archive commit <sha>` | `git archive` failed or passed its 10-second limit while fetching the previous version's bundled files. A very large `assets/` directory can do that. |
+| `cannot archive commit <sha>` | `git archive` failed or passed its 10-second limit while fetching the previous version's bundled files. A skill that ships very large files, or a `SKILL.md` at a repository root, can do that. |
 | `cannot extract the bundle at commit <sha>: <error>` | The archive would not unpack: a member failed the safe-extraction filter, or the filesystem refused. |
 
 `<sha>` is the first eight characters of the commit hash. Full detail is in
@@ -232,6 +232,68 @@ The notes you can meet, verbatim:
 product, or run those cases through `pydantic-ai` or `langchain`, which do report a token
 split. Do not leave the limit in place expecting it to be ignored — it is not ignored, it
 fails. See [Budget limits and pricing](runners.md#budget-limits-and-pricing).
+
+## A case stopped at its token budget
+
+**What you see.** A failing case under `pydantic-ai` or `langchain` whose budget detail says
+the run was stopped:
+
+```
+[FAIL] pdf :: summarises the report (pydantic-ai)
+        budget: used 120 tokens, limit is 100; pydantic-ai stopped the run before the agent finished, at the case's max_tokens
+```
+
+**What it means.** The case declares `max_tokens:` in its `budget:` block, and the run went
+over it. Under the two framework runners that limit is also handed to the framework, which
+stops the run at the first model response that takes the total over it, instead of letting a
+looping agent spend on. The case is scored as far as it got, so its output and tool calls are
+what the agent had done when it was stopped, and it **fails** on its budget. See
+[Stopping a runaway case](runners.md#stopping-a-runaway-case).
+
+**What to do.** If the skill really does need more, raise `max_tokens`. If it should not, the
+failure is the finding: the skill makes the agent loop or over-explain.
+
+## Cases that did not run
+
+**What you see.** A `Not run` list and a gate reason about the spend ceiling:
+
+```
+Not run (stopped by the spend ceiling):
+  pdf :: handles a scanned page (pydantic-ai)
+
+2 passed, 0 failed, 0 errored, 1 not run — pass rate 100%
+
+Gate FAILED:
+  - 1 case did not run: the spend ceiling of $0.50 was reached ($0.5300 recorded)
+```
+
+Or, when the spend could not be priced:
+
+```
+Gate FAILED:
+  - the spend ceiling of $0.50 could not be enforced: spend was not priced for pdf :: extracts the title (pydantic-ai): no price data for ollama:llama3 (LookupError)
+  - 3 cases did not run: the spend ceiling stopped the run
+```
+
+**What it means.** The run has a spend ceiling — `max_spend_usd` in `skill-lens.toml`, or
+`--max-spend`. Once the spend recorded so far reached it, no new case started; the cases
+already running finished. The gate fails whenever a case was left unstarted, even when every
+case that ran passed, because the run measured less than it was asked to. In the second form,
+an outcome's cost could not be priced, so the ceiling could not tell what had been spent, and
+it stopped the run rather than treat that cost as zero. See
+[The spend ceiling](gating.md#the-spend-ceiling).
+
+**What to do.** Raise the ceiling, or run fewer cases (`--tag`, `--case`, a smaller
+`--repeat`). For a provider whose spend cannot be priced, leave `max_spend_usd` unset.
+
+A run that could never price its spend is refused before it starts, with exit code `2`:
+
+```
+max_spend_usd cannot be enforced for runner copilot: copilot bills per premium request, not in US dollars. A ceiling counts spend it can price, and this runner's never is; leave max_spend_usd (and --max-spend) unset for a run that uses it
+```
+
+That is `copilot` or `cli` as the runner or the judge, or a `pydantic-ai` or `langchain`
+runner or judge whose configured model has no price. Leave the ceiling unset for that run.
 
 ## A model with no price
 
@@ -452,7 +514,7 @@ The reasons, verbatim:
 | `bwrap not found on PATH` | Linux, and bubblewrap is not installed |
 | `no sandbox backend on <system>` | There is no backend for this platform at all. Windows is the case you will meet |
 | `sandbox-exec probe failed: <detail>` | The backend is installed but would not run. `<detail>` is the first line of its standard error, or `exit <n>` when it printed nothing, or the operating-system error when it could not be started at all |
-| `bwrap probe failed: <detail>` | The same, in the same three shapes. On Linux the usual cause is that unprivileged user namespaces are disabled on the host |
+| `bwrap probe failed: <detail>` | The same, in the same three shapes. On Linux the usual cause is that unprivileged user namespaces are disabled on the host. A `bwrap` too old to accept `--tmpfs` or `--remount-ro` fails here too |
 | `temp directory path contains a double quote, which a sandbox-exec profile cannot express` | The temporary-directory path holds a `"`, which would break the profile's quoting. It fails closed rather than writing a profile it cannot trust |
 
 **What to do.** Pick one, knowingly:

@@ -22,7 +22,7 @@ which `cz bump` generates from the commit history.
 | `offered` cases, which measure whether the agent reached for the skill | [Did the agent reach for the skill?](eval-files.md#did-the-agent-reach-for-the-skill) |
 | Comparative runs: two arms, `--repeat`, the delta, `--min-delta` | [Comparative evals](comparative-evals.md) |
 | Workspaces, bundled files, and sandboxed script execution | [The workspace](runners.md#the-workspace), [Running bundled scripts](security.md#running-bundled-scripts) |
-| Token, cost and latency budgets | [Budget limits and pricing](runners.md#budget-limits-and-pricing) |
+| Token, cost and latency budgets, a token stop for a runaway case, and a spend ceiling for a whole run | [Budget limits and pricing](runners.md#budget-limits-and-pricing), [The spend ceiling](gating.md#the-spend-ceiling) |
 | Repository defaults, including a self-hosted model endpoint | [Configuration](configuration.md) |
 | Scaffolding a suite, and importing a real MCP server's tools | [`init`](cli.md#init), [`mcp-import`](cli.md#mcp-import) |
 | The eval-writing skill, as a plugin for Claude Code, Copilot, VS Code, Codex and Cursor | [Installing it](writing-evals.md#installing-it) |

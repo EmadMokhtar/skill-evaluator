@@ -37,6 +37,8 @@ def render_json(
             # Kept apart from total_cost_usd: judging is harness overhead and is
             # never charged to the skill's budget.
             "judge_cost_usd": report.judge_cost_usd,
+            # The candidate arm, like every count above; `not_run` below has both.
+            "not_run": sum(1 for item in report.not_run if item.arm == "candidate"),
         },
         "skipped_skills": report.skipped_skills,
         "tag_filtered_skills": report.tag_filtered_skills,
@@ -58,6 +60,9 @@ def render_json(
                 "model": o.result.model if o.result else "",
                 "cost_note": o.result.cost_note if o.result else "",
                 "usage_note": o.result.usage_note if o.result else "",
+                "stop_note": o.result.stop_note if o.result else "",
+                "retry_cost_usd": o.result.retry_cost_usd if o.result else 0.0,
+                "hooks": [h.model_dump() for h in o.result.hooks] if o.result else [],
                 "workspace": (str(o.result.workspace) if o.result and o.result.workspace else None),
             }
             for o in report.outcomes
@@ -68,6 +73,12 @@ def render_json(
     payload["scripts"] = report.scripts.model_dump() if report.scripts is not None else None
     payload["script_notes"] = [note.model_dump() for note in report.script_notes]
     payload["products"] = [p.model_dump() for p in report.products]
+    payload["not_run"] = [item.model_dump() for item in report.not_run]
+    payload["spend_ceiling"] = (
+        {**report.spend_ceiling.model_dump(), "spent_usd": report.spent_usd}
+        if report.spend_ceiling is not None
+        else None
+    )
     if gate is not None:
         payload["gate"] = gate.model_dump()
     return json.dumps(payload, indent=2)

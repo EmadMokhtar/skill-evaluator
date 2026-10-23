@@ -129,8 +129,8 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **Agent-framework imports appear in exactly four modules** —
   `runners/pydantic_ai.py`, `judges/pydantic_ai.py`, `runners/langchain.py`,
   `judges/langchain.py`. `runners/tools.py` builds framework-neutral `AgentTool`s (name +
-  JSON schema + callable); `runners/prompting.py` and `runners/retry.py` hold the prompt and
-  retry rules both adapters share; the adapters wrap them. `runners/product.py`,
+  JSON schema + callable); `runners/prompting.py`, `runners/retry.py` and `runners/limits.py`
+  hold the prompt, retry and token-stop rules both adapters share; the adapters wrap them. `runners/product.py`,
   `judges/product.py` and `runners/traces.py` import `subprocess` and `json`, not a
   framework — a product is an executable and a trace grammar — and `process.py` beneath
   them imports nothing from the project. `tests/test_framework_isolation.py`
@@ -145,6 +145,28 @@ fails if the two drift apart — so a new invariant is added in both places or n
   unpriced model with a budget block that mixes a priced limit and `max_cost_usd` will see
   those cases turn red on upgrade — drop `max_cost_usd` for that provider rather than relying
   on the skip to be silently ignored.
+- **A case's `max_tokens` stops a keyed run while it spends, and the stopped run fails its
+  budget check.** `pydantic-ai` passes `UsageLimits(total_tokens_limit=...)`; `langchain` an
+  `after_model` middleware adding each reply's `usage_metadata`. Both stop at the first
+  response taking the attempt's total *over* it (exactly at it passes `BudgetEvaluator`). The
+  stopped run is **not** errored: returned as far as it got (last response's text, tool calls,
+  transcript — PydanticAI's history plus the crossing response it never appends), with
+  `RunResult.stop_note` set, never retried, scored by every evaluator; its `max_tokens` check
+  fails with the note as evidence. So both arms are treated alike and a runaway baseline is a
+  failed baseline, not one the delta drops. `max_cost_usd` is not handed over (no PydanticAI
+  cost limit at the 2.22 floor, none in LangChain); PydanticAI keeps `request_limit=50`, and
+  `recursion_limit` is not set, since no `budget:` key counts steps. `runners/limits.py`
+  holds the rule and imports no framework.
+- **A keyed run's figures are its last attempt's, and what retries discarded is
+  `retry_cost_usd`.** One meter per attempt (a `WrapperModel` for PydanticAI, the middleware
+  for LangChain). Tokens, cost, notes, model and tool calls are the attempt that produced the
+  result, so `budget:` measures one run and the token limit is per attempt, never summed.
+  Earlier attempts' cost is `retry_cost_usd`, finished or errored; `total_cost_usd`,
+  `CaseOutcome.spent_usd` and the ceiling add it, `BudgetEvaluator` and the delta do not. No
+  response answered means a measured zero: not priced, no `cost_note`.
+- **A keyed run whose provider reported no token usage says so.** Responses with no usage at
+  all set `usage_note` and `cost_note` (`limits.no_usage_notes`), so `max_tokens` fails as
+  not evaluated and the ceiling does not take the `0.0` for free.
 - **Mock tools accept any arguments.** A model hallucinating an argument must not raise, or an
   eval signal would surface as an infra error.
 - **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act;
@@ -240,6 +262,35 @@ fails if the two drift apart — so a new invariant is added in both places or n
   aborts before any case runs.
 - **Outcome order is submission order, never completion order** — at every concurrency level,
   so identical runs do not churn their output.
+- **A spend ceiling stops new work, never work in flight, and a run it cut short fails the
+  gate.** `_run_item` asks the locked `_SpendLedger` as each item starts, at every concurrency;
+  it refuses once recorded spend (`CaseOutcome.spent_usd`: run cost, `retry_cost_usd` and
+  every `EvalScore.cost_usd`, both arms, errored runs included) is `>=` `max_spend_usd`. Spend is recorded before `_run_item`
+  returns, so a worker never starts work its last item paid for; items run are a prefix of the
+  plan. Running items finish and are scored, so a run can end above the ceiling by at most
+  `concurrency` items. A ceiling is positive and finite (`Config`, `--max-spend`, `run_evals`),
+  so the first item always starts. Any refused item, either arm, fails the gate whatever
+  `min_pass_rate`, `per_skill_min` and `fail_on_error` say; a ceiling the last item crossed
+  fails nothing. A case missing any repetition of either arm is excluded from the delta. JUnit
+  adds one `<error>` case with `gating.spend_ceiling_reasons`, or a cut run would render green.
+- **An item the spend ceiling kept from starting is not an outcome.** It is a `NotRunItem` on
+  `RunReport.not_run`, in submission order — never a `CaseOutcome`, never a fourth
+  `CaseStatus`. It enters none of `passed` / `failed` / `errored` / `pass_rate`; the gate fails
+  on it directly. Console and Markdown list it under "Not run", JSON as `not_run` (with a
+  candidate-only `summary.not_run`), JUnit as `<skipped>` for the candidate arm only.
+- **A spend ceiling that meets unpriced spend stops the run and fails the gate.**
+  `CaseOutcome.unpriced_note` (a `cost_note` on the `RunResult` or any `EvalScore`) makes its
+  `0.0` no measurement, so the ledger fails closed and refuses new work. The gate names the
+  first unpriced outcome in submission order (`SpendCeiling.unpriced`, read from the outcomes,
+  not the ledger's completion order), even when nothing was refused. Without a ceiling
+  nothing changes. It covers what preflight cannot know: a served model with no price, no
+  usage reported, a claude-code run that ended before reporting cost.
+- **A spend ceiling under a seat that can never price its spend is refused in preflight.**
+  Runners and judges may define `unpriced() -> str`: `Product.unpriced()` (`cli` has no
+  parser; copilot's `unpriced_note`), `pricing.unpriced_model` for a keyed seat's configured
+  `provider:name` (a model object returns `""`). With a ceiling, `run_evals` asks every
+  runner and the judge after the preflight hooks and raises `SpendCeilingError` (exit 2)
+  before any case; a seat with no `unpriced()` is not asked.
 - **Concurrency never turns an authoring error into a case failure, and the surfaced error is
   deterministic.** Only the futures queued *after* the failure are cancelled, the executor
   always shuts down with `cancel_futures=True` (including when `submit` itself raises), and a
@@ -381,6 +432,24 @@ fails if the two drift apart — so a new invariant is added in both places or n
   directory.
 - **Every work item gets its own workspace, and two arms never share one.** `mkdtemp` is
   atomic; a shared directory would let the baseline arm read the candidate's output.
+- **`task:` and `sessions:` are exclusive, and `sessions:` needs a `workspace:` and at least
+  two entries.** `EvalCase._one_prompt`, so a case built in code is refused too; exit 2 at
+  load time. Without a workspace nothing carries over, and the sessions would be unrelated
+  tasks scored on the last.
+- **The sessions of one work item share its workspace, and nothing else carries over.**
+  Created once before the first session, deleted once after scoring; each session is a fresh
+  `Runner.run` with a copy of the case whose `task` is that session's text (fresh tools, the
+  skill delivered again). A runner never sees `sessions:`; a `task:` case makes one call with
+  the case object itself.
+- **A multi-session case is one outcome: an errored session errors it and stops the rest,
+  and every evaluator reads the merged result.** `sessions.merge_results`: the last
+  session's output, every session's tool calls and hooks in order, summed spend (kept on
+  error), every distinct `cost_note` / `usage_note`, and `session k of n: ` on the error.
+  `trajectory.skill_triggered` must hold in every session (`skill_triggered_by_session`);
+  `skill_triggered` only summarises "any session". A runner handed the whole case returns
+  `refuse_sessions`'s error, never None as the prompt. A session with `stop_note` ends the loop
+  too (merged as `session k of n: ...`, `retry_cost_usd` summed), and each session's copy
+  carries only the `max_tokens` the earlier ones left, since `budget:` reads the sum.
 - **The workspace preamble is byte-identical in both arms and never names the skill** —
   otherwise `--min-delta` measures the preamble instead of the skill.
 - **`RunResult.workspace` is non-null only while the directory exists, and the orchestrator
@@ -488,8 +557,8 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **A sequence repeats its last entry once used up** — the steady state a skill that keeps
   calling should see, with `trajectory.max_calls` as the check for a loop that should have
   stopped. The counter lives in the built tool, never on the runner (`build_mock_tool` keeps
-  a locked counter in a closure), so each arm, attempt and work item starts from the top and
-  parallel calls from one model turn each consume one entry.
+  a locked counter in a closure), so each arm, attempt, session and work item starts from the
+  top and parallel calls from one model turn each consume one entry.
 - **A retried attempt gets fresh tools.** Both keyed adapters build the agent *inside* the
   retried callable, or a transient 429 would hand the retry's first call the second entry.
 - **A lookup entry that could never answer a call is an authoring error** (exit 2, load time,
@@ -539,7 +608,7 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **The product sees `SKILL.md` verbatim (its text as written; line endings are
   normalised).** `Skill.markdown` is the file; only the loader
   and the baseline resolver set it; `--baseline none` has none, so no directory is written.
-  Beside it go `scripts/`, `references/` and `assets/` and nothing else.
+  Beside it goes every file the skill ships, all but what `bundle.withheld` names.
 - **The prompt is the task verbatim, and the baseline-none arm never sees the skill's name.**
   The product owns its system prompt; anything skill-lens added would be part of what
   `--min-delta` measures. `loaded` invokes the skill by the product's own spelling; `offered`
@@ -619,6 +688,16 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **`ProductRunner.run` still never raises** once the bridge exists: a bridge directory that
   cannot be written, and a `tools:` case reaching a product with no `mcp` (a caller that
   skipped preflight), are both `RunResult.error`.
+- **A hook is reported, never judged.** `RunResult.hooks` is every `hook_response` a
+  `claude-code` run reported, in order, the product's `outcome` word kept as written: any
+  word but `success` is a failed hook (shown, never refused); `cancelled` is a hook stopped
+  by its own timeout or an interrupted run, never by a normal end of run. One with no string
+  name or outcome is skipped (the transcript keeps it); a missing event is empty. No
+  evaluator reads it, so a failed hook never changes a verdict; it shows through
+  `FailureContext` under a case already not passing. An errored run keeps its hooks only
+  when its trace is complete; one that ended early reports none (never a partial parse).
+  `--include-hook-events` only turns the `hook_*` events on (verified, 2.1.289); the
+  `result` event is unchanged.
 - **`--model` with nothing to read it is a user error, and so is `--judge-model`** (exit 2).
   `--model` is read by a keyed runner, or by a keyed judge whose `judge_model` is unset;
   `--judge-model` by a keyed judge only, so under a product judge it is refused; a
@@ -665,8 +744,15 @@ fails if the two drift apart — so a new invariant is added in both places or n
   `allow-scripts` input is unset by default so the file decides, and `pull_request_target`,
   collaborator-PR and self-hosted workflows should pass `allow-scripts: false` explicitly.
   Docs-only: `docs/security.md`, `docs/ci.md`.
-- **The bundle is `scripts/`, `references/`, `assets/` and nothing else** — an eval file
-  beside `SKILL.md` is never readable by the agent.
+- **The bundle is every file the skill ships, never its eval files or secrets** —
+  `bundle.withheld` is the one rule for `SkillBundle`, product delivery and the previous
+  baseline's extraction: the top-level `SKILL.md`; `evals/`, `.git`, `.hg`, `.svn`,
+  `node_modules`, `.venv`, `__pycache__`; `*.eval.yaml`, `evals.json`, `.env`, `.env.*`,
+  `.npmrc`, `.netrc`, `.pypirc`, `skill-lens.toml` — at any depth, case-insensitively,
+  checked on the path asked for and the path it resolves to (issue #92). `_shipped` is the
+  one walk (regular files only, directory links never descended); delivery writes exactly
+  `delivered_paths`, never a link; past 1,000 files or 100 MB it is `BundleTooLarge` (exit 2
+  in preflight). Only `scripts/` is runnable.
 - **`Skill.bundle_root` defaults to `None`, and only the loader and the baseline resolver
   set it**, so the `--baseline none` skill never carries the candidate's scripts.
 - **A script's environment is built from an allowlist, never inherited.** The key that pays

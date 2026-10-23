@@ -198,6 +198,10 @@ class ProductJudge:
         self._sandbox = sandbox
         self.name = product.name
 
+    def unpriced(self) -> str:
+        """Why this judge's spend can never be priced; see `Product.unpriced`."""
+        return self._product.unpriced()
+
     def judge(self, request: JudgeRequest) -> JudgeVerdict:
         product = self._product
         prompt = judge_prompt(request)

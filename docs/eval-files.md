@@ -11,7 +11,8 @@ which has no `cases:` list and is strict at every level — see [Reading
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `name` | yes | Case name, shown in reports |
-| `task` | yes | The prompt handed to the runner |
+| `task` | one of `task` / `sessions` | The prompt handed to the runner |
+| `sessions` | one of `task` / `sessions` | Several prompts, each a fresh session in one shared workspace — see [Several sessions in one workspace](#several-sessions-in-one-workspace) |
 | `assertions` | no | Scoring rules; a case with none passes |
 | `tags` | no | Labels for `--tag` filtering |
 | `tools` | no | Mock tools the agent may call — see [Mock tools](#mock-tools) |
@@ -81,7 +82,7 @@ With the block present, the agent also gets three built-in tools:
 | `read_file` | Read a text file. `path` is relative to the working directory |
 | `write_file` | Create or replace a text file |
 
-A skill that ships `scripts/`, `references/` or `assets/` beside `SKILL.md` also gets
+A skill that ships any file beside `SKILL.md` besides its eval files also gets
 `list_skill_files`, `read_skill_file` and — only when the run enables it with
 `allow_scripts` or `--allow-scripts` — `run_script`. See
 [Bundled files and scripts](runners.md#bundled-files-and-scripts). All six names are
@@ -103,6 +104,84 @@ like any other tool call, so it counts toward `max_calls` and any `budget:` ceil
 See [The workspace](runners.md#the-workspace) for containment and the size caps, and
 [Assertion kinds](#assertion-kinds) below for scoring a produced file rather than the chat
 output.
+
+## Several sessions in one workspace
+
+Some skills claim that a **new** session can pick up from files an earlier session wrote:
+a plan, a progress log, a memory file. One `task:` cannot test that. Seeding the files by
+hand does not test it either: a case that hands the agent a finished plan tests reading a
+file the author wrote, and it passes with or without the skill.
+
+`sessions:` replaces `task:` with a list of tasks. Each one is a separate session: a fresh
+runner call, with no conversation history, against the **same** workspace. The case is
+scored once, after the last session.
+
+```yaml
+cases:
+  - name: resumes-from-its-own-plan
+    sessions:
+      - >-
+        Plan the migration of the billing service to the new queue in three phases.
+        Do phase 1 only, then stop.
+      - Continue the migration from where it stopped.
+    workspace: {}
+    assertions:
+      # Session 1 was told to stop after phase 1, so a progress file that marks
+      # phase 2 done is progress only a resuming session could make.
+      - kind: regex
+        value: '(?im)phase 2.*(done|complete)'
+        file_glob: .planning/*/progress.md
+    judge:
+      rubric:
+        - progress.md records phase 2 as done, after phase 1, in the same plan
+      artifacts:
+        - glob: .planning/*/progress.md
+```
+
+**Check what only a later session could do.** Every check runs after the last session, so
+it cannot tell which session wrote a file. `file-produced` on a file the first session
+creates passes even when the second session did nothing at all. Check for progress the
+first session was told **not** to make, as the example does. Because a `file_glob` must match
+exactly one file, the same check also fails when the second session starts a new plan in a
+new directory instead of continuing the old one. A first session that ignored "then stop"
+would still pass the regex; the rubric's "after phase 1, in the same plan" is there for the
+judge to read the file as a whole.
+
+What each part of the case reads:
+
+| Part | Reads |
+| --- | --- |
+| `assertions:` on the output | The last session's output |
+| `assertions:` with `file:` / `file_glob:` | The workspace after the last session |
+| `trajectory:` | Every session's tool calls, in order — so `forbidden:` and `max_calls` cover every session, and `order:` may span sessions |
+| `budget:` | The sum over every session: tokens, cost and latency |
+| `judge:` | Every session's task, the last session's output, and the artifacts after the last session |
+| `mode: offered` | Every session is offered the skill, and `trajectory.skill_triggered` must hold in **every** session: `true` fails when any session did not load the skill, `false` fails when any session did. In the report, `skill_triggered` is true when any session loaded it, and `skill_triggered_by_session` lists each session's own answer |
+
+The rules:
+
+- `task:` and `sessions:` are exclusive, and a case needs one of them.
+- `sessions:` needs **at least two** entries — one is `task:` spelled longer — and no entry
+  may be blank.
+- `sessions:` needs a `workspace:` block. The workspace is the only thing that carries over
+  from one session to the next; without one the sessions would be unrelated tasks.
+
+Each of these is an **authoring error**: the run stops with exit `2` before any case runs.
+
+Nothing but the workspace carries over. Each session builds its tools again, so a mock
+tool's `returns:` list starts from its first entry in every session, and a product runner
+delivers the skill again before each session. The workspace is seeded once, before the
+first session, and deleted once, after scoring.
+
+If a session **errors** — a provider failure, a timeout, a product that crashed — the case
+is **errored**, and the sessions after it do not run. The report says which session
+failed (`session 2 of 3: ...`), and the spend of every session that ran is kept. A session
+that a keyed runner [stopped at its token budget](runners.md#stopping-a-runaway-case) is the
+last to run too, though the case is failed on its budget rather than errored; each session's
+stop is what the earlier sessions left of `max_tokens`.
+`--repeat` repeats the whole sequence, each time in a fresh workspace, and the
+[baseline arm](runners.md#comparative-runs-and-the-baseline-arm) runs the same sessions
+without the skill, in a workspace of its own.
 
 ## Mock tools
 
@@ -455,8 +534,9 @@ under that runner, never a silent `false` that would pass every negative control
 | `tools:` (mock tools) | yes | yes | yes — through the [MCP bridge](runners.md#mock-tools-under-a-product) | authoring error |
 | `trajectory:` | yes — names must be the case's own tools | yes — names must be the case's own tools | yes — the case's tools by their declared names, or the product's own tool names, unchecked; `max_calls` counts the product's own calls too | authoring error |
 | `mode: offered` | yes | yes | yes | authoring error |
-| `budget:` | yes | yes | see [Product runners](runners.md#product-runners) | latency only |
+| `budget:` | yes | yes — `max_tokens` also [stops the run while it spends](runners.md#stopping-a-runaway-case) | see [Product runners](runners.md#product-runners) | latency only |
 | `workspace:` | yes | yes | yes — the product's working directory | yes |
+| `sessions:` | yes | yes | yes — the skill is delivered again before each session | yes |
 | `judge:` | yes | yes | yes | yes |
 
 An authoring error here is found in preflight and exits 2 before any case runs. Under

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import math
+from decimal import Decimal
+
 from pydantic import BaseModel, Field
 
 from skill_lens.comparison import Delta
@@ -9,6 +12,61 @@ from skill_lens.models import RunReport
 
 EXIT_OK = 0
 EXIT_FAILED = 1
+
+
+def usd(amount: float) -> str:
+    """A dollar amount as a person set it: `$0.50`, never `$0.5` or a cent rounded away.
+
+    A whole number of cents -- float noise included, so `0.30000000000000004`
+    is `$0.30` -- prints two decimals. Anything finer prints every digit its
+    shortest exact spelling has (`repr`), so `0.005` is `$0.005` and `1e-07`
+    is `$0.0000001`, never a bare `$0.`.
+    """
+    cents = round(amount, 2)
+    if math.isclose(amount, cents, rel_tol=1e-9):
+        return f"${cents:.2f}"
+    return f"${Decimal(repr(amount)):f}"
+
+
+def recorded(report: RunReport) -> str:
+    """The run's recorded spend as every reporter says it beside the ceiling."""
+    return f"${report.spent_usd:.4f} recorded"
+
+
+def spend_ceiling_reasons(report: RunReport) -> list[str]:
+    """Why the spend ceiling fails this run, or nothing when it does not.
+
+    Two causes, each its own reason. A ceiling that met unpriced spend could
+    not be enforced, whether or not anything was cut: an unpriced `0.0` is
+    not free. And a run that left any work item unstarted -- of either arm --
+    measured less than it was asked to, whatever the pass rate of what ran.
+    A ceiling the last item crossed cut nothing, and is no reason at all.
+    Shared with the JUnit reporter, which states the same reasons on the case
+    it adds so that a cut-short run never renders green.
+    """
+    reasons: list[str] = []
+    ceiling = report.spend_ceiling
+    if ceiling is not None and ceiling.unpriced:
+        reasons.append(
+            f"the spend ceiling of {usd(ceiling.max_spend_usd)} could not be enforced: "
+            f"spend was not priced for {ceiling.unpriced}"
+        )
+    if report.not_run:
+        count = len(report.not_run)
+        cases = "case" if count == 1 else "cases"
+        # The summary line counts the candidate arm only, so a count that
+        # includes baseline runs says how it splits.
+        baseline = sum(1 for item in report.not_run if item.arm == "baseline")
+        arms = f" ({count - baseline} candidate, {baseline} baseline)" if baseline else ""
+        if ceiling is not None and not ceiling.unpriced:
+            cause = (
+                f"the spend ceiling of {usd(ceiling.max_spend_usd)} was reached "
+                f"({recorded(report)})"
+            )
+        else:
+            cause = "the spend ceiling stopped the run"
+        reasons.append(f"{count} {cases} did not run{arms}: {cause}")
+    return reasons
 
 
 class GateResult(BaseModel):
@@ -66,6 +124,11 @@ def evaluate_gate(
     if fail_on_error and report.errored:
         case_word = "case" if report.errored == 1 else "cases"
         reasons.append(f"{report.errored} {case_word} errored")
+
+    # Whatever the pass rate and fail_on_error say: a run the ceiling cut
+    # short is never a pass, and a ceiling that could not see spend was not
+    # enforced.
+    reasons.extend(spend_ceiling_reasons(report))
 
     pass_rates = report.pass_rate_by_skill()
     for skill_name, minimum in (per_skill_min or {}).items():

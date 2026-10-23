@@ -47,8 +47,9 @@ frontmatter omits it. `description` is what an agent reads when deciding whether
 the skill. `version` is optional; when it is declared, `--baseline previous` uses it to
 identify the prior version.
 
-Three directories may sit beside `SKILL.md` — `scripts/`, `references/` and `assets/`.
-Together they are the skill's **bundle**, and a case can let the agent read them. See
+Everything else in the skill's directory — `scripts/`, `references/`, `assets/`, and any
+other file it ships, such as `templates/` — is the skill's **bundle**, and a case can let the
+agent read it. The eval files (`evals/`, `*.eval.yaml`, `evals.json`) are never part of it. See
 [Bundled files and scripts](runners.md#bundled-files-and-scripts).
 
 ## Eval case
@@ -265,6 +266,10 @@ actually happen.
         trajectory: lookup_order was never called
 ```
 
+A case that a [spend ceiling](gating.md#the-spend-ceiling) kept from starting is in none of
+the three states: it never ran, so there is nothing to judge. It is reported as **not run**,
+listed apart from the outcomes, and fails the gate on its own.
+
 See [Gating and exit codes](gating.md).
 
 ## Arm, baseline and delta
@@ -314,6 +319,10 @@ otherwise a mistyped path would report success forever. The reason names the cau
 found, every skill skipped for having no cases, or every case filtered out by `--tag` or
 `--case`.
 
+**So does a run that a spend ceiling cut short.** With `max_spend_usd` set, no new case
+starts once the run has spent that much, and any case left unstarted fails the gate, even if
+every case that ran passed: the run measured less than it was asked to.
+
 See [Gating and exit codes](gating.md).
 
 ## Glossary
@@ -325,7 +334,7 @@ See [Gating and exit codes](gating.md).
 | Assertion | A rule checked against the agent's final output text, or against a file it produced — such as `contains` or `file-produced`. |
 | Baseline | What the candidate is measured against: an empty skill (`none`) or the previous version (`previous`). |
 | Budget | A limit on tokens, cost or latency that a case declares and the run checks. |
-| Bundle | The `scripts/`, `references/` and `assets/` directories beside a `SKILL.md`. |
+| Bundle | Every file a skill ships beside its `SKILL.md`, except its eval files, version control, dependency directories and secret files. |
 | Candidate | The arm running the skill under test. Every gate rule but `--min-delta` reads this arm only. |
 | Case | One task plus what you expect of it, written in YAML beside the skill. |
 | Cassette | A recorded provider response replayed in tests, so the suite runs offline. |
@@ -339,12 +348,14 @@ See [Gating and exit codes](gating.md).
 | `loaded` / `offered` | Whether the agent is handed the skill, or left to reach for it. |
 | `--min-delta` | The smallest delta the gate will accept. The one gate rule that reads both arms, so it requires `--baseline`. |
 | Mock tool | A tool whose answer you write yourself, so a case is deterministic and free. |
+| Not run | A case the spend ceiling kept from starting. Not an outcome; it fails the gate. |
 | Outcome | The result of one (skill, case, runner, arm, repetition): passed, failed or errored. |
 | Preflight | Checks run once before any case, so a run refuses what it cannot serve before spending. |
 | Product runner | An installed agent product driven as the runner: GitHub Copilot CLI, Claude Code, or a command you name yourself. |
 | Rubric | The list of `judge:` checks a judge grades the output against. |
 | Runner | The thing that actually runs a case and returns a result. |
 | Skill | Short for Agent Skill: the directory under test. |
+| Spend ceiling | `max_spend_usd`: the most a whole run may spend before no new case starts. |
 | Tool library | A YAML file of mock tools, imported by several eval files with `tool_libraries:`. |
 | Trajectory | Which tools were called, in what order, how many times, and with what arguments. |
 | Workspace | The temporary directory a case gets, so it can produce and check real files. |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 from pathlib import Path
@@ -33,7 +34,7 @@ from skill_lens.judges.product import ProductJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.mcp_import import McpImportError, parse_tools_list, render_tool_mocks
 from skill_lens.models import Skill
-from skill_lens.orchestrator import RunOptions, run_evals
+from skill_lens.orchestrator import RunOptions, SpendCeilingError, run_evals
 from skill_lens.paths import PatternRefused
 from skill_lens.reporters.console import render_console
 from skill_lens.reporters.failure_context import OUTPUT_LIMIT
@@ -99,6 +100,8 @@ _AUTHORING_ERRORS = (
     # a product runner or judge that cannot run here: executable missing,
     # version probe failed, or a case it cannot serve
     ProductSetupError,
+    # a spend ceiling set for a runner or judge whose spend is never priced
+    SpendCeilingError,
 )
 
 
@@ -293,6 +296,14 @@ def run(
             help="Isolate product runners and judges: auto, required or off.",
         ),
     ] = None,
+    max_spend: Annotated[
+        float | None,
+        typer.Option(
+            "--max-spend",
+            help="Start no new case once the run has spent this many US dollars; "
+            "overrides max_spend_usd in skill-lens.toml.",
+        ),
+    ] = None,
 ) -> None:
     """Discover skills, run their eval cases, and gate on the results."""
     try:
@@ -333,6 +344,11 @@ def run(
                 # A flag that silently does nothing hides a mistake rather than
                 # reporting it -- the same reason --min-delta requires --baseline.
                 raise typer.BadParameter("--markdown-max-chars requires --markdown-output")
+        if max_spend is not None and not (math.isfinite(max_spend) and max_spend > 0):
+            # Zero would run nothing and infinity is no ceiling: both are a
+            # mistyped flag, refused before anything is spent.
+            raise typer.BadParameter("--max-spend must be a positive amount of US dollars")
+        resolved_max_spend = max_spend if max_spend is not None else settings.max_spend_usd
         resolved_min_delta = min_delta if min_delta is not None else settings.min_delta
         # Checked against resolved values so a baseline in skill-lens.toml
         # satisfies a --min-delta on the command line. A gate that verified
@@ -455,6 +471,7 @@ def run(
                 keep_workspace=resolved_keep_workspace,
                 limits=workspace_limits,
                 scripts=settings.script_policy() if resolved_allow_scripts else None,
+                max_spend_usd=resolved_max_spend,
             ),
         )
     except _AUTHORING_ERRORS as exc:

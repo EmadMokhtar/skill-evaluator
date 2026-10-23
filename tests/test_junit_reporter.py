@@ -14,6 +14,7 @@ from skill_lens.models import (
     CaseOutcome,
     CheckResult,
     EvalScore,
+    HookRun,
     ProductStatus,
     RunReport,
     RunResult,
@@ -431,3 +432,30 @@ def test_the_zero_case_error_suite_carries_the_products():
     root = _parse(RunReport(outcomes=[], products=[_PRODUCT]), gate=evaluate_gate(RunReport()))
     (suite,) = root.findall("testsuite")
     assert _property_names(suite) == ["skill-lens.products"]
+
+
+def test_failed_hooks_reach_the_body():
+    outcome = _outcome(
+        name="writes a plan",
+        status="failed",
+        scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+        result=RunResult(
+            output="done",
+            hooks=[
+                HookRun(name="UserPromptSubmit", event="UserPromptSubmit", outcome="success"),
+                HookRun(
+                    name="PostToolUse:Write",
+                    event="PostToolUse",
+                    outcome="error",
+                    exit_code=127,
+                    stderr="jq: command not found",
+                ),
+            ],
+        ),
+    )
+    text = _parse(RunReport(outcomes=[outcome])).find("testsuite/testcase/failure").text
+    assert (
+        'failed hooks:\nPostToolUse:Write error (exit code 127): stderr="jq: command not found"'
+        in (text)
+    )
+    assert "UserPromptSubmit" not in text

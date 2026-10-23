@@ -12,6 +12,7 @@ from skill_lens.models import (
     CheckResult,
     EvalCase,
     EvalScore,
+    HookRun,
     JudgeRequest,
     JudgeSpec,
     JudgeVerdict,
@@ -461,6 +462,26 @@ def test_a_run_report_defaults_to_scripts_off():
     )
     assert report.scripts.sandbox == "bwrap"
     assert report.script_notes[0].script_count == 2
+
+
+def test_a_run_result_has_no_hooks_by_default():
+    assert RunResult().hooks == []
+
+
+def test_a_hook_run_refuses_an_unknown_field():
+    with pytest.raises(ValidationError):
+        HookRun(name="Stop", event="Stop", outcome="success", exitcode=0)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "failed"),
+    [("success", False), ("error", True), ("cancelled", True), ("blocked", True)],
+)
+def test_a_hook_failed_unless_the_product_said_success(outcome, failed):
+    # Any other word is a hook that did not do its job, and the report should
+    # show it: `cancelled` is a hook stopped by its own timeout or by an
+    # interrupted run, and a later version may add a word.
+    assert HookRun(name="Stop", event="Stop", outcome=outcome).failed is failed
 
 
 def test_run_result_carries_a_usage_note_for_tokens_it_could_not_count():

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 import shutil
 import tempfile
+import threading
 from collections.abc import Callable
 from concurrent.futures import CancelledError, Executor, Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -28,15 +30,18 @@ from skill_lens.models import (
     CaseStatus,
     EvalCase,
     EvalScore,
+    NotRunItem,
     ProductStatus,
     RunReport,
     RunResult,
     ScriptNote,
     ScriptStatus,
     Skill,
+    SpendCeiling,
 )
 from skill_lens.runners.base import Runner
 from skill_lens.scripts import ScriptPolicy, ScriptRuntime, preflight
+from skill_lens.sessions import run_sessions
 from skill_lens.skills.baseline import BaselineUnavailable, resolve_previous
 from skill_lens.workspace import (
     DEFAULT_LIMITS,
@@ -54,11 +59,15 @@ class RunOptions:
     said a bundle could come when there was a third thing. `scripts` is the
     third: None means execution is off, which is the default so that
     upgrading never runs unvetted code on its own.
+
+    `max_spend_usd` is the run's spend ceiling: once the spend recorded so
+    far reaches it, no new work item starts. None, the default, sets none.
     """
 
     keep_workspace: bool = False
     limits: WorkspaceLimits = DEFAULT_LIMITS
     scripts: ScriptPolicy | None = None
+    max_spend_usd: float | None = None
 
 
 DEFAULT_OPTIONS = RunOptions()
@@ -147,7 +156,9 @@ def _run_one(
         # the day someone turns scripts on, at which point a TypeError names
         # the runner that cannot take them.
         extra = {"scripts": runtime} if runtime is not None else {}
-        result = runner.run(skill, case, workspace=workspace, **extra)
+        # One call for a `task:` case; one per session, all against this one
+        # workspace, for a `sessions:` case -- merged into one result.
+        result = run_sessions(runner, skill, case, workspace, extra)
         # Stamped here, not echoed by the runner: an adapter that ignores the
         # parameter then fails loudly on the assertion instead of producing a
         # workspace-less result that looks like a skill problem. Written
@@ -321,13 +332,99 @@ def _plan_work(
     return plan
 
 
+class SpendCeilingError(Exception):
+    """A spend ceiling was set for a run with a runner or judge whose spend can
+    never be priced. An authoring error (exit 2), raised before any case runs."""
+
+
+def _check_ceiling_is_enforceable(runners: list[Runner], judge: Judge | None) -> None:
+    """Refuse, before any spend, a ceiling a runner or judge could never meet.
+
+    A seat says why its spend can never be priced through an optional
+    `unpriced()` -- `copilot` bills per premium request, `cli` reports no
+    cost, a configured model has no price. Under such a seat the ledger
+    would fail closed after the first case and fail the gate, so the run
+    would spend one case to learn what is known before it starts. A seat
+    with no `unpriced()` is not asked, and the ledger still fails closed on
+    any unpriced outcome it meets.
+    """
+    seats: list[tuple[str, object]] = [("runner", runner) for runner in runners]
+    if judge is not None:
+        seats.append(("judge", judge))
+    for kind, seat in seats:
+        check = getattr(seat, "unpriced", None)
+        note = check() if check is not None else ""
+        if note:
+            raise SpendCeilingError(
+                f"max_spend_usd cannot be enforced for {kind} {getattr(seat, 'name', '?')}: "
+                f"{note}. A ceiling counts spend it can price, and this {kind}'s never is; "
+                "leave max_spend_usd (and --max-spend) unset for a run that uses it"
+            )
+
+
+class _SpendLedger:
+    """What the run has recorded spending, and whether new work may start.
+
+    The one piece of mutable state the workers share, so every read and write
+    takes the lock -- and it belongs to the orchestrator, because runners,
+    judges and evaluators must stay stateless. New work is refused once the
+    recorded spend reaches the ceiling, or once any outcome's spend could not
+    be priced: an unpriced `0.0` is not free, so from then on the ceiling
+    cannot tell whether it has been crossed, and it fails closed.
+    """
+
+    def __init__(self, ceiling: float) -> None:
+        self._ceiling = ceiling
+        self._lock = threading.Lock()
+        self._spent = 0.0
+        self._blind = False
+
+    def admits(self) -> bool:
+        with self._lock:
+            return not self._blind and self._spent < self._ceiling
+
+    def record(self, outcome: CaseOutcome) -> None:
+        # `CaseOutcome.spent_usd` is the one definition of an outcome's
+        # spend, so this total and `RunReport.spent_usd` cannot disagree.
+        cost, note = outcome.spent_usd, outcome.unpriced_note
+        with self._lock:
+            self._spent += cost
+            self._blind = self._blind or bool(note)
+
+
+def _first_unpriced(outcomes: list[CaseOutcome]) -> str:
+    """The first outcome, in submission order, whose spend was not priced, and why.
+
+    Read from the finished outcomes rather than from the ledger, because the
+    ledger learns of them in completion order and the report must not change
+    between identical runs.
+    """
+    for outcome in outcomes:
+        note = outcome.unpriced_note
+        if note:
+            runner = outcome.runner if outcome.arm == "candidate" else f"{outcome.runner}, baseline"
+            return f"{outcome.skill_name} :: {outcome.case_name} ({runner}): {note}"
+    return ""
+
+
 def _run_item(
     item: _WorkItem,
     evaluators: list[Evaluator],
     options: RunOptions,
     runtime: ScriptRuntime | None,
-) -> CaseOutcome:
-    return _run_one(
+    ledger: _SpendLedger | None = None,
+) -> CaseOutcome | None:
+    """Run one work item, or return None when the spend ceiling keeps it from starting.
+
+    The ceiling is checked as the item starts, not when it is queued, so
+    every item still queued when the spend crosses it is kept back, at every
+    concurrency level. The item's spend is recorded before this returns --
+    before the worker picks up its next item -- so a worker never starts
+    work its own last item already paid the ceiling for.
+    """
+    if ledger is not None and not ledger.admits():
+        return None
+    outcome = _run_one(
         item.skill,
         item.case,
         item.runner,
@@ -338,6 +435,9 @@ def _run_item(
         options=options,
         runtime=runtime,
     )
+    if ledger is not None:
+        ledger.record(outcome)
+    return outcome
 
 
 def _default_executor(concurrency: int) -> Executor:
@@ -351,8 +451,14 @@ def _execute(
     executor_factory: Callable[[int], Executor] | None,
     options: RunOptions = DEFAULT_OPTIONS,
     runtime: ScriptRuntime | None = None,
-) -> list[CaseOutcome]:
+    ledger: _SpendLedger | None = None,
+) -> list[CaseOutcome | None]:
     """Run every work item, reporting them in submission order.
+
+    One entry per item, in the items' order: its outcome, or None for an item
+    the spend `ledger` kept from starting. Items already running when the
+    ceiling is crossed are never interrupted -- their spend was committed when
+    they started, and abandoning them would discard what it bought.
 
     At `concurrency == 1` no executor is constructed at all. That is not an
     optimisation: it is what keeps the default path single-threaded -- same
@@ -373,7 +479,7 @@ def _execute(
     network-bound and threads release the GIL while waiting on a socket.
     """
     if concurrency == 1:
-        return [_run_item(item, evaluators, options, runtime) for item in items]
+        return [_run_item(item, evaluators, options, runtime, ledger) for item in items]
 
     executor = (executor_factory or _default_executor)(concurrency)
     try:
@@ -381,7 +487,9 @@ def _execute(
         # another OS thread, a broken pool, a custom factory -- and an executor
         # left un-shut-down keeps its workers alive, so the interpreter's exit
         # handler would finish the work this abort exists to abandon.
-        futures = [executor.submit(_run_item, item, evaluators, options, runtime) for item in items]
+        futures = [
+            executor.submit(_run_item, item, evaluators, options, runtime, ledger) for item in items
+        ]
 
         def _cancel_queued_after(index: int, finished: Future) -> None:
             # Runs on the worker thread, before it picks up its next item.
@@ -399,7 +507,7 @@ def _execute(
         for index, future in enumerate(futures):
             future.add_done_callback(partial(_cancel_queued_after, index))
 
-        outcomes: list[CaseOutcome] = []
+        outcomes: list[CaseOutcome | None] = []
         for future in futures:
             try:
                 outcomes.append(future.result())
@@ -545,6 +653,17 @@ def run_evals(
     `preflight()`, which takes no arguments; a status either returns lands on
     `RunReport.products`, with the same product serving as both listed once.
 
+    `options.max_spend_usd` is the run's spend ceiling. Once the spend the run
+    has recorded -- every outcome's run cost and every evaluator's, both arms,
+    errored runs included -- reaches it, or once any of that spend could not
+    be priced, no new work item starts; items already running finish and are
+    scored. The rest land on `RunReport.not_run` in submission order, never in
+    `outcomes`, and `spend_ceiling` names the first unpriced outcome, if any.
+    The first item always starts, since a ceiling must be a positive, finite
+    amount (a `ValueError` otherwise). A runner or judge whose `unpriced()`
+    says its spend can never be priced makes the ceiling unenforceable, and
+    `SpendCeilingError` is raised before any case runs.
+
     `keep_workspace` and `workspace_limits` are the M6 part 1 spelling of the
     first two `options` fields, kept in the positions they were added in so
     a caller written against that release -- keyword or positional -- still
@@ -590,6 +709,10 @@ def run_evals(
                 keep_workspace=bool(keep_workspace),
                 limits=workspace_limits if workspace_limits is not None else DEFAULT_LIMITS,
             )
+    ceiling = options.max_spend_usd
+    if ceiling is not None and not (math.isfinite(ceiling) and ceiling > 0):
+        raise ValueError(f"max_spend_usd must be a positive, finite amount, got {ceiling}")
+    ledger = _SpendLedger(ceiling) if ceiling is not None else None
     store = _BaselineStore()
     try:
         plan = _plan_work(skills, runners, evals_path, tag, case_filter, baseline, repeat, store)
@@ -613,17 +736,33 @@ def run_evals(
         # After the script preflight, so a ScriptSetupError and a
         # ProductSetupError cannot race for the exit.
         products, has_product_runner = _preflight_hooks(plan, runners, judge)
+        if ceiling is not None:
+            _check_ceiling_is_enforceable(runners, judge)
         if has_product_runner:
             # The run's answer, like the notes themselves: they cover every
             # discovered skill, filtered out or not (issue #97).
             notes = [
                 note.model_copy(update={"product_note": PRODUCT_SCRIPTS_NOTE}) for note in notes
             ]
-        outcomes = _execute(plan.items, evaluators, concurrency, executor_factory, options, runtime)
+        results = _execute(
+            plan.items, evaluators, concurrency, executor_factory, options, runtime, ledger
+        )
     finally:
         # However the run ended -- an authoring error out of an evaluator
         # included -- the previous bundles go.
         store.cleanup()
+    outcomes = [outcome for outcome in results if outcome is not None]
+    not_run = [
+        NotRunItem(
+            skill_name=item.report_skill_name,
+            case_name=item.case.name,
+            runner=item.runner.name,
+            arm=item.arm,
+            repeat_index=item.repeat_index,
+        )
+        for item, outcome in zip(plan.items, results, strict=True)
+        if outcome is None
+    ]
     return RunReport(
         outcomes=outcomes,
         skipped_skills=plan.skipped,
@@ -635,4 +774,10 @@ def run_evals(
         scripts=status,
         script_notes=notes,
         products=products,
+        not_run=not_run,
+        spend_ceiling=(
+            None
+            if ceiling is None
+            else SpendCeiling(max_spend_usd=ceiling, unpriced=_first_unpriced(outcomes))
+        ),
     )

@@ -284,7 +284,11 @@ def bwrap_argv(
     writable directories and the read-only bundle bound back in, no network,
     and `--die-with-parent` so a killed harness takes the script with it.
     Order matters: the tmpfs must be mounted before the binds it would
-    otherwise hide.
+    otherwise hide, and remounted read-only after them. An empty tmpfs is
+    still writable, so without the remount a write elsewhere under the temp
+    directory would land in memory and vanish instead of being refused. The
+    remount is not recursive, so the binds keep their own modes; it comes
+    last because bwrap creates their mount points inside the tmpfs.
     """
     return [
         "bwrap",
@@ -295,6 +299,7 @@ def bwrap_argv(
         "--bind", str(workspace), str(workspace),
         "--bind", str(scratch), str(scratch),
         "--ro-bind", str(bundle), str(bundle),
+        "--remount-ro", str(tempdir),
         "--unshare-net",
         "--unshare-pid",
         "--die-with-parent",
@@ -325,11 +330,16 @@ def wrap(
     return list(argv)
 
 
-def _bwrap_probe_argv(product: bool = False) -> list[str]:
-    """The probe's argv; a product shares the network, so its probe does too."""
+def _bwrap_probe_argv(tempdir: Path, product: bool = False) -> list[str]:
+    """`bwrap_argv`'s mounts and namespaces, minus the per-call binds. The
+    tmpfs and its read-only remount are in it because every real call needs
+    them: a bwrap that rejects either must fail here, not on every script.
+    A product shares the network, so its probe does too (`product=True`).
+    """
     network = [] if product else ["--unshare-net"]
     return [
         "bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+        "--tmpfs", str(tempdir), "--remount-ro", str(tempdir),
         *network, "--unshare-pid", "--die-with-parent", "--", "/bin/true",
     ]  # fmt: skip
 
@@ -385,7 +395,8 @@ def probe_sandbox(
     if system == "Linux":
         if which("bwrap") is None:
             return SandboxStatus("none", "bwrap not found on PATH")
-        return _probe("bwrap", _bwrap_probe_argv(product), run)
+        tempdir = Path(tempfile.gettempdir()).resolve()
+        return _probe("bwrap", _bwrap_probe_argv(tempdir, product), run)
     return SandboxStatus("none", f"no sandbox backend on {system}")
 
 

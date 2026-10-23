@@ -38,6 +38,10 @@ inputs:
     description: Required improvement over the baseline. Needs baseline.
   concurrency:
     description: Run this many cases at once.
+  max-spend:
+    description: >-
+      Start no new case once the run has spent this many US dollars; the cases left are
+      reported as not run and the gate fails. Overrides max_spend_usd in skill-lens.toml.
   keep-workspace:
     description: Keep each case's temporary directory instead of deleting it. true or false.
   full-output:
@@ -139,6 +143,7 @@ runs:
         SE_MIN_PASS_RATE: ${{ inputs.min-pass-rate }}
         SE_MIN_DELTA: ${{ inputs.min-delta }}
         SE_CONCURRENCY: ${{ inputs.concurrency }}
+        SE_MAX_SPEND: ${{ inputs.max-spend }}
         SE_KEEP_WORKSPACE: ${{ inputs.keep-workspace }}
         SE_FULL_OUTPUT: ${{ inputs.full-output }}
         SE_ALLOW_SCRIPTS: ${{ inputs.allow-scripts }}
@@ -186,6 +191,7 @@ runs:
         add --min-pass-rate "$SE_MIN_PASS_RATE"
         add --min-delta "$SE_MIN_DELTA"
         add --concurrency "$SE_CONCURRENCY"
+        add --max-spend "$SE_MAX_SPEND"
         add_flag --keep-workspace "$SE_KEEP_WORKSPACE" --no-keep-workspace
         add_flag --full-output "$SE_FULL_OUTPUT" --no-full-output
         add_flag --allow-scripts "$SE_ALLOW_SCRIPTS" --no-allow-scripts
