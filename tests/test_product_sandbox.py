@@ -218,12 +218,23 @@ def test_claude_code_passes_its_own_variables():
     assert "GH_TOKEN" not in env
 
 
-def test_copilot_passes_its_own_variables():
+def test_copilot_gets_only_the_token_it_would_use():
+    # GH_TOKEN and GITHUB_TOKEN are general GitHub tokens -- in a workflow
+    # often the job's own, with write access. Copilot reads the first one set,
+    # in this order, so that one is all it gets.
     env = product_environment(_product("copilot"), ROOT, parent=PARENT, windows=False)
     assert env["COPILOT_GITHUB_TOKEN"] == PARENT["COPILOT_GITHUB_TOKEN"]
-    assert env["GH_TOKEN"] == PARENT["GH_TOKEN"]
+    assert "GH_TOKEN" not in env
+    assert "GITHUB_TOKEN" not in env
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
     assert "DISABLE_AUTOUPDATER" not in env
+
+
+def test_copilot_falls_back_to_the_next_token_in_its_order():
+    parent = {"PATH": "/usr/bin", "COPILOT_GITHUB_TOKEN": "", "GITHUB_TOKEN": "job"}
+    env = product_environment(_product("copilot"), ROOT, parent=parent, windows=False)
+    assert env["GITHUB_TOKEN"] == parent["GITHUB_TOKEN"]
+    assert "COPILOT_GITHUB_TOKEN" not in env
 
 
 def test_cli_passes_no_product_variables():

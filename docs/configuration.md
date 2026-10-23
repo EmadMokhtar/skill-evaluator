@@ -266,7 +266,7 @@ names in its table's `pass_env`:
 | Product | Its own variables |
 | --- | --- |
 | `claude-code` | `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`; `DISABLE_AUTOUPDATER=1` is set, so a fresh home does not start an update, and `CLAUDE_CODE_TMPDIR` points at the temporary directory, because Claude Code keeps its own temporary files there rather than under `TMPDIR` |
-| `copilot` | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` |
+| `copilot` | the first of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` that is set — the one Copilot would use — and no other; `GH_TOKEN` and `GITHUB_TOKEN` are general GitHub tokens, in a workflow often the job's own |
 | `cli` | none — name what the command needs in `pass_env` |
 
 Home isolation is **not a sandbox**: a process can still read and write any file you can by

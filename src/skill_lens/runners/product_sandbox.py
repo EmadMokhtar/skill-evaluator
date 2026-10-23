@@ -85,7 +85,9 @@ class ProductEnv:
     endpoint is not a credential); `fixed` is set for the product whatever
     the harness has; `temporary` names variables the product reads instead
     of `TMPDIR` for its own temporary files, each set to the work item's
-    temporary directory.
+    temporary directory. `first_only` passes just the first `auth` variable
+    set and non-empty, in the product's own order of precedence: the one it
+    would use, and no other.
     """
 
     auth: tuple[str, ...]
@@ -93,6 +95,7 @@ class ProductEnv:
     passed: tuple[str, ...] = ()
     fixed: tuple[tuple[str, str], ...] = ()
     temporary: tuple[str, ...] = ()
+    first_only: bool = False
 
 
 # Keyed by product name, so a preset under a wrapper `command` keeps them.
@@ -110,9 +113,14 @@ PRODUCT_ENV: dict[str, ProductEnv] = {
         fixed=(("DISABLE_AUTOUPDATER", "1"),),
         temporary=("CLAUDE_CODE_TMPDIR",),
     ),
-    # Copilot's documented auth variables, in its order of precedence.
+    # Copilot's documented auth variables, in its order of precedence. Only
+    # the first set is passed: GH_TOKEN and GITHUB_TOKEN are general GitHub
+    # tokens -- in a workflow often the job's own, with write access -- and
+    # an agent with every tool allowed should not hold one it does not use.
     "copilot": ProductEnv(
-        auth=("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"), hint="COPILOT_GITHUB_TOKEN"
+        auth=("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"),
+        hint="COPILOT_GITHUB_TOKEN",
+        first_only=True,
     ),
 }
 
@@ -229,10 +237,14 @@ def product_environment(
     parent = os.environ if parent is None else parent
     windows = os.name == "nt" if windows is None else windows
     own = PRODUCT_ENV.get(product.name)
+    auth: tuple[str, ...] = own.auth if own else ()
+    if own is not None and own.first_only:
+        auth = next(((name,) for name in auth if parent.get(name)), ())
     names = [
         *KEPT_ENV,
         *(KEPT_ENV_WINDOWS if windows else ()),
-        *(own.auth + own.passed if own else ()),
+        *auth,
+        *(own.passed if own else ()),
         *(product.pass_env or ()),
     ]
     env = {name: parent[name] for name in names if name in parent and name not in CONTROLLED_ENV}

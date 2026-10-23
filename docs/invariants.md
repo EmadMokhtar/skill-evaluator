@@ -1550,8 +1550,10 @@ earlier release runs exactly as before.
 
 Home isolation is a temporary home per `Runner.run` call (`skill-lens-home-*`, made by
 `mkdtemp`, removed in a `finally`, never kept by `--keep-workspace`) and an environment
-built from an allowlist — never `os.environ` with keys removed, so a key the harness holds
-for another runner is absent by construction. It keeps personal logins, settings and caches
+built from an allowlist — never `os.environ` with keys removed, so a key not on the list is
+absent by construction (a provider variable the product itself reads, such as
+`ANTHROPIC_API_KEY`, is on it even when another runner shares it; Copilot gets only the
+first of its three GitHub tokens that is set). It keeps personal logins, settings and caches
 out of a run; it stops nothing writing a file by its absolute path. So `required` needs a
 real backend — home isolation alone is exit 2 — and the home-only trust sentence says
 `that is not a sandbox` and names why no backend applied. `pass_env` takes names only, and

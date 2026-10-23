@@ -137,7 +137,7 @@ The product's environment is then **built, never inherited**:
 | `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` | `<root>/home/.config`, `.cache`, `.local/share`, `.local/state` |
 | `TMPDIR`, `TMP`, `TEMP` | `<root>/tmp` |
 | Kept from the harness when set | `PATH`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`, `SHELL`, `USER`, `LOGNAME`; the proxy and CA variables (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY` and their lower-case forms, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`), because the product must reach its provider; `SystemRoot`, `COMSPEC`, `PATHEXT` on Windows |
-| The product's own variables, when set | `claude-code`: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`. `copilot`: `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` (Copilot's documented auth variables, in its order of precedence). `cli`: none |
+| The product's own variables, when set | `claude-code`: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`. `copilot`: the first set of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` (Copilot's documented auth variables, in its order of precedence) — only that one, changed after review, since the other two are general GitHub tokens. `cli`: none |
 | Set for the product | `claude-code`: `DISABLE_AUTOUPDATER=1`, so a fresh home does not trigger an update on every case, and `CLAUDE_CODE_TMPDIR=<root>/tmp` (added after review: Claude Code ignores `TMPDIR` for its own files and defaults to `/tmp`, which no backend lets it write, so every Bash command reported exit 1). `copilot` already passes `--no-auto-update` |
 | `[runners.<name>] pass_env` | each named variable, when set |
 

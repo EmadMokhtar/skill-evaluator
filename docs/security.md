@@ -282,8 +282,12 @@ and shared by every product runner and the product judge (see
 | Network | open | open | open |
 
 **Home isolation is not a sandbox.** It keeps your personal setup and the job's other
-secrets (an `OPENAI_API_KEY` held for a framework runner in the same matrix, a
-`GITHUB_TOKEN` in the job's `env`) out of what the product *inherits*, so a hook that falls
+secrets out of what the product *inherits* — an `OPENAI_API_KEY` held for a framework runner
+in the same matrix, or a `GITHUB_TOKEN` in the job's `env` once Copilot has a token of its
+own (it gets only the first of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` that is
+set, the one it would use). A variable the product itself reads still reaches it:
+`ANTHROPIC_API_KEY` goes to Claude Code even when a framework runner in the same run uses it
+too. So a hook that falls
 back to `$HOME/.claude/skills/…` or caches under `~/.cache` finds an empty home. It does not
 stop a process writing `/Users/you/anything` by its absolute path, and the report says
 exactly that. `required` therefore needs a real backend: with home isolation only, it exits

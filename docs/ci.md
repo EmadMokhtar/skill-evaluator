@@ -222,8 +222,9 @@ so a pull request cannot pick the product for itself:
 ```
 
 Each case spends the product's quota; the `Plan:` line prints the ceiling. The product runs
-with its permission prompts disabled and the whole job environment in reach, so give the
-token only to jobs whose checkout you trust — see
+with its permission prompts disabled, and it holds its token and whatever it can read on the
+runner (the [product sandbox](configuration.md#product-sandbox) narrows what it inherits,
+not what it can read), so give the token only to jobs whose checkout you trust — see
 [Security](security.md#product-runners) for why pinning `runner:` alone is not enough. The
 `model` input is refused (exit 2) when only product runners are named and no keyed judge
 falls back to it, and so is `judge-model` when the file's `judge` is a product
@@ -233,8 +234,11 @@ falls back to it, and so is `judge-model` when the file's `judge` is a product
 
 The product runs under the [product sandbox](configuration.md#product-sandbox): by default a
 temporary home directory and an allowlisted environment, so it signs in from its token
-(`COPILOT_GITHUB_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`), never from a login on the runner, and the
-rest of the job's `env` is not passed to it. On a stock `ubuntu-latest` runner `bwrap` may be
+(`COPILOT_GITHUB_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`), never from a login on the runner, and it
+inherits only the allowlist: its own variables (Copilot just the first of
+`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` that is set), `pass_env`, and the plain
+ones such as `PATH`. It can still read the job's other variables the way any same-user
+process can, which [Security](security.md#product-runners) explains. On a stock `ubuntu-latest` runner `bwrap` may be
 missing, or unprivileged user namespaces refused, and then no OS sandbox applies; the product
 line on the report says which. The `product-sandbox` input passes `--product-sandbox`. Unset,
 `skill-lens.toml` decides — and in a `pull_request` workflow that file comes from the pull
