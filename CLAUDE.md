@@ -447,7 +447,9 @@ fails if the two drift apart — so a new invariant is added in both places or n
   distinct `cost_note` / `usage_note`, and `session k of n: ` on the error.
   `trajectory.skill_triggered` must hold in every session (`skill_triggered_by_session`);
   `skill_triggered` only summarises "any session". A runner handed the whole case returns
-  `refuse_sessions`'s error, never None as the prompt.
+  `refuse_sessions`'s error, never None as the prompt. A session with `stop_note` ends the loop
+  too (merged as `session k of n: ...`, `retry_cost_usd` summed), and each session's copy
+  carries only the `max_tokens` the earlier ones left, since `budget:` reads the sum.
 - **The workspace preamble is byte-identical in both arms and never names the skill** —
   otherwise `--min-delta` measures the preamble instead of the skill.
 - **`RunResult.workspace` is non-null only while the directory exists, and the orchestrator

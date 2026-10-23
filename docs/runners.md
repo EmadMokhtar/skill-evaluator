@@ -856,7 +856,10 @@ A case with [`sessions:`](eval-files.md#several-sessions-in-one-workspace) is he
 budget for all of its sessions: tokens, cost and latency are each summed over every session
 that ran. When one session could not be priced or counted, the total is missing that
 session's share, so its note is kept on the case and `max_cost_usd` or `max_tokens` fails
-as *not evaluated* — the same rule as for one run.
+as *not evaluated* — the same rule as for one run. Under `pydantic-ai` and `langchain`, each
+session is also [stopped](#stopping-a-runaway-case) at what the earlier sessions left of
+`max_tokens`, not at the whole limit again, and a session that was stopped is the last one to
+run: the case is over its budget already.
 
 If you are upgrading from a version of `skill-lens` where this budget block previously passed
 some other way, note the change: a repo that runs an unpriced model with a `budget:` block

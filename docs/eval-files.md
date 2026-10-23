@@ -175,7 +175,10 @@ first session, and deleted once, after scoring.
 
 If a session **errors** — a provider failure, a timeout, a product that crashed — the case
 is **errored**, and the sessions after it do not run. The report says which session
-failed (`session 2 of 3: ...`), and the spend of every session that ran is kept.
+failed (`session 2 of 3: ...`), and the spend of every session that ran is kept. A session
+that a keyed runner [stopped at its token budget](runners.md#stopping-a-runaway-case) is the
+last to run too, though the case is failed on its budget rather than errored; each session's
+stop is what the earlier sessions left of `max_tokens`.
 `--repeat` repeats the whole sequence, each time in a fresh workspace, and the
 [baseline arm](runners.md#comparative-runs-and-the-baseline-arm) runs the same sessions
 without the skill, in a workspace of its own.

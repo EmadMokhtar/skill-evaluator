@@ -965,7 +965,13 @@ partial sum. `trajectory.skill_triggered` must hold in every session, read from
 negative control needs) and "every session fired" (what a resume skill's positive control
 needs), so `skill_triggered` itself only summarises whether any session loaded the skill. A
 runner handed the whole case directly — bypassing the orchestrator — returns
-`refuse_sessions`'s error rather than sending None as the prompt.
+`refuse_sessions`'s error rather than sending None as the prompt. A session its framework
+stopped at `max_tokens` (`RunResult.stop_note`) ends the loop too — the case is over its
+budget already — and the merged result keeps the note as `session k of n: ...` and sums
+`retry_cost_usd`. Since `budget:` reads the sum, each session's copy of the case carries
+only what the earlier sessions left of `max_tokens`, so a keyed runner's framework stops the
+sessions together where the case's budget is crossed, never at the full limit once per
+session.
 
 ### The workspace preamble is byte-identical in both arms and never names the skill
 
