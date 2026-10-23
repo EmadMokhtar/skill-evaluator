@@ -63,9 +63,11 @@ jobs:
     outputs:
       # `bumped` is read from the push step, not the bump step: a run that
       # main outran cuts a version it never pushes, and `publish` must not
-      # hear about it.
-      bumped: ${{ steps.push.outputs.pushed }}
-      version: ${{ steps.bump.outputs.version }}
+      # hear about it. The one other way an artifact comes to exist is the
+      # recover step, which rebuilds a stranded tag on the no-release path;
+      # it sets `recovered` only after that tag's tree was verified and built.
+      bumped: ${{ steps.push.outputs.pushed == 'true' || steps.recover.outputs.recovered == 'true' }}
+      version: ${{ steps.bump.outputs.version || steps.recover.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -146,9 +148,19 @@ jobs:
         # exactly what this check waits for. security.yml runs the same command
         # weekly, so a stranded tag is found even when nothing merges; the two
         # must stay spelled identically (tests/test_security_checks.py).
+        #
+        # A tag whose run can no longer be re-run (GitHub's 30-day window has
+        # closed, or no release run pushed it) is not only reported: the check
+        # writes it to RECOVERY_PLAN, one tag per run, and passes, and the
+        # recover step below rebuilds it. The file is written only when the
+        # check otherwise passes; any other finding still fails here, and a
+        # red check is never followed by a publish. security.yml, which has
+        # no `publish` to hand anything to, leaves RECOVERY_PLAN unset.
+        id: check
         if: steps.bump.outputs.bumped == 'false'
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          RECOVERY_PLAN: recovery-plan.txt
         run: python3 scripts/check_tags_published.py
 
       - name: Push the bump commit and its tag
@@ -299,8 +311,91 @@ jobs:
           uv export --format cyclonedx1.5 --frozen --all-extras --no-default-groups \
             -o "sbom/skill-lens-${{ steps.bump.outputs.version }}.cdx.json"
 
+      - name: Verify and build a stranded tag
+        id: recover
+        # The other way an artifact comes to exist. When the tag check above
+        # found a release tag that is on origin but not on PyPI, and whose run
+        # can no longer be re-run, it wrote that one tag to RECOVERY_PLAN and
+        # passed. This step rebuilds it: the tag's commit is added as a
+        # worktree, verified with the very commands `verify` runs -- spelled
+        # the same, in the same order, which tests/test_release_workflow.py
+        # requires -- and then built, exactly as the bump path builds, with the
+        # outputs written beside this checkout where the uploads below read.
+        # Nothing publishes that has not been verified in the same run: the
+        # tag's own run passed these commands once, and this run passes them
+        # again, on this tree, before a byte of it is built.
+        #
+        # Guards, in order: the tag must still point at the commit the check
+        # saw (a tag is only ever read here, never created, moved or deleted);
+        # that commit must be on main as this run sees it; and the tree must
+        # spell the version about to be published, or a tag at the wrong
+        # commit would build -- and upload -- some other version. Any failure
+        # leaves `recovered` unset and fails the job with nothing spent: no
+        # tag was pushed, so the next no-release merge simply tries again.
+        #
+        # It runs under the check's own condition, with no plan file being the
+        # ordinary case. It sits here, after the bump path's build, so that the
+        # three uploads that follow serve both paths.
+        if: steps.bump.outputs.bumped == 'false'
+        shell: bash
+        env:
+          RECOVERY_PLAN: recovery-plan.txt
+        run: |
+          set -euo pipefail
+          if [ ! -s "$RECOVERY_PLAN" ]; then
+            echo "No stranded tag to recover."
+            exit 0
+          fi
+          # The three lines the check wrote.
+          tag="$(sed -n 's/^tag=//p' "$RECOVERY_PLAN")"
+          version="$(sed -n 's/^version=//p' "$RECOVERY_PLAN")"
+          commit="$(sed -n 's/^commit=//p' "$RECOVERY_PLAN")"
+          for field in tag version commit; do
+            if [ -z "${!field}" ]; then
+              echo "The recovery plan $RECOVERY_PLAN has no $field= line; refusing to guess." >&2
+              exit 1
+            fi
+          done
+          # The tag as origin has it now: a no-op for a tag this clone already
+          # holds at that commit, refused ("would clobber existing tag") for one
+          # that moved since the clone.
+          if ! git fetch --quiet origin "refs/tags/$tag:refs/tags/$tag"; then
+            echo "Tag $tag on origin is not the tag this clone holds: it moved since the clone. Nothing is built from a tag that moved." >&2
+            exit 1
+          fi
+          target="$(git rev-parse --verify "refs/tags/$tag^{commit}")"
+          if [ "$target" != "$commit" ]; then
+            echo "Tag $tag points at ${target:0:7}, not at ${commit:0:7} as it did when the check ran. Nothing is built from a tag that moved." >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$commit" "$GITHUB_SHA"; then
+            echo "Tag $tag points at ${commit:0:7}, which is not on main (${GITHUB_SHA:0:7}). Code main does not carry is never published; record the tag in scripts/spent-tags.txt with the reason." >&2
+            exit 1
+          fi
+          git worktree add --quiet --detach recover "$commit"
+          cd recover
+          uv sync --all-extras --dev
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run pytest
+          uv audit --preview-features audit --locked
+          spelled="$(uv run cz version --project)"
+          if [ "$spelled" != "$version" ]; then
+            echo "The tree at $tag spells version $spelled, not $version. Nothing is built from a tag whose tree names another version." >&2
+            exit 1
+          fi
+          uv run cz changelog "$version" --dry-run > ../notes.md
+          uv export --frozen --only-group build --no-hashes -o build-constraints.txt
+          uv build --build-constraint build-constraints.txt --out-dir ../dist
+          mkdir -p ../sbom
+          uv export --format cyclonedx1.5 --frozen --all-extras --no-default-groups -o "../sbom/skill-lens-$version.cdx.json"
+          cd ..
+          echo "recovered=true" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Recovered $tag from ${commit:0:7}: its tree was verified and built by this run, and the result goes to publish." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload the distributions
-        if: steps.push.outputs.pushed == 'true'
+        if: steps.push.outputs.pushed == 'true' || steps.recover.outputs.recovered == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: dist
@@ -308,7 +403,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload the SBOM
-        if: steps.push.outputs.pushed == 'true'
+        if: steps.push.outputs.pushed == 'true' || steps.recover.outputs.recovered == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: sbom
@@ -316,7 +411,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload the release notes
-        if: steps.push.outputs.pushed == 'true'
+        if: steps.push.outputs.pushed == 'true' || steps.recover.outputs.recovered == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: release-notes

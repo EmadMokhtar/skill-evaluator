@@ -59,8 +59,11 @@ jobs:
     # Only on the schedule and on demand. A stranded tag says nothing about
     # the pull request under review, and a push to main already runs the
     # release workflow's own copy. The command is spelled identically there
-    # (tests/test_security_checks.py). Re-run it by hand after re-running the
-    # stranded release's failed jobs to see it go green.
+    # (tests/test_security_checks.py). This job only reports: RECOVERY_PLAN,
+    # which turns a tag past its re-run window into a rebuild, is set only in
+    # release.yml, the one workflow with a `publish` to hand it to. Re-run it
+    # by hand after the stranded release was re-run or recovered to see it go
+    # green.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:

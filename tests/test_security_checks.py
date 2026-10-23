@@ -144,15 +144,19 @@ def test_the_audit_runs_before_a_push_not_on_every_commit():
 
 
 def test_every_copy_of_the_audit_is_the_same_command(workflow):
-    """The command is spelled in three places: the scheduled workflow, the
-    release gate, and the push hook. An `--ignore-until-fixed` added to one
-    and not the others would let the release ship what the schedule flags,
-    or block a push over what CI accepts. Keeping them byte-identical means
-    an exception is either everywhere or nowhere."""
+    """The command is spelled in four places: the scheduled workflow, the
+    release gate, the release job's recovery of a stranded tag (which audits
+    that tag's lockfile), and the push hook. An `--ignore-until-fixed` added
+    to one and not the others would let the release ship what the schedule
+    flags, or block a push over what CI accepts. Keeping them byte-identical
+    means an exception is either everywhere or nowhere."""
     release = safe_load(RELEASE.read_text(encoding="utf-8"))
+    in_recovery = _audit_commands_in(release["jobs"]["release"]["steps"])
+    assert len(in_recovery) == 1, f"expected the recover step's one audit, found {in_recovery!r}"
     commands = {
         _security_audit_command(workflow),
         *_audit_commands_in(release["jobs"]["verify"]["steps"]),
+        *in_recovery,
         str(_pre_push_audit_hook()["entry"]).strip(),
     }
     assert len(commands) == 1, f"the audit is spelled differently across files: {commands!r}"
@@ -220,3 +224,12 @@ def test_every_copy_of_the_tag_check_is_the_same_command(workflow):
     }
     assert commands == {"python3 scripts/check_tags_published.py"}, commands
     assert (REPO_ROOT / "scripts" / "check_tags_published.py").is_file()
+
+
+def test_the_scheduled_check_never_hands_a_tag_to_recovery(workflow):
+    """`RECOVERY_PLAN` is the switch that turns a stranded tag past its
+    re-run window from a failure into a plan for the release job's recover
+    step. This job has no `publish` to hand anything to: it reports."""
+    steps = workflow["jobs"]["published"]["steps"]
+    (step,) = [step for step in steps if TAG_CHECK in str(step.get("run", ""))]
+    assert "RECOVERY_PLAN" not in step.get("env", {})

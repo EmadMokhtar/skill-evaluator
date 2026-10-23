@@ -94,7 +94,8 @@ pull-request and push triggers only look when someone changes the repository.
 
 The same schedule carries a second monitor, the `published` job: it runs
 `scripts/check_tags_published.py`, which compares every release tag on `origin` with PyPI's
-release list and fails for a version that was tagged but never published. See
+release list and fails for a version that was tagged but never published. It only reports;
+the release workflow is what recovers such a tag once its run can no longer be re-run. See
 [A tag that never reached PyPI](releasing.md#a-tag-that-never-reached-pypi).
 
 ## Running it locally

@@ -454,7 +454,21 @@ re-upload of a version that already exists, which is why every gate here fails c
 corollary is that there is **no manual path to PyPI**; a locally bumped and pushed tag
 produces a run with nothing to release.
 
-### A merge with no releasable commit publishes nothing, and fails only for a tag PyPI does not have
+The one artifact `verify` did not test is a recovered stranded tag (the next two invariants):
+that run's `verify` ran on `main`'s tip, and the tag's own run verified the tag's commit in
+another run, weeks earlier, against the advisories known then. So `release`'s recover step
+verifies the tag's commit itself, in this run, before building it: it adds the commit as a
+worktree and runs every `run:` command of `verify` there — `uv sync`, `ruff check`, `ruff
+format --check`, `pytest`, `uv audit` — spelled byte for byte as `verify` spells them, in
+`verify`'s order, all before `uv build`, in the same step that builds, so the tree that was
+tested is the tree that is built. `tests/test_release_workflow.py` requires every `verify`
+command to appear so, and runs the step's script verbatim with a stand-in `uv` to show a red
+suite or a red audit on the tag's lockfile builds nothing. The alternative — a job ahead of
+`verify` choosing which ref it checks out — was rejected because it would put a new job and a
+variable checkout in front of every ordinary release to protect the rare one; the design and
+the trade is in `docs/superpowers/specs/2026-10-20-skill-lens-stranded-tag-recovery-design.md`.
+
+### A merge with no releasable commit cuts no version, and fails only for a tag PyPI does not have that this run cannot recover
 
 `cz bump` signals "nothing to release" through its exit code — `21` (`NoneIncrementExit`)
 and `3` (`NoCommitsFoundError`) — so the bump step deliberately runs without `set -e`, which
@@ -476,6 +490,51 @@ never re-uploaded. `scripts/spent-tags.txt` is the one exception list: a tag ack
 never going to be published, with its reason. It only grows, by a reviewed commit, and an
 entry for a tag PyPI does have fails the check, so the list can never hide a release that
 exists.
+
+A missing tag whose run can no longer be re-run is not only reported. In `release.yml` the
+check step sets `RECOVERY_PLAN`, a file path, and the script writes one such tag to it —
+`tag=`, `version=`, `commit=` — and passes; the recover step that follows rebuilds it (next
+invariant), so the no-release path can still end in a publish, of a version that was cut
+long before. The command line is unchanged, so the two workflows stay spelled alike; the
+behaviour differs by environment alone, as it already does for `GITHUB_TOKEN`, and
+`security.yml` — which has no `publish` to hand anything to — leaves the variable unset and
+fails as before, its message naming the next no-release merge as what will recover the tag.
+One tag per run, the oldest first, because a run builds one version and the job has one
+`version` output; a second recoverable tag is reported as waiting and is not a failure, or
+the first would never be recovered. The file is written only when the check otherwise
+passes, and a stale one is removed first: any finding the run cannot resolve — a tag whose
+run is still re-runnable, a lookup that failed, a parent run that succeeded, a release PyPI
+lists with no files, a stale spent entry — still fails the step, and then no recovery runs,
+because a red check is never followed by a publish.
+
+### A stranded tag is rebuilt only from its own commit on `main`, spelling its own version, and only once its run can no longer be re-run
+
+Recovery rebuilds a tag the release workflow pushed and never published; it must not become a
+second way to publish anything else. The tag check hands a tag to the recover step only on
+*positive* knowledge that nothing can be re-run: the release run on the tag commit's parent
+exists, did not succeed, and started more than 30 days ago, or no release run exists for that
+parent at all. A tag whose window is still open is reported for a manual re-run instead —
+re-running `publish` uploads the artifact that run itself built and verified, and its
+attestation names the run that pushed the tag, so while that is possible it is the better
+artifact. A lookup that failed, a repository the check cannot name and a parent run that
+*succeeded* (a tag pushed by hand on top of a released tip, or a release PyPI no longer has)
+are not recovered; nor is a release PyPI lists with no files, because PyPI refuses a filename
+it has seen before, deleted or not; nor, by construction, a tag in `scripts/spent-tags.txt`,
+which the check accepts and never reports. The recover step then guards the plan it was
+handed: it fetches the tag from `origin` (a no-op for a tag the clone holds at that commit,
+refused for one that moved) and requires its commit to equal the one the check saw; it
+requires that commit to be an ancestor of `GITHUB_SHA`, so a tag at a branch, or at a commit
+`main` was rewritten away from, is refused; and after verifying it requires `cz version
+--project` in the worktree to print the version being recovered, so a tag at the wrong commit
+cannot build and upload some other version — one PyPI may already list. The tag is only ever
+read; nothing in the step creates, moves or deletes one, and nothing before `publish`'s
+upload is irreversible, so a failed recovery spends nothing and the next no-release merge
+tries again. The three uploads and the job's `bumped` output accept either path — the push
+step's `pushed` or the recover step's `recovered` — and never the bump step's own output, so
+a version cut and never pushed is still never published; `publish` and `github-release` are
+unchanged, and `--verify-tag` finds the tag where it has been all along.
+`tests/test_release_workflow.py` runs the step's script verbatim against a local bare origin
+for each refusal.
 
 ### A run that `main` outran publishes nothing and fails nothing
 
@@ -622,17 +681,19 @@ lock while checking nothing on the one path that creates a file. It hands back a
 never a pull request, because a pull request opened with `GITHUB_TOKEN` gets no CI checks,
 and on a cassette refresh those checks are the whole point of the review.
 
-### The dependency audit is one command, spelled identically in three places, and its exceptions live in one table
+### The dependency audit is one command, spelled identically in four places, and its exceptions live in one table
 
 `uv audit` reads `uv.lock` — the exact set anyone installs — and asks OSV about every
 package in every extra and group, dev tooling included, because that is what runs on
 maintainers' machines and in CI. It runs in `security.yml` on every pull request, every push
-to `main`, weekly on a schedule and on demand; in `release.yml`'s `verify` job; and in the
-`pre-push` hook. The schedule is what makes it a monitor rather than a check: an advisory
-can be published against a lockfile nobody has touched, and only a timer notices. `verify`
-re-runs it rather than trusting the pull request's green check because an advisory can land
-between the merge and the tag, and nothing publishes that `verify` did not pass.
-`tests/test_security_checks.py` requires the three commands to be byte-identical, so an
+to `main`, weekly on a schedule and on demand; in `release.yml`'s `verify` job and in its
+`release` job's recover step, on a stranded tag's own lockfile; and in the `pre-push` hook.
+The schedule is what makes it a monitor rather than a check: an advisory can be published
+against a lockfile nobody has touched, and only a timer notices. `verify` re-runs it rather
+than trusting the pull request's green check because an advisory can land between the merge
+and the tag, and nothing publishes that `verify` did not pass — which is also why a recovered
+tag's lockfile is audited again, weeks after its own run passed.
+`tests/test_security_checks.py` requires the four commands to be byte-identical, so an
 exception can never apply to CI and not to the release, or to a laptop and not to CI.
 
 Exceptions go in `[tool.uv.audit]` in `pyproject.toml`, which every copy of the command reads,
