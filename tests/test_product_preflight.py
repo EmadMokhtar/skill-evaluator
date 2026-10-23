@@ -12,6 +12,12 @@ from skill_lens.models import EvalCase, Skill, ToolSpec, TrajectorySpec
 from skill_lens.runners import product as product_module
 from skill_lens.runners.mcp import CLAUDE_CODE_MCP, COPILOT_MCP, BridgeSetupError
 from skill_lens.runners.product import TRUST_NOTE, Product, ProductRunner, ProductSetupError
+from skill_lens.runners.product_sandbox import (
+    HOME_PREFIX,
+    Isolation,
+    ProductSandbox,
+    environment_refusal,
+)
 from skill_lens.runners.traces import parse_claude_code
 
 FAKE = Path(__file__).parent / "fake_product.py"
@@ -104,7 +110,7 @@ def test_a_case_with_mock_tools_is_accepted_under_a_bridged_product_and_the_brid
     monkeypatch,
 ):
     probed: list[bool] = []
-    monkeypatch.setattr(product_module, "probe_bridge", lambda: probed.append(True))
+    monkeypatch.setattr(product_module, "probe_bridge", lambda *_a: probed.append(True))
     case = _case(name="uses tools", tools=[ToolSpec(name="lookup")])
     status = ProductRunner(_product(mcp=CLAUDE_CODE_MCP)).preflight([_skill()], {"ping": [case]})
     assert status.name == "claude-code"
@@ -121,7 +127,7 @@ def test_the_bridge_really_starts_in_preflight():
 
 
 def test_the_bridge_is_not_probed_when_no_case_declares_tools(monkeypatch):
-    def explode() -> None:
+    def explode(*_a) -> None:
         raise BridgeSetupError("must not run")
 
     monkeypatch.setattr(product_module, "probe_bridge", explode)
@@ -129,7 +135,7 @@ def test_the_bridge_is_not_probed_when_no_case_declares_tools(monkeypatch):
 
 
 def test_a_bridge_that_does_not_start_is_a_setup_error_naming_the_runner(monkeypatch):
-    def explode() -> None:
+    def explode(*_a) -> None:
         raise BridgeSetupError("the MCP bridge does not start under /x: boom")
 
     monkeypatch.setattr(product_module, "probe_bridge", explode)
@@ -144,7 +150,7 @@ def test_a_bridge_that_does_not_start_is_a_setup_error_naming_the_runner(monkeyp
 def test_a_table_flag_that_hides_mcp_tools_is_refused_when_a_case_declares_tools(
     element, monkeypatch
 ):
-    monkeypatch.setattr(product_module, "probe_bridge", lambda: None)
+    monkeypatch.setattr(product_module, "probe_bridge", lambda *_a: None)
     product = _product(
         name="copilot", argv=(sys.executable, str(FAKE), "-p", "{prompt}", element), mcp=COPILOT_MCP
     )
@@ -158,7 +164,7 @@ def test_a_table_flag_that_hides_mcp_tools_is_refused_when_a_case_declares_tools
 
 def test_claude_codes_tools_flag_does_not_hide_mcp_tools_so_it_is_not_refused(monkeypatch):
     # Verified: `claude --tools ""` still lists the MCP tool in its init event.
-    monkeypatch.setattr(product_module, "probe_bridge", lambda: None)
+    monkeypatch.setattr(product_module, "probe_bridge", lambda *_a: None)
     product = _product(
         argv=(sys.executable, str(FAKE), "-p", "{prompt}", "--tools", ""), mcp=CLAUDE_CODE_MCP
     )
@@ -309,3 +315,129 @@ def test_a_file_glob_list_with_one_entry_on_the_delivered_skill_is_refused():
     )
     with pytest.raises(ProductSetupError, match="copy of the skill"):
         ProductRunner(_product()).preflight([_skill()], {"ping": [case]})
+
+
+# --- the product sandbox (issue #99) ---
+
+HOME_ONLY = ProductSandbox("auto", "none", "test")
+SANDBOXED = ProductSandbox("auto", "sandbox-exec", "test")
+NO_AUTH = {"PATH": "/usr/bin"}
+
+
+def test_a_preset_with_no_auth_variable_is_refused():
+    refusal = environment_refusal(_product(), HOME_ONLY, "runner", parent=NO_AUTH)
+    assert refusal == (
+        'runner claude-code: product_sandbox = "auto" gives the product a temporary home '
+        "directory, so it cannot use a login stored in your home directory or keychain; "
+        "export CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY, "
+        "name the variable your setup uses in [runners.claude-code] pass_env, or set "
+        'product_sandbox = "off"'
+    )
+
+
+def test_copilot_is_told_its_own_variable():
+    refusal = environment_refusal(_product(name="copilot"), HOME_ONLY, "judge", parent=NO_AUTH)
+    assert refusal is not None
+    assert refusal.startswith('judge copilot: product_sandbox = "auto"')
+    assert "export COPILOT_GITHUB_TOKEN, name the variable" in refusal
+
+
+def test_an_empty_auth_variable_does_not_count():
+    parent = {**NO_AUTH, "CLAUDE_CODE_OAUTH_TOKEN": ""}
+    assert environment_refusal(_product(), HOME_ONLY, "runner", parent=parent) is not None
+
+
+@pytest.mark.parametrize("name", ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"])
+def test_one_auth_variable_is_enough(name):
+    parent = {**NO_AUTH, name: "set"}
+    assert environment_refusal(_product(), HOME_ONLY, "runner", parent=parent) is None
+
+
+def test_a_base_url_alone_is_not_auth():
+    parent = {**NO_AUTH, "ANTHROPIC_BASE_URL": "https://gateway"}
+    assert environment_refusal(_product(), HOME_ONLY, "runner", parent=parent) is not None
+
+
+def test_a_pass_env_variable_satisfies_the_check():
+    product = _product(pass_env=("CLAUDE_CODE_USE_BEDROCK",))
+    parent = {**NO_AUTH, "CLAUDE_CODE_USE_BEDROCK": "1"}
+    assert environment_refusal(product, HOME_ONLY, "runner", parent=parent) is None
+
+
+def test_a_wrapper_is_not_auth_checked():
+    assert environment_refusal(_product(wrapper=True), HOME_ONLY, "runner", parent=NO_AUTH) is None
+
+
+def test_cli_needs_pass_env_under_isolation():
+    refusal = environment_refusal(_product(name="cli"), HOME_ONLY, "runner", parent=NO_AUTH)
+    assert refusal == (
+        'runner cli: product_sandbox = "auto" builds the product\'s environment from an '
+        "allowlist, so the command gets none of your variables unless you name them; set "
+        "[runners.cli] pass_env to the variables it needs (pass_env = [] when it needs none), "
+        'or set product_sandbox = "off"'
+    )
+    named = _product(name="cli", pass_env=())
+    assert environment_refusal(named, HOME_ONLY, "runner", parent=NO_AUTH) is None
+
+
+def test_off_checks_no_environment():
+    off = ProductSandbox("off", "none", 'product_sandbox = "off"')
+    assert environment_refusal(_product(name="cli"), off, "runner", parent=NO_AUTH) is None
+    assert environment_refusal(_product(), off, "runner", parent=NO_AUTH) is None
+
+
+def test_preflight_raises_the_refusal(monkeypatch):
+    for name in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    runner = ProductRunner(_product(), sandbox=HOME_ONLY)
+    with pytest.raises(ProductSetupError, match="cannot use a login stored in your home"):
+        runner.preflight([_skill()], {"ping": [_case()]})
+
+
+def test_the_version_probe_runs_in_the_temporary_home(tmp_path, monkeypatch):
+    record = tmp_path / "version-home.txt"
+    monkeypatch.setenv("FAKE_PRODUCT_VERSION_RECORD", str(record))
+    product = _product(pass_env=("FAKE_PRODUCT_VERSION_RECORD",), wrapper=True)
+    ProductRunner(product, sandbox=HOME_ONLY).preflight([_skill()], {"ping": [_case()]})
+    home = Path(record.read_text(encoding="utf-8"))
+    assert home.name == "home"
+    assert home.parent.name.startswith(HOME_PREFIX)
+    assert not home.parent.exists()
+
+
+def test_a_product_that_fails_inside_the_sandbox_names_off(monkeypatch):
+    monkeypatch.setattr(ProductSandbox, "wrap", lambda self, argv, writable, tempdir=None: argv)
+    monkeypatch.setenv("FAKE_PRODUCT_VERSION_FAILS", "1")
+    product = _product(pass_env=("FAKE_PRODUCT_VERSION_FAILS",), wrapper=True)
+    with pytest.raises(ProductSetupError) as caught:
+        ProductRunner(product, sandbox=SANDBOXED).preflight([_skill()], {"ping": [_case()]})
+    message = str(caught.value)
+    assert message.startswith(f"runner claude-code: {sys.executable} {FAKE} --version exited")
+    assert message.endswith(
+        'under sandbox-exec -- set product_sandbox = "off" to run it without one'
+    )
+
+
+def test_the_status_carries_the_sandbox():
+    product = _product(wrapper=True)
+    status = ProductRunner(product, sandbox=HOME_ONLY).preflight([_skill()], {"ping": [_case()]})
+    assert status.sandbox == HOME_ONLY.status()
+    assert status.trust == HOME_ONLY.trust()
+
+
+def test_off_reports_the_old_sentence_and_an_off_status():
+    status = ProductRunner(_product()).preflight([_skill()], {"ping": [_case()]})
+    assert status.trust == TRUST_NOTE
+    assert status.sandbox is not None and status.sandbox.mode == "off"
+
+
+def test_the_bridge_probe_runs_under_the_isolation(monkeypatch):
+    seen: list = []
+    monkeypatch.setattr(product_module, "probe_bridge", lambda isolation: seen.append(isolation))
+    product = _product(mcp=CLAUDE_CODE_MCP, wrapper=True)
+    runner = ProductRunner(product, sandbox=HOME_ONLY)
+    tools = [ToolSpec(name="lookup", returns="ok")]
+    runner.preflight([_skill()], {"ping": [_case(tools=tools)]})
+    (isolation,) = seen
+    assert isinstance(isolation, Isolation)
+    assert isolation.root is not None and isolation.root.name.startswith(HOME_PREFIX)

@@ -80,12 +80,14 @@ HOME_PREFIX = "skill-lens-home-"
 class ProductEnv:
     """A preset's own variables under home isolation.
 
-    `auth` is passed when set and counted by the auth check; `passed` is
-    passed but not counted (an endpoint is not a credential); `fixed` is set
-    for the product whatever the harness has.
+    `auth` is passed when set and counted by the auth check; `hint` names
+    what to export, for its refusal; `passed` is passed but not counted (an
+    endpoint is not a credential); `fixed` is set for the product whatever
+    the harness has.
     """
 
     auth: tuple[str, ...]
+    hint: str
     passed: tuple[str, ...] = ()
     fixed: tuple[tuple[str, str], ...] = ()
 
@@ -96,11 +98,14 @@ PRODUCT_ENV: dict[str, ProductEnv] = {
     # DISABLE_AUTOUPDATER: a fresh home must not start an update on every case.
     "claude-code": ProductEnv(
         auth=("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
+        hint="CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY",
         passed=("ANTHROPIC_BASE_URL",),
         fixed=(("DISABLE_AUTOUPDATER", "1"),),
     ),
     # Copilot's documented auth variables, in its order of precedence.
-    "copilot": ProductEnv(auth=("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")),
+    "copilot": ProductEnv(
+        auth=("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"), hint="COPILOT_GITHUB_TOKEN"
+    ),
 }
 
 
@@ -244,6 +249,51 @@ def product_environment(
             LOCALAPPDATA=str(home / "AppData" / "Local"),
         )
     return env
+
+
+def environment_refusal(
+    product: Product,
+    sandbox: ProductSandbox,
+    role: str,
+    *,
+    parent: Mapping[str, str] | None = None,
+) -> str | None:
+    """Why this product cannot run under home isolation, or None. Spends nothing.
+
+    A preset must find one of its own auth variables, or one `pass_env`
+    names, set and non-empty in the harness: a temporary home has no login
+    in it, so without one every case would error on the product's auth --
+    better said once, up front, as exit 2. Presence, not validity: an
+    expired token is still an errored case at run time. A wrapper `command`
+    may bring its own auth, so it is not checked. A `cli` product has no
+    known auth, and a command that lost its key may exit 0 and score as a
+    *failed* case, so it must name what it needs -- `pass_env = []` when
+    nothing. `role` ("runner" or "judge") names the seat.
+    """
+    if not sandbox.home_isolated:
+        return None
+    parent = os.environ if parent is None else parent
+    where = f'{role} {product.name}: product_sandbox = "{sandbox.mode}"'
+    own = PRODUCT_ENV.get(product.name)
+    if own is None:
+        if product.pass_env is not None:
+            return None
+        return (
+            f"{where} builds the product's environment from an allowlist, so the command "
+            "gets none of your variables unless you name them; set "
+            f"[runners.{product.name}] pass_env to the variables it needs (pass_env = [] "
+            'when it needs none), or set product_sandbox = "off"'
+        )
+    if product.wrapper:
+        return None
+    if any(parent.get(name) for name in (*own.auth, *(product.pass_env or ()))):
+        return None
+    return (
+        f"{where} gives the product a temporary home directory, so it cannot use a login "
+        f"stored in your home directory or keychain; export {own.hint}, name the variable "
+        f"your setup uses in [runners.{product.name}] pass_env, or set "
+        'product_sandbox = "off"'
+    )
 
 
 @dataclass(frozen=True)

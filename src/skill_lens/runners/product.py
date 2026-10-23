@@ -54,10 +54,11 @@ from skill_lens.runners.mcp import (
 )
 from skill_lens.runners.product_sandbox import (
     PRODUCT_SANDBOX_OFF,
-    TRUST_NOTE,
+    TRUST_NOTE,  # noqa: F401 - re-exported: callers import the off sentence from here
     Isolation,
     ProductSandbox,
     ProductSetupError,
+    environment_refusal,
     isolate,
 )
 from skill_lens.runners.traces import Trace, parse_claude_code, parse_copilot
@@ -463,34 +464,51 @@ def find_executable(product: Product, role: str) -> str:
     return executable
 
 
-def probe_version(product: Product, executable: str, role: str = "runner") -> str:
+def probe_version(
+    product: Product, executable: str, role: str = "runner", isolation: Isolation | None = None
+) -> str:
     """Run the product's version command; the first line of what it prints.
 
     Executed, not merely found: a product on PATH that cannot start should be
-    exit 2 up front, not one errored case per work item. `role` ("runner" or
-    "judge") names the seat in the message. Raises `ProductSetupError`;
-    returns "" when the product has no version command.
+    exit 2 up front, not one errored case per work item. Under `isolation` it
+    runs as the cases will -- in the temporary home, with the built
+    environment, inside the backend -- so a product that starts outside the
+    sandbox but not inside it is exit 2 too, and the message says how to run
+    it without one. `role` ("runner" or "judge") names the seat in the
+    message. Raises `ProductSetupError`; returns "" when the product has no
+    version command.
     """
     if product.version_command is None:
         return ""
     argv = [executable, *product.version_command[1:]]
     spoken = " ".join(argv)
+    cwd = isolation.root if isolation is not None else None
+    backend = isolation.sandbox.backend if isolation is not None and cwd is not None else "none"
+    under = (
+        f'; under {backend} -- set product_sandbox = "off" to run it without one'
+        if backend != "none"
+        else ""
+    )
     try:
         completed = subprocess.run(  # noqa: S603 - fixed argv from a preset or config, no shell
-            argv,
+            isolation.launch(argv, cwd) if isolation is not None and cwd is not None else argv,
             capture_output=True,
             timeout=VERSION_PROBE_TIMEOUT_SECONDS,
             check=False,
             stdin=subprocess.DEVNULL,
+            cwd=cwd,
+            env=isolation.env if isolation is not None else None,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ProductSetupError(f"{role} {product.name}: {spoken} could not run: {exc}") from exc
+        raise ProductSetupError(
+            f"{role} {product.name}: {spoken} could not run: {exc}{under}"
+        ) from exc
     if completed.returncode != 0:
         detail = completed.stderr.decode("utf-8", errors="replace").strip().splitlines()
         first = detail[0] if detail else ""
         exited = f"exited with code {completed.returncode}"
         message = f"{role} {product.name}: {spoken} {exited}: {first}"
-        raise ProductSetupError(message.rstrip(": "))
+        raise ProductSetupError(message.rstrip(": ") + under)
     lines = completed.stdout.decode("utf-8", errors="replace").strip().splitlines()
     return lines[0].strip() if lines else ""
 
@@ -646,8 +664,31 @@ class ProductRunner:
         carries.
         """
         product = self._product
+        refusal = environment_refusal(product, self._sandbox, "runner")
+        if refusal is not None:
+            raise ProductSetupError(refusal)
         executable = find_executable(product, "runner")
-        version = probe_version(product, executable)
+        with isolate(self._sandbox, product) as isolation:
+            version = probe_version(product, executable, "runner", isolation)
+            self._check_cases(skills, cases_by_skill, isolation)
+        return ProductStatus(
+            name=product.name,
+            executable=executable,
+            version=version,
+            trust=self._sandbox.trust(),
+            sandbox=self._sandbox.status(),
+        )
+
+    def _check_cases(
+        self,
+        skills: list[Skill],
+        cases_by_skill: dict[str, list[EvalCase]],
+        isolation: Isolation,
+    ) -> None:
+        """Every planned case this runner can serve, and the bridge when one
+        needs it -- probed under the run's isolation, since the bridge is the
+        product's child and starts inside the same sandbox."""
+        product = self._product
         bridged = False
         for skill in skills:
             _check_skill_name(skill.name)
@@ -682,12 +723,9 @@ class ProductRunner:
                             "whether a skill was loaded; use a preset or mode: loaded"
                         )
         if bridged and product.mcp is not None:
-            self._check_bridge(product.mcp)
-        return ProductStatus(
-            name=product.name, executable=executable, version=version, trust=TRUST_NOTE
-        )
+            self._check_bridge(product.mcp, isolation)
 
-    def _check_bridge(self, support: McpSupport) -> None:
+    def _check_bridge(self, support: McpSupport, isolation: Isolation) -> None:
         """A planned case declares `tools:`: refuse a table flag that would
         hide them from the model, then prove the bridge starts.
 
@@ -712,6 +750,6 @@ class ProductRunner:
                         f"each mock tool in it as the product spells it ({spelling})"
                     )
         try:
-            probe_bridge()
+            probe_bridge(isolation)
         except BridgeSetupError as exc:
             raise ProductSetupError(f"runner {product.name}: {exc}") from exc

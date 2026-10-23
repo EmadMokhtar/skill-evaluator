@@ -662,10 +662,12 @@ class ProductSandboxStatus(BaseModel):
 class ProductStatus(BaseModel):
     """One agent product a run executed, as preflight found it.
 
-    `trust` is fixed harness text -- permission prompts disabled, no skill-lens
-    sandbox, bundled scripts reachable through the product's own tools -- on
-    the model rather than in each reporter so the three reporters cannot
-    drift, and so the JSON report carries the same sentence a human reads.
+    `trust` is fixed harness text -- permission prompts disabled, what the
+    run's product sandbox applied, bundled scripts reachable through the
+    product's own tools -- on the model rather than in each reporter so the
+    three reporters cannot drift, and so the JSON report carries the same
+    sentence a human reads. `sandbox` is the same decision as data; None
+    only for a status built by hand.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -674,6 +676,7 @@ class ProductStatus(BaseModel):
     executable: str
     version: str = ""
     trust: str = ""
+    sandbox: ProductSandboxStatus | None = None
 
 
 class CaseOutcome(BaseModel):
