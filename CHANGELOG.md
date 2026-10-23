@@ -1,3 +1,9 @@
+## v0.24.1 (2026-10-23)
+
+### Fix
+
+- keep cost and token usage on an errored product run (#110)
+
 ## v0.24.0 (2026-10-23)
 
 ### Feat
