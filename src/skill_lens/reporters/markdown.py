@@ -172,9 +172,16 @@ def _totals(report: RunReport) -> str:
         rows.append(["Cost", f"${cost:.4f}"])
         if degraded:
             rows.append(["Cost note", "some costs not priced — see the JSON report"])
-    if report.judge_cost_usd:
-        # Judging is harness overhead and is never charged to the skill.
-        rows.append(["Judge overhead", f"${report.judge_cost_usd:.4f}"])
+    # Judging is harness overhead and is never charged to the skill, so its
+    # cost and its pricing gaps get rows of their own.
+    judge_cost = report.judge_cost_usd
+    judge_degraded = report.judge_pricing_degraded
+    if judge_cost:
+        rows.append(["Judge overhead", f"${judge_cost:.4f}"])
+        if judge_degraded:
+            rows.append(["Judge cost note", "some judge costs not priced — see the JSON report"])
+    elif judge_degraded:
+        rows.append(["Judge overhead", "not priced — see the JSON report"])
     rows.append(["Latency", f"{latency / 1000:.2f}s" if latency >= 1000 else f"{latency}ms"])
     if report.baseline_errored:
         rows.append(["Baseline errored", str(report.baseline_errored)])

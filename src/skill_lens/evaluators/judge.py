@@ -216,7 +216,7 @@ class JudgeEvaluator:
     def __init__(self, judge: Judge) -> None:
         self._judge = judge
 
-    def _errored(self, detail: str, cost_usd: float = 0.0) -> EvalScore:
+    def _errored(self, detail: str, cost_usd: float = 0.0, cost_note: str = "") -> EvalScore:
         return EvalScore(
             evaluator=self.name,
             passed=False,
@@ -224,6 +224,7 @@ class JudgeEvaluator:
             score=0.0,
             detail=detail,
             cost_usd=cost_usd,
+            cost_note=cost_note,
         )
 
     def evaluate(self, case: EvalCase, result: RunResult) -> EvalScore:
@@ -240,7 +241,9 @@ class JudgeEvaluator:
 
         verdict = self._judge.judge(request)
         if verdict.error is not None:
-            return self._errored(f"judge failed: {verdict.error}", verdict.cost_usd)
+            return self._errored(
+                f"judge failed: {verdict.error}", verdict.cost_usd, verdict.cost_note
+            )
 
         wanted = [check.id for check in request.checks]
         got = [check.id for check in verdict.checks]
@@ -248,6 +251,7 @@ class JudgeEvaluator:
             return self._errored(
                 f"judge returned verdicts for {got or 'nothing'}, expected exactly {wanted}",
                 verdict.cost_usd,
+                verdict.cost_note,
             )
 
         by_id = {check.id: check for check in verdict.checks}
@@ -265,4 +269,5 @@ class JudgeEvaluator:
             detail=detail,
             checks=checks,
             cost_usd=verdict.cost_usd,
+            cost_note=verdict.cost_note,
         )

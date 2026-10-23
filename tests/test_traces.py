@@ -100,6 +100,32 @@ def test_claude_code_without_a_result_event_says_its_spend_is_unknown():
     assert trace.usage_note == "the claude-code trace ended before reporting token usage"
 
 
+def test_claude_code_notes_name_how_a_stopped_run_ended():
+    # The runner knows why the trace stopped (a timeout, a cut); the parser
+    # only knows that it did.
+    lines = _fixture("claude-code-trigger.jsonl").splitlines()[:-1]
+    trace = parse_claude_code("\n".join(lines), "claude-code timed out")
+    assert trace.cost_note == "claude-code timed out before reporting cost"
+    assert trace.usage_note == "claude-code timed out before reporting token usage"
+
+
+@pytest.mark.parametrize("cost", [None, "0.04", True])
+def test_claude_code_without_a_usable_cost_says_cost_was_not_reported(cost):
+    # A result with no number for `total_cost_usd` must not read as a free run,
+    # nor let `max_cost_usd` pass on a 0.0 nobody measured.
+    lines = _fixture("claude-code-trigger.jsonl").splitlines()
+    result = json.loads(lines[-1])
+    if cost is None:
+        del result["total_cost_usd"]
+    else:
+        result["total_cost_usd"] = cost
+    lines[-1] = json.dumps(result)
+    trace = parse_claude_code("\n".join(lines))
+    assert trace.cost_usd == 0.0
+    assert trace.cost_note == "claude-code did not report cost"
+    assert trace.error is None
+
+
 def test_claude_code_marks_a_trace_with_a_result_event_complete():
     assert parse_claude_code(_fixture("claude-code-trigger.jsonl")).complete is True
     assert parse_claude_code(_fixture("claude-code-error.jsonl")).complete is True
@@ -232,9 +258,20 @@ def test_copilot_without_a_result_event_claims_no_premium_request_count():
     trace = parse_copilot("\n".join(lines))
     assert trace.cost_note == (
         "copilot bills per premium request, not per token; "
-        "the trace ended before reporting premium requests"
+        "the copilot trace ended before reporting premium requests"
     )
     assert trace.usage_note == ""  # the shutdown metrics came before the cut
+
+
+def test_copilot_notes_name_how_a_stopped_run_ended():
+    # Cut before `session.shutdown` too: neither figure was reported.
+    lines = _fixture("copilot-trigger.jsonl").splitlines()[:3]
+    trace = parse_copilot("\n".join(lines), "copilot timed out")
+    assert trace.cost_note == (
+        "copilot bills per premium request, not per token; "
+        "copilot timed out before reporting premium requests"
+    )
+    assert trace.usage_note == "copilot timed out before reporting token usage"
 
 
 def test_copilot_marks_a_trace_with_a_result_event_complete():

@@ -8,6 +8,7 @@ says:
 
   ok       print the file named by FAKE_PRODUCT_TRACE to stdout, exit 0 (default)
   sleep    sleep 60 s; the runner's timeout must kill it
+  stall    print the trace, then sleep 60 s: a product that hangs part-way
   exit3    print "boom" to stderr, exit 3
   garbage  print text that is no JSON at all, exit 0
   huge     print the trace, then FAKE_PRODUCT_BYTES bytes of "x", exit 0
@@ -149,6 +150,8 @@ def main(argv: list[str]) -> int:
     if mode == "huge":
         sys.stdout.write("\n" + "x" * int(os.environ.get("FAKE_PRODUCT_BYTES", "100000")))
     sys.stdout.flush()
+    if mode == "stall":
+        time.sleep(60)
     return 0
 
 

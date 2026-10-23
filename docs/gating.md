@@ -246,13 +246,19 @@ a stale pointer in the report.
 
 `outcomes[].cost_note` and `outcomes[].usage_note` say why `cost_usd` or a token count is
 `0` rather than measured — an unpriced model, a product that bills per request rather than
-per token, a trace that reported no usage, or a product run that ended before reporting
-what it spent (a timeout, a cut trace, no `result` event: `claude-code timed out before
-reporting cost`) — each empty string when the figure beside it is a real measurement. The
-last kind is on errored outcomes. The case stays errored; the note is there so a run that
-may have spent money is not read as free. `summary.total_cost_usd` is then a lower bound,
-and the console totals line says some costs were not priced. An errored outcome that never
-started a process has empty notes, because its `0` is a measurement.
+per token, a trace that reported no usage or no cost, or a product run that ended before
+reporting what it spent (a timeout, a cut trace, no `result` event: `claude-code timed out
+before reporting cost`) — each empty string when the figure beside it is a real
+measurement. The last kind is on errored outcomes. The case stays errored; the note is there
+so a run that may have spent money is not read as free. `summary.total_cost_usd` is then a
+lower bound, and the console totals line says some costs were not priced. An errored outcome
+that never started a process has empty notes, because its `0` is a measurement.
+
+`outcomes[].scores[].cost_note` does the same for an evaluator's own spend, which is
+`summary.judge_cost_usd` — today the judge's: an unpriced judge model, a product judge that
+bills per request, or a judge run that ended before reporting its cost. Any such note makes
+the totals line say `Judge overhead: not priced` or `some judge costs not priced`, apart
+from the run's own cost line.
 
 `delta` is the full comparison object — pass-rate, token, cost and latency deltas, per-case
 stats, low-signal checks, high-variance cases and notes — and is `null` when no baseline arm

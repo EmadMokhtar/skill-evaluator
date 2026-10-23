@@ -94,17 +94,31 @@ QUOTED: list[tuple[str, str]] = [
     ("claude-code did not report token usage", "runners/traces.py"),
     (" product does not report token usage", "runners/product.py"),
     (" before reporting token usage", "runners/traces.py"),
+    # How a trace that never reported its spend ended, named in the notes
+    (" timed out", "runners/product.py"),
+    (" trace was cut at max_output_bytes", "runners/product.py"),
+    ("the claude-code trace ended", "runners/traces.py"),
+    ("the copilot trace ended", "runners/traces.py"),
     # A model with no price
     ("Total cost: not priced (see per-case cost_note in the JSON report)", "reporters/console.py"),
     ("some costs not priced (see per-case cost_note in the JSON report)", "reporters/console.py"),
+    (
+        "Judge overhead: not priced (see scores[].cost_note in the JSON report)",
+        "reporters/console.py",
+    ),
+    (
+        "some judge costs not priced (see scores[].cost_note in the JSON report)",
+        "reporters/console.py",
+    ),
     ("cost budget not evaluated: ", "evaluators/budget.py"),
     ("no price data for ", "runners/pricing.py"),
     ("genai-prices is not installed; cost not calculated", "runners/pricing.py"),
     (" product does not report cost", "runners/product.py"),
     ("copilot bills per premium request, not per token; ", "runners/traces.py"),
     (" premium request(s)", "runners/traces.py"),
-    ("the trace ended before reporting premium requests", "runners/traces.py"),
+    (" before reporting premium requests", "runners/traces.py"),
     (" before reporting cost", "runners/traces.py"),
+    ("claude-code did not report cost", "runners/traces.py"),
     # NO_RESPONSE_SCRIPTED
     ("no response is scripted for ", "runners/tools.py"),
     (" with arguments ", "runners/tools.py"),

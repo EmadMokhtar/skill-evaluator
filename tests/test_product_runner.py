@@ -416,12 +416,69 @@ def test_a_trace_with_no_result_event_says_its_spend_is_unknown(tmp_path, fake, 
 def test_a_non_zero_exit_with_no_result_event_says_its_spend_is_unknown(
     tmp_path, fake, monkeypatch
 ):
-    # The exit code explains the error; the notes still explain the 0.0.
+    # The exit code explains the error; the notes still explain the 0.0. A
+    # product that exits before reaching the model (a bad flag) gets the same
+    # notes: with no `result` event, nothing tells the two apart.
     monkeypatch.setenv("FAKE_PRODUCT_MODE", "exit3")
     result = ProductRunner(_product()).run(_skill(tmp_path), _case())
     assert result.error == "claude-code exited with code 3: boom"
     assert result.cost_note == "the claude-code trace ended before reporting cost"
     assert result.usage_note == "the claude-code trace ended before reporting token usage"
+
+
+def _copilot() -> Product:
+    return _product(parse=parse_copilot, name="copilot")
+
+
+COPILOT_PREMIUM = "copilot bills per premium request, not per token; "
+
+
+def test_a_timed_out_copilot_run_says_its_spend_is_unknown(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "sleep")
+    result = ProductRunner(replace(_copilot(), timeout_seconds=0.5)).run(_skill(tmp_path), _case())
+    assert result.error == "copilot timed out after 0.5s"
+    assert result.cost_note == COPILOT_PREMIUM + (
+        "copilot timed out before reporting premium requests"
+    )
+    assert result.usage_note == "copilot timed out before reporting token usage"
+
+
+def test_a_cut_copilot_trace_says_its_spend_is_unknown(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "copilot-trigger.jsonl"))
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "huge")
+    result = ProductRunner(replace(_copilot(), max_output_bytes=500)).run(_skill(tmp_path), _case())
+    assert result.error is not None
+    assert result.cost_note == COPILOT_PREMIUM + (
+        "the copilot trace was cut at max_output_bytes before reporting premium requests"
+    )
+    assert result.usage_note == (
+        "the copilot trace was cut at max_output_bytes before reporting token usage"
+    )
+
+
+def test_a_stopped_run_keeps_what_its_trace_reported_before_the_stop(tmp_path, fake, monkeypatch):
+    # Copilot reports tokens in `session.shutdown`, before its `result` event:
+    # a run that hangs after it has real token figures, and only the premium
+    # request count is unknown.
+    lines = (FIXTURES / "copilot-trigger.jsonl").read_text(encoding="utf-8").splitlines()
+    (tmp_path / "partial.jsonl").write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(tmp_path / "partial.jsonl"))
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "stall")
+    result = ProductRunner(replace(_copilot(), timeout_seconds=1)).run(_skill(tmp_path), _case())
+    assert result.error == "copilot timed out after 1s"
+    assert result.input_tokens > 0
+    assert result.usage_note == ""
+    assert result.cost_note == COPILOT_PREMIUM + (
+        "copilot timed out before reporting premium requests"
+    )
+
+
+def test_a_run_that_reported_its_spend_before_hanging_keeps_it(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "stall")
+    result = ProductRunner(_product(timeout_seconds=1)).run(_skill(tmp_path), _case())
+    assert result.error == "claude-code timed out after 1s"
+    assert result.cost_usd > 0
+    assert (result.cost_note, result.usage_note) == ("", "")
 
 
 def test_a_generic_product_that_fails_still_says_it_reports_no_spend(tmp_path, fake, monkeypatch):

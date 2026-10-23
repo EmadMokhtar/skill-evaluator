@@ -11,6 +11,11 @@ Tool calls are what the model *requested* (`toolRequests`, `tool_use`), not
 what executed: a refused or failed call was still the model's choice, the
 same rule the framework runners apply to their message histories.
 
+A trace with no `result` event never reported what the run spent, though the
+product ran and may have spent money. Its notes say so, naming how the trace
+ended -- `ended`, from the runner when it stopped the product (a timeout, a
+cut), or the trace simply stopping -- so a report never reads it as free.
+
 Imports no agent framework -- this is JSON, not an SDK.
 """
 
@@ -44,19 +49,6 @@ class Trace:
     # better explanation.
     complete: bool = False
     error: str | None = None
-
-
-def spend_unreported(ended: str) -> dict[str, str]:
-    """`cost_note` and `usage_note` for a run that ended before its product
-    reported what it spent, `ended` saying how.
-
-    The product ran, so it may have spent: with empty notes, the report's
-    totals would read its 0.0 and zero tokens as a free run.
-    """
-    return {
-        "cost_note": f"{ended} before reporting cost",
-        "usage_note": f"{ended} before reporting token usage",
-    }
 
 
 def parse_lines(text: str) -> list[dict[str, Any]]:
@@ -93,9 +85,12 @@ def _int(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
-def parse_copilot(text: str) -> Trace:
+def parse_copilot(text: str, ended: str | None = None) -> Trace:
     """Copilot CLI: `assistant.message`, `skill.invoked`, `session.shutdown`,
     `session.error`, `result`.
+
+    Tokens are on `session.shutdown` and the premium request count on
+    `result`, so a trace that stops between the two keeps its tokens.
 
     A skill is loaded two ways, and the trace shows each differently. A slash
     invocation (`/<name> ...`, mode `loaded`) emits a `skill.invoked` event. A
@@ -158,13 +153,19 @@ def parse_copilot(text: str) -> Trace:
         error = f"copilot exited with code {result.get('exitCode')}"
     result_usage = result.get("usage") if result else None
     premium = _int(result_usage.get("premiumRequests")) if isinstance(result_usage, dict) else 0
-    # The count is on the `result` event: without one, a "0" here would be a
-    # figure the trace never reported.
+    ended = ended or "the copilot trace ended"
+    # Without a `result` event, a "0" would be a count the trace never reported.
     requests = (
         f"{premium} premium request(s)"
         if result is not None
-        else "the trace ended before reporting premium requests"
+        else f"{ended} before reporting premium requests"
     )
+    if usage_seen:
+        usage_note = ""
+    elif result is None:
+        usage_note = f"{ended} before reporting token usage"
+    else:
+        usage_note = "copilot did not report token usage"
     return Trace(
         output=output,
         tool_calls=tool_calls,
@@ -174,15 +175,18 @@ def parse_copilot(text: str) -> Trace:
         model=model,
         cost_usd=0.0,
         cost_note=f"copilot bills per premium request, not per token; {requests}",
-        usage_note="" if usage_seen else "copilot did not report token usage",
+        usage_note=usage_note,
         invoked_skills=frozenset(invoked),
         complete=result is not None,
         error=error,
     )
 
 
-def parse_claude_code(text: str) -> Trace:
-    """Claude Code: `system`/`init`, `assistant` messages, `result`."""
+def parse_claude_code(text: str, ended: str | None = None) -> Trace:
+    """Claude Code: `system`/`init`, `assistant` messages, `result`.
+
+    Cost and usage are on the `result` event only.
+    """
     events = parse_lines(text)
     tool_calls: list[ToolCall] = []
     invoked: set[str] = set()
@@ -209,13 +213,14 @@ def parse_claude_code(text: str) -> Trace:
         elif kind == "result":
             result = event
     if result is None:
+        ended = ended or "the claude-code trace ended"
         return Trace(
             tool_calls=tool_calls,
             transcript=events,
             model=model,
+            cost_note=f"{ended} before reporting cost",
+            usage_note=f"{ended} before reporting token usage",
             invoked_skills=frozenset(invoked),
-            # Cost and usage are on the `result` event only.
-            **spend_unreported("the claude-code trace ended"),
             error="no result event in the claude-code trace",
         )
     usage_seen = isinstance(result.get("usage"), dict)
@@ -223,6 +228,9 @@ def parse_claude_code(text: str) -> Trace:
     output = result.get("result") if isinstance(result.get("result"), str) else ""
     failed = result.get("is_error") is True or result.get("subtype") != "success"
     cost = result.get("total_cost_usd")
+    # A missing or non-numeric cost is unreported, not free: a 0.0 with no
+    # note would pass every `max_cost_usd`.
+    cost_seen = isinstance(cost, (int, float)) and not isinstance(cost, bool)
     return Trace(
         output=output,
         tool_calls=tool_calls,
@@ -234,9 +242,8 @@ def parse_claude_code(text: str) -> Trace:
         ),
         output_tokens=_int(usage.get("output_tokens")),
         model=model,
-        cost_usd=float(cost)
-        if isinstance(cost, (int, float)) and not isinstance(cost, bool)
-        else 0.0,
+        cost_usd=float(cost) if cost_seen else 0.0,
+        cost_note="" if cost_seen else "claude-code did not report cost",
         usage_note="" if usage_seen else "claude-code did not report token usage",
         invoked_skills=frozenset(invoked),
         complete=True,
