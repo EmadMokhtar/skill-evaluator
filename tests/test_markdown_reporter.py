@@ -16,6 +16,7 @@ from skill_lens.models import (
     CaseOutcome,
     CheckResult,
     EvalScore,
+    HookRun,
     ProductStatus,
     RunReport,
     RunResult,
@@ -726,3 +727,36 @@ def test_the_products_block_names_each_product():
     )
     text = render_markdown(report)
     assert "Product `copilot` 1.0.37 (`/x/copilot`): t" in text
+
+
+def test_failed_hooks_render_as_a_fenced_list():
+    report = RunReport(
+        outcomes=[
+            _outcome(
+                name="writes a plan",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(
+                    output="done",
+                    hooks=[
+                        HookRun(
+                            name="UserPromptSubmit", event="UserPromptSubmit", outcome="success"
+                        ),
+                        HookRun(
+                            name="PostToolUse:Write",
+                            event="PostToolUse",
+                            outcome="error",
+                            exit_code=127,
+                            stderr="jq: command not found",
+                        ),
+                    ],
+                ),
+            )
+        ]
+    )
+    text = render_markdown(report)
+    assert (
+        'Failed hooks:\n\n```\nPostToolUse:Write error (exit code 127): stderr="jq: command '
+        'not found"\n```'
+    ) in text
+    assert "UserPromptSubmit" not in text

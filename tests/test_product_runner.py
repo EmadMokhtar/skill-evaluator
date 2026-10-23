@@ -114,6 +114,7 @@ def test_the_presets_are_the_verified_spellings():
         "--output-format",
         "stream-json",
         "--verbose",
+        "--include-hook-events",
         "--dangerously-skip-permissions",
         "--setting-sources",
         "project",
@@ -174,6 +175,31 @@ def test_run_delivers_the_skill_into_a_private_cwd_and_reads_the_trace(tmp_path,
     assert seen["skill_files"] == ["ping/SKILL.md"]
     assert seen["argv"][-1] == "--flag"
     assert not Path(seen["cwd"]).exists()  # the private directory is gone
+
+
+def test_run_reports_the_hooks_the_trace_reported(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "claude-code-hooks.jsonl"))
+    result = ProductRunner(_product()).run(_skill(tmp_path), _case())
+    assert result.error is None
+    assert [(hook.name, hook.outcome) for hook in result.hooks] == [
+        ("UserPromptSubmit", "success"),
+        ("PreToolUse:Write", "success"),
+        ("PostToolUse:Write", "error"),
+        ("Stop", "cancelled"),
+    ]
+
+
+def test_an_errored_run_reports_no_hooks(tmp_path, fake, monkeypatch):
+    # A trace cut before its `result` event is an error, never a partial
+    # parse: the hooks it reported before the cut are dropped, as its tool
+    # calls are.
+    lines = (FIXTURES / "claude-code-hooks.jsonl").read_text(encoding="utf-8").splitlines()
+    (tmp_path / "partial.jsonl").write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(tmp_path / "partial.jsonl"))
+    result = ProductRunner(_product()).run(_skill(tmp_path), _case())
+    assert result.error == "no result event in the claude-code trace"
+    assert result.hooks == []
+    assert result.tool_calls == []
 
 
 def test_loaded_mode_invokes_the_skill_by_the_products_spelling(tmp_path, fake):

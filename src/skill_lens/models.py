@@ -68,6 +68,31 @@ class ToolCall(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class HookRun(BaseModel):
+    """One lifecycle hook a product ran, as its trace reported it.
+
+    `name` is the product's spelling (`PreToolUse:Write`: the event, then the
+    matcher when the hook declared one). `outcome` is the product's own word,
+    kept as written: a later version may add one, and a hook that did not
+    report `success` is shown as failed rather than refused. `exit_code` is
+    None when the hook had none (a cancelled one, or a hook that is not a
+    command).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    event: str
+    outcome: str
+    exit_code: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+
+    @property
+    def failed(self) -> bool:
+        return self.outcome != "success"
+
+
 class CheckResult(BaseModel):
     """One rubric check's verdict, with the evidence that supports it.
 
@@ -146,12 +171,16 @@ class RunResult(BaseModel):
     could not count them (a product that reports no token usage). It is to
     tokens what `cost_note` is to cost: `BudgetEvaluator` refuses to evaluate
     `max_tokens` against a zero it knows is not a measurement.
+
+    `hooks` are the lifecycle hooks a product reported running, in order;
+    empty for a runner whose trace has none (every framework runner).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     output: str = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
+    hooks: list[HookRun] = Field(default_factory=list)
     transcript: list[dict[str, Any]] = Field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0

@@ -58,6 +58,7 @@ def render_json(
                 "model": o.result.model if o.result else "",
                 "cost_note": o.result.cost_note if o.result else "",
                 "usage_note": o.result.usage_note if o.result else "",
+                "hooks": [h.model_dump() for h in o.result.hooks] if o.result else [],
                 "workspace": (str(o.result.workspace) if o.result and o.result.workspace else None),
             }
             for o in report.outcomes

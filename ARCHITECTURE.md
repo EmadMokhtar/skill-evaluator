@@ -133,7 +133,7 @@ flowchart LR
 | `judges/langchain.py` | The LangChain judge adapter. **The last of the four.** |
 | `judges/product.py` | The product judge: the shared judge prompt as one text turn closed by a JSON-only line, sent through `runners/product.py`'s `invoke`/`read_trace` from an empty directory with no skill; the first balanced JSON object in the reply validated as `JudgeOutput`, everything else `JudgeVerdict.error`. Defines the judge's `preflight()`. Imports no agent framework. |
 | `reporters/console.py` | Human-readable run summary. |
-| `reporters/failure_context.py` | The excerpt a non-passing case shows — output, cut count, tool-call lines. One helper for all three reporters; no markup. |
+| `reporters/failure_context.py` | The excerpt a non-passing case shows — output, cut count, tool-call lines, failed-hook lines. One helper for all three reporters; no markup. |
 | `reporters/json_reporter.py` | Machine-readable run report. |
 | `reporters/junit.py` | JUnit XML for CI test panes. `failed`/`errored` map onto `<failure>`/`<error>`, candidate arm only. |
 | `reporters/markdown.py` | GitHub-flavored Markdown for step summaries and PR comments, with optional `max_chars` truncation. |
@@ -170,7 +170,7 @@ All live in `models.py`.
 | `Skill` | name, description, instructions, `version` (declared frontmatter version, `""` if absent), path, `variant` (`"candidate"` or `"baseline"`), `bundle_root` (the directory whose `scripts/`, `references/` and `assets/` the agent may read; `None` when the skill ships none), `markdown` (the `SKILL.md` text verbatim — its text as written, though line endings are normalised — for a product runner to deliver; `""` for the `--baseline none` skill, so no directory is written) |
 | `EvalCase` | name, task, `tools`, `assertions`, `trajectory`, `budget`, `tags` |
 | `ToolSpec` | one mock tool: name, description, `parameters` or `input_schema`, and `returns` — a string for every call, a `list[str]` consumed in call order, or a `list[ToolResponse]` (`when:` argument subset → `value`) matched per call; `ToolRef` (`ref` + optional `returns` in the same shapes) is what a case writes to import one from a library |
-| `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, `usage_note` (why the token split is `0` when the runner could not count — a declared `max_tokens` then fails as not evaluated), model, `error` |
+| `RunResult` | output, tool calls, `hooks` (the lifecycle hooks a product reported running; empty under every framework runner), transcript, token split, latency, cost, `cost_note`, `usage_note` (why the token split is `0` when the runner could not count — a declared `max_tokens` then fails as not evaluated), model, `error` |
 | `CheckResult` | one check's `id`, `passed`, `evidence` — emitted by the judge and by assertion/trajectory/budget alike |
 | `EvalScore` | one evaluator's `passed` / `score` / `detail`, plus its `checks: list[CheckResult]` |
 | `BaselineNote` | why a skill or case has no baseline arm: `kind` (`"unavailable"` or `"skipped"`) plus a reason |

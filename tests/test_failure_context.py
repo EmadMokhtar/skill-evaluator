@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-from skill_lens.models import CaseOutcome, EvalScore, RunResult, ToolCall
+from skill_lens.models import CaseOutcome, EvalScore, HookRun, RunResult, ToolCall
 from skill_lens.reporters.failure_context import (
     ARGUMENT_LIMIT,
+    HOOK_LIMIT,
+    HOOK_STREAM_LIMIT,
     OUTPUT_LIMIT,
     TOOL_CALL_LIMIT,
     FailureContext,
     cut_note,
     failure_context,
+    format_hook,
     format_tool_call,
     more_calls_note,
+    more_hooks_note,
 )
 
 _SAID = "the agent said this"
@@ -154,3 +158,77 @@ def test_the_cut_is_counted_on_the_raw_output_before_normalisation():
     assert context is not None
     assert context.cut == 1
     assert context.output == "x" * 500
+
+
+# --- hooks ---
+
+
+def _hooked(*hooks):
+    return _outcome(result=RunResult(output="", hooks=list(hooks)))
+
+
+def test_only_the_hooks_that_failed_are_shown():
+    context = failure_context(
+        _hooked(
+            HookRun(name="UserPromptSubmit", event="UserPromptSubmit", outcome="success"),
+            HookRun(
+                name="PostToolUse:Write",
+                event="PostToolUse",
+                outcome="error",
+                exit_code=127,
+                stderr="check-complete.sh: line 4: jq: command not found\n",
+            ),
+            HookRun(name="Stop", event="Stop", outcome="cancelled"),
+        ),
+        limit=OUTPUT_LIMIT,
+    )
+    assert context is not None
+    assert context.failed_hooks == [
+        'PostToolUse:Write error (exit code 127): stderr="check-complete.sh: line 4: jq: '
+        'command not found"',
+        "Stop cancelled",
+    ]
+    assert context.more_hooks == 0
+
+
+def test_a_case_whose_hooks_all_succeeded_shows_none():
+    context = failure_context(
+        _hooked(HookRun(name="Stop", event="Stop", outcome="success", stdout="done")),
+        limit=OUTPUT_LIMIT,
+    )
+    assert context is not None
+    assert context.failed_hooks == []
+
+
+def test_a_failed_hook_shows_stderr_then_stdout_each_on_one_line():
+    hook = HookRun(
+        name="PreToolUse:Bash",
+        event="PreToolUse",
+        outcome="error",
+        exit_code=2,
+        stdout="plan\nsteps\n",
+        stderr="blocked: no plan\n",
+    )
+    assert format_hook(hook) == (
+        'PreToolUse:Bash error (exit code 2): stderr="blocked: no plan" stdout="plan\\nsteps"'
+    )
+
+
+def test_a_long_hook_stream_is_cut_with_a_marker():
+    hook = HookRun(name="Stop", event="Stop", outcome="error", exit_code=1, stderr="e" * 1000)
+    text = format_hook(hook)
+    # The JSON string is `"eeee..."`; the opening quote counts toward the limit.
+    assert text == 'Stop error (exit code 1): stderr="' + "e" * (HOOK_STREAM_LIMIT - 1) + "…"
+
+
+def test_failed_hooks_beyond_the_cap_are_counted_not_listed():
+    hooks = [
+        HookRun(name=f"PostToolUse:T{i}", event="PostToolUse", outcome="error", exit_code=1)
+        for i in range(HOOK_LIMIT + 3)
+    ]
+    context = failure_context(_hooked(*hooks), limit=OUTPUT_LIMIT)
+    assert context is not None
+    assert len(context.failed_hooks) == HOOK_LIMIT
+    assert context.failed_hooks[0] == "PostToolUse:T0 error (exit code 1)"
+    assert context.more_hooks == 3
+    assert more_hooks_note(context) == "… +3 more failed hooks"

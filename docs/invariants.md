@@ -1725,3 +1725,16 @@ is built from the same `Product` but never writes a bridge: it grades with no to
 A bridge directory that cannot be written is `OSError` → `RunResult.error`; a runner reached
 with `tools:` and no `mcp` (a caller that skipped preflight) returns an errored result
 rather than running the case without its tools.
+
+### A hook is reported, never judged
+
+`RunResult.hooks` is every `hook_response` event a clean `claude-code` run reported, in
+order. The `outcome` is the product's own word, kept as written: any word but `success` is a
+failed hook, so a word a later version adds is shown, never refused, and a `hook_response`
+with no string name, event or outcome is skipped (the transcript keeps it). No evaluator
+reads `hooks`, so a hook that failed never fails, errors or passes a case by itself; it
+shows in the failure excerpt of a case that is not passing for another reason, through
+`FailureContext`, so the three reporters show it alike. An errored run reports no hooks, as
+it reports no tool calls: a truncated trace is never a partial parse. The preset's
+`--include-hook-events` only turns the `hook_*` events on (verified against Claude Code
+2.1.289); the `result` event the run is read from is unchanged.

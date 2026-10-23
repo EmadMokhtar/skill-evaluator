@@ -25,7 +25,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from skill_lens.models import ToolCall
+from skill_lens.models import HookRun, ToolCall
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,7 @@ class Trace:
 
     output: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
+    hooks: list[HookRun] = field(default_factory=list)
     transcript: list[dict[str, Any]] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
@@ -83,6 +84,37 @@ def _arguments(args: Any) -> dict[str, Any]:
 
 def _int(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _str(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _hook(event: dict[str, Any]) -> HookRun | None:
+    """A `hook_response` event as a `HookRun`, or None when it names no hook.
+
+    Name, event and outcome are what make it a hook; without any of them there
+    is nothing to show. The rest degrades: an odd stream is empty, and an odd
+    exit code is None, never a 0 the hook did not report.
+    """
+    name, hook_event, outcome = (
+        event.get("hook_name"),
+        event.get("hook_event"),
+        event.get("outcome"),
+    )
+    if not (isinstance(name, str) and isinstance(hook_event, str) and isinstance(outcome, str)):
+        return None
+    exit_code = event.get("exit_code")
+    if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+        exit_code = None
+    return HookRun(
+        name=name,
+        event=hook_event,
+        outcome=outcome,
+        exit_code=exit_code,
+        stdout=_str(event.get("stdout")),
+        stderr=_str(event.get("stderr")),
+    )
 
 
 def parse_copilot(text: str, ended: str | None = None) -> Trace:
@@ -183,12 +215,18 @@ def parse_copilot(text: str, ended: str | None = None) -> Trace:
 
 
 def parse_claude_code(text: str, ended: str | None = None) -> Trace:
-    """Claude Code: `system`/`init`, `assistant` messages, `result`.
+    """Claude Code: `system`/`init`, `assistant` messages, `system`/`hook_response`,
+    `result`.
 
-    Cost and usage are on the `result` event only.
+    Cost and usage are on the `result` event only. A hook is its
+    `hook_response` event, written once the hook has finished;
+    `hook_started` and `hook_progress` say it is running and stay in the
+    transcript only. The preset's `--include-hook-events` is what makes Claude
+    Code write them for every hook event, not only `SessionStart` and `Setup`.
     """
     events = parse_lines(text)
     tool_calls: list[ToolCall] = []
+    hooks: list[HookRun] = []
     invoked: set[str] = set()
     model = ""
     result: dict[str, Any] | None = None
@@ -197,6 +235,10 @@ def parse_claude_code(text: str, ended: str | None = None) -> Trace:
         if kind == "system" and event.get("subtype") == "init":
             if isinstance(event.get("model"), str):
                 model = event["model"]
+        elif kind == "system" and event.get("subtype") == "hook_response":
+            hook = _hook(event)
+            if hook is not None:
+                hooks.append(hook)
         elif kind == "assistant":
             message = event.get("message") if isinstance(event.get("message"), dict) else {}
             content = message.get("content")
@@ -216,6 +258,7 @@ def parse_claude_code(text: str, ended: str | None = None) -> Trace:
         ended = ended or "the claude-code trace ended"
         return Trace(
             tool_calls=tool_calls,
+            hooks=hooks,
             transcript=events,
             model=model,
             cost_note=f"{ended} before reporting cost",
@@ -234,6 +277,7 @@ def parse_claude_code(text: str, ended: str | None = None) -> Trace:
     return Trace(
         output=output,
         tool_calls=tool_calls,
+        hooks=hooks,
         transcript=events,
         input_tokens=(
             _int(usage.get("input_tokens"))

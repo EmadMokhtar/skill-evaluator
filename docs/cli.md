@@ -60,11 +60,11 @@ each `(skill, case, runner)` is its own outcome, and the same name twice is a us
 `skill-lens.toml`; it never appends to it. A two-runner run spends twice: the `Plan:` line
 printed before the first request includes the runner factor.
 
-A non-passing case prints what the agent actually did — its output, and every tool it
-called — under the evaluator detail, in the console and in the JUnit and Markdown reports
-alike. The output is cut at 500 characters by default; a cut is never silent (`… (1,842 more
-characters; --full-output prints them)`). Passing cases stay one line. See
-[what a failing case shows](gating.md#what-a-failing-case-shows).
+A non-passing case prints what the agent actually did — its output, every tool it called,
+and under `claude-code` every hook that failed — under the evaluator detail, in the console
+and in the JUnit and Markdown reports alike. The output is cut at 500 characters by default;
+a cut is never silent (`… (1,842 more characters; --full-output prints them)`). Passing
+cases stay one line. See [what a failing case shows](gating.md#what-a-failing-case-shows).
 
 `--repeat` and `--baseline` multiply spend: `--repeat 5 --baseline previous` runs 10x as many
 cases as a plain run (5 repetitions x 2 arms). Before a run on a runner that spends — a

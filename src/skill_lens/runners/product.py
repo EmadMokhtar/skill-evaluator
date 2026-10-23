@@ -154,11 +154,14 @@ PRESETS: dict[str, Product] = {
     ),
     "claude-code": Product(
         name="claude-code",
-        # --verbose is what stream-json needs in print mode. --setting-sources
-        # project and --strict-mcp-config keep the user's own hooks, plugins
-        # and MCP servers out of the eval (verified: the project skill is
-        # still discovered and OAuth still works); --no-session-persistence
-        # writes nothing under ~/.claude.
+        # --verbose is what stream-json needs in print mode.
+        # --include-hook-events writes a `hook_response` event for every hook
+        # the skill declares, not only SessionStart's (verified against
+        # 2.1.289: the flag only turns those events on; the `result` event is
+        # unchanged). --setting-sources project and --strict-mcp-config keep
+        # the user's own hooks, plugins and MCP servers out of the eval
+        # (verified: the project skill is still discovered and OAuth still
+        # works); --no-session-persistence writes nothing under ~/.claude.
         argv=(
             "claude",
             "-p",
@@ -166,6 +169,7 @@ PRESETS: dict[str, Product] = {
             "--output-format",
             "stream-json",
             "--verbose",
+            "--include-hook-events",
             "--dangerously-skip-permissions",
             "--setting-sources",
             "project",
@@ -586,6 +590,7 @@ class ProductRunner:
                 if bridge is not None
                 else list(trace.tool_calls)
             ),
+            hooks=list(trace.hooks),
             transcript=list(trace.transcript),
             latency_ms=elapsed(),
             **spend,

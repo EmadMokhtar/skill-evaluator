@@ -607,6 +607,13 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **`ProductRunner.run` still never raises** once the bridge exists: a bridge directory that
   cannot be written, and a `tools:` case reaching a product with no `mcp` (a caller that
   skipped preflight), are both `RunResult.error`.
+- **A hook is reported, never judged.** `RunResult.hooks` is every `hook_response` a clean
+  `claude-code` run reported, in order, the product's `outcome` word kept as written: any
+  word but `success` is a failed hook (shown, never refused), and one with no string name,
+  event or outcome is skipped (the transcript keeps it). No evaluator reads it, so a failed
+  hook never changes a verdict; it shows through `FailureContext` under a case already not
+  passing. An errored run reports none, as it reports no tool calls. `--include-hook-events`
+  only turns the `hook_*` events on (verified, 2.1.289); the `result` event is unchanged.
 - **`--model` with nothing to read it is a user error, and so is `--judge-model`** (exit 2).
   `--model` is read by a keyed runner, or by a keyed judge whose `judge_model` is unset;
   `--judge-model` by a keyed judge only, so under a product judge it is refused; a
