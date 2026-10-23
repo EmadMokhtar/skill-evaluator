@@ -1,3 +1,10 @@
+## v0.24.3 (2026-10-23)
+
+### Fix
+
+- name the runner on low-signal and high-variance lines (#112)
+- say a product runner can still run bundled scripts when allow_scripts is off (#113)
+
 ## v0.24.2 (2026-10-23)
 
 ### Fix

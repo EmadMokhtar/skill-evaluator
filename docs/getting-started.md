@@ -170,7 +170,7 @@ come from the environment only.
 ## 8. Gate pull requests
 
 ```yaml
-- uses: EmadMokhtar/skill-evaluator@v0.24.2
+- uses: EmadMokhtar/skill-evaluator@v0.24.3
   with:
     path: ./skills
     runner: pydantic-ai
