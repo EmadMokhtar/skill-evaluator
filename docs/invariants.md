@@ -928,6 +928,45 @@ which two work items racing for a directory name could collide. A shared directo
 the baseline arm read what the candidate wrote, or vice versa, corrupting the very
 comparison `--baseline` exists to make.
 
+### `task:` and `sessions:` are exclusive, and `sessions:` needs a `workspace:` and at least two entries
+
+`EvalCase._one_prompt` refuses both, neither, a one-entry list (which is `task:` spelled
+longer), a blank entry, and `sessions:` with no `workspace:` block; the loader turns each
+into a `CaseParseError`, so the run exits 2 before any case runs. It is a model validator
+rather than a loader check so a case built in code gets the same refusal. The workspace rule
+is the one that matters most: the workspace is the only thing that carries over from one
+session to the next, so without one the sessions would be unrelated tasks with only the last
+one scored — a case that looks like a resume test and measures nothing of the kind.
+
+### The sessions of one work item share its workspace, and nothing else carries over
+
+A `sessions:` case is still one work item, so the rule above still holds: each arm and each
+repetition gets its own `mkdtemp` directory. Inside the work item, `_run_one` creates the
+workspace once, before the first session, and deletes it once, after scoring, and
+`sessions.run_sessions` hands it to every session. Each session is a fresh `Runner.run` with
+a copy of the case whose `task` is that session's text: no conversation history, the agent
+and its mock tools built again (so a `returns:` list starts from the top), and a product's
+skill delivered again. The runner never sees `sessions:`, which is why every runner — a
+third-party one included — supports it without a change, and why a `task:` case still makes
+exactly one call with the case object itself.
+
+### A multi-session case is one outcome: an errored session errors it and stops the rest, and every evaluator reads the merged result
+
+`errored` is not `failed` holds per session: a session whose `RunResult.error` is set errors
+the case, and no later session runs — it would build on a state the case never meant to
+test, and every session is paid for. `sessions.merge_results` names the session
+(`session 2 of 3: ...`) and keeps the spend of every session that ran. The evaluators read
+one merged `RunResult`: the last session's output, every session's tool calls in order (so
+`forbidden:` and `max_calls` cannot miss an earlier session), the summed tokens, cost and
+latency, and every distinct `cost_note` / `usage_note` — one unmeasured session leaves the
+total unmeasured, so a declared limit fails as not evaluated rather than passing on a
+partial sum. `trajectory.skill_triggered` must hold in every session, read from
+`RunResult.skill_triggered_by_session`: one flag cannot say both "no session fired" (what a
+negative control needs) and "every session fired" (what a resume skill's positive control
+needs), so `skill_triggered` itself only summarises whether any session loaded the skill. A
+runner handed the whole case directly — bypassing the orchestrator — returns
+`refuse_sessions`'s error rather than sending None as the prompt.
+
 ### The workspace preamble is byte-identical in both arms and never names the skill
 
 `WORKSPACE_PREAMBLE` is appended in `prompting.instructions` purely on whether the case has
@@ -1520,11 +1559,11 @@ The last entry is the steady state a skill that keeps calling should see — the
 parent, the job that is done — and `trajectory.max_calls` is the check for a loop that
 should have ended. A visible "no more entries" message would instead teach the model
 something about the harness. The counter lives in the built tool (a locked closure in
-`build_mock_tool`), never on the runner, so every build — each arm, each attempt, each work
-item under `--concurrency` — starts from the top, and a framework running several calls from
-one model turn in parallel still hands out each entry exactly once. Which parallel call gets
-which entry is the framework's choice; where the argument, not the position, decides, the
-docs say to use a lookup.
+`build_mock_tool`), never on the runner, so every build — each arm, each attempt, each
+session, each work item under `--concurrency` — starts from the top, and a framework
+running several calls from one model turn in parallel still hands out each entry exactly
+once. Which parallel call gets which entry is the framework's choice; where the argument,
+not the position, decides, the docs say to use a lookup.
 
 ### A retried attempt gets fresh tools
 

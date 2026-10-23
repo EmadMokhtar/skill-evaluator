@@ -18,7 +18,7 @@ from typing import Any
 
 from skill_lens.bundle import SkillBundle
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
-from skill_lens.runners.base import RunnerDependencyError
+from skill_lens.runners.base import RunnerDependencyError, refuse_sessions
 from skill_lens.runners.limits import (
     TokenBudgetExceeded,
     no_usage_notes,
@@ -398,6 +398,9 @@ class LangChainRunner:
         cost is `retry_cost_usd`. An attempt stopped at `max_tokens` is
         returned as far as it got, with `stop_note` set, and never retried."""
         _require_langchain()
+        refused = refuse_sessions(case)
+        if refused is not None:
+            return refused
         configured = self._model if isinstance(self._model, str) else ""
         offered = skill_tool_name(skill.name) if case.mode == "offered" else None
         meters: list[_TokenMeter] = []

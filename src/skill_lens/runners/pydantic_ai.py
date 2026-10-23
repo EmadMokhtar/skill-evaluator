@@ -17,7 +17,7 @@ from typing import Any
 
 from skill_lens.bundle import SkillBundle
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
-from skill_lens.runners.base import RunnerDependencyError
+from skill_lens.runners.base import RunnerDependencyError, refuse_sessions
 from skill_lens.runners.limits import no_usage_notes, stop_note, token_limit
 from skill_lens.runners.preflight import UnsupportedBaseURL, check_trajectory_names
 from skill_lens.runners.pricing import calculate_cost, provider_of, unpriced_model
@@ -386,6 +386,9 @@ class PydanticAIRunner:
         `retry_cost_usd`.
         """
         _require_pydantic_ai()
+        refused = refuse_sessions(case)
+        if refused is not None:
+            return refused
         from pydantic_ai import capture_run_messages
         from pydantic_ai.usage import UsageLimits
 

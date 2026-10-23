@@ -60,8 +60,32 @@ class Runner(Protocol):
         it is set AND the skill's `bundle_root` has something under
         `scripts/`; the two read tools need only `bundle_root`. Additive with
         a default, so a runner written against Part 1 keeps working.
+
+        `case.task` is always set: the orchestrator runs a `sessions:` case
+        one session at a time and hands the runner a copy per session whose
+        `task` is that session's text. A runner handed the whole case
+        directly reports it through `refuse_sessions` instead of sending
+        None as the prompt.
         """
         ...
+
+
+SESSIONS_REFUSED = (
+    "this case declares sessions:, and a runner runs one session at a time; run the "
+    "case through run_evals, which calls the runner once per session"
+)
+
+
+def refuse_sessions(case: EvalCase) -> RunResult | None:
+    """An errored result for a case still carrying `sessions:`, else None.
+
+    Only a caller that bypasses the orchestrator can reach a runner with one.
+    It is a mistake in the calling code, not a provider failure, but a runner
+    still never raises for it: it returns this, and spends nothing.
+    """
+    if case.sessions is None:
+        return None
+    return RunResult(error=SESSIONS_REFUSED)
 
 
 class RunnerDependencyError(Exception):
