@@ -378,3 +378,34 @@ def test_claude_code_keeps_is_sandbox():
     assert env["IS_SANDBOX"] == "1"
     copilot = product_environment(_product("copilot"), ROOT, parent=parent, windows=False)
     assert "IS_SANDBOX" not in copilot
+
+
+class _WindowsEnviron(dict):
+    """`os.environ` as Windows has it: one variable, whatever its spelling."""
+
+    def __init__(self, values: dict[str, str]) -> None:
+        super().__init__({key.upper(): value for key, value in values.items()})
+
+    def __contains__(self, key: object) -> bool:
+        return isinstance(key, str) and super().__contains__(key.upper())
+
+    def __getitem__(self, key: str) -> str:
+        return super().__getitem__(key.upper())
+
+    def get(self, key: str, default=None):
+        return super().get(key.upper(), default)
+
+
+def test_on_windows_a_variable_is_passed_once_whatever_its_case():
+    # A lower-case controlled name must not bring the real profile back, and
+    # the allowlist's two proxy spellings must not become two entries for one
+    # variable -- which of them a process sees is undefined.
+    parent = _WindowsEnviron(
+        {"Path": "C:\\bin", "USERPROFILE": "C:\\Users\\you", "HTTPS_PROXY": "http://proxy"}
+    )
+    product = _product("cli", pass_env=("userprofile", "Home"))
+    env = product_environment(product, ROOT, parent=parent, windows=True)
+    folded = [key.upper() for key in env]
+    assert len(folded) == len(set(folded))
+    assert env["USERPROFILE"] == str(ROOT / "home")
+    assert "userprofile" not in env and "Home" not in env

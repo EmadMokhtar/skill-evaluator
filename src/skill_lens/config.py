@@ -114,7 +114,8 @@ class ProductSettings(BaseModel):
         for name in value:
             if not _VARIABLE_NAME.fullmatch(name):
                 raise ValueError(f"pass_env names {name!r}, which is not a variable name")
-            if name in CONTROLLED_ENV:
+            # In any case: Windows variable names ignore it.
+            if name.upper() in CONTROLLED_ENV:
                 raise ValueError(
                     f"pass_env names {name}, which home isolation sets itself; passing it "
                     'would undo the isolation -- set product_sandbox = "off" to run the '

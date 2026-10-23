@@ -633,3 +633,10 @@ def test_a_wrapper_command_marks_the_product(tmp_path):
     assert settings.product("claude-code").wrapper is True
     assert settings.product("copilot").wrapper is False
     assert Config().product("copilot").wrapper is False
+
+
+@pytest.mark.parametrize("name", ["home", "userprofile", "TmpDir", "Copilot_Home"])
+def test_pass_env_refuses_a_controlled_name_in_any_case(name):
+    # Windows variable names ignore case, so `userprofile` is USERPROFILE.
+    with pytest.raises(ValidationError, match="home isolation sets itself"):
+        ProductSettings(pass_env=[name])

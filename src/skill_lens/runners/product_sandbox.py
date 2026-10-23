@@ -258,7 +258,20 @@ def product_environment(
         *(own.passed if own else ()),
         *(product.pass_env or ()),
     ]
-    env = {name: parent[name] for name in names if name in parent and name not in CONTROLLED_ENV}
+    # A controlled name never passes, in any case: on Windows `userprofile`
+    # is USERPROFILE. There each variable is passed once, under the first
+    # spelling that finds it, since two spellings of one variable in the
+    # environment block leave which one a process sees undefined.
+    env: dict[str, str] = {}
+    folded: set[str] = set()
+    for name in names:
+        if name.upper() in CONTROLLED_ENV or name not in parent:
+            continue
+        if windows:
+            if name.upper() in folded:
+                continue
+            folded.add(name.upper())
+        env[name] = parent[name]
     home = root / "home"
     temporary = str(root / "tmp")
     if own is not None:
