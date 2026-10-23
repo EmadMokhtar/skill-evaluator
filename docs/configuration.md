@@ -214,7 +214,7 @@ max_output_bytes = 8000000                        # default
 | `max_output_bytes` | `8000000` | Cap on the trace, positive; a longer one is an errored case naming this key. |
 | `skills_dir` | `".agents/skills"` | `cli` only. Where the skill is written, relative to the working directory; no absolute path and no `..`. Not read by the judge, which delivers no skill. |
 | `invoke` | `"{task}"` | `cli` only. The prompt in `mode: loaded`; only `{name}` and `{task}` may appear (no other field name, no conversion, no format spec), and `{task}` must appear. Not read by the judge. |
-| `pass_env` | unset | Variable *names* (never values) the product also gets under the [product sandbox](#product-sandbox)'s home isolation, beyond the allowlist and the product's own auth variables. Each must be a variable name; one the isolation sets itself (`HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TMPDIR`, `TMP`, `TEMP`, the four `XDG_*_HOME`, `CLAUDE_CONFIG_DIR`, `COPILOT_HOME`) is a config error. Under home isolation `cli` must set it, `[]` when the command needs nothing. Not read under `product_sandbox = "off"`. |
+| `pass_env` | unset | Variable *names* (never values) the product also gets under the [product sandbox](#product-sandbox)'s home isolation, beyond the allowlist and the product's own auth variables. Each must be a variable name; one the isolation sets itself (`HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TMPDIR`, `TMP`, `TEMP`, the four `XDG_*_HOME`, `CLAUDE_CONFIG_DIR`, `COPILOT_HOME`, `CLAUDE_CODE_TMPDIR`, `CLAUDE_TMPDIR`) is a config error. Under home isolation `cli` must set it, `[]` when the command needs nothing. Not read under `product_sandbox = "off"`. |
 
 Two keys with two meanings: drop an isolation flag with `command`, add a model with
 `args`. `skills_dir` or `invoke` under a preset, an unknown table name, a `command` without
@@ -265,7 +265,7 @@ names in its table's `pass_env`:
 
 | Product | Its own variables |
 | --- | --- |
-| `claude-code` | `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`; `DISABLE_AUTOUPDATER=1` is set, so a fresh home does not start an update |
+| `claude-code` | `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`; `DISABLE_AUTOUPDATER=1` is set, so a fresh home does not start an update, and `CLAUDE_CODE_TMPDIR` points at the temporary directory, because Claude Code keeps its own temporary files there rather than under `TMPDIR` |
 | `copilot` | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` |
 | `cli` | none — name what the command needs in `pass_env` |
 

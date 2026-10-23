@@ -138,7 +138,7 @@ The product's environment is then **built, never inherited**:
 | `TMPDIR`, `TMP`, `TEMP` | `<root>/tmp` |
 | Kept from the harness when set | `PATH`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TZ`, `SHELL`, `USER`, `LOGNAME`; the proxy and CA variables (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY` and their lower-case forms, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`), because the product must reach its provider; `SystemRoot`, `COMSPEC`, `PATHEXT` on Windows |
 | The product's own variables, when set | `claude-code`: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`. `copilot`: `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` (Copilot's documented auth variables, in its order of precedence). `cli`: none |
-| Set for the product | `claude-code`: `DISABLE_AUTOUPDATER=1`, so a fresh home does not trigger an update on every case. `copilot` already passes `--no-auto-update` |
+| Set for the product | `claude-code`: `DISABLE_AUTOUPDATER=1`, so a fresh home does not trigger an update on every case, and `CLAUDE_CODE_TMPDIR=<root>/tmp` (added after review: Claude Code ignores `TMPDIR` for its own files and defaults to `/tmp`, which no backend lets it write, so every Bash command reported exit 1). `copilot` already passes `--no-auto-update` |
 | `[runners.<name>] pass_env` | each named variable, when set |
 
 `CLAUDE_CONFIG_DIR` and `COPILOT_HOME` are not set: they are dropped with the rest of the
@@ -151,7 +151,7 @@ value would be a secret in a committed file. It is how a Bedrock or Vertex setup
 `AWS_*` or `GOOGLE_*` variables, and how a `cli` product gets its own auth. A name must
 match `^[A-Za-z_][A-Za-z0-9_]*$`. A name the isolation sets or drops on purpose (`HOME`,
 `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TMPDIR`, `TMP`, `TEMP`, the four `XDG_*_HOME`,
-`CLAUDE_CONFIG_DIR`, `COPILOT_HOME`) is a config error naming the field: passing it would
+`CLAUDE_CONFIG_DIR`, `COPILOT_HOME`, `CLAUDE_CODE_TMPDIR`, `CLAUDE_TMPDIR`) is a config error naming the field: passing it would
 point the product back at the real home. The message says to use `product_sandbox = "off"`
 for that. Under `off` the whole environment passes anyway, and `pass_env` is not consulted;
 setting it then is not an error (a repository may turn isolation off in one job only).

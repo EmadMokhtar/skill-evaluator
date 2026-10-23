@@ -260,7 +260,7 @@ def test_the_controlled_names_are_the_ones_the_isolation_owns():
         {
             "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TMPDIR", "TMP", "TEMP",
             "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
-            "CLAUDE_CONFIG_DIR", "COPILOT_HOME",
+            "CLAUDE_CONFIG_DIR", "COPILOT_HOME", "CLAUDE_CODE_TMPDIR", "CLAUDE_TMPDIR",
         }
     ) == CONTROLLED_ENV  # fmt: skip
 
@@ -335,3 +335,15 @@ def test_wrap_under_bwrap_is_the_product_argv():
     assert sandbox.wrap(["agent"], [WORKSPACE], TEMPDIR) == scripts.product_bwrap_argv(
         [WORKSPACE], TEMPDIR, ["agent"]
     )
+
+
+def test_claude_code_keeps_its_temporary_files_under_the_root():
+    # Claude Code ignores TMPDIR for its own files -- every Bash command ends
+    # with `pwd -P >| $CLAUDE_CODE_TMPDIR/claude-<id>-cwd`, defaulting to
+    # /tmp, which no backend lets the product write. Verified in 2.1.289.
+    parent = {**PARENT, "CLAUDE_CODE_TMPDIR": "/tmp", "CLAUDE_TMPDIR": "/tmp"}
+    env = product_environment(_product("claude-code"), ROOT, parent=parent, windows=False)
+    assert env["CLAUDE_CODE_TMPDIR"] == str(ROOT / "tmp")
+    assert "CLAUDE_TMPDIR" not in env
+    copilot = product_environment(_product("copilot"), ROOT, parent=parent, windows=False)
+    assert "CLAUDE_CODE_TMPDIR" not in copilot

@@ -60,7 +60,7 @@ CONTROLLED_ENV: frozenset[str] = frozenset(
     {
         "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TMPDIR", "TMP", "TEMP",
         "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
-        "CLAUDE_CONFIG_DIR", "COPILOT_HOME",
+        "CLAUDE_CONFIG_DIR", "COPILOT_HOME", "CLAUDE_CODE_TMPDIR", "CLAUDE_TMPDIR",
     }
 )  # fmt: skip
 # Kept from the harness when set. Not secrets, except that a proxy URL may
@@ -83,24 +83,32 @@ class ProductEnv:
     `auth` is passed when set and counted by the auth check; `hint` names
     what to export, for its refusal; `passed` is passed but not counted (an
     endpoint is not a credential); `fixed` is set for the product whatever
-    the harness has.
+    the harness has; `temporary` names variables the product reads instead
+    of `TMPDIR` for its own temporary files, each set to the work item's
+    temporary directory.
     """
 
     auth: tuple[str, ...]
     hint: str
     passed: tuple[str, ...] = ()
     fixed: tuple[tuple[str, str], ...] = ()
+    temporary: tuple[str, ...] = ()
 
 
 # Keyed by product name, so a preset under a wrapper `command` keeps them.
 # `cli` has no entry: skill-lens does not know its auth.
 PRODUCT_ENV: dict[str, ProductEnv] = {
     # DISABLE_AUTOUPDATER: a fresh home must not start an update on every case.
+    # CLAUDE_CODE_TMPDIR: Claude Code ignores TMPDIR for its own files and
+    # defaults to /tmp, which no backend lets it write; every Bash command
+    # ends with `pwd -P >| $CLAUDE_CODE_TMPDIR/claude-<id>-cwd` (verified in
+    # 2.1.289), so without it every command would report exit 1.
     "claude-code": ProductEnv(
         auth=("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
         hint="CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY",
         passed=("ANTHROPIC_BASE_URL",),
         fixed=(("DISABLE_AUTOUPDATER", "1"),),
+        temporary=("CLAUDE_CODE_TMPDIR",),
     ),
     # Copilot's documented auth variables, in its order of precedence.
     "copilot": ProductEnv(
@@ -228,10 +236,11 @@ def product_environment(
         *(product.pass_env or ()),
     ]
     env = {name: parent[name] for name in names if name in parent and name not in CONTROLLED_ENV}
-    if own is not None:
-        env.update(own.fixed)
     home = root / "home"
     temporary = str(root / "tmp")
+    if own is not None:
+        env.update(own.fixed)
+        env.update(dict.fromkeys(own.temporary, temporary))
     env.update(
         HOME=str(home),
         XDG_CONFIG_HOME=str(home / ".config"),
