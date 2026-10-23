@@ -188,8 +188,8 @@ profile allows it. Otherwise the rules are the script rules, rebuilt from the sa
 (allow default)
 (deny file-write*)
 (allow file-write* (subpath <cwd>) (subpath <root>) [(subpath <bridge dir>)])
-(allow file-write-data (literal "/dev/null") …)          ; the device files the product
-                                                          ; needs, found empirically
+(allow file-write-data (literal "/dev/null") (literal "/dev/stdout")
+                       (literal "/dev/stderr") (regex #"^/dev/fd/[0-9]+$"))
 (deny file-read* (subpath <tempdir>))
 (allow file-read* (subpath <cwd>) (subpath <root>) [(subpath <bridge dir>)])
 (allow file-read-metadata (literal <each parent between tempdir and those>))
@@ -225,6 +225,10 @@ So, under either backend, the product:
 `<root>/home/Library/Caches/copilot` and `<root>/tmp/node-compile-cache`, with `/dev/null` the
 only device written. Writes to an already-open inherited file (the capture files `invoke`
 opens before the process starts) need no rule.
+
+The standard streams by path were added after review: `echo msg >/dev/stderr`, common in
+hooks and scripts, was refused under `/dev/null` alone, and under `set -e` that aborts the
+script. They reach only descriptors the process already holds.
 
 **If a real product needs more**, the writable set is widened only to a named path, the
 trust note and the docs are reworded to match in the same commit, and the PR says so. It is

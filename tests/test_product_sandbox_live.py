@@ -116,10 +116,12 @@ def test_the_product_writes_its_working_directory_and_home(tmp_path, workspace, 
     assert (workspace.root / "inside.txt").is_file()
 
 
-def test_a_write_outside_never_reaches_the_host(tmp_path, workspace, listener):
-    # sandbox-exec refuses it; bwrap lets it land in a throwaway tmpfs. Either
-    # way the host's file must not exist afterwards.
-    _, outside, _ = _probe(tmp_path, workspace, listener)
+def test_a_write_outside_is_refused_and_never_reaches_the_host(tmp_path, workspace, listener):
+    # Refused under both backends: sandbox-exec denies it, and bwrap's temp
+    # dir is remounted read-only after the binds rather than left a writable
+    # tmpfs where the write would vanish.
+    seen, outside, _ = _probe(tmp_path, workspace, listener)
+    assert seen["outside"] == "refused"
     assert not outside.exists()
 
 
@@ -131,3 +133,27 @@ def test_a_sibling_temporary_directory_cannot_be_read(tmp_path, workspace, liste
 def test_the_network_is_reachable(tmp_path, workspace, listener):
     seen, _, _ = _probe(tmp_path, workspace, listener)
     assert seen["network"] == "connected"
+
+
+def test_the_product_can_write_its_own_standard_streams(tmp_path, workspace):
+    # `echo msg >/dev/stderr` is a common idiom in hooks and scripts; under
+    # `set -e` a refusal would abort them and score the case as failed.
+    product = Product(
+        name="cli",
+        argv=(
+            "/bin/bash",
+            "-c",
+            "set -e; echo e >/dev/stderr; echo o >/dev/stdout; echo f >/dev/fd/1",
+            "{prompt}",
+        ),
+        skills_dir=".agents/skills",
+        invoke="{task}",
+        parse=None,
+        version_command=None,
+        pass_env=(),
+    )
+    skill = Skill(name="probe", description="d", instructions="i", path=tmp_path, markdown="")
+    case = EvalCase(name="streams", task="x", workspace=WorkspaceSpec())
+    result = ProductRunner(product, sandbox=SANDBOX).run(skill, case, workspace)
+    assert result.error is None, result.error
+    assert result.output == "o\nf"

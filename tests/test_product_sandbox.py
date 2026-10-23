@@ -289,7 +289,12 @@ def test_the_product_profile_allows_the_network_and_confines_writes():
     assert lines[3] == (
         f'(allow file-write* (subpath "{WORKSPACE}") (subpath "{HOME_ROOT}") (subpath "{BRIDGE}"))'
     )
-    assert '(allow file-write-data (literal "/dev/null"))' in lines
+    # A process writes its own standard streams by path (`echo x >/dev/stderr`
+    # in a hook); those reach only descriptors it already holds.
+    assert (
+        '(allow file-write-data (literal "/dev/null") (literal "/dev/stdout") '
+        '(literal "/dev/stderr") (regex #"^/dev/fd/[0-9]+$"))'
+    ) in lines
     assert f'(deny file-read* (subpath "{TEMPDIR}"))' in lines
     assert (
         f'(allow file-read* (subpath "{WORKSPACE}") (subpath "{HOME_ROOT}") (subpath "{BRIDGE}"))'

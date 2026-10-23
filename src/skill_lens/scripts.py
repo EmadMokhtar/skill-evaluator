@@ -236,7 +236,11 @@ def product_macos_profile(writable: Sequence[Path], tempdir: Path) -> str:
         "(allow default)",
         "(deny file-write*)",
         f"(allow file-write* {allowed})",
-        '(allow file-write-data (literal "/dev/null"))',
+        # A process's own standard streams, by path: `echo msg >/dev/stderr`
+        # is common in hooks and scripts, and these reach only descriptors
+        # the process already holds.
+        '(allow file-write-data (literal "/dev/null") (literal "/dev/stdout") '
+        '(literal "/dev/stderr") (regex #"^/dev/fd/[0-9]+$"))',
         f"(deny file-read* (subpath {_quoted(tempdir)}))",
         f"(allow file-read* {allowed})",
     ]
