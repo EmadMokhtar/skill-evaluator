@@ -12,7 +12,8 @@ its error should say so rather than surface several layers away as a
 `JudgeEvaluator` complaint about a mismatched id set.
 
 The judge runs in an empty directory with no skill delivered: it grades
-text, and must not discover the skill under test.
+text, and must not discover the skill under test. It runs under the run's
+product sandbox, the same decision the product runners share (issue #99).
 """
 
 from __future__ import annotations
@@ -29,13 +30,18 @@ from skill_lens.judges.prompt import SYSTEM_PROMPT, render_request
 from skill_lens.models import CheckResult, JudgeOutput, JudgeRequest, JudgeVerdict, ProductStatus
 from skill_lens.runners.product import (
     MAX_PROMPT_BYTES,
-    TRUST_NOTE,
     Product,
     ProductSetupError,
     find_executable,
     invoke,
     probe_version,
     read_trace,
+)
+from skill_lens.runners.product_sandbox import (
+    PRODUCT_SANDBOX_OFF,
+    ProductSandbox,
+    environment_refusal,
+    isolate,
 )
 
 JUDGE_PREFIX = "skill-lens-judge-"
@@ -184,9 +190,12 @@ class ProductJudge:
 
     needs_api_key = False
 
-    def __init__(self, product: Product) -> None:
+    def __init__(self, product: Product, *, sandbox: ProductSandbox = PRODUCT_SANDBOX_OFF) -> None:
+        """`sandbox` is the run's product sandbox decision; the default,
+        `off`, is the behaviour before issue #99."""
         self._base = product
         self._product = replace(product, argv=(*product.argv, *product.judge_args))
+        self._sandbox = sandbox
         self.name = product.name
 
     def judge(self, request: JudgeRequest) -> JudgeVerdict:
@@ -205,7 +214,10 @@ class ProductJudge:
         except OSError as exc:
             return JudgeVerdict(error=f"{type(exc).__name__}: {exc}")
         try:
-            trace = read_trace(product, invoke(product, prompt, cwd))
+            with isolate(self._sandbox, product) as isolation:
+                trace = read_trace(product, invoke(product, prompt, cwd, isolation=isolation))
+        except OSError as exc:
+            return JudgeVerdict(error=f"{type(exc).__name__}: {exc}")
         finally:
             shutil.rmtree(cwd, ignore_errors=True)
         spend = {
@@ -258,8 +270,16 @@ class ProductJudge:
                         f"the judge's own {' '.join(product.judge_args)!r} cannot override "
                         "it); grade under another judge or drop the flag"
                     )
+        refusal = environment_refusal(product, self._sandbox, "judge")
+        if refusal is not None:
+            raise ProductSetupError(refusal)
         executable = find_executable(product, "judge")
-        version = probe_version(product, executable, "judge")
+        with isolate(self._sandbox, product) as isolation:
+            version = probe_version(product, executable, "judge", isolation)
         return ProductStatus(
-            name=product.name, executable=executable, version=version, trust=TRUST_NOTE
+            name=product.name,
+            executable=executable,
+            version=version,
+            trust=self._sandbox.trust(),
+            sandbox=self._sandbox.status(),
         )

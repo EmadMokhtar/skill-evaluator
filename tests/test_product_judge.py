@@ -18,7 +18,14 @@ from skill_lens.judges.product import (
 )
 from skill_lens.judges.prompt import SYSTEM_PROMPT, render_request
 from skill_lens.models import CheckResult, JudgeRequest, RubricCheck
-from skill_lens.runners.product import PRESETS, TRUST_NOTE, Product, ProductSetupError
+from skill_lens.runners.product import (
+    PRESETS,
+    TRUST_NOTE,
+    Product,
+    ProductRunner,
+    ProductSetupError,
+)
+from skill_lens.runners.product_sandbox import HOME_PREFIX, ProductSandbox
 from skill_lens.runners.traces import parse_claude_code, parse_copilot
 
 FAKE = Path(__file__).parent / "fake_product.py"
@@ -424,3 +431,52 @@ def test_the_judge_name_is_the_products():
     judge = ProductJudge(_product(name="copilot"))
     assert judge.name == "copilot"
     assert judge.needs_api_key is False
+
+
+# --- the product sandbox (issue #99) ---
+
+HOME_ONLY = ProductSandbox("auto", "none", "test")
+FAKE_VARIABLES = ("FAKE_PRODUCT_RECORD", "FAKE_PRODUCT_TRACE", "FAKE_PRODUCT_MODE")
+
+
+def _isolated_judge(**overrides) -> ProductJudge:
+    overrides.setdefault("pass_env", FAKE_VARIABLES)
+    overrides.setdefault("wrapper", True)
+    return ProductJudge(_product(**overrides), sandbox=HOME_ONLY)
+
+
+def test_the_judge_runs_in_a_temporary_home(fake, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-harness-only")
+    verdict = _isolated_judge().judge(REQUEST)
+    assert verdict.error is None
+    seen = fake()
+    home = Path(seen["home"])
+    assert home.name == "home" and home.parent.name.startswith(HOME_PREFIX)
+    assert "OPENAI_API_KEY" not in seen["env_keys"]
+
+
+def test_the_judges_home_is_removed_afterwards(fake, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "exit3")
+    _isolated_judge().judge(REQUEST)
+    assert not Path(fake()["home"]).parent.exists()
+
+
+def test_the_judge_preflight_applies_the_environment_check(monkeypatch):
+    for name in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    judge = ProductJudge(_product(), sandbox=HOME_ONLY)
+    with pytest.raises(ProductSetupError, match=r'^judge claude-code: product_sandbox = "auto"'):
+        judge.preflight()
+
+
+def test_the_judge_preflight_reports_the_sandbox():
+    status = _isolated_judge().preflight()
+    assert status.sandbox == HOME_ONLY.status()
+    assert status.trust == HOME_ONLY.trust()
+
+
+def test_one_product_as_runner_and_judge_is_one_status():
+    # The orchestrator lists equal statuses once; equal needs the same sandbox.
+    product = _product(wrapper=True)
+    runner_status = ProductRunner(product, sandbox=HOME_ONLY).preflight([], {})
+    assert ProductJudge(product, sandbox=HOME_ONLY).preflight() == runner_status
