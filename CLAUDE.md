@@ -653,11 +653,15 @@ fails if the two drift apart — so a new invariant is added in both places or n
   `allow-scripts` input is unset by default so the file decides, and `pull_request_target`,
   collaborator-PR and self-hosted workflows should pass `allow-scripts: false` explicitly.
   Docs-only: `docs/security.md`, `docs/ci.md`.
-- **The bundle is every file the skill ships except `SKILL.md`, `.git` and its eval files** —
+- **The bundle is every file the skill ships, never its eval files or secrets** —
   `bundle.withheld` is the one rule for `SkillBundle`, product delivery and the previous
-  baseline's extraction: the top-level `SKILL.md`, `evals/` and `.git` directories, and
-  `*.eval.yaml` / `evals.json` files, at any depth, checked on the path asked for and the
-  path it resolves to (issue #92). Only `scripts/` is runnable.
+  baseline's extraction: the top-level `SKILL.md`; `evals/`, `.git`, `.hg`, `.svn`,
+  `node_modules`, `.venv`, `__pycache__`; `*.eval.yaml`, `evals.json`, `.env`, `.env.*`,
+  `.npmrc`, `.netrc`, `.pypirc`, `skill-lens.toml` — at any depth, case-insensitively,
+  checked on the path asked for and the path it resolves to (issue #92). `_shipped` is the
+  one walk (regular files only, directory links never descended); delivery writes exactly
+  `delivered_paths`, never a link; past 1,000 files or 100 MB it is `BundleTooLarge` (exit 2
+  in preflight). Only `scripts/` is runnable.
 - **`Skill.bundle_root` defaults to `None`, and only the loader and the baseline resolver
   set it**, so the `--baseline none` skill never carries the candidate's scripts.
 - **A script's environment is built from an allowlist, never inherited.** The key that pays

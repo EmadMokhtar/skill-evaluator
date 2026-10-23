@@ -13,7 +13,8 @@ import os
 import pytest
 
 from promptly import promptly
-from skill_lens.bundle import SkillBundle, has_bundle, script_extension, withheld
+from skill_lens import bundle as bundle_module
+from skill_lens.bundle import BundleTooLarge, SkillBundle, has_bundle, script_extension, withheld
 from skill_lens.workspace import FileTooLarge, PathRefused
 
 INTERPRETERS = {"py": ("python3",), "sh": ("bash",)}
@@ -65,6 +66,27 @@ def _skill_dir(tmp_path):
         ("reference.md", False),
         ("scripts/count.py", False),
         ("evalsx/notes.md", False),
+        # Case variants: macOS and Windows find `Evals/` as the loader's evals/.
+        ("Evals/a.yaml", True),
+        ("EVALS.JSON", True),
+        ("references/X.EVAL.YAML", True),
+        ("skill.md", True),
+        (".GIT/config", True),
+        # Never part of what an install should carry: other version control,
+        # dependency and cache directories, secret files, the harness's config.
+        (".hg/store", True),
+        (".svn/entries", True),
+        ("node_modules/a/index.js", True),
+        (".venv/bin/python", True),
+        ("scripts/__pycache__/x.pyc", True),
+        (".env", True),
+        (".env.local", True),
+        (".npmrc", True),
+        (".netrc", True),
+        (".pypirc", True),
+        ("skill-lens.toml", True),
+        (".envrc", False),
+        ("docs/environment.md", False),
     ],
 )
 def test_withheld_names_skill_md_the_eval_files_and_git(path, kept_back):
@@ -260,3 +282,59 @@ def test_the_eval_file_names_match_the_case_loader():
     assert bundle.EVALS_DIRNAME == loader.EVALS_DIRNAME
     assert bundle.EVAL_SUFFIX == loader.EVAL_SUFFIX
     assert bundle.EVALS_JSON_FILENAME == evals_json.EVALS_JSON_FILENAME
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_link_to_the_skill_s_own_directory_is_neither_listed_nor_a_way_in(tmp_path):
+    """A directory link is never walked, so nothing is listed through it, and
+    a read through it is judged by where it resolves: the eval file stays
+    refused."""
+    root = _skill_dir(tmp_path)
+    (root / "references" / "self").symlink_to(root, target_is_directory=True)
+    bundle = SkillBundle(root)
+    assert not any(entry.startswith("references/self") for entry in bundle.listing())
+    with pytest.raises(PathRefused):
+        bundle.read("references/self/evals/more.yaml")
+
+
+def test_a_case_variant_of_an_eval_file_is_never_listed_or_read(tmp_path):
+    root = tmp_path / "skill"
+    (root / "Evals").mkdir(parents=True)
+    (root / "SKILL.md").write_text("x", encoding="utf-8")
+    (root / "Evals" / "cases.yaml").write_text("cases: []\n", encoding="utf-8")
+    (root / "EVALS.JSON").write_text("{}", encoding="utf-8")
+    (root / "notes.md").write_text("n", encoding="utf-8")
+    bundle = SkillBundle(root.resolve())
+    assert bundle.listing() == ["notes.md"]
+    for candidate in ("Evals/cases.yaml", "EVALS.JSON"):
+        with pytest.raises(PathRefused):
+            bundle.read(candidate)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no FIFOs on this platform")
+def test_a_fifo_in_the_skill_is_not_listed(tmp_path):
+    root = _skill_dir(tmp_path)
+    os.mkfifo(root / "pipe")
+    assert "pipe" not in SkillBundle(root).listing()
+
+
+def test_a_bundle_over_the_file_cap_is_refused_naming_the_count(tmp_path, monkeypatch):
+    """A SKILL.md at a repository root ships the repository; a cap stops one
+    from being copied into every work item."""
+    monkeypatch.setattr(bundle_module, "MAX_BUNDLE_FILES", 3)
+    with pytest.raises(BundleTooLarge, match=r"ships more than 3 files \(the cap is 3\)"):
+        SkillBundle(_skill_dir(tmp_path)).listing()
+
+
+def test_a_bundle_over_the_byte_cap_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(bundle_module, "MAX_BUNDLE_BYTES", 10)
+    with pytest.raises(BundleTooLarge, match="bytes"):
+        SkillBundle(_skill_dir(tmp_path)).listing()
+
+
+def test_scripts_walks_only_the_scripts_directory(tmp_path, monkeypatch):
+    """Called per work item: it must not cost a walk of the whole skill. With
+    a cap the whole skill exceeds, scripts() still answers."""
+    monkeypatch.setattr(bundle_module, "MAX_BUNDLE_FILES", 3)
+    bundle = SkillBundle(_skill_dir(tmp_path))
+    assert bundle.scripts() == ["scripts/count.py", "scripts/data.json", "scripts/nested/deep.sh"]

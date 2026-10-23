@@ -138,8 +138,9 @@ Add flags with `[runners.<name>] args` (for example, a model); replace the whole
 declares one, a fresh temporary directory otherwise) holds `SKILL.md` **verbatim (its text
 as written; line endings are normalised)** — products honour frontmatter keys skill-lens
 does not model, such as `allowed-tools` — and beside it every file the skill ships, as an
-install copies it, except `.git` and the eval files (`evals/`, `*.eval.yaml`, `evals.json`,
-at any depth). The copy stays in a workspace after the run, so `--keep-workspace`
+install copies it, except the eval files, version control, dependency directories and secret
+files (the list is under [Bundled files and scripts](#bundled-files-and-scripts)). Each file is
+written as a regular file, read through any link; a link is never copied as a link. The copy stays in a workspace after the run, so `--keep-workspace`
 shows exactly what the product saw; a case whose `file:`, `file_glob` or judge artifact would
 read that copy is refused in preflight, because it would check the harness's files.
 
@@ -582,12 +583,19 @@ a `workspace:` block also gets:
 | `read_skill_file` | Read one bundled text file, e.g. `references/style.md` | a bundle |
 | `run_script` | Run a file under `scripts/` with the workspace as its current directory | a file under `scripts/` **and** `allow_scripts` |
 
-Everything the skill ships is reachable except `SKILL.md` itself, `.git` and the eval files —
-`evals/`, `*.eval.yaml` and `evals.json`, at any depth, and a link that resolves onto one:
-`refused: 'evals/cases.yaml' is not a file the skill ships; SKILL.md, eval files (evals/,
-*.eval.yaml, evals.json) and .git are never readable`. An eval file holds the expected
-answers, and a tool that could read it would hand the agent its answer key, so keep anything
-the agent must not see — a mock tool library, an expected output — under `evals/`. A binary
+Everything the skill ships is reachable except, at any depth and in any letter case:
+`SKILL.md` itself; the eval files (`evals/`, `*.eval.yaml`, `evals.json`); version control
+(`.git`, `.hg`, `.svn`); dependency and cache directories (`node_modules`, `.venv`,
+`__pycache__`); secret files (`.env`, `.env.*`, `.npmrc`, `.netrc`, `.pypirc`); and
+`skill-lens.toml`. A link that resolves onto one of those, or out of the skill's directory,
+is refused too: `refused: 'evals/cases.yaml' is not a file the skill ships; SKILL.md, eval
+files (evals/, *.eval.yaml, evals.json), version control, dependency directories and secret
+files (.env, .npmrc, ...) are never readable`. An eval file holds the expected answers, and a
+tool that could read it would hand the agent its answer key, so keep anything the agent must
+not see — a mock tool library, an expected output — under `evals/`. A skill that ships more
+than 1,000 files or 100 MB is refused: a product runner's preflight exits `2`, and
+`list_skill_files` returns the refusal; that is almost always a `SKILL.md` at a repository
+root, which would otherwise ship the whole repository. A binary
 file gets the same `not valid UTF-8 text` message `read_file` gives; copying one into
 the workspace is not supported yet. The tools describe themselves without naming the skill:
 the instruction to run `scripts/count.py` comes from `SKILL.md`, which is what is under

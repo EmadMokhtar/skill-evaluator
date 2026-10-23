@@ -190,12 +190,17 @@ order of jobs and how a failed step is recovered.
 ## Running bundled scripts
 
 **What the agent can read of the skill.** Every file the skill ships, as an install copies
-it — `scripts/`, `references/`, `assets/`, `templates/`, a `reference.md` — except `SKILL.md`
-itself, `.git`, and the eval files: `evals/`, `*.eval.yaml` and `evals.json`, at any depth,
-and any link that resolves onto one. The same rule decides what a product runner receives
-and what a `--baseline previous` arm extracts from git. Anything that must not reach the
-agent — a mock tool library, an expected output, a fixture with the answer in it — belongs
-under `evals/`; a file elsewhere in the skill's directory is delivered.
+it — `scripts/`, `references/`, `assets/`, `templates/`, a `reference.md` — except, at any
+depth and in any letter case: `SKILL.md` itself; the eval files (`evals/`, `*.eval.yaml`,
+`evals.json`); version control (`.git`, `.hg`, `.svn`); `node_modules`, `.venv` and
+`__pycache__`; the secret files `.env`, `.env.*`, `.npmrc`, `.netrc` and `.pypirc`; and
+`skill-lens.toml`. A link onto any of those, or out of the skill's directory, is not followed:
+the read tool refuses it, and product delivery writes regular files only, never a link. The
+same rule decides what a product runner receives and what a `--baseline previous` arm extracts
+from git, and a skill that ships more than 1,000 files or 100 MB is refused rather than copied
+into every work item. The list of secret files is a floor, not a scan: anything else that must
+not reach the agent or the model provider — a mock tool library, an expected output, a
+credential under another name — belongs under `evals/` or outside the skill's directory.
 
 A skill may ship code under `scripts/`. skill-lens can execute it, and the trust model is:
 

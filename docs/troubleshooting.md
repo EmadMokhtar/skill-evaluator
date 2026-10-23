@@ -192,7 +192,7 @@ the note, after the colon in the gate reason. Each one has a different fix.
 | `SKILL.md is not tracked by git` | The file exists but was never committed. Commit it. There is no earlier version until there is a first one. |
 | `cannot read <path>/SKILL.md: <the OS or decoding error>` | The working copy cannot be read: file permissions, or a file that is not UTF-8 text. |
 | `no earlier version of SKILL.md found in the last 50 commits` | Every one of the last 50 commits touching this `SKILL.md` carries the same `version:`, or the same content where there is no `version:`. Bump `version:` in the same commit as the edit. Quote it (`version: "1.2"`), because YAML reads an unquoted `1.20` and `1.2` as the same number — an unquoted two-part version is itself an exit-2 authoring error. |
-| `cannot archive commit <sha>` | `git archive` failed or passed its 10-second limit while fetching the previous version's bundled files. A very large `assets/` directory can do that. |
+| `cannot archive commit <sha>` | `git archive` failed or passed its 10-second limit while fetching the previous version's bundled files. A skill that ships very large files, or a `SKILL.md` at a repository root, can do that. |
 | `cannot extract the bundle at commit <sha>: <error>` | The archive would not unpack: a member failed the safe-extraction filter, or the filesystem refused. |
 
 `<sha>` is the first eight characters of the commit hash. Full detail is in

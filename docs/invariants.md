@@ -966,20 +966,27 @@ on for itself. The action's `allow-scripts` input is unset by default, so the fi
 `pull_request_target`, collaborator-pull-request and self-hosted workflows should pass
 `allow-scripts: false` explicitly. [Security](security.md) and [CI](ci.md) say so.
 
-### The bundle is every file the skill ships except `SKILL.md`, `.git` and its eval files
+### The bundle is every file the skill ships, never its eval files or secrets
 
 A skill ships more than the three Agent Skills directories — planning-with-files tells the
 agent to copy `templates/task_plan.md` and links `reference.md` — and an install copies all
 of it, so measuring less would measure a different skill (issue #92). `bundle.withheld` is the
 one rule, shared by `SkillBundle`, product delivery and the `--baseline previous` extraction:
-the top-level `SKILL.md` (delivered on its own path, from the skill's markdown), anything
-under an `evals/` or `.git` directory, and any `*.eval.yaml` or `evals.json` file, **at any
-depth** — the expected answers are never readable by the agent, wherever they sit.
-`SkillBundle` checks the path asked for and the path it resolves to, so a link onto an eval
-file is refused too; `listing()` leaves out a link that resolves outside the root or onto a
-withheld file, so it never advertises a file `read` would refuse. `bundle.py` spells the eval
-file names itself (importing them would be a cycle) and a test keeps them equal to the
-loader's. Only `scripts/` is runnable.
+the top-level `SKILL.md`, the `evals/`, `.git`, `.hg`, `.svn`, `node_modules`, `.venv` and `__pycache__` directories, and `*.eval.yaml`, `evals.json`, `.env`, `.env.*`, `.npmrc`, `.netrc`, `.pypirc` and `skill-lens.toml` files — **at any depth, compared case-insensitively** (macOS and Windows find
+`Evals/` as the loader's `evals/`). The expected answers never reach the agent, and neither
+does a secret or a dependency tree a skill at a repository root would otherwise carry.
+`bundle._shipped` is the one walk: withheld directories are pruned, a directory link is never
+descended, and a file counts only when it is a regular file, directly or through a link,
+resolving inside the skill onto a path not withheld itself — so a FIFO is never opened.
+`SkillBundle` checks the path asked for and the path it resolves to; product delivery writes
+exactly the files `delivered_paths` reports, reading through links and never copying one as a
+link, so a link to the skill's own directory delivers nothing; the baseline extraction drops a
+symlink member that is absolute, leaves the skill or lands on a withheld path. Past
+`MAX_BUNDLE_FILES` (1,000) or `MAX_BUNDLE_BYTES` (100 MB) the bundle is `BundleTooLarge`: exit
+2 in product preflight, a refusal the read tool returns, `BaselineUnavailable` for a previous
+bundle. `scripts()` walks only `scripts/`. `bundle.py` spells the eval file names itself
+(importing them would be a cycle) and a test keeps them equal to the loader's. Only
+`scripts/` is runnable.
 
 ### `Skill.bundle_root` defaults to `None`, and only the loader and the baseline resolver set it
 

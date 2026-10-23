@@ -384,6 +384,8 @@ def build_bundle_tools(
     def list_skill_files(**_extra: Any) -> str:
         try:
             entries = bundle.listing()
+        except PathRefused as exc:  # BundleTooLarge: the skill ships past the cap
+            return str(exc)
         except OSError as exc:  # pragma: no cover - a directory the loader just saw
             return f"refused: cannot list the skill's files: {exc}"
         return "\n".join(entries) if entries else "(empty)"

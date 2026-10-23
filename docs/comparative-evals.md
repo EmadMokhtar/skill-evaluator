@@ -87,8 +87,8 @@ flowchart TD
      from the working copy's;
    - if it declares none, the first commit whose **content** differs from the working copy's.
 
-5. Extract the files the skill shipped at that same commit — every file but `SKILL.md`, `.git`
-   and its eval files — from the directory the skill had at that commit (`git archive`, then
+5. Extract the files the skill shipped at that same commit, by the same rule as the
+   candidate's bundle, from the directory the skill had at that commit (`git archive`, then
    `tarfile` with its `data` filter) into a temporary directory that is deleted when the run
    ends, so the previous instructions are paired with the previous bundle — never with the
    candidate's scripts. A commit that shipped no such file gives the baseline no bundle

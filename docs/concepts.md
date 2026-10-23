@@ -326,7 +326,7 @@ See [Gating and exit codes](gating.md).
 | Assertion | A rule checked against the agent's final output text, or against a file it produced — such as `contains` or `file-produced`. |
 | Baseline | What the candidate is measured against: an empty skill (`none`) or the previous version (`previous`). |
 | Budget | A limit on tokens, cost or latency that a case declares and the run checks. |
-| Bundle | Every file a skill ships beside its `SKILL.md`, except the eval files and `.git`. |
+| Bundle | Every file a skill ships beside its `SKILL.md`, except its eval files, version control, dependency directories and secret files. |
 | Candidate | The arm running the skill under test. Every gate rule but `--min-delta` reads this arm only. |
 | Case | One task plus what you expect of it, written in YAML beside the skill. |
 | Cassette | A recorded provider response replayed in tests, so the suite runs offline. |

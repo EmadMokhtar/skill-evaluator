@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
+
+import pytest
 
 from skill_lens.models import Skill
 from skill_lens.skills.baseline import (
@@ -490,3 +493,46 @@ def test_the_history_limit_counts_commits_on_both_sides_of_a_move(tmp_path, monk
     previous = _resolve(tmp_path, skill)
     assert isinstance(previous, Skill), previous
     assert previous.version == "1.0.0"
+
+
+def _commit_link(repo: Path, link: str, target: str) -> None:
+    path = repo / link
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.symlink_to(target)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_link_out_of_the_skill_is_dropped_not_fatal_in_the_previous_bundle(tmp_path):
+    """The candidate's bundle leaves such a link out; the baseline's must too,
+    rather than failing the whole extraction on the safe filter."""
+    repo = _repo(tmp_path)
+    _commit_link(repo, "references/out.md", "../../outside.md")
+    _commit_bundle(
+        repo,
+        {"SKILL.md": _skill_md("1.0.0", "old"), "templates/plan.md": "old plan"},
+        "feat: v1",
+    )
+    _commit_bundle(repo, {"SKILL.md": _skill_md("1.1.0", "new")}, "feat: v2")
+    previous = _resolve(tmp_path, parse_skill_file(repo / "SKILL.md"))
+    assert isinstance(previous, Skill)
+    root = previous.bundle_root
+    assert sorted(p.relative_to(root).as_posix() for p in root.rglob("*")) == [
+        "templates",
+        "templates/plan.md",
+    ]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+def test_a_previous_commit_shipping_only_a_link_onto_an_eval_file_has_no_bundle(tmp_path):
+    """The same test the candidate's has_bundle applies: a regular file."""
+    repo = _repo(tmp_path)
+    _commit_link(repo, "references/answers.md", "../evals/cases.yaml")
+    _commit_bundle(
+        repo,
+        {"SKILL.md": _skill_md("1.0.0", "old"), "evals/cases.yaml": "cases: []\n"},
+        "feat: v1",
+    )
+    _commit_bundle(repo, {"SKILL.md": _skill_md("1.1.0", "new")}, "feat: v2")
+    previous = _resolve(tmp_path, parse_skill_file(repo / "SKILL.md"))
+    assert isinstance(previous, Skill)
+    assert previous.bundle_root is None
