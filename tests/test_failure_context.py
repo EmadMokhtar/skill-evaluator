@@ -214,11 +214,34 @@ def test_a_failed_hook_shows_stderr_then_stdout_each_on_one_line():
     )
 
 
-def test_a_long_hook_stream_is_cut_with_a_marker():
+def test_a_long_hook_stream_is_cut_with_the_exact_count():
     hook = HookRun(name="Stop", event="Stop", outcome="error", exit_code=1, stderr="e" * 1000)
+    assert format_hook(hook) == (
+        'Stop error (exit code 1): stderr="'
+        + "e" * HOOK_STREAM_LIMIT
+        + '" … (800 more characters; --full-output prints them)'
+    )
+
+
+def test_a_hook_stream_is_cut_before_it_is_escaped():
+    # Cutting the JSON text would count each `\n` escape twice and could end
+    # on a lone backslash.
+    hook = HookRun(name="Stop", event="Stop", outcome="error", stderr="a\n" * 150 + "end")
     text = format_hook(hook)
-    # The JSON string is `"eeee..."`; the opening quote counts toward the limit.
-    assert text == 'Stop error (exit code 1): stderr="' + "e" * (HOOK_STREAM_LIMIT - 1) + "…"
+    assert text == (
+        'Stop error: stderr="'
+        + "a\\n" * (HOOK_STREAM_LIMIT // 2)
+        + '" … (103 more characters; --full-output prints them)'
+    )
+
+
+def test_no_limit_lifts_the_hook_stream_cut():
+    long = "e" * 1000
+    hook = HookRun(name="Stop", event="Stop", outcome="error", stderr=long)
+    assert format_hook(hook, limit=None) == f'Stop error: stderr="{long}"'
+    context = failure_context(_hooked(hook), limit=None)
+    assert context is not None
+    assert context.failed_hooks == [f'Stop error: stderr="{long}"']
 
 
 def test_failed_hooks_beyond_the_cap_are_counted_not_listed():

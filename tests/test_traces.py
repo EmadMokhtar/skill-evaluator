@@ -148,9 +148,10 @@ def test_claude_code_without_usage_says_tokens_were_not_reported():
 # UserPromptSubmit, PreToolUse, PostToolUse and Stop hooks: the same keys in
 # the same order, `hook_name` spelled `<event>:<matcher>`, and `output` equal
 # to stdout then stderr. That run had no cancelled hook and no `hook_progress`
-# (its hooks were too short); those two lines rest on the schema alone:
-# `exit_code` is absent when the hook had none, and `hook_progress` is a
-# partial read of a hook still running.
+# (its hooks were too short); those two lines rest on the binary alone:
+# `cancelled` is written only for a hook stopped by its own timeout or by an
+# interrupted run, `exit_code` is absent when the hook had none, and
+# `hook_progress` is a partial read of a hook still running.
 
 
 def test_claude_code_hooks_are_the_hook_response_events_in_order():
@@ -208,15 +209,8 @@ def test_claude_code_hooks_seen_before_a_cut_are_still_parsed():
     assert [hook.name for hook in trace.hooks] == ["UserPromptSubmit"]
 
 
-@pytest.mark.parametrize(
-    "broken",
-    [
-        {"hook_name": 7},
-        {"hook_event": None},
-        {"outcome": ["error"]},
-    ],
-)
-def test_claude_code_a_hook_response_without_a_string_name_event_or_outcome_is_skipped(broken):
+@pytest.mark.parametrize("broken", [{"hook_name": 7}, {"outcome": ["error"]}])
+def test_claude_code_a_hook_response_without_a_string_name_or_outcome_is_skipped(broken):
     event = {
         "type": "system",
         "subtype": "hook_response",
@@ -229,6 +223,23 @@ def test_claude_code_a_hook_response_without_a_string_name_event_or_outcome_is_s
     trace = parse_claude_code(json.dumps(event) + "\n" + json.dumps(result))
     assert trace.hooks == []
     assert trace.error is None
+
+
+@pytest.mark.parametrize("event_field", [{}, {"hook_event": None}])
+def test_claude_code_a_hook_response_without_a_string_event_is_kept(event_field):
+    # The name already carries the event, and the report never shows it; a
+    # failed hook must not vanish because one field was missing.
+    event = {
+        "type": "system",
+        "subtype": "hook_response",
+        "hook_name": "Stop",
+        "outcome": "error",
+        "exit_code": 1,
+        **event_field,
+    }
+    result = {"type": "result", "subtype": "success", "is_error": False, "result": "ok"}
+    trace = parse_claude_code(json.dumps(event) + "\n" + json.dumps(result))
+    assert trace.hooks == [HookRun(name="Stop", event="", outcome="error", exit_code=1)]
 
 
 def test_claude_code_a_hook_responses_odd_streams_and_exit_code_do_not_raise():

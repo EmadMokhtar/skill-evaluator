@@ -189,7 +189,7 @@ def test_run_reports_the_hooks_the_trace_reported(tmp_path, fake, monkeypatch):
     ]
 
 
-def test_an_errored_run_reports_no_hooks(tmp_path, fake, monkeypatch):
+def test_a_trace_that_ended_early_reports_no_hooks(tmp_path, fake, monkeypatch):
     # A trace cut before its `result` event is an error, never a partial
     # parse: the hooks it reported before the cut are dropped, as its tool
     # calls are.
@@ -199,6 +199,27 @@ def test_an_errored_run_reports_no_hooks(tmp_path, fake, monkeypatch):
     result = ProductRunner(_product()).run(_skill(tmp_path), _case())
     assert result.error == "no result event in the claude-code trace"
     assert result.hooks == []
+    assert result.tool_calls == []
+
+
+def test_a_complete_trace_that_ends_in_an_error_keeps_its_hooks(tmp_path, fake, monkeypatch):
+    # A hook that keeps blocking the model is often why the product gave up;
+    # the trace reached its `result` event, so nothing in it was cut.
+    lines = (FIXTURES / "claude-code-hooks.jsonl").read_text(encoding="utf-8").splitlines()
+    result_event = json.loads(lines[-1])
+    result_event.update(subtype="error_max_turns", is_error=True)
+    del result_event["result"]
+    lines[-1] = json.dumps(result_event)
+    (tmp_path / "gave-up.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(tmp_path / "gave-up.jsonl"))
+    result = ProductRunner(_product()).run(_skill(tmp_path), _case())
+    assert result.error == "claude-code: error_max_turns"
+    assert [hook.name for hook in result.hooks] == [
+        "UserPromptSubmit",
+        "PreToolUse:Write",
+        "PostToolUse:Write",
+        "Stop",
+    ]
     assert result.tool_calls == []
 
 

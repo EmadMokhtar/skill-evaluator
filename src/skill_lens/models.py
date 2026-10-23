@@ -72,11 +72,14 @@ class HookRun(BaseModel):
     """One lifecycle hook a product ran, as its trace reported it.
 
     `name` is the product's spelling (`PreToolUse:Write`: the event, then the
-    matcher when the hook declared one). `outcome` is the product's own word,
-    kept as written: a later version may add one, and a hook that did not
-    report `success` is shown as failed rather than refused. `exit_code` is
-    None when the hook had none (a cancelled one, or a hook that is not a
-    command).
+    matcher when the hook declared one); `event` is empty when the product did
+    not report one. `outcome` is the product's own word, kept as written:
+    Claude Code 2.1.289 writes `success`, `error` (any non-zero exit,
+    including a deliberate block with exit code 2) or `cancelled` (the hook
+    was stopped before it finished: its own timeout ran out, or the run was
+    interrupted; never at a normal end of run). A later version may add a
+    word, and a hook that did not report `success` is shown as failed rather
+    than refused. `exit_code` is None when the hook reported none.
     """
 
     model_config = ConfigDict(extra="forbid")

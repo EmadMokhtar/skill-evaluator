@@ -209,7 +209,9 @@ list at 20 calls, with a `… +N more calls` count. `--full-output` (or `full_ou
 
 Under the `claude-code` runner, a skill's [hooks](runners.md#hooks-under-claude-code) that did
 not report `success` follow, under `failed hooks:` — each with its outcome, its exit code
-when it had one, and its stderr then its stdout, each on one line and cut at 200 characters:
+when it had one, and its stderr then its stdout, each on one line. A stream is cut at 200
+characters, never silently — the cut states the count, as the output's does — and
+`--full-output` lifts that cap too:
 
 ```
         failed hooks:
@@ -264,8 +266,9 @@ a stale pointer in the report.
 
 `outcomes[].hooks` lists every lifecycle hook the run reported, in order, each as `{name,
 event, outcome, exit_code, stdout, stderr}` — `exit_code` is `null` when the hook had none.
-Only a clean `claude-code` run reports hooks (see [Hooks under Claude
-Code](runners.md#hooks-under-claude-code)); every other outcome has `[]`. No check reads them,
+Only a `claude-code` run reports hooks, and an errored one only when its trace reached its
+`result` event (see [Hooks under Claude Code](runners.md#hooks-under-claude-code)); every
+other outcome has `[]`. No check reads them,
 so they never change a status or the exit code.
 
 `outcomes[].cost_note` and `outcomes[].usage_note` say why `cost_usd` or a token count is

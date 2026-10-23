@@ -185,8 +185,10 @@ A skill can declare lifecycle hooks (commands Claude Code runs at fixed points, 
 `PreToolUse` before every tool call or `Stop` when the model ends its turn). Under
 `claude-code`, every hook that ran is recorded in order from its `hook_response` event: its
 name as Claude Code spells it (`PreToolUse:Write` — the event, then the matcher the hook
-declared), its event, its outcome (`success`, `error` or `cancelled`), its exit code (none
-for a cancelled hook), its stdout and its stderr. The JSON report lists them per outcome
+declared), its event, its outcome, its exit code (none when the hook reported none), its
+stdout and its stderr. The outcome is `success`, `error` (any non-zero exit) or `cancelled`
+(the hook was stopped before it finished, because its own `timeout` ran out or the run was
+interrupted; a normal end of run cancels nothing). The JSON report lists them per outcome
 under [`hooks`](gating.md#json-report), and the transcript keeps every `hook_*` event.
 
 A hook whose outcome is anything but `success` is a **failed hook**, and a non-passing case
@@ -195,8 +197,10 @@ Exit code `2` is how a hook blocks on purpose, and Claude Code reports that as `
 so read the exit code before blaming the hook.
 
 Hooks are reported, never judged: nothing checks them yet, so a failed hook never fails,
-errors or passes a case by itself. An errored case reports no hooks, as it reports no tool
-calls.
+errors or passes a case by itself. An errored case keeps its hooks when Claude Code finished
+its trace — a run that gave up (`error_max_turns`) because a hook kept blocking the model
+shows that hook — and reports none when the trace was cut short, as it reports no tool
+calls then.
 
 A case the runner cannot serve is an **authoring error** (exit 2) found in preflight, before
 any case runs and before any quota is spent — never a vacuous pass. A `trajectory:` name is

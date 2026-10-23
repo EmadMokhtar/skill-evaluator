@@ -582,7 +582,15 @@ class ProductRunner:
             # Errored, but the product may still have spent: a run stopped by
             # its own budget reports what it cost. Dropping that would make
             # every total under-count by exactly the runs that cost the most.
-            return RunResult(error=trace.error, latency_ms=elapsed(), **spend)
+            # A complete trace keeps its hooks too: a hook that kept blocking
+            # the model is often why the product gave up. A trace that ended
+            # early keeps none, because it is never a partial parse.
+            return RunResult(
+                error=trace.error,
+                latency_ms=elapsed(),
+                hooks=list(trace.hooks) if trace.complete else [],
+                **spend,
+            )
         return RunResult(
             output=trace.output,
             tool_calls=(

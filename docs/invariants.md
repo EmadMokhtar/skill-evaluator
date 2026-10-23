@@ -1728,13 +1728,17 @@ rather than running the case without its tools.
 
 ### A hook is reported, never judged
 
-`RunResult.hooks` is every `hook_response` event a clean `claude-code` run reported, in
-order. The `outcome` is the product's own word, kept as written: any word but `success` is a
-failed hook, so a word a later version adds is shown, never refused, and a `hook_response`
-with no string name, event or outcome is skipped (the transcript keeps it). No evaluator
-reads `hooks`, so a hook that failed never fails, errors or passes a case by itself; it
-shows in the failure excerpt of a case that is not passing for another reason, through
-`FailureContext`, so the three reporters show it alike. An errored run reports no hooks, as
-it reports no tool calls: a truncated trace is never a partial parse. The preset's
+`RunResult.hooks` is every `hook_response` event a `claude-code` run reported, in order. The
+`outcome` is the product's own word, kept as written: any word but `success` is a failed
+hook, so a word a later version adds is shown, never refused. `cancelled` is a hook stopped
+by its own timeout or by an interrupted run, never one stopped by a normal end of run
+(verified in the 2.1.289 binary). A `hook_response` with no string name or outcome is
+skipped (the transcript keeps it); a missing event is empty, because the name carries it.
+No evaluator reads `hooks`, so a hook that failed never fails, errors or passes a case by
+itself; it shows in the failure excerpt of a case that is not passing for another reason,
+through `FailureContext`, so the three reporters show it alike. An errored run keeps its
+hooks only when its trace is complete (its `result` event was seen), because a hook that
+kept blocking the model is often why the product gave up; a trace that ended early reports
+none, because a truncated trace is never a partial parse. The preset's
 `--include-hook-events` only turns the `hook_*` events on (verified against Claude Code
 2.1.289); the `result` event the run is read from is unchanged.

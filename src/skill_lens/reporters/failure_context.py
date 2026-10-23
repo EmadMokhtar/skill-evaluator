@@ -30,8 +30,8 @@ ARGUMENT_LIMIT = 80
 # Tool calls listed before the rest are counted rather than shown.
 TOOL_CALL_LIMIT = 20
 
-# Characters per stream of a failed hook. Its stderr is usually one line that
-# says why; the whole of it is in the transcript.
+# Characters per stream of a failed hook, counted before the stream is quoted.
+# Its stderr is usually one line that says why. `--full-output` lifts it.
 HOOK_STREAM_LIMIT = 200
 
 # Failed hooks listed before the rest are counted rather than shown. A
@@ -55,12 +55,12 @@ class FailureContext:
     more_hooks: int = 0
 
 
-def _argument(value: object, limit: int = ARGUMENT_LIMIT) -> str:
+def _argument(value: object) -> str:
     # `default=str` because arguments come from a provider as JSON but a
     # library caller may hand a runner anything; a reporter must never raise.
     text = json.dumps(value, ensure_ascii=False, default=str)
-    if len(text) > limit:
-        return text[:limit] + "…"
+    if len(text) > ARGUMENT_LIMIT:
+        return text[:ARGUMENT_LIMIT] + "…"
     return text
 
 
@@ -70,18 +70,33 @@ def format_tool_call(call: ToolCall) -> str:
     return f"{call.name}({arguments})"
 
 
-def format_hook(hook: HookRun) -> str:
+def _more_characters(count: int) -> str:
+    return f"… ({count:,} more characters; --full-output prints them)"
+
+
+def _stream(label: str, text: str, limit: int | None) -> str:
+    """`label="..."`, cut to `limit` characters before it is quoted, so an
+    escape never counts twice or ends half-written, and a cut says how much."""
+    cut = 0
+    if limit is not None and len(text) > limit:
+        cut = len(text) - limit
+        text = text[:limit]
+    quoted = f"{label}={json.dumps(text, ensure_ascii=False)}"
+    return f"{quoted} {_more_characters(cut)}" if cut else quoted
+
+
+def format_hook(hook: HookRun, limit: int | None = HOOK_STREAM_LIMIT) -> str:
     """`name outcome (exit code N): stderr="..." stdout="..."`.
 
     stderr comes first: it is where a failing command says why. Each stream is
-    JSON-quoted, so a multi-line one stays on one line, and is cut like an
-    argument.
+    JSON-quoted, so a multi-line one stays on one line. `limit=None` cuts
+    nothing (the `full_output` path).
     """
     text = f"{hook.name} {hook.outcome}"
     if hook.exit_code is not None:
         text += f" (exit code {hook.exit_code})"
     streams = [
-        f"{label}={_argument(stream.rstrip(), HOOK_STREAM_LIMIT)}"
+        _stream(label, stream.rstrip(), limit)
         for label, stream in (("stderr", hook.stderr), ("stdout", hook.stdout))
         if stream.strip()
     ]
@@ -92,7 +107,7 @@ def format_hook(hook: HookRun) -> str:
 
 def cut_note(context: FailureContext) -> str:
     """Never a silent cut: the exact count, and how to see the rest."""
-    return f"… ({context.cut:,} more characters; --full-output prints them)"
+    return _more_characters(context.cut)
 
 
 def more_calls_note(context: FailureContext) -> str:
@@ -126,6 +141,9 @@ def failure_context(outcome: CaseOutcome, *, limit: int | None) -> FailureContex
         cut=cut,
         tool_calls=[format_tool_call(call) for call in calls[:TOOL_CALL_LIMIT]],
         more_calls=max(0, len(calls) - TOOL_CALL_LIMIT),
-        failed_hooks=[format_hook(hook) for hook in failed[:HOOK_LIMIT]],
+        failed_hooks=[
+            format_hook(hook, HOOK_STREAM_LIMIT if limit is not None else None)
+            for hook in failed[:HOOK_LIMIT]
+        ],
         more_hooks=max(0, len(failed) - HOOK_LIMIT),
     )

@@ -478,8 +478,9 @@ def test_a_hook_run_refuses_an_unknown_field():
     [("success", False), ("error", True), ("cancelled", True), ("blocked", True)],
 )
 def test_a_hook_failed_unless_the_product_said_success(outcome, failed):
-    # Any other word -- today's `cancelled`, or one a later version adds -- is
-    # a hook that did not do its job, and the report should show it.
+    # Any other word is a hook that did not do its job, and the report should
+    # show it: `cancelled` is a hook stopped by its own timeout or by an
+    # interrupted run, and a later version may add a word.
     assert HookRun(name="Stop", event="Stop", outcome=outcome).failed is failed
 
 

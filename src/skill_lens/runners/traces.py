@@ -93,23 +93,20 @@ def _str(value: Any) -> str:
 def _hook(event: dict[str, Any]) -> HookRun | None:
     """A `hook_response` event as a `HookRun`, or None when it names no hook.
 
-    Name, event and outcome are what make it a hook; without any of them there
-    is nothing to show. The rest degrades: an odd stream is empty, and an odd
-    exit code is None, never a 0 the hook did not report.
+    Name and outcome are what make it a hook; without either there is nothing
+    to show. The rest degrades: an odd event or stream is empty (the name
+    already carries the event), and an odd exit code is None, never a 0 the
+    hook did not report.
     """
-    name, hook_event, outcome = (
-        event.get("hook_name"),
-        event.get("hook_event"),
-        event.get("outcome"),
-    )
-    if not (isinstance(name, str) and isinstance(hook_event, str) and isinstance(outcome, str)):
+    name, outcome = event.get("hook_name"), event.get("outcome")
+    if not (isinstance(name, str) and isinstance(outcome, str)):
         return None
     exit_code = event.get("exit_code")
     if isinstance(exit_code, bool) or not isinstance(exit_code, int):
         exit_code = None
     return HookRun(
         name=name,
-        event=hook_event,
+        event=_str(event.get("hook_event")),
         outcome=outcome,
         exit_code=exit_code,
         stdout=_str(event.get("stdout")),
