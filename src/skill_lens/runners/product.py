@@ -50,6 +50,7 @@ from skill_lens.runners.mcp import (
     restore_tool_names,
     write_bridge,
 )
+from skill_lens.runners.product_sandbox import TRUST_NOTE, ProductSetupError
 from skill_lens.runners.traces import Trace, parse_claude_code, parse_copilot
 from skill_lens.skills.loader import SKILL_FILENAME
 from skill_lens.workspace import PathRefused, Workspace, check_relative_path
@@ -66,16 +67,6 @@ STDERR_CAP_BYTES = 20_000
 STDERR_TAIL_CHARS = 500
 PRIVATE_PREFIX = "skill-lens-product-"
 SCRATCH_PREFIX = "skill-lens-product-capture-"
-TRUST_NOTE = (
-    "runs with permission prompts disabled and the full environment; no skill-lens "
-    "sandbox applies; bundled scripts are reachable through the product's own tools"
-)
-
-
-class ProductSetupError(Exception):
-    """A product runner cannot run here: raised from `preflight` (exit 2 via
-    `cli.py`) and from `deliver_skill`, where `run` turns it into
-    `RunResult.error` for the arm it concerns."""
 
 
 @dataclass(frozen=True)

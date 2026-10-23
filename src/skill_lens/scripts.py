@@ -265,10 +265,12 @@ def wrap(
     return list(argv)
 
 
-def _bwrap_probe_argv() -> list[str]:
+def _bwrap_probe_argv(product: bool = False) -> list[str]:
+    """The probe's argv; a product shares the network, so its probe does too."""
+    network = [] if product else ["--unshare-net"]
     return [
         "bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-        "--unshare-net", "--unshare-pid", "--die-with-parent", "--", "/bin/true",
+        *network, "--unshare-pid", "--die-with-parent", "--", "/bin/true",
     ]  # fmt: skip
 
 
@@ -291,14 +293,19 @@ def probe_sandbox(
     system: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     run: Callable[..., Any] = subprocess.run,
+    product: bool = False,
 ) -> SandboxStatus:
     """Decide the backend for this run, empirically.
 
     `system`, `which` and `run` are injectable so the decision table is
-    testable on every platform; the defaults are the real thing.
+    testable on every platform; the defaults are the real thing. `product`
+    probes the backend the way a product runs under it (issue #99): the
+    network stays open, because a product must reach its provider, and only
+    writes are denied.
     """
     if mode == "off":
-        return SandboxStatus("none", 'script_sandbox = "off"')
+        key = "product_sandbox" if product else "script_sandbox"
+        return SandboxStatus("none", f'{key} = "off"')
     system = platform.system() if system is None else system
     if system == "Darwin":
         if which("sandbox-exec") is None:
@@ -312,12 +319,13 @@ def probe_sandbox(
                 "temp directory path contains a double quote, which a sandbox-exec "
                 "profile cannot express",
             )
-        argv = ["sandbox-exec", "-p", "(version 1)(allow default)(deny network*)", "/usr/bin/true"]
+        denied = "(deny file-write*)" if product else "(deny network*)"
+        argv = ["sandbox-exec", "-p", f"(version 1)(allow default){denied}", "/usr/bin/true"]
         return _probe("sandbox-exec", argv, run)
     if system == "Linux":
         if which("bwrap") is None:
             return SandboxStatus("none", "bwrap not found on PATH")
-        return _probe("bwrap", _bwrap_probe_argv(), run)
+        return _probe("bwrap", _bwrap_probe_argv(product), run)
     return SandboxStatus("none", f"no sandbox backend on {system}")
 
 

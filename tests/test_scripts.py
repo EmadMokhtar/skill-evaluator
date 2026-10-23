@@ -251,6 +251,22 @@ def test_required_and_auto_probe_the_same_way(mode):
     assert status.backend == "none"
 
 
+def test_the_script_probe_still_denies_the_network():
+    # The product probe (product=True) allows the network; the script probe
+    # must not have changed with it.
+    seen = {}
+
+    def run(argv, **_kwargs):
+        seen.setdefault("argv", []).append(argv)
+        return _completed(0)
+
+    probe_sandbox("auto", system="Darwin", which=lambda _n: "/usr/bin/sandbox-exec", run=run)
+    probe_sandbox("auto", system="Linux", which=lambda _n: "/usr/bin/bwrap", run=run)
+    darwin, linux = seen["argv"]
+    assert "(deny network*)" in darwin[2]
+    assert "--unshare-net" in linux
+
+
 NO_SANDBOX = SandboxStatus(backend="none", detail="test")
 
 

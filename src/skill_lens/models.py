@@ -640,6 +640,25 @@ class ScriptNote(BaseModel):
         return f"{head}execution is off {hint}"
 
 
+class ProductSandboxStatus(BaseModel):
+    """The run's product sandbox decision, as data (issue #99).
+
+    `mode` is what was asked, `backend` what applies -- "none" under `off`,
+    or when `auto` found no backend that works -- and `detail` the probe's
+    reason, as `ScriptStatus.detail`. `home_isolated` is true under `auto`
+    and `required`: a temporary home and an allowlisted environment, which
+    is not a sandbox on its own. `ProductStatus.trust` is the sentence a
+    human reads; this is what a JSON consumer reads.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: SandboxMode
+    backend: SandboxBackend
+    home_isolated: bool
+    detail: str
+
+
 class ProductStatus(BaseModel):
     """One agent product a run executed, as preflight found it.
 
