@@ -26,14 +26,20 @@ Imports nothing from `runners/product.py`, which imports this.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
-from collections.abc import Callable
+import tempfile
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from skill_lens.models import ProductSandboxStatus, SandboxBackend, SandboxMode
-from skill_lens.scripts import probe_sandbox
+from skill_lens.scripts import probe_sandbox, product_bwrap_argv, product_macos_profile
+
+if TYPE_CHECKING:
+    from skill_lens.runners.product import Product
 
 TRUST_NOTE = (
     "runs with permission prompts disabled and the full environment; no skill-lens "
@@ -44,6 +50,57 @@ _ISOLATED = (
     "runs with permission prompts disabled, a temporary home directory and only an "
     "allowlisted environment"
 )
+
+
+# What the isolation sets, or drops on purpose: passing one through would
+# point the product back at the real home. `Config` refuses these names in
+# `pass_env`, and `product_environment` never lets one through regardless.
+CONTROLLED_ENV: frozenset[str] = frozenset(
+    {
+        "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TMPDIR", "TMP", "TEMP",
+        "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME",
+        "CLAUDE_CONFIG_DIR", "COPILOT_HOME",
+    }
+)  # fmt: skip
+# Kept from the harness when set. Not secrets, except that a proxy URL may
+# carry one -- and the product needs its proxy and CA to reach its provider.
+KEPT_ENV: tuple[str, ...] = (
+    "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SHELL", "USER", "LOGNAME",
+    "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "ALL_PROXY",
+    "https_proxy", "http_proxy", "no_proxy", "all_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+)  # fmt: skip
+# Nothing starts on Windows without these.
+KEPT_ENV_WINDOWS: tuple[str, ...] = ("SystemRoot", "COMSPEC", "PATHEXT")
+HOME_PREFIX = "skill-lens-home-"
+
+
+@dataclass(frozen=True)
+class ProductEnv:
+    """A preset's own variables under home isolation.
+
+    `auth` is passed when set and counted by the auth check; `passed` is
+    passed but not counted (an endpoint is not a credential); `fixed` is set
+    for the product whatever the harness has.
+    """
+
+    auth: tuple[str, ...]
+    passed: tuple[str, ...] = ()
+    fixed: tuple[tuple[str, str], ...] = ()
+
+
+# Keyed by product name, so a preset under a wrapper `command` keeps them.
+# `cli` has no entry: skill-lens does not know its auth.
+PRODUCT_ENV: dict[str, ProductEnv] = {
+    # DISABLE_AUTOUPDATER: a fresh home must not start an update on every case.
+    "claude-code": ProductEnv(
+        auth=("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
+        passed=("ANTHROPIC_BASE_URL",),
+        fixed=(("DISABLE_AUTOUPDATER", "1"),),
+    ),
+    # Copilot's documented auth variables, in its order of precedence.
+    "copilot": ProductEnv(auth=("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")),
+}
 
 
 class ProductSetupError(Exception):
@@ -90,6 +147,19 @@ class ProductSandbox:
             f"{_SCRIPTS_CLAUSE}"
         )
 
+    def wrap(
+        self, argv: Sequence[str], writable: Sequence[Path], tempdir: Path | None = None
+    ) -> list[str]:
+        """`argv` inside the backend, writes confined to `writable`; unchanged
+        for "none". `tempdir` is injectable for tests; by default the system
+        temporary directory, resolved, as the script sandbox uses it."""
+        if self.backend == "none":
+            return list(argv)
+        tempdir = Path(tempfile.gettempdir()).resolve() if tempdir is None else tempdir
+        if self.backend == "sandbox-exec":
+            return ["sandbox-exec", "-p", product_macos_profile(writable, tempdir), *argv]
+        return product_bwrap_argv(writable, tempdir, argv)
+
     def status(self) -> ProductSandboxStatus:
         return ProductSandboxStatus(
             mode=self.mode,
@@ -125,3 +195,51 @@ def decide_product_sandbox(
             f'product_sandbox = "required" but no sandbox is available: {probed.detail}'
         )
     return ProductSandbox(mode=mode, backend=probed.backend, detail=probed.detail)
+
+
+def product_environment(
+    product: Product,
+    root: Path,
+    *,
+    parent: Mapping[str, str] | None = None,
+    windows: bool | None = None,
+) -> dict[str, str]:
+    """The environment a product runs in under home isolation: built, never inherited.
+
+    `root` is the work item's private directory; the product's home is
+    `root/home` and its temporary directory `root/tmp`. `CLAUDE_CONFIG_DIR`
+    and `COPILOT_HOME` are dropped with everything else not kept, so each
+    product falls back to its directory under the temporary home. `parent`
+    and `windows` are injectable for tests.
+    """
+    parent = os.environ if parent is None else parent
+    windows = os.name == "nt" if windows is None else windows
+    own = PRODUCT_ENV.get(product.name)
+    names = [
+        *KEPT_ENV,
+        *(KEPT_ENV_WINDOWS if windows else ()),
+        *(own.auth + own.passed if own else ()),
+        *(product.pass_env or ()),
+    ]
+    env = {name: parent[name] for name in names if name in parent and name not in CONTROLLED_ENV}
+    if own is not None:
+        env.update(own.fixed)
+    home = root / "home"
+    temporary = str(root / "tmp")
+    env.update(
+        HOME=str(home),
+        XDG_CONFIG_HOME=str(home / ".config"),
+        XDG_CACHE_HOME=str(home / ".cache"),
+        XDG_DATA_HOME=str(home / ".local" / "share"),
+        XDG_STATE_HOME=str(home / ".local" / "state"),
+        TMPDIR=temporary,
+        TMP=temporary,
+        TEMP=temporary,
+    )
+    if windows:
+        env.update(
+            USERPROFILE=str(home),
+            APPDATA=str(home / "AppData" / "Roaming"),
+            LOCALAPPDATA=str(home / "AppData" / "Local"),
+        )
+    return env

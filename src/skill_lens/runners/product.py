@@ -107,6 +107,14 @@ class Product:
     # `judge_args`. `ProductJudge.preflight` refuses it.
     tool_flag: str | None = None
     mcp: McpSupport | None = None
+    # Under home isolation (`product_sandbox` not "off"): the variable names
+    # `[runners.<name>] pass_env` adds to the built environment, or None when
+    # the table does not set it -- which a `cli` product may not leave unset
+    # (see `product_sandbox.environment_refusal`).
+    pass_env: tuple[str, ...] | None = None
+    # True when a preset's `command` names another executable: a wrapper may
+    # bring its own auth, so it is not auth-checked.
+    wrapper: bool = False
 
 
 PRESETS: dict[str, Product] = {

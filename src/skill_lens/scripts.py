@@ -200,20 +200,68 @@ def macos_profile(workspace: Path, scratch: Path, tempdir: Path, bundle: Path) -
         f"(allow file-read* (subpath {_quoted(workspace)}) (subpath {_quoted(scratch)}) "
         f"(subpath {_quoted(bundle)}))",
     ]
-    parents = sorted(
-        {
-            parent
-            for path in (workspace, scratch, bundle)
-            for parent in path.parents
-            if parent.is_relative_to(tempdir)
-        }
-    )
-    # Never emitted empty: an unfiltered `(allow file-read-metadata)` would
-    # allow every path on the machine.
-    if parents:
-        literals = " ".join(f"(literal {_quoted(parent)})" for parent in parents)
-        lines.append(f"(allow file-read-metadata {literals})")
+    lines += _parent_metadata((workspace, scratch, bundle), tempdir)
     return "\n".join(lines)
+
+
+def _parent_metadata(paths: Sequence[Path], tempdir: Path) -> list[str]:
+    """The metadata rule for the directories between `tempdir` and `paths`.
+
+    One rule, or none: never emitted empty, because an unfiltered
+    `(allow file-read-metadata)` would allow every path on the machine.
+    """
+    parents = sorted(
+        {parent for path in paths for parent in path.parents if parent.is_relative_to(tempdir)}
+    )
+    if not parents:
+        return []
+    literals = " ".join(f"(literal {_quoted(parent)})" for parent in parents)
+    return [f"(allow file-read-metadata {literals})"]
+
+
+def product_macos_profile(writable: Sequence[Path], tempdir: Path) -> str:
+    """The `sandbox-exec` profile for a product (issue #99).
+
+    The script profile's rules, but the network stays open -- a product must
+    reach its provider -- and the writable set is the product's: its working
+    directory, its temporary home and, for a `tools:` case, the MCP bridge's
+    directory (the bridge is the product's child and writes its record
+    there). The same directories are allowed back for reading under the
+    temp-directory read denial, so another case's workspace or home stays
+    hidden. `writable` is never empty: the working directory is always in it.
+    """
+    allowed = " ".join(f"(subpath {_quoted(path)})" for path in writable)
+    lines = [
+        "(version 1)",
+        "(allow default)",
+        "(deny file-write*)",
+        f"(allow file-write* {allowed})",
+        '(allow file-write-data (literal "/dev/null"))',
+        f"(deny file-read* (subpath {_quoted(tempdir)}))",
+        f"(allow file-read* {allowed})",
+    ]
+    lines += _parent_metadata(writable, tempdir)
+    return "\n".join(lines)
+
+
+def product_bwrap_argv(writable: Sequence[Path], tempdir: Path, argv: Sequence[str]) -> list[str]:
+    """The `bwrap` command line for a product: `bwrap_argv`'s, minus the
+    network denial and the read-only bundle, with each writable directory
+    bound back in after the tmpfs that would otherwise hide it."""
+    binds = [element for path in writable for element in ("--bind", str(path), str(path))]
+    return [
+        "bwrap",
+        "--ro-bind", "/", "/",
+        "--dev", "/dev",
+        "--proc", "/proc",
+        "--tmpfs", str(tempdir),
+        *binds,
+        "--unshare-pid",
+        "--die-with-parent",
+        "--new-session",
+        "--",
+        *argv,
+    ]  # fmt: skip
 
 
 def bwrap_argv(
