@@ -189,6 +189,14 @@ order of jobs and how a failed step is recovered.
 
 ## Running bundled scripts
 
+**What the agent can read of the skill.** Every file the skill ships, as an install copies
+it — `scripts/`, `references/`, `assets/`, `templates/`, a `reference.md` — except `SKILL.md`
+itself, `.git`, and the eval files: `evals/`, `*.eval.yaml` and `evals.json`, at any depth,
+and any link that resolves onto one. The same rule decides what a product runner receives
+and what a `--baseline previous` arm extracts from git. Anything that must not reach the
+agent — a mock tool library, an expected output, a fixture with the answer in it — belongs
+under `evals/`; a file elsewhere in the skill's directory is delivered.
+
 A skill may ship code under `scripts/`. skill-lens can execute it, and the trust model is:
 
 - **Off by default, on only by the operator's decision.** `allow_scripts = true` in

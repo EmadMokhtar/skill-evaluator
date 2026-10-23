@@ -210,11 +210,20 @@ def test_malformed_text_names_its_source_not_a_file_path():
         )
 
 
-def test_bundle_root_is_set_when_a_bundle_directory_exists(tmp_path):
+def test_bundle_root_is_set_when_the_skill_ships_a_file(tmp_path):
     skill_dir = _write_skill(tmp_path, "pdf")
     (skill_dir / "references").mkdir()
+    (skill_dir / "references" / "style.md").write_text("# Style\n", encoding="utf-8")
     skill = parse_skill_file(skill_dir / "SKILL.md")
     assert skill.bundle_root == skill_dir.resolve()
+
+
+def test_bundle_root_is_set_for_files_outside_the_three_directories(tmp_path):
+    """planning-with-files ships templates/ and reference.md (issue #92)."""
+    skill_dir = _write_skill(tmp_path, "pdf")
+    (skill_dir / "templates").mkdir()
+    (skill_dir / "templates" / "task_plan.md").write_text("# Plan\n", encoding="utf-8")
+    assert parse_skill_file(skill_dir / "SKILL.md").bundle_root == skill_dir.resolve()
 
 
 def test_bundle_root_is_none_for_a_bare_skill(tmp_path):

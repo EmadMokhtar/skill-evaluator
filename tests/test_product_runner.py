@@ -19,6 +19,7 @@ from skill_lens.runners.product import (
     Product,
     ProductRunner,
     deliver_skill,
+    delivered_paths,
     read_trace,
 )
 from skill_lens.runners.traces import parse_claude_code, parse_copilot
@@ -136,7 +137,7 @@ def test_the_presets_are_the_verified_spellings():
 # --- delivery ---
 
 
-def test_deliver_skill_writes_the_markdown_verbatim_and_the_three_bundle_dirs_only(tmp_path):
+def test_deliver_skill_writes_the_markdown_verbatim_and_the_bundle(tmp_path):
     skill = _skill(tmp_path, bundle=True)
     cwd = tmp_path / "cwd"
     cwd.mkdir()
@@ -148,6 +149,40 @@ def test_deliver_skill_writes_the_markdown_verbatim_and_the_three_bundle_dirs_on
         "references/notes.md",
         "scripts/count.py",
     ]  # the eval file beside SKILL.md is never delivered
+
+
+def test_deliver_skill_writes_every_shipped_file_but_no_eval_file(tmp_path):
+    """Issue #92: templates/ and reference.md reach the product, as an install
+    copies them; eval files at any depth, .git and the on-disk SKILL.md do not
+    -- SKILL.md is the skill's markdown, which a baseline takes from git."""
+    root = tmp_path / "ping"
+    files = {
+        "SKILL.md": "on disk, not delivered",
+        "reference.md": "ref",
+        "templates/plan.md": "plan",
+        "references/notes.md": "notes",
+        "ping.eval.yaml": "cases: []",
+        "evals/cases.yaml": "cases: []",
+        "references/deep/x.eval.yaml": "cases: []",
+        "assets/evals.json": "{}",
+        ".git/HEAD": "ref: refs/heads/main",
+    }
+    for relative, content in files.items():
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (root / relative).write_text(content, encoding="utf-8")
+    skill = _skill(tmp_path).model_copy(update={"bundle_root": root.resolve()})
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    assert deliver_skill(skill, cwd, ".agents/skills") is True
+    target = cwd / ".agents" / "skills" / "ping"
+    shipped = ["SKILL.md", "reference.md", "references/notes.md", "templates/plan.md"]
+    assert sorted(p.relative_to(target).as_posix() for p in target.rglob("*") if p.is_file()) == (
+        shipped
+    )
+    assert (target / "SKILL.md").read_text(encoding="utf-8") == SKILL_MD
+    assert delivered_paths(skill, ".agents/skills") == [
+        f".agents/skills/ping/{relative}" for relative in shipped
+    ]
 
 
 def test_deliver_skill_writes_nothing_for_a_skill_with_no_markdown(tmp_path):

@@ -204,9 +204,37 @@ def test_the_previous_bundle_comes_from_the_same_commit_as_its_skill_md(tmp_path
     assert (previous.bundle_root / "references" / "style.md").read_text(
         encoding="utf-8"
     ) == "old style"
-    # Only the three bundle directories are materialised: never the eval file.
+    # Never the eval file, and never SKILL.md: the baseline's markdown comes from git.
     assert not (previous.bundle_root / "pdf.eval.yaml").exists()
     assert not (previous.bundle_root / "SKILL.md").exists()
+
+
+def test_the_previous_bundle_is_every_shipped_file_but_no_eval_file(tmp_path):
+    """Issue #92: the baseline arm gets what the candidate arm gets, from its
+    own commit -- templates/ and reference.md included, eval files excluded."""
+    repo = _repo(tmp_path)
+    _commit_bundle(
+        repo,
+        {
+            "SKILL.md": _skill_md("1.0.0", "old"),
+            "templates/plan.md": "old plan",
+            "reference.md": "old ref",
+            "evals/cases.yaml": "cases: []\n",
+            "references/deep/x.eval.yaml": "cases: []\n",
+            "assets/evals.json": "{}",
+        },
+        "feat: v1",
+    )
+    _commit_bundle(repo, {"SKILL.md": _skill_md("1.1.0", "new")}, "feat: v2")
+
+    previous = _resolve(tmp_path, parse_skill_file(repo / "SKILL.md"))
+
+    root = previous.bundle_root
+    assert root is not None
+    assert sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()) == [
+        "reference.md",
+        "templates/plan.md",
+    ]
 
 
 def test_a_previous_commit_with_no_bundle_yields_no_bundle_root(tmp_path):

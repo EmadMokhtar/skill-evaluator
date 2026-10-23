@@ -102,7 +102,7 @@ flowchart LR
 | `scaffold.py` | Renders the starter eval suite `skill-lens init` writes. Pure: a `Skill` in, the file text out, with the IO left to `cli.py`. `scaffold_target` decides where `init` writes. |
 | `mcp_import.py` | Turns a saved MCP `tools/list` response into mock-tool YAML: `parse_tools_list` (three accepted shapes, every refusal a `McpImportError`) and `render_tool_mocks` (a pasteable `tools:` block). Pure: text in, text out; `cli.py` reads the file or stdin. Never touches the network. |
 | `workspace.py` | The per-case temporary directory: creation, seeding, path containment, and cleanup. Framework-neutral, like every other top-level module. Its methods **raise** (`PathRefused`, `WorkspaceError`) for `cases/loader.py` and the evaluators to catch as authoring or infra errors; `runners/tools.py`'s built-in tools catch those same exceptions and turn them into ordinary tool-result strings instead. |
-| `bundle.py` | A read-only view of the three Agent Skills directories beside `SKILL.md` (`scripts/`, `references/`, `assets/`) and nothing else — an eval file beside `SKILL.md` is never readable by the agent. Same "methods raise, tools catch" split as `workspace.py`. |
+| `bundle.py` | A read-only view of every file a skill ships beside `SKILL.md`, and `withheld`, the one rule for what is never part of it — `SKILL.md`, `.git` and the eval files at any depth — shared by product delivery and the previous baseline's extraction. Same "methods raise, tools catch" split as `workspace.py`. |
 | `scripts.py` | Runs a bundled script: the policy, the once-per-run preflight (interpreters on `PATH`, the sandbox probe), the allowlisted environment, the scratch directory, the process-group timeout and the capped output read through the harness's own descriptors (both via `process.py`), and the `sandbox-exec` / `bwrap` wrapping. Never raises for a script that will not run; raises `ScriptSetupError` only from preflight. |
 | `process.py` | Starts a child in its own process group, waits with a timeout, kills the group after every exit, and reads output through the harness's own handle. Shared by `scripts.py` and `runners/product.py`; imports nothing from the rest of the project. |
 | `paths.py` | The path and pattern checks that need no filesystem: `PathRefused`, `check_relative_path`, `check_glob_pattern` (raising `PatternRefused`, an authoring error) and `glob_matches_path`, plus `segment_matches`, the one per-level glob rule `Workspace.match` also walks the disk with. Pure string work, so `models.py` validates a case with it and `workspace.py` imports it; imports nothing from the rest of the project. |
@@ -142,7 +142,7 @@ flowchart LR
 
 ```
 path
-  └─ skills/loader (walk for SKILL.md) ──────────────► [Skill] (bundle_root if scripts/, references/ or assets/ exists)
+  └─ skills/loader (walk for SKILL.md) ──────────────► [Skill] (bundle_root if it ships any file besides SKILL.md and evals)
         └─ per skill: skills/baseline (once, if --baseline) ──► baseline Skill (+ its own bundle) | note
         └─ per skill: cases/loader (evals/ dir or *.eval.yaml; evals.json → cases/evals_json; tool_libraries: → cases/tool_libraries; ref: resolved) ──► [EvalCase]
   └─ scripts.preflight (once, only if allow_scripts) ──► ScriptRuntime | ScriptSetupError (exit 2)

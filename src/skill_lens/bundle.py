@@ -1,11 +1,12 @@
 """A read-only view of the files a skill ships beside SKILL.md.
 
-The Agent Skills layout puts three directories next to `SKILL.md`: `scripts/`
-(code the agent may run), `references/` (documents it may read) and `assets/`
-(files it may use). This module exposes exactly those three and nothing else.
-That exclusion is the point: `*.eval.yaml` and `evals/` sit beside `SKILL.md`
-too and hold the expected answers, so "any file beside SKILL.md" would hand
-the agent its own answer key.
+The bundle is every file in the skill's directory, as an install copies it
+(issue #92) -- `scripts/`, `references/` and `assets/`, and also a skill's own
+`templates/` or `reference.md` -- except what `withheld` names: `SKILL.md`
+itself (delivered on its own path, from the skill's markdown), `.git`, and the
+eval files, which sit beside `SKILL.md` and hold the expected answers. Those
+are withheld at any depth, so the agent is never handed its own answer key.
+Only `scripts/` is runnable.
 
 Framework-neutral, and it follows `workspace.py`'s split: methods here
 **raise** (`PathRefused`, `OSError`, `UnicodeDecodeError`); the tools built on
@@ -16,9 +17,9 @@ path is an eval signal and an exception would surface it as an infra error.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from skill_lens.workspace import (
     DEFAULT_LIMITS,
@@ -29,13 +30,103 @@ from skill_lens.workspace import (
     stat_regular,
 )
 
-BUNDLE_DIRS: tuple[str, ...] = ("scripts", "references", "assets")
 SCRIPTS_DIR = "scripts"
+SKILL_FILENAME = "SKILL.md"
+# The eval files' names, as `cases/loader.py` and `cases/evals_json.py` spell
+# them (a test keeps them equal: importing them here would be a cycle).
+EVALS_DIRNAME = "evals"
+EVAL_SUFFIX = ".eval.yaml"
+EVALS_JSON_FILENAME = "evals.json"
+# Directories never part of what a skill ships, at any depth.
+WITHHELD_DIRS = frozenset({EVALS_DIRNAME, ".git"})
+
+WITHHELD_NOTE = "SKILL.md, eval files (evals/, *.eval.yaml, evals.json) and .git are never readable"
+
+
+def withheld(relative: str) -> bool:
+    """Is this path, relative to the skill's directory, kept from the agent?
+
+    The top-level `SKILL.md`; anything under an `evals/` or `.git` directory;
+    and any `*.eval.yaml` or `evals.json` file -- at any depth, so an eval file
+    tucked under `references/` is withheld as surely as one beside `SKILL.md`.
+    """
+    parts = PurePosixPath(relative.strip()).parts
+    if not parts:
+        return False
+    if parts == (SKILL_FILENAME,):
+        return True
+    if any(part in WITHHELD_DIRS for part in parts):
+        return True
+    return parts[-1].endswith(EVAL_SUFFIX) or parts[-1] == EVALS_JSON_FILENAME
+
+
+def _resolves_withheld(item: Path, root: Path) -> bool:
+    """A link (or a path through one) that lands outside `root` or on a
+    withheld file. A loop or an unreadable link counts as withheld."""
+    try:
+        resolved = item.resolve()
+    except (OSError, RuntimeError):
+        return True
+    return not resolved.is_relative_to(root) or withheld(resolved.relative_to(root).as_posix())
+
+
+def _shipped(root: Path) -> Iterator[str]:
+    """Every file the skill ships, relative to `root`, in walk order.
+
+    Withheld directories are pruned, not walked, so `.git` costs nothing. A
+    file is a regular file, directly or through a link, that resolves inside
+    `root` to a path that is not withheld itself.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        here = Path(dirpath)
+        prefix = here.relative_to(root)
+        dirnames[:] = [d for d in dirnames if not withheld((prefix / d).as_posix())]
+        for name in filenames:
+            relative = (prefix / name).as_posix()
+            item = here / name
+            if withheld(relative) or not item.is_file() or _resolves_withheld(item, root):
+                continue
+            yield relative
+
+
+def bundle_files(root: Path) -> list[str]:
+    """Every file the skill ships, relative to `root`, sorted."""
+    return sorted(_shipped(root.resolve()))
 
 
 def has_bundle(directory: Path) -> bool:
-    """Does `directory` hold at least one of the three bundle directories?"""
-    return any((directory / name).is_dir() for name in BUNDLE_DIRS)
+    """Does `directory` ship at least one file besides `SKILL.md` and its evals?"""
+    return next(_shipped(directory.resolve()), None) is not None
+
+
+def _lands_on_withheld(item: Path, root: Path) -> bool:
+    """A link that resolves inside `root` onto a withheld file, or cannot be
+    resolved at all. A link out of `root` is not this: it is copied as a link,
+    as `git archive` preserves it."""
+    try:
+        resolved = item.resolve()
+    except (OSError, RuntimeError):
+        return True
+    return resolved.is_relative_to(root) and withheld(resolved.relative_to(root).as_posix())
+
+
+def copy_ignore(root: Path) -> Callable[[str, list[str]], set[str]]:
+    """A `shutil.copytree(root, ..., ignore=...)` callable that leaves out what
+    `withheld` names and links onto it, so a delivered copy never holds an eval
+    file. `root` must be the path passed to `copytree`."""
+    resolved_root = root.resolve()
+
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        here = Path(directory)
+        prefix = here.relative_to(root)
+        return {
+            name
+            for name in names
+            if withheld((prefix / name).as_posix())
+            or ((here / name).is_symlink() and _lands_on_withheld(here / name, resolved_root))
+        }
+
+    return ignore
 
 
 def script_extension(candidate: str) -> str:
@@ -45,7 +136,7 @@ def script_extension(candidate: str) -> str:
 
 @dataclass(frozen=True)
 class SkillBundle:
-    """The three bundle directories under one skill, read-only.
+    """The files one skill ships, read-only.
 
     `root` is **always already resolved**, for the same reason `Workspace.root`
     is: a containment check that compared `/tmp/...` against `/private/tmp/...`
@@ -67,10 +158,9 @@ class SkillBundle:
         target = resolve_under(self.root, candidate)
         if target == self.root or not target.is_relative_to(self.root):
             raise PathRefused(f"refused: {candidate!r} resolves outside the skill's directory")
-        if Path(text).parts[0] not in BUNDLE_DIRS:
+        if withheld(text) or withheld(target.relative_to(self.root).as_posix()):
             raise PathRefused(
-                f"refused: {candidate!r} is not under scripts/, references/ or assets/; "
-                "only those three directories are readable"
+                f"refused: {candidate!r} is not a file the skill ships; {WITHHELD_NOTE}"
             )
         return target, stat_regular(target, candidate)
 
@@ -79,20 +169,12 @@ class SkillBundle:
         return self._inspect(candidate)[0]
 
     def listing(self) -> list[str]:
-        """Every bundled file, relative to the root, sorted, recursive.
+        """Every file the skill ships, relative to the root, sorted, recursive.
 
-        A symbolic link whose target lies outside the root is left out, so the
-        listing never advertises a file `read` would refuse.
+        A link that resolves outside the root or onto a withheld file is left
+        out, so the listing never advertises a file `read` would refuse.
         """
-        found: list[str] = []
-        for name in BUNDLE_DIRS:
-            directory = self.root / name
-            if not directory.is_dir():
-                continue
-            for item in directory.rglob("*"):
-                if item.is_file() and item.resolve().is_relative_to(self.root):
-                    found.append(item.relative_to(self.root).as_posix())
-        return sorted(found)
+        return bundle_files(self.root)
 
     def scripts(self) -> list[str]:
         """The listing, narrowed to `scripts/`."""

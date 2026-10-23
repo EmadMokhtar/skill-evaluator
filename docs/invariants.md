@@ -899,8 +899,8 @@ whatever the skill did and the second would show the judge one name for two thin
 
 A product runner delivers the skill into the workspace and leaves it there, so
 `--keep-workspace` shows what the product saw. A `file:`, `file_glob` or judge artifact that
-names or matches a delivered file (`runners.product.delivered_paths`: `SKILL.md` and the
-three bundle directories, under the runner's `skills_dir`) would read the harness's copy,
+names or matches a delivered file (`runners.product.delivered_paths`: `SKILL.md` and every
+file the skill ships, under the runner's `skills_dir`) would read the harness's copy,
 not the skill's output, and hold whatever the skill did. `ProductRunner.preflight` refuses
 it (`ProductSetupError`, exit 2, before any spend), per runner, because only the runner
 knows its `skills_dir`.
@@ -966,12 +966,20 @@ on for itself. The action's `allow-scripts` input is unset by default, so the fi
 `pull_request_target`, collaborator-pull-request and self-hosted workflows should pass
 `allow-scripts: false` explicitly. [Security](security.md) and [CI](ci.md) say so.
 
-### The bundle is `scripts/`, `references/`, `assets/` and nothing else
+### The bundle is every file the skill ships except `SKILL.md`, `.git` and its eval files
 
-`SkillBundle` refuses any other first path component, so `*.eval.yaml` and `evals/` — the
-expected answers — are never readable by the agent. `listing()` also leaves out a symbolic
-link whose target resolves outside the root, so it never advertises a file `read` would
-refuse.
+A skill ships more than the three Agent Skills directories — planning-with-files tells the
+agent to copy `templates/task_plan.md` and links `reference.md` — and an install copies all
+of it, so measuring less would measure a different skill (issue #92). `bundle.withheld` is the
+one rule, shared by `SkillBundle`, product delivery and the `--baseline previous` extraction:
+the top-level `SKILL.md` (delivered on its own path, from the skill's markdown), anything
+under an `evals/` or `.git` directory, and any `*.eval.yaml` or `evals.json` file, **at any
+depth** — the expected answers are never readable by the agent, wherever they sit.
+`SkillBundle` checks the path asked for and the path it resolves to, so a link onto an eval
+file is refused too; `listing()` leaves out a link that resolves outside the root or onto a
+withheld file, so it never advertises a file `read` would refuse. `bundle.py` spells the eval
+file names itself (importing them would be a cycle) and a test keeps them equal to the
+loader's. Only `scripts/` is runnable.
 
 ### `Skill.bundle_root` defaults to `None`, and only the loader and the baseline resolver set it
 
@@ -1092,7 +1100,7 @@ A previous baseline carries its own bundle, extracted with `git archive <sha> --
 :(literal)<dir>` run from the repository root, where `<dir>` is the directory the skill had
 *at that commit* — after a move it no longer exists in the checkout, so there is nowhere to
 run `git archive <sha> -- .` from — and the `<dir>/` prefix stripped from every member
-(verified: `<sha>:./` gives an empty archive). It is then filtered to the three directories, with `tarfile`'s `data` filter — which is why
+(verified: `<sha>:./` gives an empty archive). It is then filtered by `bundle.withheld`, as the candidate's bundle is, with `tarfile`'s `data` filter — which is why
 `requires-python` is `>=3.11.4`, the release that added `filter=`. The commit is the one
 that last edited `SKILL.md` at the previous version — the version is the authority — so a
 bundle-only commit after it is invisible, and a very large historical `assets/` can hit the
@@ -1479,9 +1487,9 @@ newline-preserving read would push `\r\n` into the framework runners' system pro
 the loader stays as it is. Products honour frontmatter keys skill-lens does not model
 (`allowed-tools`, `disable-model-invocation`, `license`); a re-rendering would change the
 product's behaviour and the eval would measure the re-rendering. `deliver_skill` writes it
-with `newline=""` so no further translation changes a byte on the way out, and copies
-`scripts/`, `references/` and `assets/` beside it — those three and nothing else, so an eval
-file beside `SKILL.md` never reaches the product. The `--baseline none` skill has an empty
+with `newline=""` so no further translation changes a byte on the way out, and copies every
+file the skill ships beside it — all but what `bundle.withheld` names, so an eval file never
+reaches the product. The `--baseline none` skill has an empty
 `markdown`, so no directory is written for it: the rule is keyed on emptiness, not on which
 arm is running, the same rule `BASELINE_PREAMBLE` uses, so a runner never has to know which
 arm it is serving.

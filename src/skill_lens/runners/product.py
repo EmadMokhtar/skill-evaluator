@@ -36,7 +36,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from skill_lens.bundle import BUNDLE_DIRS
+from skill_lens.bundle import bundle_files, copy_ignore
 from skill_lens.models import ArtifactGlob, EvalCase, ProductStatus, RunResult, Skill
 from skill_lens.paths import glob_entries, glob_matches_path
 from skill_lens.process import group_kwargs, read_capped_handle, reap_and_kill_group
@@ -321,21 +321,14 @@ def delivered_paths(skill: Skill, skills_dir: str) -> list[str]:
     """Every file `deliver_skill` writes for `skill`, relative to the working directory.
 
     The same rule as `deliver_skill`: nothing for a skill with no markdown,
-    else `SKILL.md` and the files of the three bundle directories.
+    else `SKILL.md` and every file the skill ships (`bundle.bundle_files`).
     """
     if not skill.markdown:
         return []
     base = PurePosixPath(skills_dir) / skill.name
     paths = [(base / SKILL_FILENAME).as_posix()]
     if skill.bundle_root is not None:
-        for name in BUNDLE_DIRS:
-            source = skill.bundle_root / name
-            if source.is_dir():
-                paths += [
-                    (base / name / item.relative_to(source).as_posix()).as_posix()
-                    for item in sorted(source.rglob("*"))
-                    if item.is_file()
-                ]
+        paths += [(base / relative).as_posix() for relative in bundle_files(skill.bundle_root)]
     return paths
 
 
@@ -372,10 +365,11 @@ def deliver_skill(skill: Skill, cwd: Path, skills_dir: str) -> bool:
     endings are normalised (the loader reads the file in text mode, so a
     `\\r\\n` in the source is already a bare `\\n` by the time it reaches here)
     -- `newline=""` so no platform's text-mode translation turns that `\\n`
-    back into a `\\r\\n` on the way out; beside it go `scripts/`, `references/`
-    and `assets/` from the bundle -- those three and nothing else, so an eval
-    file beside `SKILL.md` never reaches the product. Symlinks are copied as
-    symlinks, as `git archive` preserved them.
+    back into a `\\r\\n` on the way out; beside it goes every file the skill
+    ships, as an install copies it (issue #92), except what `bundle.withheld`
+    names -- the on-disk `SKILL.md`, `.git` and the eval files at any depth --
+    so an eval file never reaches the product. Symlinks are copied as
+    symlinks, as `git archive` preserved them, except one onto a withheld file.
 
     `skill.name` is checked here, not trusted from the caller: under
     `--baseline previous` it comes from a historical `SKILL.md`'s
@@ -390,10 +384,13 @@ def deliver_skill(skill: Skill, cwd: Path, skills_dir: str) -> bool:
     target.mkdir(parents=True, exist_ok=True)
     (target / SKILL_FILENAME).write_text(skill.markdown, encoding="utf-8", newline="")
     if skill.bundle_root is not None:
-        for name in BUNDLE_DIRS:
-            source = skill.bundle_root / name
-            if source.is_dir():
-                shutil.copytree(source, target / name, symlinks=True, dirs_exist_ok=True)
+        shutil.copytree(
+            skill.bundle_root,
+            target,
+            symlinks=True,
+            dirs_exist_ok=True,
+            ignore=copy_ignore(skill.bundle_root),
+        )
     return True
 
 
