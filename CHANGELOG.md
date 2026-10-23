@@ -1,3 +1,13 @@
+## v0.24.0 (2026-10-23)
+
+### Feat
+
+- rebuild a stranded release tag past its re-run window and publish it (#107)
+
+### Fix
+
+- **deps**: upgrade certifi, opentelemetry-api and virtualenv for known vulnerabilities (#109)
+
 ## v0.23.0 (2026-10-20)
 
 ### Feat
