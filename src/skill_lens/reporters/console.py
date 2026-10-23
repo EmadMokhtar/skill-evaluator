@@ -121,10 +121,16 @@ def _script_lines(report: RunReport) -> list[str]:
         lines.append(line)
     for note in report.script_notes:
         plural = "" if note.script_count == 1 else "s"
-        lines.append(
-            f"skill {note.skill_name} bundles {note.script_count} script{plural}; "
-            "execution is off (allow_scripts = true or --allow-scripts)"
-        )
+        line = f"skill {note.skill_name} bundles {note.script_count} script{plural}; "
+        if note.product_note:
+            # allow_scripts reaches only run_script; say so, then what does not.
+            line += (
+                "skill-lens's run_script is off (allow_scripts = true or --allow-scripts); "
+                f"{note.product_note}"
+            )
+        else:
+            line += "execution is off (allow_scripts = true or --allow-scripts)"
+        lines.append(line)
     return lines
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 from skill_lens.comparison import build_delta
 from skill_lens.gating import evaluate_gate
 from skill_lens.models import (
+    PRODUCT_SCRIPTS_NOTE,
     BaselineNote,
     CaseOutcome,
     CheckResult,
@@ -725,6 +726,25 @@ def test_console_notes_bundled_scripts_that_did_not_run():
     assert "bundles 1 script;" in render_console(one)
 
 
+def test_console_says_a_product_runner_can_still_run_the_scripts():
+    """Issue #97: under a product runner, "execution is off" contradicted the
+    trust note printed just above it."""
+    report = _report().model_copy(
+        update={
+            "script_notes": [
+                ScriptNote(skill_name="pdf", script_count=22, product_note=PRODUCT_SCRIPTS_NOTE)
+            ]
+        }
+    )
+    text = render_console(report)
+    assert (
+        "skill pdf bundles 22 scripts; skill-lens's run_script is off "
+        "(allow_scripts = true or --allow-scripts); "
+        "product runners can still run them through their own tools"
+    ) in text
+    assert "execution is off" not in text
+
+
 def test_json_carries_the_script_status_and_notes():
     report = _report().model_copy(
         update={
@@ -740,7 +760,7 @@ def test_json_carries_the_script_status_and_notes():
         "detail": "sandbox-exec probe succeeded",
         "hardening": None,
     }
-    assert payload["script_notes"] == [{"skill_name": "pdf", "script_count": 1}]
+    assert payload["script_notes"] == [{"skill_name": "pdf", "script_count": 1, "product_note": ""}]
     assert json.loads(render_json(_report()))["scripts"] is None
 
 

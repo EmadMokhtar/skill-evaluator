@@ -20,6 +20,7 @@ from skill_lens.evaluators.trajectory import TrajectoryEvaluator
 from skill_lens.judges.base import Judge
 from skill_lens.judges.fake import FakeJudge
 from skill_lens.models import (
+    PRODUCT_SCRIPTS_NOTE,
     Arm,
     BaselineKind,
     BaselineNote,
@@ -428,7 +429,7 @@ def _execute(
 
 def _preflight_hooks(
     plan: _Plan, runners: list[Runner], judge: Judge | None
-) -> list[ProductStatus]:
+) -> tuple[list[ProductStatus], list[Runner]]:
     """Give every runner that defines `preflight` one look at what it will run,
     and call the judge's `preflight()`, which takes no arguments.
 
@@ -438,8 +439,13 @@ def _preflight_hooks(
     for it, once each: compatibility is a property of (case, runner), so a
     case `--tag` or `--case` filtered out is not its concern, and neither arm
     nor repeat changes the answer.
+
+    Also returns the runners whose hook reported a product: those are the
+    product runners. A product judge is not among them -- its working
+    directory holds no skill, so it can never reach the skill's scripts.
     """
     statuses: list[ProductStatus] = []
+    product_runners: list[Runner] = []
     for runner in runners:
         hook = getattr(runner, "preflight", None)
         if hook is None:
@@ -461,13 +467,14 @@ def _preflight_hooks(
         status = hook(skills, cases_by_skill)
         if status is not None:
             statuses.append(status)
+            product_runners.append(runner)
     hook = getattr(judge, "preflight", None) if judge is not None else None
     if hook is not None:
         status = hook()
         if status is not None and status not in statuses:
             # The same product serving as runner and judge is one product.
             statuses.append(status)
-    return statuses
+    return statuses, product_runners
 
 
 def run_evals(
@@ -604,7 +611,19 @@ def run_evals(
                     notes.append(ScriptNote(skill_name=skill.name, script_count=count))
         # After the script preflight, so a ScriptSetupError and a
         # ProductSetupError cannot race for the exit.
-        products = _preflight_hooks(plan, runners, judge)
+        products, product_runners = _preflight_hooks(plan, runners, judge)
+        if notes and product_runners:
+            reached = {
+                item.skill.name
+                for item in plan.items
+                if any(item.runner is runner for runner in product_runners)
+            }
+            notes = [
+                note.model_copy(update={"product_note": PRODUCT_SCRIPTS_NOTE})
+                if note.skill_name in reached
+                else note
+                for note in notes
+            ]
         outcomes = _execute(plan.items, evaluators, concurrency, executor_factory, options, runtime)
     finally:
         # However the run ended -- an authoring error out of an evaluator

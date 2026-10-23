@@ -603,16 +603,27 @@ class ScriptStatus(BaseModel):
     hardening: str | None = None
 
 
+# allow_scripts governs only skill-lens's own `run_script` tool. A product
+# runner reaches the same scripts through its own tools (Bash, say) whatever
+# allow_scripts says, so "execution is off" alone would contradict the
+# product's trust note printed beside it (issue #97).
+PRODUCT_SCRIPTS_NOTE = "product runners can still run them through their own tools"
+
+
 class ScriptNote(BaseModel):
-    """A skill bundles scripts, and execution is off.
+    """A skill bundles scripts, and skill-lens's `run_script` is off.
 
     On the report rather than printed from the orchestrator so that every
     notice a run produces goes through the reporters -- they render, they
-    never decide.
+    never decide. `product_note` is `PRODUCT_SCRIPTS_NOTE` when a product
+    runner ran this skill, else empty: it is fixed text on the model, as
+    `ProductStatus.trust` is, so the reporters cannot drift and the JSON
+    report carries the sentence a human reads.
     """
 
     skill_name: str
     script_count: int
+    product_note: str = ""
 
 
 class ProductStatus(BaseModel):

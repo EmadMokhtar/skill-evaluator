@@ -12,6 +12,7 @@ from skill_lens.cases.loader import CaseParseError
 from skill_lens.evaluators.assertion import InvalidAssertionValue
 from skill_lens.judges.fake import FakeJudge
 from skill_lens.models import (
+    PRODUCT_SCRIPTS_NOTE,
     AssertionSpec,
     CheckResult,
     EvalCase,
@@ -1071,6 +1072,35 @@ def test_scripts_off_leaves_a_note_per_skill_that_bundles_scripts(tmp_path):
     report = run_evals([skill], [runner], evals_path=_evals(tmp_path, _case()))
     assert report.scripts is None
     assert report.script_notes == [ScriptNote(skill_name="bundled", script_count=2)]
+
+
+def test_scripts_off_under_a_product_runner_says_the_product_can_still_run_them(tmp_path):
+    """allow_scripts governs only skill-lens's run_script. A product runner
+    reaches the same scripts through its own tools, so "execution is off"
+    alone would contradict the product's trust note (issue #97)."""
+    skill = _bundled_skill(tmp_path, "a.py", "b.sh")
+    report = run_evals([skill], [_PreflightRunner()], evals_path=_evals(tmp_path, _case()))
+    assert report.script_notes == [
+        ScriptNote(skill_name="bundled", script_count=2, product_note=PRODUCT_SCRIPTS_NOTE)
+    ]
+
+
+def test_a_product_judge_alone_leaves_the_scripts_note_as_it_was(tmp_path):
+    """A product judge's working directory holds no skill, so it cannot run
+    the skill's scripts; only a product *runner* changes the note."""
+
+    class ProbedJudge(FakeJudge):
+        name = "probed-judge"
+
+        def preflight(self):
+            return ProductStatus(name="probed-judge", executable="/bin/j", version="2", trust="t")
+
+    skill = _bundled_skill(tmp_path, "a.py")
+    report = run_evals(
+        [skill], [_RecordingRunner()], evals_path=_evals(tmp_path, _case()), judge=ProbedJudge()
+    )
+    assert report.script_notes == [ScriptNote(skill_name="bundled", script_count=1)]
+    assert report.script_notes[0].product_note == ""
 
 
 def test_scripts_off_notes_nothing_for_a_bundle_without_scripts(tmp_path):

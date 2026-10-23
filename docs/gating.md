@@ -219,7 +219,9 @@ off, else `{sandbox, detail, hardening}` saying which OS sandbox the run's scrip
 and why — `sandbox` is `"sandbox-exec"`, `"bwrap"` or `"none"` — and whether the harness
 could hide its own environment from same-user processes: `hardening` is a short note on
 Linux when `prctl(PR_SET_DUMPABLE, 0)` applied, else `null`), `script_notes` (skills that bundle
-scripts which did not run because execution was off, each as `{skill_name, script_count}`),
+scripts while skill-lens's `run_script` was off, each as `{skill_name, script_count,
+product_note}`; `product_note` is the fixed sentence that product runners can still run the
+scripts through their own tools when one ran that skill, else `""`),
 `products` (one entry per product the run executed, as a runner or as the judge — a product
 serving as both is listed once — each as `{name, executable, version, trust}`; `trust` is
 the fixed sentence about permission prompts and the missing sandbox, the same one the

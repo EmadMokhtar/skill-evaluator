@@ -361,10 +361,15 @@ def _scripts(report: RunReport) -> str:
         bits.append(line)
     for note in report.script_notes:
         plural = "" if note.script_count == 1 else "s"
-        bits.append(
-            f"{_code(note.skill_name)} bundles {note.script_count} script{plural}; "
-            "execution is off (`allow_scripts = true` or `--allow-scripts`)"
-        )
+        bit = f"{_code(note.skill_name)} bundles {note.script_count} script{plural}; "
+        if note.product_note:
+            bit += (
+                "skill-lens's `run_script` is off (`allow_scripts = true` or `--allow-scripts`); "
+                f"{_escape(note.product_note)}"
+            )
+        else:
+            bit += "execution is off (`allow_scripts = true` or `--allow-scripts`)"
+        bits.append(bit)
     return "<sub>" + "<br>".join(bits) + "</sub>" if bits else ""
 
 

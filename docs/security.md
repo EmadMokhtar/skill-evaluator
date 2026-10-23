@@ -277,6 +277,18 @@ and the full environment; no skill-lens sandbox applies; bundled scripts are rea
 through the product's own tools`), and the JSON report's `products` entries and the JUnit
 `skill-lens.products` property carry the same sentence.
 
+**The scripts note says the same thing.** With `allow_scripts` off, a skill that bundles
+scripts is named on the report. Under a framework runner that line says `execution is off`,
+which is true: the agent can only run a script through `run_script`. Under a product runner
+it says what is off and what is not:
+
+```
+skill planning-with-files bundles 22 scripts; skill-lens's run_script is off (allow_scripts = true or --allow-scripts); product runners can still run them through their own tools
+```
+
+The second half appears only for a skill a product *runner* ran. A product used only as the
+judge does not change the line: the judge's working directory holds no skill.
+
 **A case's mock tools reach the product through skill-lens's own MCP bridge.** A `tools:`
 block under `copilot` or `claude-code` is served by `python -m skill_lens.mcp_bridge`, a
 stdio server the product starts as a child process, with the product's environment, from a
