@@ -692,8 +692,8 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **`run_script` never raises, and an unrunnable script is never `RunResult.error`.**
 - **The sandbox decision is made once per run and appears on the report.** It is made in
   preflight: `required` without a backend and a missing interpreter abort with exit 2 before
-  any case runs; the backend is executed, not merely found. Preflight and the "execution is
-  off" notes cover every *discovered* skill, including ones `--tag`/`--case` filter out or
+  any case runs; the backend is executed, not merely found. Preflight and the "bundles N
+  scripts" notes cover every *discovered* skill, including ones `--tag`/`--case` filter out or
   that have no cases. The probe fails closed on a temp-dir path holding a double quote.
 - **The sandbox hides other skill-lens temporary directories, and re-allows the bundle
   explicitly.** It denies reads under the system temp directory, then re-allows the

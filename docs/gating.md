@@ -221,7 +221,7 @@ could hide its own environment from same-user processes: `hardening` is a short 
 Linux when `prctl(PR_SET_DUMPABLE, 0)` applied, else `null`), `script_notes` (skills that bundle
 scripts while skill-lens's `run_script` was off, each as `{skill_name, script_count,
 product_note}`; `product_note` is the fixed sentence that product runners can still run the
-scripts through their own tools when one ran that skill, else `""`),
+scripts through their own tools when the run includes a product runner, else `""`),
 `products` (one entry per product the run executed, as a runner or as the judge — a product
 serving as both is listed once — each as `{name, executable, version, trust}`; `trust` is
 the fixed sentence about permission prompts and the missing sandbox, the same one the

@@ -107,8 +107,9 @@ def _script_lines(report: RunReport) -> list[str]:
 
     Printed on every run that enabled scripts, so an operator can tell from
     the log whether the isolation they expected was applied -- `none` says
-    why. A skill whose scripts did not run because execution is off gets a
-    line too, however execution was left off: a bundled script that silently
+    why. A skill whose scripts skill-lens's `run_script` could not run gets a
+    line too, however execution was left off -- saying, under a product runner,
+    that the product can still run them: a bundled script that silently
     never runs would look like a skill that does not need it.
     """
     lines: list[str] = []
@@ -120,17 +121,7 @@ def _script_lines(report: RunReport) -> list[str]:
             line += f"; {report.scripts.hardening}"
         lines.append(line)
     for note in report.script_notes:
-        plural = "" if note.script_count == 1 else "s"
-        line = f"skill {note.skill_name} bundles {note.script_count} script{plural}; "
-        if note.product_note:
-            # allow_scripts reaches only run_script; say so, then what does not.
-            line += (
-                "skill-lens's run_script is off (allow_scripts = true or --allow-scripts); "
-                f"{note.product_note}"
-            )
-        else:
-            line += "execution is off (allow_scripts = true or --allow-scripts)"
-        lines.append(line)
+        lines.append(f"skill {note.skill_name} {note.describe()}")
     return lines
 
 

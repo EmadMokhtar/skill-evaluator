@@ -286,8 +286,9 @@ it says what is off and what is not:
 skill planning-with-files bundles 22 scripts; skill-lens's run_script is off (allow_scripts = true or --allow-scripts); product runners can still run them through their own tools
 ```
 
-The second half appears only for a skill a product *runner* ran. A product used only as the
-judge does not change the line: the judge's working directory holds no skill.
+The second half appears whenever the run includes a product *runner*, on every note, the
+same as the notes themselves cover every discovered skill. A product used only as the judge
+does not change the line: the judge's working directory holds no skill.
 
 **A case's mock tools reach the product through skill-lens's own MCP bridge.** A `tools:`
 block under `copilot` or `claude-code` is served by `python -m skill_lens.mcp_bridge`, a

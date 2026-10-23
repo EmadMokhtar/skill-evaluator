@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -624,6 +624,20 @@ class ScriptNote(BaseModel):
     skill_name: str
     script_count: int
     product_note: str = ""
+
+    def describe(self, code: Callable[[str], str] = str, plain: Callable[[str], str] = str) -> str:
+        """The note after the skill's name, the one wording every reporter
+        prints. `code` formats a flag or a tool name and `plain` formats prose,
+        so Markdown can pass its code-span and escape functions and the
+        console the identity."""
+        plural = "" if self.script_count == 1 else "s"
+        hint = f"({code('allow_scripts = true')} or {code('--allow-scripts')})"
+        head = f"bundles {self.script_count} script{plural}; "
+        if self.product_note:
+            return (
+                f"{head}skill-lens's {code('run_script')} is off {hint}; {plain(self.product_note)}"
+            )
+        return f"{head}execution is off {hint}"
 
 
 class ProductStatus(BaseModel):

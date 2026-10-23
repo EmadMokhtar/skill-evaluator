@@ -176,9 +176,9 @@ All live in `models.py`.
 | `BaselineNote` | why a skill or case has no baseline arm: `kind` (`"unavailable"` or `"skipped"`) plus a reason |
 | `CaseOutcome` | one (skill, case, runner, arm, repetition) combination: status plus its scores and result |
 | `ScriptStatus` | the once-per-run sandbox decision: `sandbox` (`"sandbox-exec"`, `"bwrap"` or `"none"`), the probe's `detail`, and `hardening` — the note when the harness could hide its own environment from same-user processes (Linux, non-root), else `None` |
-| `ScriptNote` | a skill that bundles scripts while execution is off: `skill_name`, `script_count` |
+| `ScriptNote` | a skill that bundles scripts while skill-lens's `run_script` is off: `skill_name`, `script_count`, and `product_note` — the fixed sentence that product runners can still run the scripts through their own tools when the run includes one, else empty; `describe()` is the one wording every reporter prints |
 | `ProductStatus` | one agent product a run executed, as a runner or as the judge, as preflight found it: `name`, `executable`, `version`, and `trust` — the fixed sentence about permission prompts, the full environment and the missing sandbox, on the model so the three reporters cannot drift; equal statuses collapse to one entry, so a product in both seats is listed once |
-| `RunReport` | every outcome, skipped and tag-filtered skills, `baseline_kind`, `repeat`, `baseline_notes`, `scripts` (`None` when execution was off), `script_notes`, `products` (one `ProductStatus` per product the run executed, as a runner or as the judge, a product in both seats once; empty otherwise) |
+| `RunReport` | every outcome, skipped and tag-filtered skills, `baseline_kind`, `repeat`, `baseline_notes`, `scripts` (`None` when skill-lens's `run_script` was off), `script_notes`, `products` (one `ProductStatus` per product the run executed, as a runner or as the judge, a product in both seats once; empty otherwise) |
 
 Two fields are **derived, not stored**: `RunResult.tokens` (the input/output split summed)
 and `RunResult.errored` (`error is not None`). Aggregates on `RunReport` — `total`,

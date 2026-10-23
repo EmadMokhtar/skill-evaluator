@@ -251,14 +251,15 @@ on. Reading the bundle (`references/`, `assets/`, `scripts/`) needs no opt-in.
 With execution off, every discovered skill that bundles scripts is named on the report
 (`skill log-triage bundles 1 script; execution is off (allow_scripts = true or
 --allow-scripts)`), so a script that silently never runs cannot look like a skill that does
-not need one. This key governs only skill-lens's `run_script` tool: a product runner can
-still run the scripts through its own tools, and for a skill one ran the line says so
-instead (see [Product runners](security.md#product-runners)). With execution on, a preflight runs once, after discovery and before any
-case: every bundled script's interpreter must be on `PATH`, and `script_sandbox =
-"required"` must find a sandbox, or the run exits 2 before any money is spent. Both the
-preflight and the notes cover every *discovered* skill — including one that `--tag` or
-`--case` filters out, or that has no cases — so a missing interpreter for a skill that
-would never run still exits 2. That is the fail-closed choice: a check that quietly
+not need one. This key governs only skill-lens's `run_script` tool, and a product runner can
+still run the scripts through its own tools: when the run includes one, that `bundles 1
+script` line names `run_script` as what is off and says so (see [Product
+runners](security.md#product-runners)). With execution on, a preflight runs once, after
+discovery and before any case: every bundled script's interpreter must be on `PATH`, and
+`script_sandbox = "required"` must find a sandbox, or the run exits 2 before any money is
+spent. Both the preflight and the notes cover every *discovered* skill — including one that
+`--tag` or `--case` filters out, or that has no cases — so a missing interpreter for a skill
+that would never run still exits 2. That is the fail-closed choice: a check that quietly
 skipped some skills would not be one.
 
 The four `script_*` keys are repository policy, config-only:

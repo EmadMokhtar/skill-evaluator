@@ -1043,7 +1043,8 @@ bundled scripts when the name was wrong, the allowed extensions when the interpr
 `preflight` runs in `run_evals` after discovery and before any case: `required` without a
 backend, and a missing interpreter for a discovered script, raise `ScriptSetupError` (exit 2)
 before any money is spent. The backend is *executed*, not merely found on `PATH`. Preflight
-and the "bundles N scripts; execution is off" notes both iterate every *discovered* skill,
+and the "bundles N scripts" notes (`execution is off`, or under a product runner `run_script
+is off`) both iterate every *discovered* skill,
 including one `--tag` or `--case` filters out or that has no cases — a fail-closed check
 that quietly skipped some skills would not be one. Baseline bundles are not preflighted; an
 interpreter is looked up again at call time, and a miss there is a refusal, not an error.
