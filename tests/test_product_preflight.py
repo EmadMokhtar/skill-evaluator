@@ -462,3 +462,46 @@ def test_the_bridge_probe_runs_under_the_isolation(monkeypatch):
     (isolation,) = seen
     assert isinstance(isolation, Isolation)
     assert isolation.root is not None and isolation.root.name.startswith(HOME_PREFIX)
+
+
+def _no_temp_home(monkeypatch):
+    """mkdtemp fails for the temporary home only, as on a full disk."""
+    import tempfile
+
+    real = tempfile.mkdtemp
+
+    def mkdtemp(*args, **kwargs):
+        if kwargs.get("prefix") == HOME_PREFIX:
+            raise OSError(28, "No space left on device")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", mkdtemp)
+
+
+def test_a_temporary_home_that_cannot_be_made_is_exit_2_in_preflight(monkeypatch):
+    # An environment fault, so a setup error (exit 2) naming it -- not a
+    # traceback with exit 1, which CI would read as a failed gate.
+    _no_temp_home(monkeypatch)
+    runner = ProductRunner(_product(wrapper=True), sandbox=HOME_ONLY)
+    with pytest.raises(ProductSetupError, match="cannot create a temporary home") as caught:
+        runner.preflight([_skill()], {"ping": [_case()]})
+    assert "No space left on device" in str(caught.value)
+
+
+def test_a_temporary_home_that_cannot_be_made_errors_a_run_never_raises(monkeypatch, tmp_path):
+    _no_temp_home(monkeypatch)
+    result = ProductRunner(_product(wrapper=True), sandbox=HOME_ONLY).run(_skill(), _case())
+    assert result.error is not None and "cannot create a temporary home" in result.error
+
+
+def test_the_judge_preflight_and_judge_handle_a_temporary_home_that_cannot_be_made(monkeypatch):
+    from skill_lens.judges.product import ProductJudge
+    from skill_lens.models import JudgeRequest, RubricCheck
+
+    _no_temp_home(monkeypatch)
+    judge = ProductJudge(_product(wrapper=True), sandbox=HOME_ONLY)
+    with pytest.raises(ProductSetupError, match="cannot create a temporary home"):
+        judge.preflight()
+    request = JudgeRequest(task="t", output="o", checks=[RubricCheck(id="c1", text="x")])
+    verdict = judge.judge(request)  # never raises
+    assert verdict.error is not None and "cannot create a temporary home" in verdict.error

@@ -361,16 +361,24 @@ def isolate(sandbox: ProductSandbox, product: Product) -> Iterator[Isolation]:
 
     `mkdtemp` is atomic, so two arms or two concurrent cases never share a
     home. Every product process the work item starts uses the same one.
-    Raises `OSError` when the directory cannot be made, which a caller that
-    must not raise turns into its own error.
+    Raises `ProductSetupError` when the directory cannot be made (a full or
+    read-only temp dir): an environment fault, so exit 2 from preflight, and
+    `RunResult.error` / `JudgeVerdict.error` from a run, never a traceback.
     """
     if not sandbox.home_isolated:
         yield Isolation(sandbox=sandbox, root=None, env=os.environ.copy())
         return
-    root = Path(tempfile.mkdtemp(prefix=HOME_PREFIX)).resolve()
+    cannot = f"cannot create a temporary home for the {product.name} product"
     try:
-        (root / "home").mkdir()
-        (root / "tmp").mkdir()
+        root = Path(tempfile.mkdtemp(prefix=HOME_PREFIX)).resolve()
+    except OSError as exc:
+        raise ProductSetupError(f"{cannot}: {exc}") from exc
+    try:
+        try:
+            (root / "home").mkdir()
+            (root / "tmp").mkdir()
+        except OSError as exc:
+            raise ProductSetupError(f"{cannot}: {exc}") from exc
         yield Isolation(sandbox=sandbox, root=root, env=product_environment(product, root))
     finally:
         shutil.rmtree(root, ignore_errors=True)

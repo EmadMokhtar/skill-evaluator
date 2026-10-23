@@ -220,6 +220,8 @@ class ProductJudge:
         try:
             with isolate(self._sandbox, product) as isolation:
                 trace = read_trace(product, invoke(product, prompt, cwd, isolation=isolation))
+        except ProductSetupError as exc:
+            return JudgeVerdict(error=str(exc))
         except OSError as exc:
             return JudgeVerdict(error=f"{type(exc).__name__}: {exc}")
         finally:

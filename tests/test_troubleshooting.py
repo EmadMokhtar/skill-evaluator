@@ -198,6 +198,7 @@ QUOTED: list[tuple[str, str]] = [
         "runners/product_sandbox.py",
     ),
     (' -- set product_sandbox = "off" to run it without one', "runners/product.py"),
+    ("cannot create a temporary home for the ", "runners/product_sandbox.py"),
     (
         ", which home isolation sets itself; passing it would undo the isolation -- set "
         'product_sandbox = "off" to run the product with your own home',

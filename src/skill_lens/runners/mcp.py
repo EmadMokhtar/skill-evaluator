@@ -236,7 +236,10 @@ def probe_bridge(isolation: Isolation | None = None) -> None:
     the built environment, inside the backend -- since the bridge is the
     product's child. Raises `BridgeSetupError` naming what went wrong."""
     command = bridge_command()
-    directory = Path(tempfile.mkdtemp(prefix=BRIDGE_PREFIX)).resolve()
+    try:
+        directory = Path(tempfile.mkdtemp(prefix=BRIDGE_PREFIX)).resolve()
+    except OSError as exc:
+        raise BridgeSetupError(f"cannot write the MCP bridge's files: {exc}") from exc
     try:
         spec_path = directory / "tools.json"
         spec_path.write_text(
