@@ -31,7 +31,7 @@ def _outcome(name="extracts", status="passed", arm="candidate", repeat_index=0, 
     return CaseOutcome(
         skill_name=kwargs.pop("skill_name", "pdf"),
         case_name=name,
-        runner="fake",
+        runner=kwargs.pop("runner", "fake"),
         status=status,
         scores=scores,
         result=result,
@@ -175,6 +175,38 @@ def test_low_signal_checks_are_labelled_as_advice():
     text = render_markdown(report, delta=build_delta(report))
     assert "Low-signal checks" in text
     assert "never fail the gate" in text
+
+
+def test_markdown_names_the_runner_on_every_flag_line():
+    """Issue #98: the same case and check under two runners must not render as
+    two identical lines."""
+    check = [
+        EvalScore(
+            evaluator="assertion",
+            passed=True,
+            checks=[CheckResult(id="contains:pdf", passed=True, evidence="ok")],
+        )
+    ]
+    report = RunReport(
+        outcomes=[
+            _outcome(
+                arm=arm,
+                repeat_index=index,
+                runner=runner,
+                status="failed" if (arm, index) == ("candidate", 1) else "passed",
+                scores=check,
+            )
+            for runner in ("claude-code", "pydantic-ai")
+            for arm in ("candidate", "baseline")
+            for index in (0, 1)
+        ],
+        baseline_kind="none",
+        repeat=2,
+    )
+    text = render_markdown(report, delta=build_delta(report))
+    for runner in ("claude-code", "pydantic-ai"):
+        assert f"- `pdf` :: `extracts` (`{runner}`): `contains:pdf`" in text
+        assert f"- `pdf` :: `extracts` (`{runner}`, candidate): 50%, stddev 0.50" in text
 
 
 def test_high_variance_cases_are_reported():
@@ -439,6 +471,7 @@ def test_a_backtick_in_a_check_id_cannot_close_its_code_span():
             LowSignalCheck(
                 skill_name="pdf",
                 case_name="extracts",
+                runner="fake",
                 evaluator="trajectory",
                 check_id="called:a`b",
             )

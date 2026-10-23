@@ -326,14 +326,14 @@ def test_the_json_report_carries_per_check_verdicts_and_judge_cost():
     assert checks[1]["evidence"] == "uses the word 'RMA'"
 
 
-def _arm_outcome(status, arm="candidate", index=0, *, checks=()):
+def _arm_outcome(status, arm="candidate", index=0, *, checks=(), runner="fake"):
     """One repetition of one arm. Local to this module on purpose: importing a
     helper across test files couples two suites that should move independently.
     """
     return CaseOutcome(
         skill_name="pdf",
         case_name="extracts",
-        runner="fake",
+        runner=runner,
         status=status,
         arm=arm,
         repeat_index=index,
@@ -394,6 +394,47 @@ def test_flags_are_rendered_as_advice_not_failures():
     text = render_console(report, delta=build_delta(report))
     assert "low-signal" in text
     assert "never fail the gate" in text
+
+
+def _two_runner_report() -> RunReport:
+    """Two runners, two repetitions per arm: `contains[0]` passes everywhere
+    (low signal under each runner) and the candidate arm disagrees with itself
+    (high variance under each runner)."""
+    always = (("contains[0]", True),)
+    return RunReport(
+        baseline_kind="none",
+        repeat=2,
+        outcomes=[
+            _arm_outcome(status, index=index, checks=always, runner=runner)
+            for runner in ("claude-code", "pydantic-ai")
+            for index, status in enumerate(("passed", "failed"))
+        ]
+        + [
+            _arm_outcome("failed", arm="baseline", index=index, checks=always, runner=runner)
+            for runner in ("claude-code", "pydantic-ai")
+            for index in (0, 1)
+        ],
+    )
+
+
+def test_the_console_names_the_runner_on_every_flag_line():
+    """Issue #98: with two runners the same case and check appeared twice with
+    nothing to tell the lines apart."""
+    report = _two_runner_report()
+    text = render_console(report, delta=build_delta(report))
+    assert "  - pdf :: extracts (claude-code): contains[0]" in text
+    assert "  - pdf :: extracts (pydantic-ai): contains[0]" in text
+    assert "  - pdf :: extracts (claude-code, candidate): 50%, stddev 0.50" in text
+    assert "  - pdf :: extracts (pydantic-ai, candidate): 50%, stddev 0.50" in text
+
+
+def test_json_low_signal_checks_carry_the_runner():
+    report = _two_runner_report()
+    payload = json.loads(render_json(report, delta=build_delta(report)))
+    assert [(c["runner"], c["check_id"]) for c in payload["delta"]["low_signal"]] == [
+        ("claude-code", "contains[0]"),
+        ("pydantic-ai", "contains[0]"),
+    ]
 
 
 def test_baseline_notes_are_shown():
