@@ -66,11 +66,34 @@ class CaseStats(BaseModel):
     high_variance: bool = False
 
 
+class RunnerDelta(BaseModel):
+    """One runner's comparable cases, candidate minus baseline.
+
+    A product runner and a framework runner spend very differently -- in one
+    run, about 375,000 tokens against 9,000 -- so an aggregate across runners
+    describes neither, and a strong runner can hide a regression in the other
+    (issue #93). `comparable_cases` is how many of this runner's cases had
+    both arms; zero means nothing was measured for it.
+    """
+
+    runner: str
+    comparable_cases: int = 0
+    pass_rate_candidate: float = 0.0
+    pass_rate_baseline: float = 0.0
+    pass_rate_delta: float = 0.0
+    tokens_delta: float = 0.0
+    cost_usd_delta: float = 0.0
+    latency_ms_delta: float = 0.0
+
+
 class Delta(BaseModel):
     """The candidate arm minus the baseline arm.
 
     Every delta is candidate - baseline. Higher is better for `pass_rate_delta`;
-    negative is better for tokens, cost and latency.
+    negative is better for tokens, cost and latency. The top-level numbers
+    aggregate every runner; `runners` has the same numbers per runner, in the
+    order each runner first appears, and is what `--min-delta` gates on when
+    there is more than one.
     """
 
     baseline_kind: BaselineKind
@@ -84,6 +107,14 @@ class Delta(BaseModel):
     low_signal: list[LowSignalCheck] = Field(default_factory=list)
     high_variance: list[CaseRef] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    runners: list[RunnerDelta] = Field(default_factory=list)
+
+    @property
+    def per_runner(self) -> bool:
+        """Whether reporters and the gate read `runners` instead of the
+        aggregate: only with more than one runner, so a single-runner run
+        renders and gates exactly as it did before `runners` existed."""
+        return len(self.runners) > 1
 
 
 def format_baseline_notes(notes: list[BaselineNote]) -> list[str]:
@@ -123,6 +154,19 @@ def _arm_stats(outcomes: list[CaseOutcome]) -> ArmStats:
         mean_cost_usd=_mean([o.result.cost_usd for o in scored if o.result]),
         mean_latency_ms=_mean([float(o.result.latency_ms) for o in scored if o.result]),
     )
+
+
+def _difference(candidate: list[CaseOutcome], baseline: list[CaseOutcome]) -> dict[str, float]:
+    """Candidate minus baseline over paired outcomes, as the delta fields."""
+    cand, base = _arm_stats(candidate), _arm_stats(baseline)
+    return {
+        "pass_rate_candidate": cand.pass_rate,
+        "pass_rate_baseline": base.pass_rate,
+        "pass_rate_delta": cand.pass_rate - base.pass_rate,
+        "tokens_delta": cand.mean_tokens - base.mean_tokens,
+        "cost_usd_delta": cand.mean_cost_usd - base.mean_cost_usd,
+        "latency_ms_delta": cand.mean_latency_ms - base.mean_latency_ms,
+    }
 
 
 def _group(report: RunReport) -> dict[tuple[str, str, str], dict[Arm, list[CaseOutcome]]]:
@@ -180,14 +224,16 @@ def build_delta(report: RunReport) -> Delta | None:
         return None
 
     cases: list[CaseStats] = []
-    paired_candidate: list[CaseOutcome] = []
-    paired_baseline: list[CaseOutcome] = []
     all_low_signal: list[LowSignalCheck] = []
     all_high_variance: list[CaseRef] = []
+    # Paired candidate and baseline outcomes per runner, in the order each runner
+    # first appears. Every runner gets an entry, comparable or not.
+    paired: dict[str, tuple[list[CaseOutcome], list[CaseOutcome]]] = {}
 
     for (skill_name, case_name, runner), arms in _group(report).items():
         candidate, baseline = arms["candidate"], arms["baseline"]
         reason = _exclusion_reason(candidate, baseline)
+        runner_candidate, runner_baseline = paired.setdefault(runner, ([], []))
         stats = CaseStats(
             skill_name=skill_name,
             case_name=case_name,
@@ -199,8 +245,8 @@ def build_delta(report: RunReport) -> Delta | None:
         )
         low_signal: list[LowSignalCheck] = []
         if not reason:
-            paired_candidate.extend(candidate)
-            paired_baseline.extend(baseline)
+            runner_candidate.extend(candidate)
+            runner_baseline.extend(baseline)
             for evaluator, check_id in _low_signal(candidate, baseline):
                 low_signal.append(
                     LowSignalCheck(
@@ -229,19 +275,23 @@ def build_delta(report: RunReport) -> Delta | None:
                 )
         cases.append(stats)
 
-    candidate_stats = _arm_stats(paired_candidate)
-    baseline_stats = _arm_stats(paired_baseline)
-
+    runners = [
+        RunnerDelta(
+            runner=runner,
+            comparable_cases=sum(1 for c in cases if c.runner == runner and c.comparable),
+            **_difference(cand, base),
+        )
+        for runner, (cand, base) in paired.items()
+    ]
     return Delta(
         baseline_kind=report.baseline_kind,
-        pass_rate_candidate=candidate_stats.pass_rate,
-        pass_rate_baseline=baseline_stats.pass_rate,
-        pass_rate_delta=candidate_stats.pass_rate - baseline_stats.pass_rate,
-        tokens_delta=candidate_stats.mean_tokens - baseline_stats.mean_tokens,
-        cost_usd_delta=candidate_stats.mean_cost_usd - baseline_stats.mean_cost_usd,
-        latency_ms_delta=candidate_stats.mean_latency_ms - baseline_stats.mean_latency_ms,
+        **_difference(
+            [o for cand, _ in paired.values() for o in cand],
+            [o for _, base in paired.values() for o in base],
+        ),
         cases=cases,
         low_signal=all_low_signal,
         high_variance=all_high_variance,
         notes=format_baseline_notes(report.baseline_notes),
+        runners=runners,
     )

@@ -293,7 +293,9 @@ one.
 `--min-delta` is the one gate rule that reads both arms. It names the smallest improvement
 you will accept — `--min-delta 0.2` fails the run unless the candidate's pass rate is at
 least 20 percentage points above the baseline's — so it gates on the delta rather than on
-either arm's own number. It needs `--baseline`; passing it alone is exit `2`.
+either arm's own number. With more than one runner it applies to each runner on its own:
+every runner must clear the bar, so one that improved cannot carry one that did not. It needs
+`--baseline`; passing it alone is exit `2`.
 
 See [Comparative evals](comparative-evals.md).
 

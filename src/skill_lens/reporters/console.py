@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from skill_lens.comparison import ArmStats, CaseStats, Delta, format_baseline_notes
+from skill_lens.comparison import ArmStats, CaseStats, Delta, RunnerDelta, format_baseline_notes
 from skill_lens.gating import GateResult
 from skill_lens.models import CaseOutcome, RunReport
 from skill_lens.reporters.failure_context import (
@@ -41,15 +41,30 @@ def _case_line(case: CaseStats) -> str:
     return f"{head}  baseline {_fraction(case.baseline)}  {difference:+.0%}"
 
 
+def _metric_lines(d: Delta | RunnerDelta, indent: str) -> list[str]:
+    return [
+        f"{indent}pass rate  {d.pass_rate_baseline:.0%} -> {d.pass_rate_candidate:.0%}  "
+        f"{d.pass_rate_delta:+.0%}   (higher is better)",
+        f"{indent}tokens     {d.tokens_delta:+.0f}   (negative is better)",
+        f"{indent}cost       ${d.cost_usd_delta:+.4f}   (negative is better)",
+        f"{indent}latency    {d.latency_ms_delta:+.0f}ms   (negative is better)",
+    ]
+
+
 def _delta_block(delta: Delta) -> list[str]:
-    lines = ["", f"Delta vs baseline ({delta.baseline_kind})"]
-    lines.append(
-        f"  pass rate  {delta.pass_rate_baseline:.0%} -> {delta.pass_rate_candidate:.0%}  "
-        f"{delta.pass_rate_delta:+.0%}   (higher is better)"
-    )
-    lines.append(f"  tokens     {delta.tokens_delta:+.0f}   (negative is better)")
-    lines.append(f"  cost       ${delta.cost_usd_delta:+.4f}   (negative is better)")
-    lines.append(f"  latency    {delta.latency_ms_delta:+.0f}ms   (negative is better)")
+    if delta.per_runner:
+        # One block per runner: an aggregate across runners describes neither
+        # (issue #93). A single-runner run prints exactly what it always did.
+        lines = ["", f"Delta vs baseline ({delta.baseline_kind}), per runner"]
+        for runner in delta.runners:
+            if runner.comparable_cases == 0:
+                lines.append(f"  {runner.runner}: no case had a comparable baseline")
+                continue
+            lines.append(f"  {runner.runner}")
+            lines.extend(_metric_lines(runner, "    "))
+    else:
+        lines = ["", f"Delta vs baseline ({delta.baseline_kind})"]
+        lines.extend(_metric_lines(delta, "  "))
     if delta.low_signal:
         lines.append("")
         lines.append(
