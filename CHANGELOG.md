@@ -1,3 +1,18 @@
+## v0.25.0 (2026-10-23)
+
+### Feat
+
+- run product runners inside a sandbox (#125)
+- stop a run's spending at a ceiling, for every runner (#118)
+- record which skill hooks fired in a claude-code run (#117)
+- run a case as several sessions that share one workspace (#116)
+- deliver every file the skill ships, not only scripts/, references/ and assets/ (#115)
+
+### Fix
+
+- refuse script writes under the temp dir in the linux bwrap sandbox (#120)
+- report the comparison delta per runner, not mixed across runners (#114)
+
 ## v0.24.3 (2026-10-23)
 
 ### Fix
