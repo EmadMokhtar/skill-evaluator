@@ -162,11 +162,14 @@ class ProductSandbox:
                 f"({self.detail}), and the product can read and write anything you can; "
                 f"{_SCRIPTS_CLAUSE}"
             )
+        # "itself": the profile starts from allow-default, so a system
+        # service the product asks -- launchd, a user systemd, Docker -- acts
+        # outside the sandbox, and the note must not imply otherwise.
         return (
-            f"{_ISOLATED}, under {self.backend}: it cannot change files outside its working "
-            "directory and its own temporary directories, or read other skill-lens temporary "
-            "directories; it can read anything else you can, and reach the network; "
-            f"{_SCRIPTS_CLAUSE}"
+            f"{_ISOLATED}, under {self.backend}: it cannot itself change files outside its "
+            "working directory and its own temporary directories, or read other skill-lens "
+            "temporary directories; it can read anything else you can, reach the network, "
+            f"and ask system services to act for it; {_SCRIPTS_CLAUSE}"
         )
 
     def wrap(

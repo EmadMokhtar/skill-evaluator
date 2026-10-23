@@ -277,7 +277,7 @@ and shared by every product runner and the product judge (see
 | --- | --- | --- | --- |
 | Environment | your whole environment | built from an allowlist: the product's own auth variables, `pass_env`, and no other secret | the same |
 | Home directory | your real home: personal logins, settings, skills, plugins and caches load | a fresh temporary home per case, deleted afterwards | the same |
-| Writes | anything you can write | anything you can write, by absolute path | only the working directory, the temporary home and the MCP bridge's directory |
+| Writes | anything you can write | anything you can write, by absolute path | by itself, only the working directory, the temporary home and the MCP bridge's directory |
 | Reads | anything you can read | anything you can read | anything you can read, except other skill-lens temporary directories |
 | Network | open | open | open |
 
@@ -308,9 +308,13 @@ that cannot start there is exit 2 up front, never a quiet fallback.
   the sandbox cannot hide it — and the network is open, so what it reads can leave the
   machine. Hiding the filesystem is a container's job, which skill-lens does not provide
   yet. Treat a product run as running the skill under your account.
-- **Unix-domain sockets.** The network is open under both backends, Unix-domain sockets
-  included: a product whose user can reach `/var/run/docker.sock` can drive the Docker
-  daemon, which is a full escape on that host.
+- **Asking a system service to act.** The sandbox confines the product's own processes, not
+  the services they can ask. On macOS the profile allows messages to system services, so
+  `launchctl` can have `launchd` start a job outside the sandbox; on Linux a user systemd
+  (`systemd-run --user`, over `/run/user/<uid>/bus`) does the same. The network is open
+  under both backends, Unix-domain sockets included, so a product whose user can reach
+  `/var/run/docker.sock` can drive the Docker daemon — a full escape on that host. The
+  trust note says so: the product "cannot itself change files" outside its directories.
 - **Reading the harness's own environment.** The allowlist stops *inheritance*. On macOS
   any same-user process can read another's exec-time environment through the
   `kern.procargs2` sysctl behind `ps -E`, and `sandbox-exec` does not gate it, so a product
@@ -324,7 +328,7 @@ that cannot start there is exit 2 up front, never a quiet fallback.
 run, never more — under the default on a Mac:
 
 ```
-product claude-code 2.1.289 (/Users/you/.local/bin/claude): runs with permission prompts disabled, a temporary home directory and only an allowlisted environment, under sandbox-exec: it cannot change files outside its working directory and its own temporary directories, or read other skill-lens temporary directories; it can read anything else you can, and reach the network; bundled scripts are reachable through the product's own tools
+product claude-code 2.1.289 (/Users/you/.local/bin/claude): runs with permission prompts disabled, a temporary home directory and only an allowlisted environment, under sandbox-exec: it cannot itself change files outside its working directory and its own temporary directories, or read other skill-lens temporary directories; it can read anything else you can, reach the network, and ask system services to act for it; bundled scripts are reachable through the product's own tools
 ```
 
 With home isolation only, the line says `that is not a sandbox: no skill-lens sandbox

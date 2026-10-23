@@ -297,10 +297,13 @@ run them whatever `allow_scripts` says.
 - **A backend applied**:
 
   > runs with permission prompts disabled, a temporary home directory and only an
-  > allowlisted environment, under sandbox-exec: it cannot change files outside its working
-  > directory and its own temporary directories, or read other skill-lens temporary
-  > directories; it can read anything else you can, and reach the network; bundled scripts
-  > are reachable through the product's own tools
+  > allowlisted environment, under sandbox-exec: it cannot itself change files outside its
+  > working directory and its own temporary directories, or read other skill-lens temporary
+  > directories; it can read anything else you can, reach the network, and ask system
+  > services to act for it; bundled scripts are reachable through the product's own tools
+
+  ("itself" and the system-services clause were added after review: the profile allows
+  messages to system services, so `launchd`, a user systemd or Docker can act outside it.)
 
 Console, Markdown and JUnit print `trust` where they print it today. The JSON report's
 `products` entries carry `sandbox` as an object.

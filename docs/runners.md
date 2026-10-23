@@ -255,7 +255,7 @@ Each product line on the report says exactly what applied:
 | --- | --- |
 | `off` | `runs with permission prompts disabled and the full environment; no skill-lens sandbox applies; bundled scripts are reachable through the product's own tools` |
 | home isolation only | `runs with permission prompts disabled, a temporary home directory and only an allowlisted environment; that is not a sandbox: no skill-lens sandbox applies (<why>), and the product can read and write anything you can; bundled scripts are reachable through the product's own tools` |
-| a backend applied | `runs with permission prompts disabled, a temporary home directory and only an allowlisted environment, under <backend>: it cannot change files outside its working directory and its own temporary directories, or read other skill-lens temporary directories; it can read anything else you can, and reach the network; bundled scripts are reachable through the product's own tools` |
+| a backend applied | `runs with permission prompts disabled, a temporary home directory and only an allowlisted environment, under <backend>: it cannot itself change files outside its working directory and its own temporary directories, or read other skill-lens temporary directories; it can read anything else you can, reach the network, and ask system services to act for it; bundled scripts are reachable through the product's own tools` |
 
 `<why>` is the probe's reason — `bwrap not found on PATH`, `no sandbox backend on
 Windows`, the first line of a failed probe. On Windows only home isolation applies, and it

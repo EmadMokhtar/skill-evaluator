@@ -144,11 +144,15 @@ def test_the_sandboxed_note_says_what_it_stops_and_what_it_does_not(backend):
     sandbox = ProductSandbox("auto", backend, f"{backend} probe succeeded")
     assert sandbox.trust() == (
         "runs with permission prompts disabled, a temporary home directory and only an "
-        f"allowlisted environment, under {backend}: it cannot change files outside its "
-        "working directory and its own temporary directories, or read other skill-lens "
-        "temporary directories; it can read anything else you can, and reach the network; "
-        "bundled scripts are reachable through the product's own tools"
+        f"allowlisted environment, under {backend}: it cannot itself change files outside "
+        "its working directory and its own temporary directories, or read other skill-lens "
+        "temporary directories; it can read anything else you can, reach the network, and "
+        "ask system services to act for it; bundled scripts are reachable through the "
+        "product's own tools"
     )
+    # A service the product can ask (launchd, a user systemd, Docker) acts
+    # outside the sandbox, so the note must never say the files are safe.
+    assert "cannot change files" not in sandbox.trust()
 
 
 def test_status_mirrors_the_decision():

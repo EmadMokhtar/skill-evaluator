@@ -286,12 +286,14 @@ command = ["my-agent", "--prompt", "{prompt}"]
 pass_env = []                    # the command needs nothing from your environment
 ```
 
-**The OS sandbox** adds a boundary around the product's whole process tree: it cannot change
-files outside its working directory and its own temporary directories (the home, and the
-[MCP bridge](runners.md#mock-tools-under-a-product)'s directory for a case with `tools:`),
-and cannot read other skill-lens temporary directories, such as the other arm's workspace.
-It can read everything else you can — the products and their runtimes are installed in your
-home directory — and it can reach the network, because the product must reach its provider.
+**The OS sandbox** adds a boundary around the product's whole process tree: it cannot itself
+change files outside its working directory and its own temporary directories (the home, and
+the [MCP bridge](runners.md#mock-tools-under-a-product)'s directory for a case with
+`tools:`), and cannot read other skill-lens temporary directories, such as the other arm's
+workspace. It can read everything else you can — the products and their runtimes are
+installed in your home directory — it can reach the network, because the product must reach
+its provider, and it can ask a system service (`launchd`, a user systemd, Docker) to act
+outside the sandbox for it.
 The product's `--version` (and the bridge, when a case declares `tools:`) is started once
 inside the sandbox before any case, so a product that will not start there is exit 2 up
 front. See [Security](security.md#product-runners) for what each mode guarantees.
