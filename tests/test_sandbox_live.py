@@ -82,12 +82,7 @@ def test_writes_outside_the_workspace_are_refused_and_inside_succeed(tmp_path):
         "print('inside: wrote')\n"
     )
     workspace, out, err, _ = _run(tmp_path, source)
-    # `outside` is under the temp directory. sandbox-exec refuses the write;
-    # bwrap mounts a private in-memory temp directory, so the write succeeds
-    # there and is discarded (docs/security.md). Either way the host file is
-    # never written, which is the guarantee.
-    expected = "outside: wrote" if STATUS.backend == "bwrap" else "outside: refused"
-    assert expected in out, err
+    assert "outside: refused" in out, err
     assert "inside: wrote" in out
     assert not outside.exists()
     assert workspace.read("inside.txt") == "y"
