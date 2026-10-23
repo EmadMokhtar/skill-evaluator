@@ -103,6 +103,13 @@ allow_scripts = true
 # py = ["python3"]
 # sh = ["bash"]
 
+# How a product runner or product judge is isolated, decided once per run.
+# "auto": a temporary home and an allowlisted environment, inside
+# sandbox-exec (macOS) or bwrap (Linux) where one works; "required": exit 2
+# when none works; "off": your whole environment and real home. Home
+# isolation alone is not a sandbox. Overridden by --product-sandbox.
+# product_sandbox = "auto"
+
 # Product runners: start the product the skill ships to, no API key needed.
 # The same table serves the product as the judge (`judge = "<name>"` above).
 # Each table is optional for a preset; the preset supplies the verified argv.
@@ -115,6 +122,7 @@ allow_scripts = true
 #
 # [runners.claude-code]
 # args = ["--model", "sonnet"]
+# pass_env = ["CLAUDE_CODE_USE_BEDROCK", "AWS_REGION"]   # names only, never values
 #
 # "cli" has no preset, so "command" is required. "skills_dir" and "invoke"
 # are accepted here only; a preset's spellings are fixed.
