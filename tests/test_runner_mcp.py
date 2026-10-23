@@ -263,3 +263,14 @@ def test_mcp_support_is_a_plain_value():
     assert support.product_name("t") == "t"
     with pytest.raises(AttributeError):
         support.config_arg = "y"  # type: ignore[misc]
+
+
+def test_a_probe_directory_that_cannot_be_made_is_a_bridge_setup_error(monkeypatch):
+    # Raised as BridgeSetupError, which preflight turns into exit 2 -- never a
+    # bare OSError traceback (exit 1).
+    def mkdtemp(*_args, **_kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(mcp.tempfile, "mkdtemp", mkdtemp)
+    with pytest.raises(BridgeSetupError, match="No space left on device"):
+        probe_bridge()

@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from skill_lens.comparison import build_delta
 from skill_lens.gating import evaluate_gate
 from skill_lens.models import (
@@ -20,6 +22,9 @@ from skill_lens.models import (
 from skill_lens.reporters.console import render_console
 from skill_lens.reporters.failure_context import HOOK_LIMIT
 from skill_lens.reporters.json_reporter import render_json
+from skill_lens.reporters.junit import render_junit
+from skill_lens.reporters.markdown import render_markdown
+from skill_lens.runners.product_sandbox import ProductSandbox
 
 
 def _report():
@@ -892,6 +897,30 @@ def test_json_carries_the_products():
     report = _report().model_copy(update={"products": [_PRODUCT]})
     assert json.loads(render_json(report))["products"] == [_PRODUCT.model_dump()]
     assert json.loads(render_json(_report()))["products"] == []
+
+
+# --- the product sandbox's trust notes (issue #99) ---
+
+_SANDBOXES = [
+    ProductSandbox("off", "none", 'product_sandbox = "off"'),
+    ProductSandbox("auto", "none", "bwrap not found on PATH"),
+    ProductSandbox("auto", "sandbox-exec", "sandbox-exec probe succeeded"),
+]
+
+
+@pytest.mark.parametrize("sandbox", _SANDBOXES, ids=["off", "home-only", "sandboxed"])
+def test_every_reporter_prints_the_trust_note_of_the_decision(sandbox):
+    status = _PRODUCT.model_copy(update={"trust": sandbox.trust(), "sandbox": sandbox.status()})
+    report = _report().model_copy(update={"products": [status]})
+    assert render_console(report).splitlines()[0].endswith(f": {sandbox.trust()}")
+    assert sandbox.trust() in render_markdown(report)
+    assert sandbox.trust() in render_junit(report)
+    assert json.loads(render_json(report))["products"][0]["sandbox"] == {
+        "mode": sandbox.mode,
+        "backend": sandbox.backend,
+        "home_isolated": sandbox.home_isolated,
+        "detail": sandbox.detail,
+    }
 
 
 _HOOKS = [

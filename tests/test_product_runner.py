@@ -24,6 +24,7 @@ from skill_lens.runners.product import (
     delivered_paths,
     read_trace,
 )
+from skill_lens.runners.product_sandbox import HOME_PREFIX, ProductSandbox
 from skill_lens.runners.traces import parse_claude_code, parse_copilot
 from skill_lens.workspace import Workspace, create_workspace
 
@@ -857,3 +858,108 @@ def test_a_product_that_cannot_take_the_bridge_errors_a_tools_case(tmp_path, fak
     result = ProductRunner(_product()).run(_skill(tmp_path), _case(tools=TOOLS))
     assert result.error == "the claude-code runner cannot serve the case's tools:"
     assert not (tmp_path / "record.json").exists()  # the product never started
+
+
+# --- the product sandbox (issue #99) ---
+
+# The fake reads its instructions from the environment; under home isolation
+# they reach it the way any variable a product needs does: through pass_env.
+FAKE_VARIABLES = (
+    "FAKE_PRODUCT_RECORD",
+    "FAKE_PRODUCT_TRACE",
+    "FAKE_PRODUCT_SKILLS_DIR",
+    "FAKE_PRODUCT_MODE",
+    "FAKE_PRODUCT_MCP_CALL",
+    "FAKE_PRODUCT_MCP",
+)
+HOME_ONLY = ProductSandbox("auto", "none", "test")
+
+
+def _isolated(**overrides) -> ProductRunner:
+    overrides.setdefault("pass_env", FAKE_VARIABLES)
+    return ProductRunner(_product(**overrides), sandbox=HOME_ONLY)
+
+
+def _home_root(seen: dict) -> Path:
+    home = Path(seen["home"])
+    assert home.name == "home"
+    assert home.parent.name.startswith(HOME_PREFIX)
+    return home.parent
+
+
+def test_home_isolation_gives_the_product_a_temporary_home(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-harness-only")
+    result = _isolated().run(_skill(tmp_path), _case())
+    assert result.error is None
+    seen = fake()
+    root = _home_root(seen)
+    assert seen["tmpdir"] == str(root / "tmp")
+    assert "OPENAI_API_KEY" not in seen["env_keys"]
+    assert "FAKE_PRODUCT_TRACE" in seen["env_keys"]
+
+
+def test_the_temporary_home_is_removed_after_the_run(tmp_path, fake):
+    _isolated().run(_skill(tmp_path), _case())
+    assert not _home_root(fake()).exists()
+
+
+def test_the_temporary_home_is_removed_after_a_timeout(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "sleep")
+    result = _isolated(timeout_seconds=1).run(_skill(tmp_path), _case())
+    assert result.error is not None and "timed out" in result.error
+    assert not _home_root(fake()).exists()
+
+
+def test_a_kept_workspace_never_keeps_the_temporary_home(tmp_path, fake):
+    workspace = create_workspace(WorkspaceSpec(), label="t")
+    result = _isolated().run(
+        _skill(tmp_path), _case(workspace=WorkspaceSpec()), workspace=workspace
+    )
+    assert result.error is None
+    assert workspace.root.exists()  # the orchestrator decides about the workspace
+    assert not _home_root(fake()).exists()  # never kept: it may hold the product's login
+
+
+def test_two_work_items_get_two_homes(tmp_path, fake):
+    runner = _isolated()
+    runner.run(_skill(tmp_path), _case())
+    first = fake()["home"]
+    runner.run(_skill(tmp_path), _case())
+    assert fake()["home"] != first
+
+
+def test_off_passes_the_whole_environment(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-harness-only")
+    result = ProductRunner(_product()).run(_skill(tmp_path), _case())
+    assert result.error is None
+    seen = fake()
+    assert "OPENAI_API_KEY" in seen["env_keys"]
+    assert seen["home"] == os.environ["HOME"]
+
+
+def test_the_bridge_reaches_the_product_under_isolation(tmp_path, fake, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "claude-code-mcp.jsonl"))
+    monkeypatch.setenv("FAKE_PRODUCT_MCP_CALL", "lookup_order")
+    result = _isolated(mcp=CLAUDE_CODE_MCP).run(_skill(tmp_path), _case(tools=TOOLS))
+    assert result.error is None
+    assert fake()["mcp"]["tools"] == ["lookup_order"]
+
+
+def test_writes_are_confined_to_cwd_home_and_bridge(tmp_path, fake, monkeypatch):
+    seen_writable: list = []
+
+    def wrap(self, argv, writable, tempdir=None):
+        seen_writable.append(list(writable))
+        return list(argv)
+
+    monkeypatch.setattr(ProductSandbox, "wrap", wrap)
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "claude-code-mcp.jsonl"))
+    runner = ProductRunner(
+        _product(mcp=CLAUDE_CODE_MCP, pass_env=FAKE_VARIABLES),
+        sandbox=ProductSandbox("auto", "sandbox-exec", "test"),
+    )
+    assert runner.run(_skill(tmp_path), _case(tools=TOOLS)).error is None
+    seen = fake()
+    assert seen_writable == [
+        [Path(seen["cwd"]), _home_root(seen), _bridge_dir(seen)],
+    ]

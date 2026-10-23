@@ -200,20 +200,80 @@ def macos_profile(workspace: Path, scratch: Path, tempdir: Path, bundle: Path) -
         f"(allow file-read* (subpath {_quoted(workspace)}) (subpath {_quoted(scratch)}) "
         f"(subpath {_quoted(bundle)}))",
     ]
-    parents = sorted(
-        {
-            parent
-            for path in (workspace, scratch, bundle)
-            for parent in path.parents
-            if parent.is_relative_to(tempdir)
-        }
-    )
-    # Never emitted empty: an unfiltered `(allow file-read-metadata)` would
-    # allow every path on the machine.
-    if parents:
-        literals = " ".join(f"(literal {_quoted(parent)})" for parent in parents)
-        lines.append(f"(allow file-read-metadata {literals})")
+    lines += _parent_metadata((workspace, scratch, bundle), tempdir)
     return "\n".join(lines)
+
+
+def _parent_metadata(paths: Sequence[Path], tempdir: Path) -> list[str]:
+    """The metadata rule for the directories between `tempdir` and `paths`.
+
+    One rule, or none: never emitted empty, because an unfiltered
+    `(allow file-read-metadata)` would allow every path on the machine.
+    """
+    parents = sorted(
+        {parent for path in paths for parent in path.parents if parent.is_relative_to(tempdir)}
+    )
+    if not parents:
+        return []
+    literals = " ".join(f"(literal {_quoted(parent)})" for parent in parents)
+    return [f"(allow file-read-metadata {literals})"]
+
+
+def product_macos_profile(writable: Sequence[Path], tempdir: Path) -> str:
+    """The `sandbox-exec` profile for a product (issue #99).
+
+    The script profile's rules, but the network stays open -- a product must
+    reach its provider -- and the writable set is the product's: its working
+    directory, its temporary home and, for a `tools:` case, the MCP bridge's
+    directory (the bridge is the product's child and writes its record
+    there). The same directories are allowed back for reading under the
+    temp-directory read denial, so another case's workspace or home stays
+    hidden. `writable` is never empty: the working directory is always in it.
+    """
+    allowed = " ".join(f"(subpath {_quoted(path)})" for path in writable)
+    lines = [
+        "(version 1)",
+        "(allow default)",
+        "(deny file-write*)",
+        f"(allow file-write* {allowed})",
+        # A process's own standard streams, by path: `echo msg >/dev/stderr`
+        # is common in hooks and scripts, and these reach only descriptors
+        # the process already holds.
+        '(allow file-write-data (literal "/dev/null") (literal "/dev/stdout") '
+        '(literal "/dev/stderr") (regex #"^/dev/fd/[0-9]+$"))',
+        f"(deny file-read* (subpath {_quoted(tempdir)}))",
+        f"(allow file-read* {allowed})",
+    ]
+    lines += _parent_metadata(writable, tempdir)
+    return "\n".join(lines)
+
+
+def product_bwrap_argv(writable: Sequence[Path], tempdir: Path, argv: Sequence[str]) -> list[str]:
+    """The `bwrap` command line for a product: `bwrap_argv`'s, minus the
+    network denial and the read-only bundle, with each writable directory
+    bound back in after the tmpfs that would otherwise hide it.
+
+    The tmpfs is then remounted read-only, so a write elsewhere under the
+    temp directory is refused, as `sandbox-exec` refuses it, rather than
+    landing in memory and vanishing. After the binds, because bwrap creates
+    their mount points inside the tmpfs; `--remount-ro` is not recursive,
+    so the binds keep their own, writable, mode.
+    """
+    binds = [element for path in writable for element in ("--bind", str(path), str(path))]
+    return [
+        "bwrap",
+        "--ro-bind", "/", "/",
+        "--dev", "/dev",
+        "--proc", "/proc",
+        "--tmpfs", str(tempdir),
+        *binds,
+        "--remount-ro", str(tempdir),
+        "--unshare-pid",
+        "--die-with-parent",
+        "--new-session",
+        "--",
+        *argv,
+    ]  # fmt: skip
 
 
 def bwrap_argv(
@@ -270,15 +330,17 @@ def wrap(
     return list(argv)
 
 
-def _bwrap_probe_argv(tempdir: Path) -> list[str]:
+def _bwrap_probe_argv(tempdir: Path, product: bool = False) -> list[str]:
     """`bwrap_argv`'s mounts and namespaces, minus the per-call binds. The
     tmpfs and its read-only remount are in it because every real call needs
     them: a bwrap that rejects either must fail here, not on every script.
+    A product shares the network, so its probe does too (`product=True`).
     """
+    network = [] if product else ["--unshare-net"]
     return [
         "bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
         "--tmpfs", str(tempdir), "--remount-ro", str(tempdir),
-        "--unshare-net", "--unshare-pid", "--die-with-parent", "--", "/bin/true",
+        *network, "--unshare-pid", "--die-with-parent", "--", "/bin/true",
     ]  # fmt: skip
 
 
@@ -301,14 +363,19 @@ def probe_sandbox(
     system: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     run: Callable[..., Any] = subprocess.run,
+    product: bool = False,
 ) -> SandboxStatus:
     """Decide the backend for this run, empirically.
 
     `system`, `which` and `run` are injectable so the decision table is
-    testable on every platform; the defaults are the real thing.
+    testable on every platform; the defaults are the real thing. `product`
+    probes the backend the way a product runs under it (issue #99): the
+    network stays open, because a product must reach its provider, and only
+    writes are denied.
     """
     if mode == "off":
-        return SandboxStatus("none", 'script_sandbox = "off"')
+        key = "product_sandbox" if product else "script_sandbox"
+        return SandboxStatus("none", f'{key} = "off"')
     system = platform.system() if system is None else system
     if system == "Darwin":
         if which("sandbox-exec") is None:
@@ -322,12 +389,14 @@ def probe_sandbox(
                 "temp directory path contains a double quote, which a sandbox-exec "
                 "profile cannot express",
             )
-        argv = ["sandbox-exec", "-p", "(version 1)(allow default)(deny network*)", "/usr/bin/true"]
+        denied = "(deny file-write*)" if product else "(deny network*)"
+        argv = ["sandbox-exec", "-p", f"(version 1)(allow default){denied}", "/usr/bin/true"]
         return _probe("sandbox-exec", argv, run)
     if system == "Linux":
         if which("bwrap") is None:
             return SandboxStatus("none", "bwrap not found on PATH")
-        return _probe("bwrap", _bwrap_probe_argv(Path(tempfile.gettempdir()).resolve()), run)
+        tempdir = Path(tempfile.gettempdir()).resolve()
+        return _probe("bwrap", _bwrap_probe_argv(tempdir, product), run)
     return SandboxStatus("none", f"no sandbox backend on {system}")
 
 

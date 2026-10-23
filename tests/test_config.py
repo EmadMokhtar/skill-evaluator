@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from skill_lens.config import (
     PRODUCT_NAMES,
@@ -11,6 +12,7 @@ from skill_lens.config import (
     load_config,
 )
 from skill_lens.runners.product import PRESETS
+from skill_lens.runners.product_sandbox import CONTROLLED_ENV
 from skill_lens.workspace import DEFAULT_LIMITS
 
 TOML = """
@@ -575,3 +577,66 @@ def test_a_well_formed_base_url_is_kept_with_only_the_whitespace_removed(tmp_pat
     path = tmp_path / "skill-lens.toml"
     path.write_text(f'base_url = "{value}"\n')
     assert load_config(path=path).base_url == expected
+
+
+# --- the product sandbox (issue #99) ---
+
+
+def test_product_sandbox_defaults_to_auto():
+    assert Config().product_sandbox == "auto"
+
+
+def test_product_sandbox_rejects_an_unknown_mode():
+    with pytest.raises(ValidationError):
+        Config(product_sandbox="on")
+
+
+def test_pass_env_is_unset_by_default():
+    assert ProductSettings().pass_env is None
+    assert Config().product("copilot").pass_env is None
+
+
+def test_pass_env_reaches_the_product(tmp_path):
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.claude-code]\npass_env = ["AWS_PROFILE", "CLAUDE_CODE_USE_BEDROCK"]\n',
+        encoding="utf-8",
+    )
+    product = load_config(tmp_path / "skill-lens.toml").product("claude-code")
+    assert product.pass_env == ("AWS_PROFILE", "CLAUDE_CODE_USE_BEDROCK")
+
+
+def test_an_empty_pass_env_is_kept_as_set():
+    assert ProductSettings(pass_env=[]).pass_env == []
+
+
+@pytest.mark.parametrize("name", ["1BAD", "WITH-DASH", "", "A B"])
+def test_pass_env_refuses_a_name_that_is_not_a_variable(name):
+    with pytest.raises(ValidationError, match="pass_env"):
+        ProductSettings(pass_env=[name])
+
+
+@pytest.mark.parametrize("name", sorted(CONTROLLED_ENV))
+def test_pass_env_refuses_a_name_the_isolation_owns(name):
+    with pytest.raises(ValidationError) as caught:
+        ProductSettings(pass_env=[name])
+    assert name in str(caught.value)
+    assert 'product_sandbox = "off"' in str(caught.value)
+
+
+def test_a_wrapper_command_marks_the_product(tmp_path):
+    (tmp_path / "skill-lens.toml").write_text(
+        '[runners.claude-code]\ncommand = ["secret", "run", "--", "claude", "-p", "{prompt}"]\n'
+        '[runners.copilot]\ncommand = ["copilot", "-p", "{prompt}"]\n',
+        encoding="utf-8",
+    )
+    settings = load_config(tmp_path / "skill-lens.toml")
+    assert settings.product("claude-code").wrapper is True
+    assert settings.product("copilot").wrapper is False
+    assert Config().product("copilot").wrapper is False
+
+
+@pytest.mark.parametrize("name", ["home", "userprofile", "TmpDir", "Copilot_Home"])
+def test_pass_env_refuses_a_controlled_name_in_any_case(name):
+    # Windows variable names ignore case, so `userprofile` is USERPROFILE.
+    with pytest.raises(ValidationError, match="home isolation sets itself"):
+        ProductSettings(pass_env=[name])

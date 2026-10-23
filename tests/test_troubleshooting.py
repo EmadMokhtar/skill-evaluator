@@ -174,6 +174,36 @@ QUOTED: list[tuple[str, str]] = [
         "a product reaches its own endpoint",
         "cli.py",
     ),
+    # A product that cannot run under the product sandbox
+    ('product_sandbox = "required" but no sandbox is available: ', "runners/product_sandbox.py"),
+    (
+        " gives the product a temporary home directory, so it cannot use a login stored in "
+        "your home directory or keychain; export ",
+        "runners/product_sandbox.py",
+    ),
+    (", name the credential your setup uses in [runners.", "runners/product_sandbox.py"),
+    (
+        "] pass_env (a name containing TOKEN, KEY, SECRET, PASSWORD or CREDENTIAL), or set "
+        'product_sandbox = "off"',
+        "runners/product_sandbox.py",
+    ),
+    (
+        " builds the product's environment from an allowlist, so the command gets none of "
+        "your variables unless you name them; set [runners.",
+        "runners/product_sandbox.py",
+    ),
+    (
+        "] pass_env to the variables it needs (pass_env = [] when it needs none), or set "
+        'product_sandbox = "off"',
+        "runners/product_sandbox.py",
+    ),
+    (' -- set product_sandbox = "off" to run it without one', "runners/product.py"),
+    ("cannot create a temporary home for the ", "runners/product_sandbox.py"),
+    (
+        ", which home isolation sets itself; passing it would undo the isolation -- set "
+        'product_sandbox = "off" to run the product with your own home',
+        "config.py",
+    ),
     # script_sandbox = "required" with no backend
     ('script_sandbox = "required" but no sandbox is available: ', "scripts.py"),
     ("sandbox-exec not found on PATH", "scripts.py"),

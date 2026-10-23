@@ -130,9 +130,12 @@ emits the trace, and what keeps *your* setup out of the eval.
   OAuth auth still works;
 - `--no-session-persistence` writes nothing under `~/.claude`.
 
-Personal skills and plugins under `~/.copilot` do still load for Copilot — that is the
-product as you have it; for a hermetic run (one that loads nothing from your personal setup)
-point `COPILOT_HOME` at an empty directory and set `COPILOT_GITHUB_TOKEN`.
+Under the default [product sandbox](#the-product-sandbox) every case gets an empty
+temporary home, so nothing from `~/.copilot`, `~/.claude` or `~/.claude.json` loads and the
+product signs in from its token (`COPILOT_GITHUB_TOKEN`; `CLAUDE_CODE_OAUTH_TOKEN` from
+`claude setup-token`, or `ANTHROPIC_API_KEY`). Under `product_sandbox = "off"` personal
+skills and plugins under `~/.copilot` do still load for Copilot — that is the product as you
+have it.
 
 Add flags with `[runners.<name>] args` (for example, a model); replace the whole argv with
 `command`. See [Configuration](configuration.md#product-runners).
@@ -145,7 +148,10 @@ install copies it, except the eval files, version control, dependency directorie
 files (the list is under [Bundled files and scripts](#bundled-files-and-scripts)). Each file is
 written as a regular file, read through any link; a link is never copied as a link. The copy stays in a workspace after the run, so `--keep-workspace`
 shows exactly what the product saw; a case whose `file:`, `file_glob` or judge artifact would
-read that copy is refused in preflight, because it would check the harness's files.
+read that copy is refused in preflight, because it would check the harness's files. Under
+home isolation the product's `HOME`, `XDG_*_HOME` and `TMPDIR` point into a temporary
+directory of its own, deleted when the case ends — `--keep-workspace` keeps the workspace, never that home,
+which may hold what the product wrote about its own login.
 
 The prompt is the case's `task`, verbatim: the product owns its system prompt, and
 skill-lens adds no preamble. `mode: loaded` invokes the skill through the product's own
@@ -255,16 +261,44 @@ a passing one. A run that never started a process — a prompt over 100 KiB, an 
 missing at run time, a skill that cannot be delivered — spent nothing and keeps empty notes.
 
 Preflight checks the executable is on `PATH` and, for the two presets, that it actually
-starts (`--version`); `cli` has no version command, so only the `PATH` lookup applies to it.
+starts (`--version`) — under the run's product sandbox, so a product that will not start
+inside it is exit 2; `cli` has no version command, so only the `PATH` lookup applies to it.
+Under home isolation a preset also needs one of its auth variables set and non-empty, or a
+credential named in `pass_env` (a name containing `TOKEN`, `KEY`, `SECRET`, `PASSWORD` or `CREDENTIAL`; a region, a profile name or a provider switch does not count) (exit 2 with the fix otherwise, unless `command` names a wrapper), and
+`cli` must set `pass_env`; see [Product sandbox](configuration.md#product-sandbox).
 The report names the product, its executable and — where there is one — its version on every
 run.
 
-**Trust.** The product runs with permission prompts disabled and inherits your whole
-environment — it needs its own auth, and cannot run non-interactively otherwise. No
-skill-lens sandbox applies; the skill's bundled scripts are reachable through the product's
-own shell whatever `allow_scripts` says, which governs only skill-lens's `run_script` tool.
-**Naming a product runner is that decision**, and every report says so. See
+**Trust.** The product runs with permission prompts disabled — it cannot run
+non-interactively otherwise — under the run's [product sandbox](#the-product-sandbox); the
+skill's bundled scripts are reachable through the product's own shell whatever
+`allow_scripts` says, which governs only skill-lens's `run_script` tool. **Naming a product
+runner is that decision**, and every report says so. See
 [Security](security.md#product-runners).
+
+### The product sandbox
+
+`product_sandbox` (`--product-sandbox`) is decided once per run, before any case, and only
+when a product runner or a product judge is named; every product in the run shares the one
+decision. `auto`, the default, gives every product run a temporary home and an environment
+built from an allowlist (*home isolation*), and wraps the product in `sandbox-exec` (macOS)
+or `bwrap` (Linux) where the once-per-run probe finds one that works; `required` exits 2 when
+none does; `off` is your whole environment and your real home. The keys, the allowlist and
+`pass_env` are in [Configuration](configuration.md#product-sandbox), and what each mode
+guarantees — and what none does — in [Security](security.md#product-runners).
+
+Each product line on the report says exactly what applied:
+
+| Decision | The product line's trust sentence |
+| --- | --- |
+| `off` | `runs with permission prompts disabled and the full environment; no skill-lens sandbox applies; bundled scripts are reachable through the product's own tools` |
+| home isolation only | `runs with permission prompts disabled, a temporary home directory and only an allowlisted environment; that is not a sandbox: no skill-lens sandbox applies (<why>), and the product can read and write anything you can; bundled scripts are reachable through the product's own tools` |
+| a backend applied | `runs with permission prompts disabled, a temporary home directory and only an allowlisted environment, under <backend>: it cannot itself change files outside its working directory and its own temporary directories, or read other skill-lens temporary directories; it can read anything else you can, reach the network, and ask system services to act for it; bundled scripts are reachable through the product's own tools` |
+
+`<why>` is the probe's reason — `bwrap not found on PATH`, `no sandbox backend on
+Windows`, the first line of a failed probe. On Windows only home isolation applies, and it
+also points `USERPROFILE`, `APPDATA` and `LOCALAPPDATA` into the temporary home; that path is
+not exercised by the test suite.
 
 ### Mock tools under a product
 

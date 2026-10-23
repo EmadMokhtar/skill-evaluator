@@ -9,10 +9,12 @@ own trace. The skill is measured under the product's system prompt, tools
 and loading mechanics, none of which skill-lens can emulate from outside.
 
 The trust model is the product's, not skill-lens's: permission prompts are
-disabled (the product cannot run non-interactively otherwise) and the full
-environment is inherited (the product needs its own auth). Nothing here is
-sandboxed; `ProductStatus.trust` says so on every report. Naming a product
-runner is the decision.
+disabled (the product cannot run non-interactively otherwise). What else
+applies is the run's product sandbox (`product_sandbox.py`, issue #99): under
+`off` the full environment is inherited and nothing is sandboxed; otherwise a
+temporary home and an allowlisted environment, inside `sandbox-exec` or
+`bwrap` where one works. `ProductStatus.trust` says which on every report.
+Naming a product runner is the decision.
 
 A case's `tools:` reach the product through a stdio MCP server skill-lens
 ships (`mcp_bridge.py`) and the product starts from a config file this
@@ -51,6 +53,15 @@ from skill_lens.runners.mcp import (
     restore_tool_names,
     write_bridge,
 )
+from skill_lens.runners.product_sandbox import (
+    PRODUCT_SANDBOX_OFF,
+    TRUST_NOTE,  # noqa: F401 - re-exported: callers import the off sentence from here
+    Isolation,
+    ProductSandbox,
+    ProductSetupError,
+    environment_refusal,
+    isolate,
+)
 from skill_lens.runners.traces import Trace, parse_claude_code, parse_copilot
 from skill_lens.skills.loader import SKILL_FILENAME
 from skill_lens.workspace import PathRefused, Workspace, check_relative_path
@@ -67,16 +78,6 @@ STDERR_CAP_BYTES = 20_000
 STDERR_TAIL_CHARS = 500
 PRIVATE_PREFIX = "skill-lens-product-"
 SCRATCH_PREFIX = "skill-lens-product-capture-"
-TRUST_NOTE = (
-    "runs with permission prompts disabled and the full environment; no skill-lens "
-    "sandbox applies; bundled scripts are reachable through the product's own tools"
-)
-
-
-class ProductSetupError(Exception):
-    """A product runner cannot run here: raised from `preflight` (exit 2 via
-    `cli.py`) and from `deliver_skill`, where `run` turns it into
-    `RunResult.error` for the arm it concerns."""
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,14 @@ class Product:
     # `judge_args`. `ProductJudge.preflight` refuses it.
     tool_flag: str | None = None
     mcp: McpSupport | None = None
+    # Under home isolation (`product_sandbox` not "off"): the variable names
+    # `[runners.<name>] pass_env` adds to the built environment, or None when
+    # the table does not set it -- which a `cli` product may not leave unset
+    # (see `product_sandbox.environment_refusal`).
+    pass_env: tuple[str, ...] | None = None
+    # True when a preset's `command` names another executable: a wrapper may
+    # bring its own auth, so it is not auth-checked.
+    wrapper: bool = False
     # Why the product's spend can never be priced in US dollars, for one
     # whose trace parser is known never to report a cost; see `unpriced`.
     unpriced_note: str = ""
@@ -215,12 +224,20 @@ class Invocation:
 
 
 def invoke(
-    product: Product, prompt: str, cwd: Path, extra_args: tuple[str, ...] = ()
+    product: Product,
+    prompt: str,
+    cwd: Path,
+    extra_args: tuple[str, ...] = (),
+    isolation: Isolation | None = None,
+    writable: Sequence[Path] = (),
 ) -> Invocation:
     """Start the product once with `prompt`, in `cwd`; never raises.
 
     `extra_args` go after everything else -- after the table's `args` -- and
-    are how the MCP bridge's config reaches the product. Output goes to
+    are how the MCP bridge's config reaches the product. `isolation` is the
+    work item's product sandbox (`product_sandbox.isolate`): its environment,
+    and its launcher, which may also write `writable`; None is the whole
+    environment and no wrapper, as before issue #99. Output goes to
     files in a scratch directory and is read back through the handles the
     harness opened (see `process.read_capped_handle`). The process group is
     killed after every exit, timeout or not.
@@ -234,6 +251,9 @@ def invoke(
         *(prompt if element == PROMPT_PLACEHOLDER else element for element in product.argv[1:]),
         *extra_args,
     ]
+    env = os.environ.copy() if isolation is None else isolation.env
+    if isolation is not None:
+        argv = isolation.launch(argv, cwd, writable)
     try:
         scratch = Path(tempfile.mkdtemp(prefix=SCRATCH_PREFIX)).resolve()
     except OSError as exc:
@@ -249,9 +269,9 @@ def invoke(
                 process = subprocess.Popen(  # noqa: S603 - argv list, shell=False, prompt is one element
                     argv,
                     cwd=cwd,
-                    # The whole environment, on purpose: the product needs its
-                    # own auth. The opposite of `scripts.script_environment`.
-                    env=os.environ.copy(),
+                    # Under `product_sandbox = "off"`, the whole environment:
+                    # the product needs its own auth. Otherwise the built one.
+                    env=env,
                     stdin=subprocess.DEVNULL,
                     stdout=stdout_handle,
                     stderr=stderr_handle,
@@ -470,34 +490,51 @@ def find_executable(product: Product, role: str) -> str:
     return executable
 
 
-def probe_version(product: Product, executable: str, role: str = "runner") -> str:
+def probe_version(
+    product: Product, executable: str, role: str = "runner", isolation: Isolation | None = None
+) -> str:
     """Run the product's version command; the first line of what it prints.
 
     Executed, not merely found: a product on PATH that cannot start should be
-    exit 2 up front, not one errored case per work item. `role` ("runner" or
-    "judge") names the seat in the message. Raises `ProductSetupError`;
-    returns "" when the product has no version command.
+    exit 2 up front, not one errored case per work item. Under `isolation` it
+    runs as the cases will -- in the temporary home, with the built
+    environment, inside the backend -- so a product that starts outside the
+    sandbox but not inside it is exit 2 too, and the message says how to run
+    it without one. `role` ("runner" or "judge") names the seat in the
+    message. Raises `ProductSetupError`; returns "" when the product has no
+    version command.
     """
     if product.version_command is None:
         return ""
     argv = [executable, *product.version_command[1:]]
     spoken = " ".join(argv)
+    cwd = isolation.root if isolation is not None else None
+    backend = isolation.sandbox.backend if isolation is not None and cwd is not None else "none"
+    under = (
+        f'; under {backend} -- set product_sandbox = "off" to run it without one'
+        if backend != "none"
+        else ""
+    )
     try:
         completed = subprocess.run(  # noqa: S603 - fixed argv from a preset or config, no shell
-            argv,
+            isolation.launch(argv, cwd) if isolation is not None and cwd is not None else argv,
             capture_output=True,
             timeout=VERSION_PROBE_TIMEOUT_SECONDS,
             check=False,
             stdin=subprocess.DEVNULL,
+            cwd=cwd,
+            env=isolation.env if isolation is not None else None,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ProductSetupError(f"{role} {product.name}: {spoken} could not run: {exc}") from exc
+        raise ProductSetupError(
+            f"{role} {product.name}: {spoken} could not run: {exc}{under}"
+        ) from exc
     if completed.returncode != 0:
         detail = completed.stderr.decode("utf-8", errors="replace").strip().splitlines()
         first = detail[0] if detail else ""
         exited = f"exited with code {completed.returncode}"
         message = f"{role} {product.name}: {spoken} {exited}: {first}"
-        raise ProductSetupError(message.rstrip(": "))
+        raise ProductSetupError(message.rstrip(": ") + under)
     lines = completed.stdout.decode("utf-8", errors="replace").strip().splitlines()
     return lines[0].strip() if lines else ""
 
@@ -507,13 +544,21 @@ class ProductRunner:
 
     needs_api_key = False
 
-    def __init__(self, product: Product) -> None:
+    def __init__(self, product: Product, *, sandbox: ProductSandbox = PRODUCT_SANDBOX_OFF) -> None:
+        """`sandbox` is the run's product sandbox decision, shared by every
+        product runner and the judge; the default, `off`, is the behaviour
+        before issue #99."""
         self._product = product
+        self._sandbox = sandbox
         self.name = product.name
 
     @property
     def product(self) -> Product:
         return self._product
+
+    @property
+    def sandbox(self) -> ProductSandbox:
+        return self._sandbox
 
     def unpriced(self) -> str:
         """Why this runner's spend can never be priced; see `Product.unpriced`."""
@@ -555,7 +600,11 @@ class ProductRunner:
 
         private: Path | None = None
         bridge: Bridge | None = None
+        stack = ExitStack()
         try:
+            # Entered first, so the temporary home outlives every process
+            # this work item starts and is removed however the run ends.
+            isolation = stack.enter_context(isolate(self._sandbox, product))
             if workspace is not None:
                 cwd = workspace.root
             else:
@@ -573,7 +622,10 @@ class ProductRunner:
                 bridge = write_bridge(case.tools, product.mcp)
                 extra_args = bridge.argv()
             deliver_skill(skill, cwd, product.skills_dir)
-            trace = read_trace(product, invoke(product, prompt, cwd, extra_args))
+            writable = (bridge.directory,) if bridge is not None else ()
+            trace = read_trace(
+                product, invoke(product, prompt, cwd, extra_args, isolation, writable)
+            )
             if bridge is not None and trace.error is None and not bridge.connected():
                 # The product ran, but never asked the bridge for its tools:
                 # the model had none. Infra, not a skill that failed to call
@@ -596,6 +648,7 @@ class ProductRunner:
                 bridge.cleanup()
             if private is not None:
                 shutil.rmtree(private, ignore_errors=True)
+            stack.close()
 
         # One set of spend fields for both results below, so an errored run
         # and a clean one can never disagree about what the trace reported.
@@ -654,7 +707,30 @@ class ProductRunner:
         """
         product = self._product
         executable = find_executable(product, "runner")
-        version = probe_version(product, executable)
+        refusal = environment_refusal(product, self._sandbox, "runner")
+        if refusal is not None:
+            raise ProductSetupError(refusal)
+        with isolate(self._sandbox, product) as isolation:
+            version = probe_version(product, executable, "runner", isolation)
+            self._check_cases(skills, cases_by_skill, isolation)
+        return ProductStatus(
+            name=product.name,
+            executable=executable,
+            version=version,
+            trust=self._sandbox.trust(),
+            sandbox=self._sandbox.status(),
+        )
+
+    def _check_cases(
+        self,
+        skills: list[Skill],
+        cases_by_skill: dict[str, list[EvalCase]],
+        isolation: Isolation,
+    ) -> None:
+        """Every planned case this runner can serve, and the bridge when one
+        needs it -- probed under the run's isolation, since the bridge is the
+        product's child and starts inside the same sandbox."""
+        product = self._product
         bridged = False
         for skill in skills:
             _check_skill_name(skill.name)
@@ -689,12 +765,9 @@ class ProductRunner:
                             "whether a skill was loaded; use a preset or mode: loaded"
                         )
         if bridged and product.mcp is not None:
-            self._check_bridge(product.mcp)
-        return ProductStatus(
-            name=product.name, executable=executable, version=version, trust=TRUST_NOTE
-        )
+            self._check_bridge(product.mcp, isolation)
 
-    def _check_bridge(self, support: McpSupport) -> None:
+    def _check_bridge(self, support: McpSupport, isolation: Isolation) -> None:
         """A planned case declares `tools:`: refuse a table flag that would
         hide them from the model, then prove the bridge starts.
 
@@ -719,6 +792,6 @@ class ProductRunner:
                         f"each mock tool in it as the product spells it ({spelling})"
                     )
         try:
-            probe_bridge()
+            probe_bridge(isolation)
         except BridgeSetupError as exc:
             raise ProductSetupError(f"runner {product.name}: {exc}") from exc

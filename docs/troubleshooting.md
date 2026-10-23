@@ -474,6 +474,24 @@ user error. See
 its own endpoint, so `--base-url` has no meaning for one either. See
 [`run`](cli.md#run).
 
+## A product that cannot run under the product sandbox
+
+**What you see.** Exit `2`, in preflight, before any case runs — one of these, `<role>` being
+`runner` or `judge`:
+
+| Message | What it means | What to do |
+| --- | --- | --- |
+| `product_sandbox = "required" but no sandbox is available: <reason>` | You required an OS sandbox for products and the once-per-run probe found none; the reasons are those in the table below for scripts. | Install the backend, or use `auto`, which falls back to home isolation and says so on the report. |
+| `<role> <product>: product_sandbox = "auto" gives the product a temporary home directory, so it cannot use a login stored in your home directory or keychain; export <variable>, name the credential your setup uses in [runners.<product>] pass_env (a name containing TOKEN, KEY, SECRET, PASSWORD or CREDENTIAL), or set product_sandbox = "off"` | Home isolation hides your login, and none of the product's auth variables is set and non-empty, nor any credential-named variable in `pass_env`. A region, a profile name or a switch such as `CLAUDE_CODE_USE_BEDROCK` does not count: a login kept under `~/.aws` is hidden by the temporary home. | Export a token (`claude setup-token` prints one for `CLAUDE_CODE_OAUTH_TOKEN`), or list the credentials a Bedrock or Vertex setup uses in `pass_env` (`AWS_SECRET_ACCESS_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, `GOOGLE_APPLICATION_CREDENTIALS`), or set `product_sandbox = "off"`. |
+| `<role> cli: product_sandbox = "auto" builds the product's environment from an allowlist, so the command gets none of your variables unless you name them; set [runners.cli] pass_env to the variables it needs (pass_env = [] when it needs none), or set product_sandbox = "off"` | skill-lens does not know a `cli` command's auth, and a command that lost its key may exit 0 and score as a failed case. | Name what it needs in `[runners.cli] pass_env`, or `pass_env = []`. |
+| `<role> <product>: <command> exited with code <n>: <first line of stderr>; under <backend> -- set product_sandbox = "off" to run it without one` | The version probe failed inside the OS sandbox. | Report it if the product starts outside the sandbox; meanwhile use `off`. |
+| `cannot create a temporary home for the <product> product: <the OS error>` | The temporary directory is full, read-only or missing, so home isolation has nowhere to put the product's home. | Free space in, or fix the permissions of, the system temporary directory (`TMPDIR`). |
+
+A `pass_env` entry naming a variable the isolation sets itself is a config error: `pass_env
+names <NAME>, which home isolation sets itself; passing it would undo the isolation -- set
+product_sandbox = "off" to run the product with your own home`. See
+[Product sandbox](configuration.md#product-sandbox).
+
 ## `script_sandbox = "required"` with no backend
 
 **What you see.** Exit `2`, in preflight, before any case runs:

@@ -898,10 +898,10 @@ def test_every_case_runs_through_every_runner_and_each_outcome_names_its_runner(
     monkeypatch.setattr(cli_module, "_RUNNER_NAMES", (*cli_module._RUNNER_NAMES, "fake-2"))
     original_build_runner = cli_module._build_runner
 
-    def _build_runner(name, settings, model_name, base_url=""):
+    def _build_runner(name, settings, model_name, base_url="", sandbox=None):
         if name == "fake-2":
             return SecondFake()
-        return original_build_runner(name, settings, model_name, base_url)
+        return original_build_runner(name, settings, model_name, base_url, sandbox)
 
     monkeypatch.setattr(cli_module, "_build_runner", _build_runner)
     skill_dir = _make_skill(tmp_path)
@@ -963,7 +963,10 @@ def _product_config(tmp_path, name="copilot", judge: str | None = None) -> Path:
     command = [sys.executable, str(FAKE_PRODUCT), "-p", "{prompt}"]
     # A key after a [table] header would belong to that table, so the judge
     # line -- when there is one -- goes first.
-    prefix = f'judge = "{judge}"\n' if judge is not None else ""
+    # These tests pin the product path itself; the fake reads its FAKE_PRODUCT_*
+    # variables from the whole environment, so the sandbox stays off here.
+    prefix = 'product_sandbox = "off"\n'
+    prefix += f'judge = "{judge}"\n' if judge is not None else ""
     body = f"{prefix}[runners.{name}]\ncommand = {command!r}\n".replace("'", '"')
     path = tmp_path / "skill-lens.toml"
     path.write_text(body, encoding="utf-8")
@@ -1054,7 +1057,17 @@ def test_a_case_with_mock_tools_runs_through_the_bridge_under_a_preset(tmp_path,
     skill_dir = _make_skill(tmp_path, cases=BRIDGED_CASES_YAML)
     out = tmp_path / "report.json"
     result = runner.invoke(
-        app, ["run", str(skill_dir), "--runner", "claude-code", "--json-output", str(out)]
+        app,
+        [
+            "run",
+            str(skill_dir),
+            "--runner",
+            "claude-code",
+            "--json-output",
+            str(out),
+            "--product-sandbox",
+            "off",
+        ],
     )
     assert result.exit_code == 0, result.output
     report = json.loads(out.read_text(encoding="utf-8"))
@@ -1514,3 +1527,113 @@ def test_a_refused_glob_pattern_is_an_authoring_error():
     from skill_lens.paths import PatternRefused
 
     assert issubclass(PatternRefused, _AUTHORING_ERRORS)
+
+
+# --- the product sandbox (issue #99) ---
+
+from skill_lens.models import RunReport  # noqa: E402
+from skill_lens.runners.product_sandbox import (  # noqa: E402
+    PRODUCT_SANDBOX_OFF,
+    ProductSetupError,
+)
+
+
+def _recording_decision(monkeypatch) -> list:
+    decided: list = []
+
+    def decide(mode, **_kwargs):
+        decided.append(mode)
+        return PRODUCT_SANDBOX_OFF
+
+    monkeypatch.setattr(cli_module, "decide_product_sandbox", decide)
+    return decided
+
+
+def test_product_sandbox_flag_beats_the_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(PRODUCT_FIXTURES / "copilot-trigger.jsonl"))
+    decided = _recording_decision(monkeypatch)
+    skill_dir = _make_skill(tmp_path, cases=PRODUCT_CASES_YAML)
+    config = _product_config(tmp_path)  # product_sandbox = "off" in the file
+    result = runner.invoke(
+        app,
+        ["run", str(skill_dir), "--runner", "copilot", "--config", str(config),
+         "--product-sandbox", "required"],
+    )  # fmt: skip
+    assert result.exit_code == 0, result.output
+    assert decided == ["required"]
+
+
+def test_the_file_decides_without_the_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(PRODUCT_FIXTURES / "copilot-trigger.jsonl"))
+    decided = _recording_decision(monkeypatch)
+    skill_dir = _make_skill(tmp_path, cases=PRODUCT_CASES_YAML)
+    config = _product_config(tmp_path)
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--runner", "copilot", "--config", str(config)]
+    )
+    assert result.exit_code == 0, result.output
+    assert decided == ["off"]
+
+
+def test_a_run_with_no_product_decides_nothing(tmp_path, monkeypatch):
+    decided = _recording_decision(monkeypatch)
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(skill_dir), "--product-sandbox", "required"])
+    assert result.exit_code == 0, result.output
+    assert decided == []
+
+
+def test_a_product_judge_alone_is_decided_for(tmp_path, monkeypatch):
+    decided = _recording_decision(monkeypatch)
+    monkeypatch.setattr(cli_module, "run_evals", lambda *args, **kwargs: RunReport())
+    skill_dir = _make_skill(tmp_path)
+    config = _product_config(tmp_path, name="claude-code", judge="claude-code")
+    runner.invoke(app, ["run", str(skill_dir), "--config", str(config)])
+    assert decided == ["off"]
+
+
+def test_required_with_no_backend_exits_2(tmp_path, monkeypatch):
+    def decide(mode, **_kwargs):
+        raise ProductSetupError(
+            'product_sandbox = "required" but no sandbox is available: bwrap not found on PATH'
+        )
+
+    monkeypatch.setattr(cli_module, "decide_product_sandbox", decide)
+    skill_dir = _make_skill(tmp_path, cases=PRODUCT_CASES_YAML)
+    config = _product_config(tmp_path)
+    result = runner.invoke(
+        app, ["run", str(skill_dir), "--runner", "copilot", "--config", str(config)]
+    )
+    assert result.exit_code == 2
+    assert "no sandbox is available" in plain(result.output)
+
+
+def test_an_unknown_product_sandbox_is_exit_2(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    result = runner.invoke(app, ["run", str(skill_dir), "--product-sandbox", "on"])
+    assert result.exit_code == 2
+    assert "unknown product sandbox: on" in plain(result.output)
+
+
+def test_every_product_shares_one_decision(tmp_path, monkeypatch):
+    the_decision = PRODUCT_SANDBOX_OFF
+    monkeypatch.setattr(cli_module, "decide_product_sandbox", lambda mode, **_k: the_decision)
+    seen: dict = {}
+
+    def run_evals(skills, runners, **kwargs):
+        seen["runners"] = runners
+        seen["judge"] = kwargs["judge"]
+        return RunReport()
+
+    monkeypatch.setattr(cli_module, "run_evals", run_evals)
+    skill_dir = _make_skill(tmp_path)
+    config = tmp_path / "skill-lens.toml"
+    config.write_text(
+        'judge = "copilot"\n[runners.cli]\ncommand = ["agent", "{prompt}"]\n', encoding="utf-8"
+    )
+    runner.invoke(
+        app,
+        ["run", str(skill_dir), "--config", str(config), "--runner", "cli", "--runner", "copilot"],
+    )
+    assert [r.sandbox for r in seen["runners"]] == [the_decision, the_decision]
+    assert seen["judge"]._sandbox is the_decision

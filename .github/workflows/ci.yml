@@ -101,8 +101,9 @@ jobs:
           uv run skill-lens list ./plugins
 
   sandbox-macos:
-    # The sandbox-exec profile is only ever exercised on macOS. The bwrap
-    # argv is exercised by the test job above, which sets up bwrap itself.
+    # The sandbox-exec profiles (scripts and products) are only ever exercised
+    # on macOS. The bwrap argv is exercised by the test job above, which sets
+    # up bwrap itself.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -117,7 +118,7 @@ jobs:
       - name: Live sandbox tests
         env:
           SKILL_LENS_REQUIRE_SANDBOX: "1"
-        run: uv run pytest tests/test_sandbox_live.py tests/test_scripts.py -v
+        run: uv run pytest tests/test_sandbox_live.py tests/test_product_sandbox_live.py tests/test_scripts.py -v
 
   docs:
     runs-on: ubuntu-latest

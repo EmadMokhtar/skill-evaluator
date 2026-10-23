@@ -2,8 +2,9 @@
 
 Started by the tests as `python fake_product.py -p <prompt> ...`. It records
 what it saw to the JSON file named by FAKE_PRODUCT_RECORD -- its cwd, its
-argv, the prompt after `-p`, and every file under the directory named by
-FAKE_PRODUCT_SKILLS_DIR (relative to cwd) -- then behaves as FAKE_PRODUCT_MODE
+argv, the prompt after `-p`, every file under the directory named by
+FAKE_PRODUCT_SKILLS_DIR (relative to cwd), its HOME and TMPDIR and the names
+in its environment -- then behaves as FAKE_PRODUCT_MODE
 says:
 
   ok       print the file named by FAKE_PRODUCT_TRACE to stdout, exit 0 (default)
@@ -15,7 +16,8 @@ says:
   failed   print the trace, exit 1 -- how a product ends a run it reports as failed
 
 `--version` as the first argument prints "fake 1.2.3" and exits 0, or exits 1
-when FAKE_PRODUCT_VERSION_FAILS is set. Nothing here touches the network.
+when FAKE_PRODUCT_VERSION_FAILS is set; with FAKE_PRODUCT_VERSION_RECORD set it
+first writes its HOME to that file. Nothing here touches the network.
 
 An argv element `--mcp-config=<path>` or `--additional-mcp-config=@<path>` --
 the two spellings the presets use -- makes the fake act as an MCP client the
@@ -107,6 +109,9 @@ def _mcp_session(argv: list[str]) -> dict[str, Any] | None:
 
 def main(argv: list[str]) -> int:
     if argv[:1] == ["--version"]:
+        version_record = os.environ.get("FAKE_PRODUCT_VERSION_RECORD")
+        if version_record:
+            Path(version_record).write_text(os.environ.get("HOME", ""), encoding="utf-8")
         if os.environ.get("FAKE_PRODUCT_VERSION_FAILS"):
             print("cannot start", file=sys.stderr)
             return 1
@@ -132,6 +137,9 @@ def main(argv: list[str]) -> int:
                     "prompt": prompt,
                     "skill_files": files,
                     "mcp": mcp,
+                    "home": os.environ.get("HOME"),
+                    "tmpdir": os.environ.get("TMPDIR"),
+                    "env_keys": sorted(os.environ),
                 }
             ),
             encoding="utf-8",

@@ -499,6 +499,7 @@ def test_a_product_status_is_a_typed_record():
         "executable": "/usr/local/bin/copilot",
         "version": "1.0.37",
         "trust": "t",
+        "sandbox": None,
     }
 
 

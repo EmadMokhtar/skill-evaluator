@@ -24,12 +24,15 @@ import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from skill_lens import __version__
 from skill_lens.mcp_bridge import SERVER_NAME
 from skill_lens.models import ToolCall, ToolResponse, ToolSpec
 from skill_lens.runners.tools import NO_RESPONSE_SCRIPTED, build_mock_tool
+
+if TYPE_CHECKING:
+    from skill_lens.runners.product_sandbox import Isolation
 
 BRIDGE_PREFIX = "skill-lens-mcp-"
 BRIDGE_MODULE = "skill_lens.mcp_bridge"
@@ -226,12 +229,17 @@ def restore_tool_names(bridge: Bridge, calls: Iterable[ToolCall]) -> list[ToolCa
     ]
 
 
-def probe_bridge() -> None:
+def probe_bridge(isolation: Isolation | None = None) -> None:
     """Start the server once under this interpreter, `--check`, before any
-    case runs: executed, not merely found, like the version probe. Raises
-    `BridgeSetupError` naming what went wrong."""
+    case runs: executed, not merely found, like the version probe. Under a
+    product sandbox's `isolation` it starts as the product would start it --
+    the built environment, inside the backend -- since the bridge is the
+    product's child. Raises `BridgeSetupError` naming what went wrong."""
     command = bridge_command()
-    directory = Path(tempfile.mkdtemp(prefix=BRIDGE_PREFIX)).resolve()
+    try:
+        directory = Path(tempfile.mkdtemp(prefix=BRIDGE_PREFIX)).resolve()
+    except OSError as exc:
+        raise BridgeSetupError(f"cannot write the MCP bridge's files: {exc}") from exc
     try:
         spec_path = directory / "tools.json"
         spec_path.write_text(
@@ -239,12 +247,16 @@ def probe_bridge() -> None:
             encoding="utf-8",
         )
         try:
+            argv = [*command, "--check", str(spec_path)]
+            isolated = isolation is not None and isolation.root is not None
             completed = subprocess.run(  # noqa: S603 - this interpreter, fixed argv, no shell
-                [*command, "--check", str(spec_path)],
+                isolation.launch(argv, directory) if isolated else argv,
                 capture_output=True,
                 timeout=PROBE_TIMEOUT_SECONDS,
                 check=False,
                 stdin=subprocess.DEVNULL,
+                cwd=directory if isolated else None,
+                env=isolation.env if isolation is not None else None,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BridgeSetupError(f"the MCP bridge could not start: {exc}") from exc

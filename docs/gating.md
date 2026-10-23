@@ -306,12 +306,17 @@ scripts while skill-lens's `run_script` was off, each as `{skill_name, script_co
 product_note}`; `product_note` is the fixed sentence that product runners can still run the
 scripts through their own tools when the run includes a product runner, else `""`),
 `products` (one entry per product the run executed, as a runner or as the judge — a product
-serving as both is listed once — each as `{name, executable, version, trust}`; `trust` is
-the fixed sentence about permission prompts and the missing sandbox, the same one the
-console prints, describing the product's runner trust whichever seat it filled — a
-judge-only product delivers no skill, so it has no bundle for that sentence's reachable-
-scripts clause to reach; empty when no product ran), and the `gate` decision with its
-reasons.
+serving as both is listed once — each as `{name, executable, version, trust, sandbox}`;
+`trust` is the fixed sentence about permission prompts and what the run's product sandbox
+applied, the same one the console prints, describing the product's runner trust whichever
+seat it filled — a judge-only product delivers no skill, so it has no bundle for that
+sentence's reachable-scripts clause to reach; `sandbox` is the same decision as data,
+`{mode, backend, home_isolated, detail}` — `mode` is `product_sandbox` (`auto`, `required`
+or `off`), `backend` is `sandbox-exec`, `bwrap` or `none`, `home_isolated` is true under
+`auto` and `required` (a temporary home and an allowlisted environment, which is not a
+sandbox on its own), and `detail` is the probe's reason, such as `bwrap not found on PATH`;
+see [Runners](runners.md#product-runners); empty when no product ran), and the `gate`
+decision with its reasons.
 
 The spend ceiling adds three fields. `not_run` lists every case the ceiling kept from
 starting, in the order it would have run, each as `{skill_name, case_name, runner, arm,
