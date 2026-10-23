@@ -47,7 +47,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--markdown-max-chars <int>` | unset | Truncate the Markdown summary to fit a comment. Detail blocks are dropped first, then gate reasons are elided behind a `+N more` count; a budget too small to hold even the verdict is cut outright. Requires `--markdown-output` |
 | `--concurrency <int>` | `1` | Run this many cases at once. The work is network-bound, so the practical ceiling is your provider's rate limit |
 | `--keep-workspace` / `--no-keep-workspace` | unset | Keep each case's temporary directory instead of deleting it. Overrides the `keep_workspace` config key in either direction; omitting both flags leaves the config file's value in effect. Every kept directory is printed, under a `Kept workspaces` section, whichever of the flag or the config turned keeping on |
-| `--full-output` / `--no-full-output` | unset | Print a failing case's whole output instead of the first 500 characters. Overrides the `full_output` config key in either direction; omitting both flags leaves the config file's value in effect |
+| `--full-output` / `--no-full-output` | unset | Print a failing case's whole output instead of the first 500 characters, and each failed hook's whole stdout and stderr instead of the first 200. Overrides the `full_output` config key in either direction; omitting both flags leaves the config file's value in effect |
 | `--max-spend <usd>` | `max_spend_usd` in `skill-lens.toml`, else no ceiling | The run's spend ceiling, in US dollars. Once the spend the run has recorded — every run and every judge, both arms, errored runs included — reaches it, no new case starts; cases already running finish and are scored, the rest are reported as not run, and the gate fails. A run whose runner or judge can never price its spend (`copilot`, `cli`, a model with no price) is refused before it starts, and spend that turns out unpriced stops the run and fails the gate. Must be a positive, finite amount (exit 2 otherwise). See [The spend ceiling](gating.md#the-spend-ceiling) |
 | `--allow-scripts` / `--no-allow-scripts` | unset | Run the scripts a skill bundles under `scripts/`. Off by default: a `SKILL.md` under evaluation is unvetted code. Overrides the `allow_scripts` config key in either direction; omitting both flags leaves the config file's value in effect. Every run that enables scripts prints `scripts: on, sandbox: <backend>` so the log shows whether an OS sandbox applied, and exits 2 before any case runs if a bundled script's interpreter is missing or `script_sandbox = "required"` finds no sandbox. See [Running bundled scripts](runners.md#running-bundled-scripts) |
 
@@ -61,11 +61,11 @@ each `(skill, case, runner)` is its own outcome, and the same name twice is a us
 `skill-lens.toml`; it never appends to it. A two-runner run spends twice: the `Plan:` line
 printed before the first request includes the runner factor.
 
-A non-passing case prints what the agent actually did — its output, and every tool it
-called — under the evaluator detail, in the console and in the JUnit and Markdown reports
-alike. The output is cut at 500 characters by default; a cut is never silent (`… (1,842 more
-characters; --full-output prints them)`). Passing cases stay one line. See
-[what a failing case shows](gating.md#what-a-failing-case-shows).
+A non-passing case prints what the agent actually did — its output, every tool it called,
+and under `claude-code` every hook that failed — under the evaluator detail, in the console
+and in the JUnit and Markdown reports alike. The output is cut at 500 characters by default;
+a cut is never silent (`… (1,842 more characters; --full-output prints them)`). Passing
+cases stay one line. See [what a failing case shows](gating.md#what-a-failing-case-shows).
 
 `--repeat` and `--baseline` multiply spend: `--repeat 5 --baseline previous` runs 10x as many
 cases as a plain run (5 repetitions x 2 arms). Before a run on a runner that spends — a

@@ -74,10 +74,10 @@ def merge_results(results: list[RunResult], tasks: list[str]) -> RunResult:
     """The one `RunResult` every evaluator and reporter reads.
 
     `results` holds the sessions that ran, in order -- fewer than `tasks`
-    when one errored. The output is the last session's, the tool calls and
-    the transcript are every session's, and the spend is the sum, so the
-    budget measures the whole case and the trajectory cannot miss a call
-    made in an earlier session. Spend is kept when a session errored: it was
+    when one errored. The output is the last session's, the tool calls, the
+    hooks and the transcript are every session's, and the spend is the sum,
+    so the budget measures the whole case and the trajectory cannot miss a
+    call made in an earlier session. Spend is kept when a session errored: it was
     spent.
     """
     total = len(tasks)
@@ -95,6 +95,7 @@ def merge_results(results: list[RunResult], tasks: list[str]) -> RunResult:
     return RunResult(
         output=last.output,
         tool_calls=[call for result in results for call in result.tool_calls],
+        hooks=[hook for result in results for hook in result.hooks],
         transcript=transcript,
         input_tokens=sum(result.input_tokens for result in results),
         output_tokens=sum(result.output_tokens for result in results),

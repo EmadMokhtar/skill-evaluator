@@ -101,7 +101,7 @@ turned keeping on — a setting that silently filled a disk with no on-screen ex
 be a trap.
 
 `full_output` lifts the 500-character cap on the agent output printed under a non-passing
-case, in every reporter. `--full-output` / `--no-full-output` override it in either
+case, and the 200-character cap on each stream of a failed hook, in every reporter. `--full-output` / `--no-full-output` override it in either
 direction; leaving both unset keeps the config file's value. The cap is never silent — a cut
 output always states exactly how many characters were removed — so the default is safe to
 leave in CI, where a long red log helps nobody, and `true` is the right committed value for

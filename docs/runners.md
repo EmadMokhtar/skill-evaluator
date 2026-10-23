@@ -114,7 +114,7 @@ skill-lens run ./skills --runner copilot --runner pydantic-ai --model openai:gpt
 | Runner | Starts | Skill directory | Trace |
 | --- | --- | --- | --- |
 | `copilot` | `copilot -p <prompt> --allow-all-tools --output-format json --no-custom-instructions --no-auto-update` | `.agents/skills/<name>/` | Copilot's JSONL (one JSON object per line) |
-| `claude-code` | `claude -p <prompt> --output-format stream-json --verbose --dangerously-skip-permissions --setting-sources project --strict-mcp-config --no-session-persistence` | `.claude/skills/<name>/` | Claude Code's `stream-json` |
+| `claude-code` | `claude -p <prompt> --output-format stream-json --verbose --include-hook-events --dangerously-skip-permissions --setting-sources project --strict-mcp-config --no-session-persistence` | `.claude/skills/<name>/` | Claude Code's `stream-json` |
 | `cli` | the `command` in `[runners.cli]` | `skills_dir` (default `.agents/skills`) | none — stdout is the output |
 
 The flags are the verified minimum: what the product needs to run without a terminal, what
@@ -122,6 +122,9 @@ emits the trace, and what keeps *your* setup out of the eval.
 
 - `--no-custom-instructions` stops a stray `AGENTS.md` or a personal instructions file
   shaping a Copilot run;
+- `--include-hook-events` makes Claude Code write an event for every hook the skill
+  declares, not only its `SessionStart` and `Setup` hooks; it changes nothing else in the
+  trace (verified against Claude Code 2.1.289);
 - `--setting-sources project --strict-mcp-config` keeps your own hooks, plugins and MCP
   servers out of a Claude Code run while the project skill is still discovered and
   OAuth auth still works;
@@ -175,6 +178,7 @@ one. The MCP bridge is started fresh for every session too.
 | `budget: max_cost_usd` | failing "not evaluated" check — Copilot bills per premium request (its billing unit: one counted request, not tokens), and the note says how many | yes, at list price (the provider's published per-token price), as the product reports it in `total_cost_usd`; a `result` event with no number there is a failing "not evaluated" check | failing "not evaluated" check |
 | `budget: max_latency_ms` | yes | yes | yes |
 | `tools:` (mock tools) | yes, through the [MCP bridge](#mock-tools-under-a-product) | yes, through the [MCP bridge](#mock-tools-under-a-product) | no — an authoring error |
+| Hooks the skill declares (`hooks`) | no — not read from Copilot's trace | yes — reported, never checked ([below](#hooks-under-claude-code)) | no |
 
 Token counts under a product runner include the product's own system prompt and tool
 definitions — tens of thousands of tokens for a one-line answer under Claude Code. A
@@ -184,6 +188,30 @@ set a separate budget, or run budget cases through the framework runners only.
 Tool calls are what the model *requested* (Copilot's `toolRequests`, Claude Code's
 `tool_use` blocks), not what executed — a refused call was still the model's choice, the
 same rule the framework runners apply.
+
+#### Hooks under Claude Code
+
+A skill can declare lifecycle hooks (commands Claude Code runs at fixed points, such as
+`PreToolUse` before every tool call or `Stop` when the model ends its turn). Under
+`claude-code`, every hook that ran is recorded in order from its `hook_response` event: its
+name as Claude Code spells it (`PreToolUse:Write` — the event, then the matcher the hook
+declared), its event, its outcome, its exit code (none when the hook reported none), its
+stdout and its stderr. The outcome is `success`, `error` (any non-zero exit) or `cancelled`
+(the hook was stopped before it finished, because its own `timeout` ran out or the run was
+interrupted; a normal end of run cancels nothing). The JSON report lists them per outcome
+under [`hooks`](gating.md#json-report), and the transcript keeps every `hook_*` event. A
+[`sessions:`](eval-files.md#several-sessions-in-one-workspace) case lists every session's hooks, in order.
+
+A hook whose outcome is anything but `success` is a **failed hook**, and a non-passing case
+shows it under `failed hooks:` in [its failure excerpt](gating.md#what-a-failing-case-shows).
+Exit code `2` is how a hook blocks on purpose, and Claude Code reports that as `error` too,
+so read the exit code before blaming the hook.
+
+Hooks are reported, never judged: nothing checks them yet, so a failed hook never fails,
+errors or passes a case by itself. An errored case keeps its hooks when Claude Code finished
+its trace — a run that gave up (`error_max_turns`) because a hook kept blocking the model
+shows that hook — and reports none when the trace was cut short, as it reports no tool
+calls then.
 
 A case the runner cannot serve is an **authoring error** (exit 2) found in preflight, before
 any case runs and before any quota is spent — never a vacuous pass. A `trajectory:` name is

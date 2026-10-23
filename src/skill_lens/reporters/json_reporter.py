@@ -62,6 +62,7 @@ def render_json(
                 "usage_note": o.result.usage_note if o.result else "",
                 "stop_note": o.result.stop_note if o.result else "",
                 "retry_cost_usd": o.result.retry_cost_usd if o.result else 0.0,
+                "hooks": [h.model_dump() for h in o.result.hooks] if o.result else [],
                 "workspace": (str(o.result.workspace) if o.result and o.result.workspace else None),
             }
             for o in report.outcomes

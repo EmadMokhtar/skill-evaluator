@@ -17,6 +17,7 @@ from skill_lens.reporters.failure_context import (
     cut_note,
     failure_context,
     more_calls_note,
+    more_hooks_note,
 )
 
 _TRUNCATION_NOTE = "_Truncated — see the JSON report artifact._"
@@ -309,6 +310,11 @@ def _failure_lines(outcome: CaseOutcome, repeat: int, output_limit: int | None) 
             if context.more_calls:
                 calls.append(more_calls_note(context))
             lines.extend(["", "Tool calls:", "", _fenced("\n".join(calls))])
+        if context.failed_hooks:
+            hooks = list(context.failed_hooks)
+            if context.more_hooks:
+                hooks.append(more_hooks_note(context))
+            lines.extend(["", "Failed hooks:", "", _fenced("\n".join(hooks))])
     lines.append("")
     return lines
 

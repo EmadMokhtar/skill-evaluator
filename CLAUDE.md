@@ -443,8 +443,8 @@ fails if the two drift apart — so a new invariant is added in both places or n
   the case object itself.
 - **A multi-session case is one outcome: an errored session errors it and stops the rest,
   and every evaluator reads the merged result.** `sessions.merge_results`: the last
-  session's output, every session's tool calls in order, summed spend (kept on error), every
-  distinct `cost_note` / `usage_note`, and `session k of n: ` on the error.
+  session's output, every session's tool calls and hooks in order, summed spend (kept on
+  error), every distinct `cost_note` / `usage_note`, and `session k of n: ` on the error.
   `trajectory.skill_triggered` must hold in every session (`skill_triggered_by_session`);
   `skill_triggered` only summarises "any session". A runner handed the whole case returns
   `refuse_sessions`'s error, never None as the prompt. A session with `stop_note` ends the loop
@@ -676,6 +676,16 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **`ProductRunner.run` still never raises** once the bridge exists: a bridge directory that
   cannot be written, and a `tools:` case reaching a product with no `mcp` (a caller that
   skipped preflight), are both `RunResult.error`.
+- **A hook is reported, never judged.** `RunResult.hooks` is every `hook_response` a
+  `claude-code` run reported, in order, the product's `outcome` word kept as written: any
+  word but `success` is a failed hook (shown, never refused); `cancelled` is a hook stopped
+  by its own timeout or an interrupted run, never by a normal end of run. One with no string
+  name or outcome is skipped (the transcript keeps it); a missing event is empty. No
+  evaluator reads it, so a failed hook never changes a verdict; it shows through
+  `FailureContext` under a case already not passing. An errored run keeps its hooks only
+  when its trace is complete; one that ended early reports none (never a partial parse).
+  `--include-hook-events` only turns the `hook_*` events on (verified, 2.1.289); the
+  `result` event is unchanged.
 - **`--model` with nothing to read it is a user error, and so is `--judge-model`** (exit 2).
   `--model` is read by a keyed runner, or by a keyed judge whose `judge_model` is unset;
   `--judge-model` by a keyed judge only, so under a product judge it is refused; a
