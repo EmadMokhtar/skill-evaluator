@@ -360,11 +360,7 @@ def _scripts(report: RunReport) -> str:
             line += f"; {_escape(report.scripts.hardening)}"
         bits.append(line)
     for note in report.script_notes:
-        plural = "" if note.script_count == 1 else "s"
-        bits.append(
-            f"{_code(note.skill_name)} bundles {note.script_count} script{plural}; "
-            "execution is off (`allow_scripts = true` or `--allow-scripts`)"
-        )
+        bits.append(f"{_code(note.skill_name)} {note.describe(code=_code, plain=_escape)}")
     return "<sub>" + "<br>".join(bits) + "</sub>" if bits else ""
 
 

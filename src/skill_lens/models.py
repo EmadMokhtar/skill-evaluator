@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -603,16 +603,41 @@ class ScriptStatus(BaseModel):
     hardening: str | None = None
 
 
+# allow_scripts governs only skill-lens's own `run_script` tool. A product
+# runner reaches the same scripts through its own tools (Bash, say) whatever
+# allow_scripts says, so "execution is off" alone would contradict the
+# product's trust note printed beside it (issue #97).
+PRODUCT_SCRIPTS_NOTE = "product runners can still run them through their own tools"
+
+
 class ScriptNote(BaseModel):
-    """A skill bundles scripts, and execution is off.
+    """A skill bundles scripts, and skill-lens's `run_script` is off.
 
     On the report rather than printed from the orchestrator so that every
     notice a run produces goes through the reporters -- they render, they
-    never decide.
+    never decide. `product_note` is `PRODUCT_SCRIPTS_NOTE` when a product
+    runner ran this skill, else empty: it is fixed text on the model, as
+    `ProductStatus.trust` is, so the reporters cannot drift and the JSON
+    report carries the sentence a human reads.
     """
 
     skill_name: str
     script_count: int
+    product_note: str = ""
+
+    def describe(self, code: Callable[[str], str] = str, plain: Callable[[str], str] = str) -> str:
+        """The note after the skill's name, the one wording every reporter
+        prints. `code` formats a flag or a tool name and `plain` formats prose,
+        so Markdown can pass its code-span and escape functions and the
+        console the identity."""
+        plural = "" if self.script_count == 1 else "s"
+        hint = f"({code('allow_scripts = true')} or {code('--allow-scripts')})"
+        head = f"bundles {self.script_count} script{plural}; "
+        if self.product_note:
+            return (
+                f"{head}skill-lens's {code('run_script')} is off {hint}; {plain(self.product_note)}"
+            )
+        return f"{head}execution is off {hint}"
 
 
 class ProductStatus(BaseModel):

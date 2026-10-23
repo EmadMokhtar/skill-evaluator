@@ -11,6 +11,7 @@ import re
 from skill_lens.comparison import build_delta
 from skill_lens.gating import GateResult, evaluate_gate
 from skill_lens.models import (
+    PRODUCT_SCRIPTS_NOTE,
     BaselineNote,
     CaseOutcome,
     CheckResult,
@@ -581,6 +582,23 @@ def test_the_scripts_block_states_the_sandbox_and_the_notes():
     text = render_markdown(report)
     assert "Scripts: on, sandbox: none (no sandbox backend on Windows)" in text
     assert "`pdf` bundles 3 scripts; execution is off" in text
+
+
+def test_the_scripts_block_says_a_product_runner_can_still_run_the_scripts():
+    report = _mixed_report().model_copy(
+        update={
+            "script_notes": [
+                ScriptNote(skill_name="pdf", script_count=22, product_note=PRODUCT_SCRIPTS_NOTE)
+            ]
+        }
+    )
+    text = render_markdown(report)
+    assert (
+        "`pdf` bundles 22 scripts; skill-lens's `run_script` is off "
+        "(`allow_scripts = true` or `--allow-scripts`); "
+        "product runners can still run them through their own tools"
+    ) in text
+    assert "execution is off" not in text
 
 
 def test_the_scripts_block_prints_the_hardening_note_when_it_applied():

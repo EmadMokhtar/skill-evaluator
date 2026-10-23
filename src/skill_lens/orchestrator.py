@@ -20,6 +20,7 @@ from skill_lens.evaluators.trajectory import TrajectoryEvaluator
 from skill_lens.judges.base import Judge
 from skill_lens.judges.fake import FakeJudge
 from skill_lens.models import (
+    PRODUCT_SCRIPTS_NOTE,
     Arm,
     BaselineKind,
     BaselineNote,
@@ -428,7 +429,7 @@ def _execute(
 
 def _preflight_hooks(
     plan: _Plan, runners: list[Runner], judge: Judge | None
-) -> list[ProductStatus]:
+) -> tuple[list[ProductStatus], bool]:
     """Give every runner that defines `preflight` one look at what it will run,
     and call the judge's `preflight()`, which takes no arguments.
 
@@ -438,8 +439,13 @@ def _preflight_hooks(
     for it, once each: compatibility is a property of (case, runner), so a
     case `--tag` or `--case` filtered out is not its concern, and neither arm
     nor repeat changes the answer.
+
+    Also returns whether any *runner* reported a product. A product judge
+    does not count -- its working directory holds no skill, so it can never
+    reach the skill's scripts.
     """
     statuses: list[ProductStatus] = []
+    has_product_runner = False
     for runner in runners:
         hook = getattr(runner, "preflight", None)
         if hook is None:
@@ -461,13 +467,14 @@ def _preflight_hooks(
         status = hook(skills, cases_by_skill)
         if status is not None:
             statuses.append(status)
+            has_product_runner = True
     hook = getattr(judge, "preflight", None) if judge is not None else None
     if hook is not None:
         status = hook()
         if status is not None and status not in statuses:
             # The same product serving as runner and judge is one product.
             statuses.append(status)
-    return statuses
+    return statuses, has_product_runner
 
 
 def run_evals(
@@ -531,7 +538,8 @@ def run_evals(
     absent raises `ScriptSetupError` before any money is spent, and the
     sandbox decision is recorded on the report. When it is not set, every
     skill that bundles scripts gets a `ScriptNote` so the report can say
-    execution was off. Every runner that defines a
+    skill-lens's `run_script` was off -- and, when the run includes a product
+    runner, that the product can still run the scripts itself. Every runner that defines a
     `preflight(skills, cases_by_skill)` hook is called once here too, with
     the candidate-arm cases planned for it, and so is the judge's
     `preflight()`, which takes no arguments; a status either returns lands on
@@ -604,7 +612,13 @@ def run_evals(
                     notes.append(ScriptNote(skill_name=skill.name, script_count=count))
         # After the script preflight, so a ScriptSetupError and a
         # ProductSetupError cannot race for the exit.
-        products = _preflight_hooks(plan, runners, judge)
+        products, has_product_runner = _preflight_hooks(plan, runners, judge)
+        if has_product_runner:
+            # The run's answer, like the notes themselves: they cover every
+            # discovered skill, filtered out or not (issue #97).
+            notes = [
+                note.model_copy(update={"product_note": PRODUCT_SCRIPTS_NOTE}) for note in notes
+            ]
         outcomes = _execute(plan.items, evaluators, concurrency, executor_factory, options, runtime)
     finally:
         # However the run ended -- an authoring error out of an evaluator
