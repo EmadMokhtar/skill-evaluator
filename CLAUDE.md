@@ -539,7 +539,7 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **The product sees `SKILL.md` verbatim (its text as written; line endings are
   normalised).** `Skill.markdown` is the file; only the loader
   and the baseline resolver set it; `--baseline none` has none, so no directory is written.
-  Beside it go `scripts/`, `references/` and `assets/` and nothing else.
+  Beside it goes every file the skill ships, all but what `bundle.withheld` names.
 - **The prompt is the task verbatim, and the baseline-none arm never sees the skill's name.**
   The product owns its system prompt; anything skill-lens added would be part of what
   `--min-delta` measures. `loaded` invokes the skill by the product's own spelling; `offered`
@@ -653,8 +653,15 @@ fails if the two drift apart — so a new invariant is added in both places or n
   `allow-scripts` input is unset by default so the file decides, and `pull_request_target`,
   collaborator-PR and self-hosted workflows should pass `allow-scripts: false` explicitly.
   Docs-only: `docs/security.md`, `docs/ci.md`.
-- **The bundle is `scripts/`, `references/`, `assets/` and nothing else** — an eval file
-  beside `SKILL.md` is never readable by the agent.
+- **The bundle is every file the skill ships, never its eval files or secrets** —
+  `bundle.withheld` is the one rule for `SkillBundle`, product delivery and the previous
+  baseline's extraction: the top-level `SKILL.md`; `evals/`, `.git`, `.hg`, `.svn`,
+  `node_modules`, `.venv`, `__pycache__`; `*.eval.yaml`, `evals.json`, `.env`, `.env.*`,
+  `.npmrc`, `.netrc`, `.pypirc`, `skill-lens.toml` — at any depth, case-insensitively,
+  checked on the path asked for and the path it resolves to (issue #92). `_shipped` is the
+  one walk (regular files only, directory links never descended); delivery writes exactly
+  `delivered_paths`, never a link; past 1,000 files or 100 MB it is `BundleTooLarge` (exit 2
+  in preflight). Only `scripts/` is runnable.
 - **`Skill.bundle_root` defaults to `None`, and only the loader and the baseline resolver
   set it**, so the `--baseline none` skill never carries the candidate's scripts.
 - **A script's environment is built from an allowlist, never inherited.** The key that pays

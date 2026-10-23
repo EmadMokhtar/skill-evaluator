@@ -81,7 +81,7 @@ With the block present, the agent also gets three built-in tools:
 | `read_file` | Read a text file. `path` is relative to the working directory |
 | `write_file` | Create or replace a text file |
 
-A skill that ships `scripts/`, `references/` or `assets/` beside `SKILL.md` also gets
+A skill that ships any file beside `SKILL.md` besides its eval files also gets
 `list_skill_files`, `read_skill_file` and — only when the run enables it with
 `allow_scripts` or `--allow-scripts` — `run_script`. See
 [Bundled files and scripts](runners.md#bundled-files-and-scripts). All six names are

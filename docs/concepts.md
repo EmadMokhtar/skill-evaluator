@@ -47,8 +47,9 @@ frontmatter omits it. `description` is what an agent reads when deciding whether
 the skill. `version` is optional; when it is declared, `--baseline previous` uses it to
 identify the prior version.
 
-Three directories may sit beside `SKILL.md` — `scripts/`, `references/` and `assets/`.
-Together they are the skill's **bundle**, and a case can let the agent read them. See
+Everything else in the skill's directory — `scripts/`, `references/`, `assets/`, and any
+other file it ships, such as `templates/` — is the skill's **bundle**, and a case can let the
+agent read it. The eval files (`evals/`, `*.eval.yaml`, `evals.json`) are never part of it. See
 [Bundled files and scripts](runners.md#bundled-files-and-scripts).
 
 ## Eval case
@@ -325,7 +326,7 @@ See [Gating and exit codes](gating.md).
 | Assertion | A rule checked against the agent's final output text, or against a file it produced — such as `contains` or `file-produced`. |
 | Baseline | What the candidate is measured against: an empty skill (`none`) or the previous version (`previous`). |
 | Budget | A limit on tokens, cost or latency that a case declares and the run checks. |
-| Bundle | The `scripts/`, `references/` and `assets/` directories beside a `SKILL.md`. |
+| Bundle | Every file a skill ships beside its `SKILL.md`, except its eval files, version control, dependency directories and secret files. |
 | Candidate | The arm running the skill under test. Every gate rule but `--min-delta` reads this arm only. |
 | Case | One task plus what you expect of it, written in YAML beside the skill. |
 | Cassette | A recorded provider response replayed in tests, so the suite runs offline. |

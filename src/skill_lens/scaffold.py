@@ -96,7 +96,7 @@ cases:
   # 5. Does it produce the right artifact? `workspace:` gives the case a real,
   #    contained temporary directory seeded with the files named under
   #    `files:`, plus three built-in tools: list_files, read_file, write_file
-  #    (six when the skill bundles scripts/, references/ or assets/:
+  #    (six when the skill ships any file besides SKILL.md and its evals:
   #    list_skill_files, read_skill_file and, under --allow-scripts, run_script).
   #    Assertions can then target a produced file instead of the chat output.
   #    Delete this case if the skill produces no files.
