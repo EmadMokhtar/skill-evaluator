@@ -144,9 +144,13 @@ def test_claude_code_without_usage_says_tokens_were_not_reported():
 
 
 # The hook fixture is built from the `hook_response` schema Claude Code 2.1.289
-# declares for its SDK, not recorded: `exit_code` is absent when the hook had
-# none (a cancelled one), and `hook_progress` is a partial read of a hook still
-# running.
+# declares for its SDK, and checked against a live 2.1.289 run of a skill with
+# UserPromptSubmit, PreToolUse, PostToolUse and Stop hooks: the same keys in
+# the same order, `hook_name` spelled `<event>:<matcher>`, and `output` equal
+# to stdout then stderr. That run had no cancelled hook and no `hook_progress`
+# (its hooks were too short); those two lines rest on the schema alone:
+# `exit_code` is absent when the hook had none, and `hook_progress` is a
+# partial read of a hook still running.
 
 
 def test_claude_code_hooks_are_the_hook_response_events_in_order():
