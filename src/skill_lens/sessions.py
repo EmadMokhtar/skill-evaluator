@@ -86,8 +86,12 @@ def merge_results(results: list[RunResult], tasks: list[str]) -> RunResult:
         cost_note=_notes([result.cost_note for result in results]),
         usage_note=_notes([result.usage_note for result in results]),
         model=next((result.model for result in results if result.model), ""),
-        # Any session loading the skill is a trigger: a negative control must
-        # fail when the first session reached for the skill, not only the last.
+        # The summary flag says whether the skill fired at all. The check
+        # reads every session's decision instead: a negative control fails
+        # when any session fired, a positive one when any session did not.
         skill_triggered=any(flags) if flags else None,
+        skill_triggered_by_session=(
+            [result.skill_triggered for result in results] if flags else []
+        ),
         error=error,
     )

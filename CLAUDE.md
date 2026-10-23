@@ -393,8 +393,10 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **A multi-session case is one outcome: an errored session errors it and stops the rest,
   and every evaluator reads the merged result.** `sessions.merge_results`: the last
   session's output, every session's tool calls in order, summed spend (kept on error), every
-  distinct `cost_note` / `usage_note`, `skill_triggered` when any session loaded the skill,
-  and `session k of n: ` on the error.
+  distinct `cost_note` / `usage_note`, and `session k of n: ` on the error.
+  `trajectory.skill_triggered` must hold in every session (`skill_triggered_by_session`);
+  `skill_triggered` only summarises "any session". A runner handed the whole case returns
+  `refuse_sessions`'s error, never None as the prompt.
 - **The workspace preamble is byte-identical in both arms and never names the skill** —
   otherwise `--min-delta` measures the preamble instead of the skill.
 - **`RunResult.workspace` is non-null only while the directory exists, and the orchestrator

@@ -100,13 +100,32 @@ def _call_args_check(index: int, entry: CallArgsSpec, tool_calls: list[ToolCall]
     )
 
 
+def _trigger_evidence(triggered: list[bool | None], expected: bool) -> str:
+    """What the runner reported, per session when there was more than one.
+
+    A one-session case keeps the wording it always had.
+    """
+    if len(triggered) == 1:
+        said = "skill was triggered" if triggered[0] else "skill was not triggered"
+        return f"{said}; expected {expected}"
+    said = "; ".join(
+        f"session {position}: skill was {'' if fired else 'not '}triggered"
+        for position, fired in enumerate(triggered, start=1)
+    )
+    return f"{said}; expected {expected} in every session"
+
+
 def _checks(
-    spec: TrajectorySpec, tool_calls: list[ToolCall], triggered: bool | None
+    spec: TrajectorySpec, tool_calls: list[ToolCall], triggered: list[bool | None]
 ) -> list[CheckResult]:
     """One CheckResult per declared check, in a stable order.
 
     Ids come from the spec, never from the result, so the same ids appear in
     both arms of a comparative run.
+
+    `triggered` holds one decision per session -- one for a `task:` case --
+    and holds no None whenever `skill_triggered` is declared (the caller
+    errors the case first). `skill_triggered` must hold in every session.
     """
     called = [call.name for call in tool_calls]
     checks: list[CheckResult] = []
@@ -157,13 +176,12 @@ def _checks(
         )
 
     if spec.skill_triggered is not None:
-        held = triggered == spec.skill_triggered
+        held = all(fired == spec.skill_triggered for fired in triggered)
         checks.append(
             CheckResult(
                 id="skill_triggered",
                 passed=held,
-                evidence=("skill was triggered" if triggered else "skill was not triggered")
-                + f"; expected {spec.skill_triggered}",
+                evidence=_trigger_evidence(triggered, spec.skill_triggered),
             )
         )
 
@@ -188,11 +206,19 @@ class TrajectoryEvaluator:
             return EvalScore(
                 evaluator=self.name, passed=True, score=1.0, detail="no trajectory checks"
             )
-        if spec.skill_triggered is not None and result.skill_triggered is None:
-            # The runner reported no triggering decision at all. That is an
-            # infra fact about the runner, not a signal about the skill, so it
-            # must not read as a skill that failed to fire -- and there is no
-            # verdict to record as a check.
+        # One decision per session for a `sessions:` case, else the one flag.
+        # Read only when the case has sessions, so a runner that fills the
+        # list on a `task:` case cannot change what is checked.
+        triggered = (
+            result.skill_triggered_by_session
+            if case.sessions is not None and result.skill_triggered_by_session
+            else [result.skill_triggered]
+        )
+        if spec.skill_triggered is not None and any(fired is None for fired in triggered):
+            # The runner reported no triggering decision at all (in some
+            # session). That is an infra fact about the runner, not a signal
+            # about the skill, so it must not read as a skill that failed to
+            # fire -- and there is no verdict to record as a check.
             return EvalScore(
                 evaluator=self.name,
                 passed=False,
@@ -203,7 +229,7 @@ class TrajectoryEvaluator:
                     "triggering decision; this runner does not support 'mode: offered'"
                 ),
             )
-        checks = _checks(spec, result.tool_calls, result.skill_triggered)
+        checks = _checks(spec, result.tool_calls, triggered)
         if not checks:
             return EvalScore(
                 evaluator=self.name, passed=True, score=1.0, detail="no trajectory checks"

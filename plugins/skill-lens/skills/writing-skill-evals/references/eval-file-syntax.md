@@ -64,9 +64,13 @@ the same workspace, and the case is scored once, after the last session:
   `workspace:` block, or the run stops with exit 2.
 - Assertions and the judge read the last session's output and the files after it.
   `trajectory:` reads every session's tool calls, in order. `budget:` limits the sum.
+- Under `mode: offered`, `trajectory.skill_triggered` must hold in every session.
 - An errored session errors the case, and the sessions after it do not run.
 - Do not seed the files the skill should have written: a hand-written file tests reading,
   not resuming.
+- Every check runs after the last session, so it cannot tell which session wrote a file.
+  `file-produced` on a file the first session creates passes even if the second did
+  nothing; check for progress the first session was told not to make.
 
 ## Assertion kinds
 

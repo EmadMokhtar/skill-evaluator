@@ -7,6 +7,7 @@ runners, or PydanticAI's offline `FunctionModel`.
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from typer.testing import CliRunner
 
+from langchain_fakes import scripted, text
 from skill_lens.cases.loader import CaseParseError, parse_cases_file
 from skill_lens.cli import app
 from skill_lens.evaluators.judge import build_request
@@ -33,7 +35,10 @@ from skill_lens.models import (
 )
 from skill_lens.orchestrator import RunOptions, run_evals
 from skill_lens.runners.fake import FakeRunner
+from skill_lens.runners.langchain import LangChainRunner
+from skill_lens.runners.product import Product, ProductRunner
 from skill_lens.runners.pydantic_ai import PydanticAIRunner
+from skill_lens.runners.traces import parse_claude_code
 from skill_lens.sessions import merge_results, run_sessions
 from skill_lens.workspace import create_workspace
 
@@ -297,6 +302,18 @@ def test_the_skill_triggered_when_any_session_loaded_it(flags, expected):
     assert merged.skill_triggered is expected
 
 
+def test_every_sessions_trigger_decision_is_kept_in_order():
+    merged = merge_results(
+        [RunResult(skill_triggered=True), RunResult(skill_triggered=False)], ["a", "b"]
+    )
+    assert merged.skill_triggered_by_session == [True, False]
+
+
+def test_no_trigger_decisions_are_kept_outside_an_offered_run():
+    merged = merge_results([RunResult(), RunResult()], ["a", "b"])
+    assert merged.skill_triggered_by_session == []
+
+
 def test_an_error_names_its_session_and_keeps_the_spend_so_far():
     merged = merge_results(
         [RunResult(output="one", input_tokens=5), RunResult(error="boom", input_tokens=7)],
@@ -463,16 +480,95 @@ def test_an_errored_session_errors_the_case_and_keeps_its_spend(tmp_path):
     assert [task for task, _, _ in runner.calls] == ["start", "continue"]
 
 
-def test_offered_skill_triggered_reads_every_session(tmp_path):
+def _triggers(tmp_path, start, carry_on, expected):
+    runner = FakeRunner(
+        responses={
+            "start": RunResult(output="ok", skill_triggered=start),
+            "continue": RunResult(output="ok", skill_triggered=carry_on),
+        }
+    )
+    case = _case(mode="offered", trajectory=TrajectorySpec(skill_triggered=expected))
+    report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
+    [outcome] = report.outcomes
+    [check] = [
+        check for score in outcome.scores for check in score.checks if check.id == "skill_triggered"
+    ]
+    return outcome.status, check.evidence
+
+
+@pytest.mark.parametrize(
+    ("start", "carry_on", "expected", "status"),
+    [
+        # A negative control fails when any session reached for the skill...
+        (True, False, False, "failed"),
+        # ...and a positive one when any session did not: a resume skill that
+        # fires only in the first session has not resumed anything.
+        (True, False, True, "failed"),
+        (False, True, True, "failed"),
+        (True, True, True, "passed"),
+        (False, False, False, "passed"),
+    ],
+)
+def test_skill_triggered_must_hold_in_every_session(tmp_path, start, carry_on, expected, status):
+    assert _triggers(tmp_path, start, carry_on, expected)[0] == status
+
+
+def test_the_trigger_evidence_names_each_session(tmp_path):
+    _, evidence = _triggers(tmp_path, True, False, True)
+    assert evidence == (
+        "session 1: skill was triggered; session 2: skill was not triggered; "
+        "expected True in every session"
+    )
+
+
+def test_a_session_with_no_trigger_decision_errors_the_case(tmp_path):
     runner = FakeRunner(
         responses={
             "start": RunResult(output="ok", skill_triggered=True),
-            "continue": RunResult(output="ok", skill_triggered=False),
+            "continue": RunResult(output="ok"),
         }
     )
-    case = _case(mode="offered", trajectory=TrajectorySpec(skill_triggered=False))
+    case = _case(mode="offered", trajectory=TrajectorySpec(skill_triggered=True))
     report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
-    assert report.failed == 1
+    assert report.errored == 1
+
+
+# -- a sessions case handed straight to a runner -------------------------------
+
+
+def _bundled_runners():
+    def never_called(messages, info):
+        raise AssertionError("the model must not be called for a sessions case")
+
+    fake_product = Path(__file__).parent / "fake_product.py"
+    product = Product(
+        name="claude-code",
+        argv=(sys.executable, str(fake_product), "-p", "{prompt}"),
+        skills_dir=".claude/skills",
+        invoke="/{name} {task}",
+        parse=parse_claude_code,
+        version_command=(sys.executable, str(fake_product), "--version"),
+    )
+    return [
+        FakeRunner(),
+        PydanticAIRunner(model=FunctionModel(never_called)),
+        LangChainRunner(model=scripted(text("never"))),
+        ProductRunner(product),
+    ]
+
+
+@pytest.mark.parametrize("runner", _bundled_runners(), ids=lambda runner: runner.name)
+def test_a_runner_handed_a_whole_sessions_case_reports_it_and_never_raises(tmp_path, runner):
+    case = _case()
+    workspace = create_workspace(case.workspace, label="t")
+    try:
+        result = runner.run(_skill(tmp_path), case, workspace=workspace)
+        assert result.error is not None
+        assert "sessions:" in result.error
+        assert "skill_lens" not in result.error
+        assert workspace.listing() == []
+    finally:
+        workspace.cleanup()
 
 
 # -- the judge -----------------------------------------------------------------

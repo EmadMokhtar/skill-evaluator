@@ -121,19 +121,31 @@ cases:
   - name: resumes-from-its-own-plan
     sessions:
       - >-
-        Plan the migration of the billing service to the new queue. Do the first
-        phase only, then stop.
+        Plan the migration of the billing service to the new queue in three phases.
+        Do phase 1 only, then stop.
       - Continue the migration from where it stopped.
     workspace: {}
     assertions:
-      - kind: file-produced
+      # Session 1 was told to stop after phase 1, so a progress file that marks
+      # phase 2 done is progress only a resuming session could make.
+      - kind: regex
+        value: '(?im)phase 2.*(done|complete)'
         file_glob: .planning/*/progress.md
     judge:
       rubric:
-        - progress.md records the second phase as started or done, continuing the plan
+        - progress.md records phase 2 as done, after phase 1, in the same plan
       artifacts:
         - glob: .planning/*/progress.md
 ```
+
+**Check what only a later session could do.** Every check runs after the last session, so
+it cannot tell which session wrote a file. `file-produced` on a file the first session
+creates passes even when the second session did nothing at all. Check for progress the
+first session was told **not** to make, as the example does. Because a `file_glob` must match
+exactly one file, the same check also fails when the second session starts a new plan in a
+new directory instead of continuing the old one. A first session that ignored "then stop"
+would still pass the regex; the rubric's "after phase 1, in the same plan" is there for the
+judge to read the file as a whole.
 
 What each part of the case reads:
 
@@ -144,7 +156,7 @@ What each part of the case reads:
 | `trajectory:` | Every session's tool calls, in order — so `forbidden:` and `max_calls` cover every session, and `order:` may span sessions |
 | `budget:` | The sum over every session: tokens, cost and latency |
 | `judge:` | Every session's task, the last session's output, and the artifacts after the last session |
-| `mode: offered` | Every session is offered the skill; `skill_triggered` is true when any session loaded it |
+| `mode: offered` | Every session is offered the skill, and `trajectory.skill_triggered` must hold in **every** session: `true` fails when any session did not load the skill, `false` fails when any session did. In the report, `skill_triggered` is true when any session loaded it, and `skill_triggered_by_session` lists each session's own answer |
 
 The rules:
 

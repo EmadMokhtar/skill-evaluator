@@ -843,13 +843,17 @@ exactly one call with the case object itself.
 `errored` is not `failed` holds per session: a session whose `RunResult.error` is set errors
 the case, and no later session runs — it would build on a state the case never meant to
 test, and every session is paid for. `sessions.merge_results` names the session
-(`session 2 of 3: ...`) and keeps the spend of every session that ran. The evaluators are
-unchanged and read one merged `RunResult`: the last session's output, every session's tool
-calls in order (so `forbidden:` and `max_calls` cannot miss an earlier session), the summed
-tokens, cost and latency, and every distinct `cost_note` / `usage_note` — one unmeasured
-session leaves the total unmeasured, so a declared limit fails as not evaluated rather than
-passing on a partial sum. `skill_triggered` is true when any session loaded the skill, so a
-negative control fails on the first session too.
+(`session 2 of 3: ...`) and keeps the spend of every session that ran. The evaluators read
+one merged `RunResult`: the last session's output, every session's tool calls in order (so
+`forbidden:` and `max_calls` cannot miss an earlier session), the summed tokens, cost and
+latency, and every distinct `cost_note` / `usage_note` — one unmeasured session leaves the
+total unmeasured, so a declared limit fails as not evaluated rather than passing on a
+partial sum. `trajectory.skill_triggered` must hold in every session, read from
+`RunResult.skill_triggered_by_session`: one flag cannot say both "no session fired" (what a
+negative control needs) and "every session fired" (what a resume skill's positive control
+needs), so `skill_triggered` itself only summarises whether any session loaded the skill. A
+runner handed the whole case directly — bypassing the orchestrator — returns
+`refuse_sessions`'s error rather than sending None as the prompt.
 
 ### The workspace preamble is byte-identical in both arms and never names the skill
 
@@ -1440,10 +1444,10 @@ parent, the job that is done — and `trajectory.max_calls` is the check for a l
 should have ended. A visible "no more entries" message would instead teach the model
 something about the harness. The counter lives in the built tool (a locked closure in
 `build_mock_tool`), never on the runner, so every build — each arm, each attempt, each
-session, each work item under `--concurrency` — starts from the top, and a framework running several calls from
-one model turn in parallel still hands out each entry exactly once. Which parallel call gets
-which entry is the framework's choice; where the argument, not the position, decides, the
-docs say to use a lookup.
+session, each work item under `--concurrency` — starts from the top, and a framework
+running several calls from one model turn in parallel still hands out each entry exactly
+once. Which parallel call gets which entry is the framework's choice; where the argument,
+not the position, decides, the docs say to use a lookup.
 
 ### A retried attempt gets fresh tools
 

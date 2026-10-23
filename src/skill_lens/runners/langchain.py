@@ -18,7 +18,7 @@ from typing import Any
 
 from skill_lens.bundle import SkillBundle
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
-from skill_lens.runners.base import RunnerDependencyError
+from skill_lens.runners.base import RunnerDependencyError, refuse_sessions
 from skill_lens.runners.preflight import UnsupportedBaseURL, check_trajectory_names
 from skill_lens.runners.pricing import calculate_cost, provider_of
 from skill_lens.runners.prompting import instructions
@@ -308,6 +308,9 @@ class LangChainRunner:
         scripts: ScriptRuntime | None = None,
     ) -> RunResult:
         _require_langchain()
+        refused = refuse_sessions(case)
+        if refused is not None:
+            return refused
         configured = self._model if isinstance(self._model, str) else ""
         offered = skill_tool_name(skill.name) if case.mode == "offered" else None
         started = time.monotonic()

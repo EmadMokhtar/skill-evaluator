@@ -38,7 +38,7 @@ judge run once, after the last session. It ships as **one pull request**
 | What assertions and the judge read | The last session's output, and the workspace after the last session | "Run after the last session", as the issue says. The workspace is what carries over |
 | How `budget:` adds up | The sum over every session: tokens, cost and latency | A case's budget is what the whole case cost. An unpriced or uncounted session makes the total unmeasured, so the limit fails as today |
 | An errored session | Errors the case, and **no later session runs** | `errored` is not `failed`. A later session would build on a broken state and spend money on a case that is already errored. The spend of the sessions that ran is kept |
-| `mode: offered` | Every session is offered the skill. `skill_triggered` is true when any session loaded it | Each session is a fresh session where the skill is installed. "Any" keeps a negative control honest across all sessions |
+| `mode: offered` | Every session is offered the skill. `trajectory.skill_triggered` must hold in every session, read from `RunResult.skill_triggered_by_session`; `skill_triggered` summarises "any session" | Each session is a fresh session where the skill is installed. A negative control must fail when any session fired, and a resume skill's positive control when any session did not; one flag cannot say both (revised after review) |
 | `mode: loaded` | Every session has the skill loaded (a product invokes it in every session) | The same rule as one session, applied to each |
 | `--repeat` | Repeats the whole sequence. Each repetition gets a fresh workspace | A repetition is one work item, and a work item owns one workspace |
 | The baseline arm | Runs the same sessions without the skill, in its own workspace | Two arms never share a workspace |
@@ -53,16 +53,19 @@ cases:
   - name: resumes-from-own-files
     sessions:
       - >-
-        Plan the migration of the billing service to the new queue. Do the first phase
-        only, then stop.
+        Plan the migration of the billing service to the new queue in three phases. Do
+        phase 1 only, then stop.
       - Continue the migration work from where it stopped.
     workspace: {}
     assertions:
-      - kind: file-produced
+      # Only a resuming session can mark phase 2 done. A `file-produced` check
+      # would pass on the file session 1 already wrote (revised after review).
+      - kind: regex
+        value: '(?im)phase 2.*(done|complete)'
         file_glob: .planning/*/progress.md
     judge:
       rubric:
-        - progress.md records the second phase as started or done, continuing the plan
+        - progress.md records phase 2 as done, after phase 1, in the same plan
       artifacts:
         - glob: .planning/*/progress.md
 ```
@@ -115,6 +118,7 @@ It is a pure function.
 | `cost_note`, `usage_note` | Every distinct non-empty note, in session order, joined with `; ` |
 | `model` | The first non-empty one |
 | `skill_triggered` | `None` when every session says `None`; otherwise `True` when any session says `True`, else `False` |
+| `skill_triggered_by_session` | Every session's own `skill_triggered`, in order; empty when every session says `None` |
 | `error` | `session k of n: <the session's error>`, when session k errored |
 
 A non-empty `cost_note` or `usage_note` on any one session leaves the merged note non-empty.

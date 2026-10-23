@@ -171,7 +171,7 @@ All live in `models.py`.
 | `Skill` | name, description, instructions, `version` (declared frontmatter version, `""` if absent), path, `variant` (`"candidate"` or `"baseline"`), `bundle_root` (the directory whose `scripts/`, `references/` and `assets/` the agent may read; `None` when the skill ships none), `markdown` (the `SKILL.md` text verbatim — its text as written, though line endings are normalised — for a product runner to deliver; `""` for the `--baseline none` skill, so no directory is written) |
 | `EvalCase` | name, `task` or `sessions` (exactly one; `sessions` needs a `workspace` and two entries or more), `tools`, `assertions`, `trajectory`, `budget`, `tags` |
 | `ToolSpec` | one mock tool: name, description, `parameters` or `input_schema`, and `returns` — a string for every call, a `list[str]` consumed in call order, or a `list[ToolResponse]` (`when:` argument subset → `value`) matched per call; `ToolRef` (`ref` + optional `returns` in the same shapes) is what a case writes to import one from a library |
-| `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, `usage_note` (why the token split is `0` when the runner could not count — a declared `max_tokens` then fails as not evaluated), model, `error` |
+| `RunResult` | output, tool calls, transcript, token split, latency, cost, `cost_note`, `usage_note` (why the token split is `0` when the runner could not count — a declared `max_tokens` then fails as not evaluated), model, `skill_triggered` and, for a `sessions:` case, `skill_triggered_by_session` (each session's own answer, what `trajectory.skill_triggered` reads), `error` |
 | `CheckResult` | one check's `id`, `passed`, `evidence` — emitted by the judge and by assertion/trajectory/budget alike |
 | `EvalScore` | one evaluator's `passed` / `score` / `detail`, plus its `checks: list[CheckResult]` |
 | `BaselineNote` | why a skill or case has no baseline arm: `kind` (`"unavailable"` or `"skipped"`) plus a reason |
@@ -220,7 +220,9 @@ rather than writing either again — both adapters must measure the same thing �
 the agent, tools included, *inside* the retried callable, so a mock whose `returns:` is
 consumed in call order starts from the top on every attempt. A runner that
 must refuse a run before any case executes defines the optional `preflight` hook and raises
-an authoring error from it.
+an authoring error from it. A runner is handed one session's task at a time; start `run` with
+`runners/base.refuse_sessions`, so a caller that bypasses the orchestrator with a
+`sessions:` case gets an errored result rather than a prompt of None.
 
 **Adding a judge.** The same shape under `judges/`: a keyed adapter is registered in
 `cli._KEYED_JUDGES` and receives the shared model, `judge_temperature` and the retry

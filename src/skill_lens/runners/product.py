@@ -40,6 +40,7 @@ from skill_lens.bundle import BundleTooLarge, bundle_files
 from skill_lens.models import ArtifactGlob, EvalCase, ProductStatus, RunResult, Skill
 from skill_lens.paths import glob_entries, glob_matches_path
 from skill_lens.process import group_kwargs, read_capped_handle, reap_and_kill_group
+from skill_lens.runners.base import refuse_sessions
 from skill_lens.runners.mcp import (
     CLAUDE_CODE_MCP,
     COPILOT_MCP,
@@ -505,6 +506,9 @@ class ProductRunner:
     ) -> RunResult:
         """`scripts` is accepted for protocol symmetry and ignored: the product
         brings its own tools, and its shell can already reach the bundle."""
+        refused = refuse_sessions(case)
+        if refused is not None:
+            return refused
         product = self._product
         started = time.monotonic()
 

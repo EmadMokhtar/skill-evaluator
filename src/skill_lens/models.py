@@ -148,6 +148,13 @@ class RunResult(BaseModel):
     could not count them (a product that reports no token usage). It is to
     tokens what `cost_note` is to cost: `BudgetEvaluator` refuses to evaluate
     `max_tokens` against a zero it knows is not a measurement.
+
+    `skill_triggered_by_session` is each session's own `skill_triggered`, in
+    order, for a `sessions:` case in `mode: offered`; empty otherwise. Set by
+    `sessions.merge_results`, never by a runner. `skill_triggered` is then
+    true when any session loaded the skill, but the trajectory check reads
+    this list, because one flag cannot say both "no session fired" and
+    "every session fired".
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -163,6 +170,7 @@ class RunResult(BaseModel):
     usage_note: str = ""
     model: str = ""
     skill_triggered: bool | None = None
+    skill_triggered_by_session: list[bool | None] = Field(default_factory=list)
     workspace: Path | None = None
     error: str | None = None
 
