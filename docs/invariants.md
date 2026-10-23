@@ -1529,15 +1529,38 @@ error of its own, gets the exit code and the stderr tail instead.
 ### Naming a product runner is the trust decision, and the report says so
 
 The product runs with permission prompts disabled (`--allow-all-tools`,
-`--dangerously-skip-permissions`) because it cannot run non-interactively otherwise, and
-with the full environment (`os.environ.copy()`) because it needs its own auth — the opposite
-of `scripts.script_environment`'s allowlist, on purpose: here the product is the harness,
-not the subject. No skill-lens sandbox applies; bundled scripts are reachable through the
-product's own tools whatever `allow_scripts` says, which governs only `run_script` — gating
-the runner on it would also switch on `run_script` for every framework runner in the same
-matrix. `TRUST_NOTE` is fixed harness text on `ProductStatus.trust`, on the model rather
-than in each reporter, so the three reporters cannot drift and the JSON carries the sentence
-a human reads.
+`--dangerously-skip-permissions`) because it cannot run non-interactively otherwise. What
+else bounds it is the run's product sandbox (issue #99), decided **once per run** by
+`decide_product_sandbox` — called by `cli.py` only when a product runner or product judge is
+named, before any case — and handed as one `ProductSandbox` to every `ProductRunner` and
+`ProductJudge`, so a runner and the judge can never disagree. Under `off` the product gets
+the full environment (`os.environ.copy()`) and the real home, as before; under `auto` and
+`required` it gets home isolation, and the OS backend where the probe found one that works.
+Bundled scripts are reachable through the product's own tools whatever `allow_scripts`
+says, which governs only `run_script` — gating the runner on it would also switch on
+`run_script` for every framework runner in the same matrix. `ProductStatus.trust` is
+`ProductSandbox.trust()`: one of three fixed sentences (`off` keeps `TRUST_NOTE` byte for
+byte; home isolation only; a backend applied), saying what applied and never more, on the
+model rather than in each reporter, so the three reporters cannot drift and the JSON carries
+the sentence a human reads. `ProductStatus.sandbox` carries the same decision as data. The
+library default is `off` (`sandbox=PRODUCT_SANDBOX_OFF`), so a caller written against an
+earlier release runs exactly as before.
+
+### Home isolation is not a sandbox, and the report never calls it one
+
+Home isolation is a temporary home per `Runner.run` call (`skill-lens-home-*`, made by
+`mkdtemp`, removed in a `finally`, never kept by `--keep-workspace`) and an environment
+built from an allowlist — never `os.environ` with keys removed, so a key the harness holds
+for another runner is absent by construction. It keeps personal logins, settings and caches
+out of a run; it stops nothing writing a file by its absolute path. So `required` needs a
+real backend — home isolation alone is exit 2 — and the home-only trust sentence says
+`that is not a sandbox` and names why no backend applied. `pass_env` takes names only, and
+never one the isolation sets itself (`CONTROLLED_ENV`), which would point the product back
+at the real home; `product_environment` drops such a name even when a caller skipped
+`Config`. The OS backend's profile leaves the network open (a product must reach its
+provider) and confines writes to the working directory, the temporary home and the MCP
+bridge's directory; under `bwrap` the temp directory is remounted read-only after the binds,
+so a write elsewhere under it is refused, as under `sandbox-exec`.
 
 ### Preflight spends nothing
 
@@ -1559,6 +1582,17 @@ so a case `--tag` or `--case` filtered out is not its concern, and neither arm n
 changes the answer. `deliver_skill` re-checks the skill name at run time because under
 `--baseline previous` it comes from a historical `SKILL.md` that never passed preflight;
 that failure is `RunResult.error` for the arm it concerns, never a raise.
+
+Under the product sandbox the version probe and the bridge's `--check` run as the cases
+will — in a temporary home, with the built environment, inside the backend — so a product
+that starts outside the sandbox but not inside it is exit 2 up front, its message naming the
+backend and `product_sandbox = "off"`, never a quiet fallback to no sandbox. Under home
+isolation `environment_refusal` refuses (exit 2), after the `PATH` lookup, a preset with
+none of its own auth variables set and non-empty, or named in `pass_env` (presence, not
+validity; a wrapper `command` is not checked, since it may bring its own auth), and a `cli`
+product whose `pass_env` is unset, since a command that lost its key may exit 0 and score as
+*failed*. The decision itself is made before `run_evals` by the CLI, and only when a product
+is named; `required` with no working backend is exit 2 there. All of it spends nothing.
 
 ### `process.py` is the one implementation
 

@@ -262,20 +262,73 @@ Action is covered in [CI integration](ci.md#the-composite-action).
 
 A product runner (`--runner copilot`, `claude-code`, `cli`) hands the skill to an agent
 product with its **permission prompts disabled** (`--allow-all-tools`,
-`--dangerously-skip-permissions`) — the product cannot run non-interactively otherwise —
-and with the **whole environment inherited**, because the product needs its own auth.
+`--dangerously-skip-permissions`) — the product cannot run non-interactively otherwise.
 Everything the product can do, the skill under evaluation can make it do: run shell
-commands as you, read what you can read, and run the skill's own bundled scripts through
-the product's shell, whatever `allow_scripts` says. `allow_scripts` governs only
-skill-lens's `run_script` tool; no skill-lens sandbox applies to a product. This is the
-opposite of the script allowlist above, on purpose: under a product runner the product is
-the harness, not the subject.
+commands as you, and run the skill's own bundled scripts — and its hooks — through the
+product's shell, whatever `allow_scripts` says. `allow_scripts` governs only skill-lens's
+`run_script` tool. Under a product runner the product is the harness, not the subject.
 
-**Naming a product runner is the trust decision.** The report states it on every run
-(`product copilot 1.0.37 (/usr/local/bin/copilot): runs with permission prompts disabled
-and the full environment; no skill-lens sandbox applies; bundled scripts are reachable
-through the product's own tools`), and the JSON report's `products` entries and the JUnit
-`skill-lens.products` property carry the same sentence.
+What bounds it is the **product sandbox**, decided once per run by `product_sandbox`
+(default `"auto"`), the `--product-sandbox` flag or the action's `product-sandbox` input,
+and shared by every product runner and the product judge (see
+[Product sandbox](configuration.md#product-sandbox) for the keys):
+
+| | `off` | home isolation (`auto` with no backend) | home isolation and an OS sandbox (`auto` with a backend, `required`) |
+| --- | --- | --- | --- |
+| Environment | your whole environment | built from an allowlist: the product's own auth variables, `pass_env`, and no other secret | the same |
+| Home directory | your real home: personal logins, settings, skills, plugins and caches load | a fresh temporary home per case, deleted afterwards | the same |
+| Writes | anything you can write | anything you can write, by absolute path | only the working directory, the temporary home and the MCP bridge's directory |
+| Reads | anything you can read | anything you can read | anything you can read, except other skill-lens temporary directories |
+| Network | open | open | open |
+
+**Home isolation is not a sandbox.** It keeps your personal setup and the job's other
+secrets (an `OPENAI_API_KEY` held for a framework runner in the same matrix, a
+`GITHUB_TOKEN` in the job's `env`) out of what the product *inherits*, so a hook that falls
+back to `$HOME/.claude/skills/…` or caches under `~/.cache` finds an empty home. It does not
+stop a process writing `/Users/you/anything` by its absolute path, and the report says
+exactly that. `required` therefore needs a real backend: with home isolation only, it exits
+2 before any case.
+
+**The OS sandbox** is `sandbox-exec` on macOS and `bwrap` on Linux, probed once per run
+the way the script sandbox is, but with the network left open — a product must reach its
+provider. It wraps the product's whole process tree: its own tools, the skill's hooks and
+scripts, and the MCP bridge. Under `bwrap` the temporary directory is a read-only, empty
+mount apart from the product's own directories, and `/dev/shm` is a private in-memory mount
+discarded at exit. The product's `--version` starts inside it before any case, so a product
+that cannot start there is exit 2 up front, never a quiet fallback.
+
+**What no mode prevents.**
+
+- **Reading your files, and sending them out.** Under every mode the product can read what
+  you can read — the products and their runtimes are installed in your home directory, so
+  the sandbox cannot hide it — and the network is open, so what it reads can leave the
+  machine. Hiding the filesystem is a container's job, which skill-lens does not provide
+  yet. Treat a product run as running the skill under your account.
+- **Unix-domain sockets.** The network is open under both backends, Unix-domain sockets
+  included: a product whose user can reach `/var/run/docker.sock` can drive the Docker
+  daemon, which is a full escape on that host.
+- **Reading the harness's own environment.** The allowlist stops *inheritance*. On macOS
+  any same-user process can read another's exec-time environment through the
+  `kern.procargs2` sysctl behind `ps -E`, and `sandbox-exec` does not gate it, so a product
+  can read the harness's environment, including keys skill-lens holds for other runners or
+  the judge. On Linux, `bwrap`'s PID namespace hides the harness; without `bwrap`,
+  `/proc/<pid>/environ` is readable by the product unless the harness is non-dumpable,
+  which skill-lens arranges only when scripts are enabled. Give a job that runs a product
+  only the secrets that product needs.
+
+**Naming a product runner is the trust decision.** The report states what applied on every
+run, never more — under the default on a Mac:
+
+```
+product claude-code 2.1.289 (/Users/you/.local/bin/claude): runs with permission prompts disabled, a temporary home directory and only an allowlisted environment, under sandbox-exec: it cannot change files outside its working directory and its own temporary directories, or read other skill-lens temporary directories; it can read anything else you can, and reach the network; bundled scripts are reachable through the product's own tools
+```
+
+With home isolation only, the line says `that is not a sandbox: no skill-lens sandbox
+applies (<why>), and the product can read and write anything you can`; under `off` it is
+`runs with permission prompts disabled and the full environment; no skill-lens sandbox
+applies; bundled scripts are reachable through the product's own tools`. The JSON report's
+`products` entries and the JUnit `skill-lens.products` property carry the same sentence,
+and the JSON adds the decision as data (`sandbox`, see [Gating](gating.md)).
 
 **The scripts note says the same thing.** With `allow_scripts` off, a skill that bundles
 scripts is named on the report. Under a framework runner that line says `execution is off`,
@@ -301,13 +354,14 @@ by the rules every runner applies — whatever the arguments; nothing from the e
 the skill executes, and the server exits when the product closes its pipe.
 
 It adds no capability the product did not already have; what it adds is a fixed, known
-answer to a tool the skill under test may call. The trust sentence on the report is
-unchanged, because the decision is unchanged. See [Mock tools under a
+answer to a tool the skill under test may call. It starts as the product's child, so it
+runs under the same product sandbox, with the product's built environment. The trust
+sentence on the report is unchanged, because the decision is unchanged. See [Mock tools under a
 product](runners.md#mock-tools-under-a-product).
 
 **A product judge is the same product under the same trust.** `judge = "copilot"`,
 `"claude-code"` or `"cli"` starts the product from the same `[runners.<name>]` table, with
-permission prompts disabled and the full environment, to grade a rubric — see [Judging with
+permission prompts disabled and under the same product sandbox decision, to grade a rubric — see [Judging with
 a product](runners.md#judging-with-a-product).
 
 Its prompt is the graded response and any judge artifacts: text the skill under test
@@ -354,10 +408,15 @@ in: if the product's own auth fails at run time, that surfaces as an **errored**
 what the product does with whatever token the job gives it is the product's behaviour, not
 skill-lens's.
 
+The checkout's file also decides the product sandbox: a pull request can set
+`product_sandbox = "off"` for itself. A workflow that runs untrusted pull requests should
+pass `product-sandbox: required` in the action, which overrides the file and stops the run
+(exit 2) where no OS sandbox works, rather than running the product without one.
+
 The exposure is `pull_request_target`, pull requests from collaborators, and self-hosted
-runners, the same three as for scripts. For a hermetic Copilot run (one that loads nothing
-from your personal setup), point `COPILOT_HOME` at an empty directory and provide
-`COPILOT_GITHUB_TOKEN`, so nothing from your personal `~/.copilot` loads. See [Product
+runners, the same three as for scripts. The default home isolation already loads nothing
+from your personal setup; under `product_sandbox = "off"`, point `COPILOT_HOME` at an empty
+directory and provide `COPILOT_GITHUB_TOKEN` for a hermetic Copilot run. See [Product
 runners](runners.md#product-runners) for what each product runner measures and [CI
 integration](ci.md#running-under-a-product) for the workflow.
 

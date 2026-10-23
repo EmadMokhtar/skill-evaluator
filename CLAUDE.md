@@ -554,14 +554,26 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **A truncated trace is `RunResult.error`, never a partial parse**; a complete
   trace carrying the product's own error message wins over the exit code.
 - **Naming a product runner is the trust decision, and the report says so.** Prompts
-  disabled, full environment, no sandbox; `allow_scripts` governs only `run_script`.
-  `TRUST_NOTE` lives on `ProductStatus.trust`, on the model, so the three reporters cannot
-  drift.
+  disabled; the rest is the run's product sandbox (`product_sandbox`, default `auto`),
+  decided once by the CLI when a product is named and shared by every product runner and
+  the judge: `off` is the full environment and real home, `auto`/`required` home isolation
+  plus `sandbox-exec`/`bwrap` where one works. `ProductStatus.trust` is
+  `ProductSandbox.trust()` — three fixed sentences, `off` keeping `TRUST_NOTE` byte for
+  byte — on the model, so the three reporters cannot drift; `ProductStatus.sandbox` is the
+  same as data. `allow_scripts` governs only `run_script`. The library default is `off`.
+- **Home isolation is not a sandbox, and the report never calls it one.** A temporary home
+  per `Runner.run` (removed in a `finally`, never kept) and an allowlisted environment;
+  `required` needs a real backend; the home-only sentence says "that is not a sandbox" and
+  why. `pass_env` is names only, never a `CONTROLLED_ENV` name. The OS profile leaves the
+  network open and confines writes to the working directory, the temporary home and the
+  bridge's directory; `bwrap` remounts the temp dir read-only after its binds.
 - **Preflight spends nothing**: executable found on `PATH` and, for the two
   presets, executed (`--version`; `cli` has no version command), skill names checked,
   `tools:` refused under `cli` and under a preset whose `command` names another executable,
   and `trajectory:`/`offered` refused under `cli`, all before the first case; only the
-  candidate-arm cases that will run are inspected, once each.
+  candidate-arm cases that will run are inspected, once each. Under the product sandbox the
+  version probe and the bridge check run inside it, and a preset with no auth variable set
+  (unless a wrapper) or a `cli` with `pass_env` unset is exit 2.
 - **Which tools a case has is the runner's to know, so the declared-name rule for
   `trajectory:` is made in preflight, per runner — never in the loader.** `fake`,
   `pydantic-ai` and `langchain` refuse (`UndeclaredTool`, exit 2, before
