@@ -1,3 +1,9 @@
+## v0.24.2 (2026-10-23)
+
+### Fix
+
+- say a product run's spend is unknown when it died before reporting it (#111)
+
 ## v0.24.1 (2026-10-23)
 
 ### Fix
