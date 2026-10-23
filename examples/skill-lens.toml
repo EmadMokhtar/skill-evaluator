@@ -129,7 +129,9 @@ allow_scripts = true
 #
 # [runners.claude-code]
 # args = ["--model", "sonnet"]
-# pass_env = ["CLAUDE_CODE_USE_BEDROCK", "AWS_REGION"]   # names only, never values
+# Names only, never values. Under the default product_sandbox a preset needs
+# its own token, or a credential named here (TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL).
+# pass_env = ["CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
 #
 # "cli" has no preset, so "command" is required. "skills_dir" and "invoke"
 # are accepted here only; a preset's spellings are fixed.

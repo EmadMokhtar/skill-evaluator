@@ -181,8 +181,12 @@ QUOTED: list[tuple[str, str]] = [
         "your home directory or keychain; export ",
         "runners/product_sandbox.py",
     ),
-    (", name the variable your setup uses in [runners.", "runners/product_sandbox.py"),
-    ('] pass_env, or set product_sandbox = "off"', "runners/product_sandbox.py"),
+    (", name the credential your setup uses in [runners.", "runners/product_sandbox.py"),
+    (
+        "] pass_env (a name containing TOKEN, KEY, SECRET, PASSWORD or CREDENTIAL), or set "
+        'product_sandbox = "off"',
+        "runners/product_sandbox.py",
+    ),
     (
         " builds the product's environment from an allowlist, so the command gets none of "
         "your variables unless you name them; set [runners.",

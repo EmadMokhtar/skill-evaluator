@@ -263,8 +263,8 @@ missing at run time, a skill that cannot be delivered — spent nothing and keep
 Preflight checks the executable is on `PATH` and, for the two presets, that it actually
 starts (`--version`) — under the run's product sandbox, so a product that will not start
 inside it is exit 2; `cli` has no version command, so only the `PATH` lookup applies to it.
-Under home isolation a preset also needs one of its auth variables set and non-empty, or one
-named in `pass_env` (exit 2 with the fix otherwise, unless `command` names a wrapper), and
+Under home isolation a preset also needs one of its auth variables set and non-empty, or a
+credential named in `pass_env` (a name containing `TOKEN`, `KEY`, `SECRET`, `PASSWORD` or `CREDENTIAL`; a region, a profile name or a provider switch does not count) (exit 2 with the fix otherwise, unless `command` names a wrapper), and
 `cli` must set `pass_env`; see [Product sandbox](configuration.md#product-sandbox).
 The report names the product, its executable and — where there is one — its version on every
 run.

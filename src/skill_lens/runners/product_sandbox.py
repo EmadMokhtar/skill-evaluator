@@ -27,6 +27,7 @@ Imports nothing from `runners/product.py`, which imports this.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -74,6 +75,11 @@ KEPT_ENV: tuple[str, ...] = (
 # Nothing starts on Windows without these.
 KEPT_ENV_WINDOWS: tuple[str, ...] = ("SystemRoot", "COMSPEC", "PATHEXT")
 HOME_PREFIX = "skill-lens-home-"
+# What makes a `pass_env` name count for the auth check: a name that looks
+# like a credential. A region, a profile name or a provider switch
+# (`CLAUDE_CODE_USE_BEDROCK`) says nothing about whether the product can
+# sign in -- a login kept under the real home is hidden either way.
+_CREDENTIAL_NAME = re.compile(r"TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL")
 
 
 @dataclass(frozen=True)
@@ -286,8 +292,9 @@ def environment_refusal(
 ) -> str | None:
     """Why this product cannot run under home isolation, or None. Spends nothing.
 
-    A preset must find one of its own auth variables, or one `pass_env`
-    names, set and non-empty in the harness: a temporary home has no login
+    A preset must find one of its own auth variables, or a credential-named
+    one in `pass_env` (`_CREDENTIAL_NAME`), set and non-empty in the
+    harness: a temporary home has no login
     in it, so without one every case would error on the product's auth --
     better said once, up front, as exit 2. Presence, not validity: an
     expired token is still an errored case at run time. A wrapper `command`
@@ -312,13 +319,14 @@ def environment_refusal(
         )
     if product.wrapper:
         return None
-    if any(parent.get(name) for name in (*own.auth, *(product.pass_env or ()))):
+    credentials = [name for name in product.pass_env or () if _CREDENTIAL_NAME.search(name.upper())]
+    if any(parent.get(name) for name in (*own.auth, *credentials)):
         return None
     return (
         f"{where} gives the product a temporary home directory, so it cannot use a login "
-        f"stored in your home directory or keychain; export {own.hint}, name the variable "
-        f"your setup uses in [runners.{product.name}] pass_env, or set "
-        'product_sandbox = "off"'
+        f"stored in your home directory or keychain; export {own.hint}, name the credential "
+        f"your setup uses in [runners.{product.name}] pass_env (a name containing TOKEN, "
+        'KEY, SECRET, PASSWORD or CREDENTIAL), or set product_sandbox = "off"'
     )
 
 

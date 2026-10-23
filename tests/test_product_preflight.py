@@ -330,7 +330,8 @@ def test_a_preset_with_no_auth_variable_is_refused():
         'runner claude-code: product_sandbox = "auto" gives the product a temporary home '
         "directory, so it cannot use a login stored in your home directory or keychain; "
         "export CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY, "
-        "name the variable your setup uses in [runners.claude-code] pass_env, or set "
+        "name the credential your setup uses in [runners.claude-code] pass_env (a name "
+        "containing TOKEN, KEY, SECRET, PASSWORD or CREDENTIAL), or set "
         'product_sandbox = "off"'
     )
 
@@ -339,7 +340,7 @@ def test_copilot_is_told_its_own_variable():
     refusal = environment_refusal(_product(name="copilot"), HOME_ONLY, "judge", parent=NO_AUTH)
     assert refusal is not None
     assert refusal.startswith('judge copilot: product_sandbox = "auto"')
-    assert "export COPILOT_GITHUB_TOKEN, name the variable" in refusal
+    assert "export COPILOT_GITHUB_TOKEN, name the credential" in refusal
 
 
 def test_an_empty_auth_variable_does_not_count():
@@ -358,10 +359,30 @@ def test_a_base_url_alone_is_not_auth():
     assert environment_refusal(_product(), HOME_ONLY, "runner", parent=parent) is not None
 
 
-def test_a_pass_env_variable_satisfies_the_check():
-    product = _product(pass_env=("CLAUDE_CODE_USE_BEDROCK",))
-    parent = {**NO_AUTH, "CLAUDE_CODE_USE_BEDROCK": "1"}
+@pytest.mark.parametrize(
+    "name",
+    [
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_BEARER_TOKEN_BEDROCK",
+        "AWS_SESSION_TOKEN",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "MY_GATEWAY_PASSWORD",
+    ],
+)
+def test_a_credential_named_in_pass_env_satisfies_the_check(name):
+    product = _product(pass_env=("CLAUDE_CODE_USE_BEDROCK", name))
+    parent = {**NO_AUTH, "CLAUDE_CODE_USE_BEDROCK": "1", name: "set"}
     assert environment_refusal(product, HOME_ONLY, "runner", parent=parent) is None
+
+
+def test_a_pass_env_name_that_is_no_credential_does_not_satisfy_the_check():
+    # A Bedrock setup that logs in through `aws sso login` keeps its
+    # credentials in ~/.aws, which the temporary home hides; a region and a
+    # switch are set, but nothing to sign in with -- exit 2, not N errored cases.
+    product = _product(pass_env=("CLAUDE_CODE_USE_BEDROCK", "AWS_REGION", "AWS_PROFILE"))
+    parent = {**NO_AUTH, "CLAUDE_CODE_USE_BEDROCK": "1", "AWS_REGION": "eu", "AWS_PROFILE": "w"}
+    assert environment_refusal(product, HOME_ONLY, "runner", parent=parent) is not None
 
 
 def test_a_wrapper_is_not_auth_checked():

@@ -1767,7 +1767,9 @@ will — in a temporary home, with the built environment, inside the backend —
 that starts outside the sandbox but not inside it is exit 2 up front, its message naming the
 backend and `product_sandbox = "off"`, never a quiet fallback to no sandbox. Under home
 isolation `environment_refusal` refuses (exit 2), after the `PATH` lookup, a preset with
-none of its own auth variables set and non-empty, or named in `pass_env` (presence, not
+none of its own auth variables set and non-empty, or a credential-named one in `pass_env`
+(a name containing `TOKEN`, `KEY`, `SECRET`, `PASSWORD` or `CREDENTIAL` -- a region or a
+provider switch says nothing about signing in; presence, not
 validity; a wrapper `command` is not checked, since it may bring its own auth), and a `cli`
 product whose `pass_env` is unset, since a command that lost its key may exit 0 and score as
 *failed*. The decision itself is made before `run_evals` by the CLI, and only when a product

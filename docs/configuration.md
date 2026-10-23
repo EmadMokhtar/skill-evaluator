@@ -289,8 +289,8 @@ Home isolation is **not a sandbox**: a process can still read and write any file
 its absolute path. A login kept in your home directory or the OS keychain is out of reach
 too, so the product authenticates from the environment — `CLAUDE_CODE_OAUTH_TOKEN` (from
 `claude setup-token`) or `ANTHROPIC_API_KEY`, and `COPILOT_GITHUB_TOKEN`. Preflight refuses a
-preset with none of its auth variables set and non-empty, or named in `pass_env`, with exit 2
-and the fix; a `command` that names another executable (a wrapper that brings its own auth)
+preset with none of its auth variables set and non-empty, or a credential named in `pass_env`
+(a name containing `TOKEN`, `KEY`, `SECRET`, `PASSWORD` or `CREDENTIAL`; a region, a profile name or a provider switch does not count), with exit 2 and the fix; a `command` that names another executable (a wrapper that brings its own auth)
 is not checked. A Bedrock or Vertex setup names its variables in `pass_env`:
 
 ```toml

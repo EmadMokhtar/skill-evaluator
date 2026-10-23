@@ -251,7 +251,9 @@ and add:
 2. **The MCP bridge probe runs under the same decision**, when a planned case declares
    `tools:` — the bridge is the product's child, and its environment is the product's.
 3. **Under home isolation, a preset needs an auth variable.** At least one of the preset's
-   own variables, or one named in `pass_env`, must be set and non-empty in the harness's
+   own variables, or a credential-named one in `pass_env` (a name containing `TOKEN`, `KEY`,
+   `SECRET`, `PASSWORD` or `CREDENTIAL` — narrowed after the PR review, since `AWS_REGION`
+   alone passed while `~/.aws` stayed hidden), must be set and non-empty in the harness's
    environment. Otherwise `ProductSetupError` (exit 2), for example:
 
    > runner claude-code: product_sandbox = "auto" gives the product a temporary home
