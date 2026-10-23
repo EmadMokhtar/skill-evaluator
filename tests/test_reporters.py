@@ -418,6 +418,55 @@ def _two_runner_report() -> RunReport:
     )
 
 
+def test_a_single_runner_delta_block_is_unchanged():
+    report = _two_arm_report()
+    text = render_console(report, delta=build_delta(report))
+    assert "Delta vs baseline (none)\n  pass rate  0% -> 100%  +100%   (higher is better)\n" in text
+    assert "per runner" not in text
+
+
+def test_a_multi_runner_delta_prints_one_block_per_runner():
+    """Issue #93: a mixed aggregate describes neither runner."""
+    report = _two_runner_report()
+    text = render_console(report, delta=build_delta(report))
+    block = (
+        "Delta vs baseline (none), per runner\n"
+        "  claude-code\n"
+        "    pass rate  0% -> 50%  +50%   (higher is better)\n"
+        "    tokens     +0   (negative is better)\n"
+        "    cost       $+0.0000   (negative is better)\n"
+        "    latency    +0ms   (negative is better)\n"
+        "  pydantic-ai\n"
+        "    pass rate  0% -> 50%  +50%   (higher is better)\n"
+    )
+    assert block in text
+
+
+def test_a_runner_with_nothing_comparable_says_so_in_the_console():
+    report = _two_runner_report()
+    report = report.model_copy(
+        update={
+            "outcomes": [
+                o
+                for o in report.outcomes
+                if not (o.runner == "pydantic-ai" and o.arm == "baseline")
+            ]
+        }
+    )
+    text = render_console(report, delta=build_delta(report))
+    assert "  pydantic-ai: no case had a comparable baseline\n" in text
+
+
+def test_json_delta_carries_one_entry_per_runner():
+    report = _two_runner_report()
+    payload = json.loads(render_json(report, delta=build_delta(report)))
+    runners = payload["delta"]["runners"]
+    assert [(r["runner"], r["comparable_cases"], r["pass_rate_delta"]) for r in runners] == [
+        ("claude-code", 1, 0.5),
+        ("pydantic-ai", 1, 0.5),
+    ]
+
+
 def test_the_console_names_the_runner_on_every_flag_line():
     """Issue #98: with two runners the same case and check appeared twice with
     nothing to tell the lines apart."""

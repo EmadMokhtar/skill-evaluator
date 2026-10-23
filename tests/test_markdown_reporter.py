@@ -211,6 +211,39 @@ def test_markdown_names_the_runner_on_every_flag_line():
         assert f"- `pdf` :: `extracts` ({runner}, candidate): 50%, stddev 0.50" in text
 
 
+def test_a_multi_runner_delta_is_one_table_row_per_runner():
+    """Issue #93: no mixed aggregate across runners in the comment."""
+    report = RunReport(
+        outcomes=[
+            _outcome(arm=arm, repeat_index=0, runner=runner, status=status)
+            for runner in ("claude-code", "pydantic-ai")
+            for arm, status in (("candidate", "passed"), ("baseline", "failed"))
+        ],
+        baseline_kind="none",
+    )
+    text = render_markdown(report, delta=build_delta(report))
+    assert "### Delta vs baseline (none), per runner" in text
+    assert "| Runner | Pass rate | Pass-rate delta | Tokens | Cost | Latency |" in text
+    assert "| `claude-code` | 0% → 100% | **+100%** | +0 | $+0.0000 | +0ms |" in text
+    assert "| `pydantic-ai` | 0% → 100% | **+100%** | +0 | $+0.0000 | +0ms |" in text
+
+
+def test_a_single_runner_markdown_delta_is_unchanged():
+    report = RunReport(
+        outcomes=[
+            _outcome(arm="candidate", status="passed"),
+            _outcome(arm="baseline", status="failed"),
+        ],
+        baseline_kind="none",
+    )
+    text = render_markdown(report, delta=build_delta(report))
+    assert (
+        "### Delta vs baseline (none)\nPass rate **0% → 100%** (**+100%**, higher is better)"
+        in text
+    )
+    assert "per runner" not in text
+
+
 def test_high_variance_cases_are_reported():
     """Repetitions that disagree usually point at ambiguous skill instructions."""
     report = RunReport(

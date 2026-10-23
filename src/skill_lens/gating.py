@@ -100,6 +100,23 @@ def evaluate_gate(
                     "a minimum delta was required but no case had a comparable "
                     "baseline, so no improvement could be measured"
                 )
+            elif len(delta.runners) > 1:
+                # Every runner must meet the bar: an aggregate across runners
+                # lets a strong one hide a regression in another (issue #93),
+                # and a runner with nothing comparable measured nothing.
+                for runner in delta.runners:
+                    if runner.comparable_cases == 0:
+                        reasons.append(
+                            "a minimum delta was required but no case under runner "
+                            f"{runner.runner!r} had a comparable baseline, so no "
+                            "improvement could be measured for it"
+                        )
+                    elif runner.pass_rate_delta < min_delta:
+                        reasons.append(
+                            f"pass-rate delta under runner {runner.runner!r} "
+                            f"{runner.pass_rate_delta:+.0%} is below the required "
+                            f"{min_delta:+.0%}"
+                        )
             elif delta.pass_rate_delta < min_delta:
                 reasons.append(
                     f"pass-rate delta {delta.pass_rate_delta:+.0%} is below the "

@@ -195,6 +195,11 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **`--min-delta` without `--baseline` is a user error (exit 2)**, and gating on a delta with
   nothing comparable fails. Both are the vacuous-pass rejection this project applies
   everywhere else.
+- **With several runners, `--min-delta` applies to each runner.** An aggregate across runners
+  describes neither and lets one that improved carry one that regressed (issue #93). The gate
+  reads `Delta.runners`: every runner's pass-rate delta must meet the bar, and a runner with no
+  comparable case fails, named. The aggregate stays on `Delta` for JSON consumers and is never
+  gated on then; a single-runner run renders and gates exactly as before.
 - **Low-signal and high-variance flags never change the exit code.** They are diagnostics
   about the eval suite, not verdicts on the skill.
 - **`resolve_previous` never raises for environmental failures** — no `git`, no repo, an

@@ -294,6 +294,18 @@ A delta gate that checks nothing must never report a pass — the same vacuous-p
 every other gate rule in this project applies. Gating on a delta with no comparable case
 fails for the same reason, mirroring "a run executing zero cases fails the gate".
 
+### With several runners, `--min-delta` applies to each runner
+
+Runners spend and score very differently — a product runner can use forty times the tokens of
+a framework runner on the same case — so a delta aggregated across them describes neither,
+and a runner that improved can carry one that regressed past the bar (issue #93). `Delta.runners`
+holds one `RunnerDelta` per runner, in the order each first ran, and with more than one runner
+the gate reads only those: every runner's pass-rate delta must meet `--min-delta`, and a runner
+with no comparable case fails it, named, for the vacuous-pass reason above. The aggregate
+numbers stay on `Delta` for JSON consumers and are never gated on then. A single-runner run
+renders and gates exactly as before, and a hand-built `Delta` with no `runners` is gated on
+its aggregate.
+
 ### Low-signal and high-variance flags never change the exit code
 
 They are diagnostics about the *eval suite* — a weak assertion, an unstable case — not

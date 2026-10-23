@@ -187,9 +187,10 @@ outcomes never count toward the gate); `baseline_outcomes` and `baseline_errored
 comparison side apart from them. `pass_rate_by_skill` is likewise candidate-only.
 
 `comparison.py` adds a second layer of models — `ArmStats`, `CaseStats`, `LowSignalCheck`,
-`CaseRef` and `Delta` — that are computed from a `RunReport`, never stored on it. `Delta` is
-`None` whenever no baseline arm ran, which is the signal reporters use to fall back to the
-single-arm rendering.
+`CaseRef`, `RunnerDelta` and `Delta` — that are computed from a `RunReport`, never stored on it.
+`Delta` is `None` whenever no baseline arm ran, which is the signal reporters use to fall back
+to the single-arm rendering. `Delta.runners` holds one `RunnerDelta` per runner; with more than
+one, the reporters render it instead of the aggregate and `--min-delta` gates on each.
 
 ## Invariants
 

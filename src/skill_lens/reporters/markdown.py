@@ -210,6 +210,31 @@ def _per_skill(report: RunReport) -> str:
 
 
 def _delta_block(delta: Delta) -> str:
+    if len(delta.runners) > 1:
+        # One row per runner: an aggregate across runners describes neither
+        # (issue #93). A single-runner run renders exactly what it always did.
+        rows = [
+            [_code(r.runner), "no comparable case", "—", "—", "—", "—"]
+            if r.comparable_cases == 0
+            else [
+                _code(r.runner),
+                f"{r.pass_rate_baseline:.0%} → {r.pass_rate_candidate:.0%}",
+                f"**{r.pass_rate_delta:+.0%}**",
+                f"{r.tokens_delta:+.0f}",
+                f"${r.cost_usd_delta:+.4f}",
+                f"{r.latency_ms_delta:+.0f}ms",
+            ]
+            for r in delta.runners
+        ]
+        head = (
+            f"### Delta vs baseline ({delta.baseline_kind}), per runner\n"
+            "Higher is better for the pass rate; negative is better for tokens, cost and "
+            "latency (means per case).\n"
+        )
+        table = _table(
+            ["Runner", "Pass rate", "Pass-rate delta", "Tokens", "Cost", "Latency"], rows
+        )
+        return head + "\n" + table
     head = (
         f"### Delta vs baseline ({delta.baseline_kind})\n"
         f"Pass rate **{delta.pass_rate_baseline:.0%} → {delta.pass_rate_candidate:.0%}** "

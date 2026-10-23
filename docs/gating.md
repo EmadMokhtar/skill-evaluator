@@ -20,7 +20,7 @@ flowchart TD
     ERR -->|"no, or fail_on_error is off"| RATE{"Pass rate at or above min_pass_rate, and every per_skill_min met?"}
     RATE -->|no| E1
     RATE -->|yes| DELTA{"Is --min-delta set?"}
-    DELTA -->|"yes: no baseline arm ran, nothing was comparable, the delta is below the bar, or a baseline couldn't be resolved"| E1
+    DELTA -->|"yes: no baseline arm ran, nothing was comparable, a runner's delta is below the bar, or a baseline couldn't be resolved"| E1
     DELTA -->|"no, or none of those hold"| E0["exit 0 - gate passed"]
 ```
 
@@ -148,8 +148,9 @@ of these numbers move from what they were before comparative evals existed.
 
 When a run names several runners, every candidate `(skill, case, runner)` outcome counts
 toward the pass rate: a case that fails under one framework fails the gate, whatever it
-did under the other. `per_skill_min` is per skill across runners, and `--min-delta` is
-measured over the whole matrix. There is no per-runner threshold.
+did under the other. `per_skill_min` is per skill across runners. `--min-delta` is the one
+rule applied per runner: every runner's own pass-rate delta must meet it (see below). There
+is no per-runner `min_pass_rate`.
 
 ## Gating on the delta (`--min-delta`)
 
@@ -160,8 +161,11 @@ measured over the whole matrix. There is no per-runner threshold.
   all-`offered` suite under `--baseline none`), so there is nothing to build a delta from in
   the first place;
 - **no case was comparable** — a delta gate that verified nothing must never report a pass,
-  the same principle that fails a run executing zero cases;
-- the pass-rate delta is below `min_delta`;
+  the same principle that fails a run executing zero cases. With more than one runner, a
+  runner with no comparable case fails this rule on its own, named;
+- the pass-rate delta is below `min_delta` — with more than one runner, **any runner's**
+  pass-rate delta, each named, because an aggregate across runners lets one that improved
+  hide one that regressed;
 - a skill's baseline **could not be resolved** — named, with the reason — because treating an
   unresolvable baseline as "no change" would let a repository pass this gate forever by
   deleting its git history.
@@ -267,7 +271,8 @@ from the run's own cost line.
 
 `delta` is the full comparison object — pass-rate, token, cost and latency deltas, per-case
 stats, low-signal checks, high-variance cases and notes — and is `null` when no baseline arm
-ran. Every `delta.low_signal[]` and `delta.high_variance[]` entry names its `runner`, so one
+ran. Its top-level deltas aggregate every runner; `delta.runners` has the same deltas for each
+runner, with `comparable_cases`, and is what `--min-delta` reads when there is more than one. Every `delta.low_signal[]` and `delta.high_variance[]` entry names its `runner`, so one
 case flagged under two runners appears once per runner. `baseline_notes` lists why a skill's or case's baseline was skipped or unavailable.
 `summary.baseline_errored` counts errored baseline repetitions apart from `summary.errored`,
 which is candidate-only, for the same reason the gate itself only reads the candidate arm

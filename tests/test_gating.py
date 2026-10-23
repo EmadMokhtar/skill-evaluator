@@ -1,4 +1,4 @@
-from skill_lens.comparison import ArmStats, CaseStats, Delta
+from skill_lens.comparison import ArmStats, CaseStats, Delta, RunnerDelta
 from skill_lens.gating import EXIT_FAILED, EXIT_OK, evaluate_gate
 from skill_lens.models import BaselineNote, CaseOutcome, RunReport
 
@@ -155,6 +155,49 @@ def test_a_delta_below_the_bar_fails():
 def test_a_negative_delta_fails_a_must_not_regress_bar():
     gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.0, delta=_delta(-0.25))
     assert gate.passed is False
+
+
+def test_min_delta_applies_to_every_runner():
+    """Issue #93: the mixed aggregate (+50% here) clears the bar while one
+    runner did not improve at all. Every runner must meet it."""
+    delta = _delta(0.5).model_copy(
+        update={
+            "runners": [
+                RunnerDelta(runner="claude-code", comparable_cases=1, pass_rate_delta=1.0),
+                RunnerDelta(runner="pydantic-ai", comparable_cases=1, pass_rate_delta=0.0),
+            ]
+        }
+    )
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.1, delta=delta)
+    assert gate.passed is False
+    assert gate.reasons == [
+        "pass-rate delta under runner 'pydantic-ai' +0% is below the required +10%"
+    ]
+
+
+def test_a_runner_with_nothing_comparable_fails_a_delta_gate():
+    delta = _delta(1.0).model_copy(
+        update={
+            "runners": [
+                RunnerDelta(runner="claude-code", comparable_cases=1, pass_rate_delta=1.0),
+                RunnerDelta(runner="pydantic-ai", comparable_cases=0),
+            ]
+        }
+    )
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.0, delta=delta)
+    assert gate.passed is False
+    assert gate.reasons == [
+        "a minimum delta was required but no case under runner 'pydantic-ai' had a "
+        "comparable baseline, so no improvement could be measured for it"
+    ]
+
+
+def test_a_single_runner_keeps_the_aggregate_message():
+    delta = _delta(0.05).model_copy(
+        update={"runners": [RunnerDelta(runner="fake", comparable_cases=1, pass_rate_delta=0.05)]}
+    )
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.2, delta=delta)
+    assert gate.reasons == ["pass-rate delta +5% is below the required +20%"]
 
 
 def test_gating_on_a_delta_with_nothing_comparable_fails():

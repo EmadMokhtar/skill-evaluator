@@ -217,6 +217,31 @@ Delta vs baseline (previous)
   latency    -120ms   (negative is better)
 ```
 
+**With more than one runner, the delta is reported per runner.** Runners spend very
+differently — a product runner can use about 375,000 tokens on a case a framework runner
+does in 9,000 — so one number averaged across them describes neither, and a runner that got
+better can hide one that got worse. The block then has one section per runner, in the order
+each first ran, and a runner with no comparable case says so:
+
+```
+Delta vs baseline (none), per runner
+  claude-code
+    pass rate  0% -> 60%  +60%   (higher is better)
+    tokens     +301804   (negative is better)
+    cost       $+0.1900   (negative is better)
+    latency    +24000ms   (negative is better)
+  pydantic-ai
+    pass rate  0% -> 100%  +100%   (higher is better)
+    tokens     +240000   (negative is better)
+    cost       $+0.0100   (negative is better)
+    latency    +149000ms   (negative is better)
+```
+
+The Markdown report shows the same as a table with one row per runner. The JSON report keeps
+the aggregate numbers at the top of `delta` and adds `delta.runners`, one entry per runner
+with the same fields plus `comparable_cases`. A single-runner run prints exactly the block
+above.
+
 ## Low-signal checks and high-variance cases
 
 Two diagnostics ride along with the delta. Both describe the **eval suite**, not the skill
@@ -270,7 +295,10 @@ With a baseline set, `--min-delta` fails the gate for four reasons, checked in t
 2. **No case was comparable** — mirroring "a run executing zero cases fails the gate": a gate
    that verified nothing must never report a pass. This is the rule for a delta that was
    built and then emptied — some baseline did run, but every pair was dropped.
-3. **The delta is below the bar** — `pass_rate_delta < min_delta`.
+3. **The delta is below the bar** — `pass_rate_delta < min_delta`. With more than one runner
+   this is checked **per runner**: every runner's pass-rate delta must meet the bar, and a
+   runner with no comparable case fails rule 2 on its own, named. The aggregate across
+   runners is never gated on, because a runner that improved could carry one that regressed.
 4. **A skill's baseline could not be resolved** — naming the skill and the reason. Otherwise a
    repository could pass `--min-delta` forever by deleting its git history.
 
