@@ -237,6 +237,12 @@ Delta vs baseline (none), per runner
     latency    +149000ms   (negative is better)
 ```
 
+A runner none of whose cases had both arms gets one line instead of four:
+
+```
+  pydantic-ai: no case had a comparable baseline
+```
+
 The Markdown report shows the same as a table with one row per runner. The JSON report keeps
 the aggregate numbers at the top of `delta` and adds `delta.runners`, one entry per runner
 with the same fields plus `comparable_cases`. A single-runner run prints exactly the block
@@ -297,8 +303,9 @@ With a baseline set, `--min-delta` fails the gate for four reasons, checked in t
    built and then emptied — some baseline did run, but every pair was dropped.
 3. **The delta is below the bar** — `pass_rate_delta < min_delta`. With more than one runner
    this is checked **per runner**: every runner's pass-rate delta must meet the bar, and a
-   runner with no comparable case fails rule 2 on its own, named. The aggregate across
-   runners is never gated on, because a runner that improved could carry one that regressed.
+   runner with no comparable case fails with its own reason, `no case under runner '<name>'
+   had a comparable baseline`. The aggregate across runners is never gated on, because a
+   runner that improved could carry one that regressed.
 4. **A skill's baseline could not be resolved** — naming the skill and the reason. Otherwise a
    repository could pass `--min-delta` forever by deleting its git history.
 

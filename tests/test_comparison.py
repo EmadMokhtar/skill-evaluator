@@ -19,6 +19,7 @@ def _outcome(
     index=0,
     *,
     case="c",
+    skill="pdf",
     runner="fake",
     tokens=100,
     cost=0.001,
@@ -26,7 +27,7 @@ def _outcome(
     checks=(),
 ):
     return CaseOutcome(
-        skill_name="pdf",
+        skill_name=skill,
         case_name=case,
         runner=runner,
         status=status,
@@ -300,3 +301,54 @@ def test_a_single_runner_delta_equals_the_aggregate():
     (only,) = delta.runners
     assert (only.runner, only.comparable_cases) == ("fake", 1)
     assert (only.pass_rate_delta, only.tokens_delta) == (delta.pass_rate_delta, delta.tokens_delta)
+
+
+def test_a_runner_whose_baseline_all_errored_contributes_nothing():
+    """The pairing rule holds per runner: a case excluded for one runner (every
+    baseline repetition errored) must not leak its candidate half into that
+    runner's numbers or the aggregate."""
+    report = RunReport(
+        baseline_kind="none",
+        repeat=3,
+        outcomes=[_outcome("passed", runner="a", index=i, tokens=100) for i in range(3)]
+        + [_outcome("failed", arm="baseline", runner="a", index=i, tokens=50) for i in range(3)]
+        + [_outcome("passed", runner="b", index=i, tokens=9000) for i in range(3)]
+        + [_outcome("errored", arm="baseline", runner="b", index=i) for i in range(3)],
+    )
+    delta = build_delta(report)
+    a, b = delta.runners
+    assert (a.comparable_cases, a.pass_rate_delta, a.tokens_delta) == (1, 1.0, 50.0)
+    assert b == RunnerDelta(runner="b", comparable_cases=0)
+    # The aggregate is runner a's alone: b's candidate half was dropped with its pair.
+    assert (delta.pass_rate_delta, delta.tokens_delta) == (1.0, 50.0)
+
+
+def test_errored_repetitions_are_left_out_of_a_runners_rates():
+    report = RunReport(
+        baseline_kind="none",
+        repeat=3,
+        outcomes=[
+            _outcome("passed", runner="a", index=0),
+            _outcome("errored", runner="a", index=1),
+            _outcome("failed", runner="a", index=2),
+            _outcome("failed", arm="baseline", runner="a", index=0),
+            _outcome("failed", arm="baseline", runner="a", index=1),
+            _outcome("failed", arm="baseline", runner="a", index=2),
+        ],
+    )
+    (a,) = build_delta(report).runners
+    assert (a.pass_rate_candidate, a.pass_rate_baseline) == (0.5, 0.0)
+
+
+def test_one_runners_cases_from_two_skills_pool_into_one_entry():
+    report = RunReport(
+        baseline_kind="none",
+        outcomes=[
+            _outcome("passed", skill="pdf", runner="a"),
+            _outcome("failed", arm="baseline", skill="pdf", runner="a"),
+            _outcome("failed", skill="docx", runner="a"),
+            _outcome("failed", arm="baseline", skill="docx", runner="a"),
+        ],
+    )
+    (a,) = build_delta(report).runners
+    assert (a.runner, a.comparable_cases, a.pass_rate_candidate) == ("a", 2, 0.5)

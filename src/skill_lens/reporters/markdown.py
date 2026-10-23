@@ -210,7 +210,7 @@ def _per_skill(report: RunReport) -> str:
 
 
 def _delta_block(delta: Delta) -> str:
-    if len(delta.runners) > 1:
+    if delta.per_runner:
         # One row per runner: an aggregate across runners describes neither
         # (issue #93). A single-runner run renders exactly what it always did.
         rows = [

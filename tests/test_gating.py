@@ -1,4 +1,4 @@
-from skill_lens.comparison import ArmStats, CaseStats, Delta, RunnerDelta
+from skill_lens.comparison import ArmStats, CaseStats, Delta, RunnerDelta, build_delta
 from skill_lens.gating import EXIT_FAILED, EXIT_OK, evaluate_gate
 from skill_lens.models import BaselineNote, CaseOutcome, RunReport
 
@@ -173,6 +173,51 @@ def test_min_delta_applies_to_every_runner():
     assert gate.reasons == [
         "pass-rate delta under runner 'pydantic-ai' +0% is below the required +10%"
     ]
+
+
+def test_every_runner_at_or_above_the_bar_passes():
+    """At exactly the bar passes, as it does for the aggregate."""
+    delta = _delta(0.5).model_copy(
+        update={
+            "runners": [
+                RunnerDelta(runner="claude-code", comparable_cases=1, pass_rate_delta=0.25),
+                RunnerDelta(runner="pydantic-ai", comparable_cases=2, pass_rate_delta=1.0),
+            ]
+        }
+    )
+    gate = evaluate_gate(_report(("pdf", "passed")), min_delta=0.25, delta=delta)
+    assert gate.passed is True
+    assert gate.reasons == []
+
+
+def _two_runner_outcomes(b_baseline: str) -> RunReport:
+    """Runner a improves (failed -> passed); runner b's baseline is given."""
+    return RunReport(
+        baseline_kind="none",
+        outcomes=[
+            CaseOutcome(skill_name="pdf", case_name="c", runner=r, status=s, arm=arm)
+            for r, s, arm in (
+                ("a", "passed", "candidate"),
+                ("a", "failed", "baseline"),
+                ("b", "passed", "candidate"),
+                ("b", b_baseline, "baseline"),
+            )
+        ],
+    )
+
+
+def test_min_delta_reads_the_runners_build_delta_produces():
+    """End to end: runner b did not improve (passed -> passed), so the gate
+    fails naming b, though the aggregate (+50%) clears the bar."""
+    report = _two_runner_outcomes("passed")
+    gate = evaluate_gate(report, min_delta=0.1, delta=build_delta(report))
+    assert gate.reasons == ["pass-rate delta under runner 'b' +0% is below the required +10%"]
+
+
+def test_min_delta_passes_when_build_delta_shows_every_runner_improved():
+    report = _two_runner_outcomes("failed")
+    gate = evaluate_gate(report, min_delta=1.0, delta=build_delta(report))
+    assert gate.passed is True
 
 
 def test_a_runner_with_nothing_comparable_fails_a_delta_gate():

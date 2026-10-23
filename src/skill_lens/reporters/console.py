@@ -52,7 +52,7 @@ def _metric_lines(d: Delta | RunnerDelta, indent: str) -> list[str]:
 
 
 def _delta_block(delta: Delta) -> list[str]:
-    if len(delta.runners) > 1:
+    if delta.per_runner:
         # One block per runner: an aggregate across runners describes neither
         # (issue #93). A single-runner run prints exactly what it always did.
         lines = ["", f"Delta vs baseline ({delta.baseline_kind}), per runner"]

@@ -228,6 +228,19 @@ def test_a_multi_runner_delta_is_one_table_row_per_runner():
     assert "| `pydantic-ai` | 0% → 100% | **+100%** | +0 | $+0.0000 | +0ms |" in text
 
 
+def test_a_runner_with_nothing_comparable_is_its_own_markdown_row():
+    report = RunReport(
+        outcomes=[
+            _outcome(arm="candidate", runner="claude-code", status="passed"),
+            _outcome(arm="baseline", runner="claude-code", status="failed"),
+            _outcome(arm="candidate", runner="pydantic-ai", status="passed"),
+        ],
+        baseline_kind="none",
+    )
+    text = render_markdown(report, delta=build_delta(report))
+    assert "| `pydantic-ai` | no comparable case | — | — | — | — |" in text
+
+
 def test_a_single_runner_markdown_delta_is_unchanged():
     report = RunReport(
         outcomes=[

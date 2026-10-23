@@ -41,7 +41,7 @@ Discover skills, run their eval cases, score them, and gate on the results.
 | `--config <file>` | upward discovery | Path to `skill-lens.toml` |
 | `--baseline <kind>` | off | Run a second, baseline arm: `none` (no skill loaded) or `previous` (the prior version, from git). Omit for a single-arm run. |
 | `--repeat <int>` | `1` | Sample each arm this many times. Each repetition is its own outcome. |
-| `--min-delta <float>` | unset | Require the candidate arm to beat the baseline by at least this much. Requires `--baseline`. |
+| `--min-delta <float>` | unset | Require the candidate arm to beat the baseline by at least this much — with several runners, every runner on its own. Requires `--baseline`. |
 | `--junit-output <path>` | none | Write a JUnit XML report here, for CI test panes |
 | `--markdown-output <path>` | none | Write a Markdown summary here, for a job summary or PR comment |
 | `--markdown-max-chars <int>` | unset | Truncate the Markdown summary to fit a comment. Detail blocks are dropped first, then gate reasons are elided behind a `+N more` count; a budget too small to hold even the verdict is cut outright. Requires `--markdown-output` |

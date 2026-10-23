@@ -109,6 +109,13 @@ class Delta(BaseModel):
     notes: list[str] = Field(default_factory=list)
     runners: list[RunnerDelta] = Field(default_factory=list)
 
+    @property
+    def per_runner(self) -> bool:
+        """Whether reporters and the gate read `runners` instead of the
+        aggregate: only with more than one runner, so a single-runner run
+        renders and gates exactly as it did before `runners` existed."""
+        return len(self.runners) > 1
+
 
 def format_baseline_notes(notes: list[BaselineNote]) -> list[str]:
     """Render baseline notes for a human.
@@ -217,20 +224,16 @@ def build_delta(report: RunReport) -> Delta | None:
         return None
 
     cases: list[CaseStats] = []
-    paired_candidate: list[CaseOutcome] = []
-    paired_baseline: list[CaseOutcome] = []
     all_low_signal: list[LowSignalCheck] = []
     all_high_variance: list[CaseRef] = []
-    # Per runner: paired candidate outcomes, paired baseline outcomes, and how
-    # many cases were comparable. Every runner gets an entry, comparable or not.
-    by_runner: dict[str, tuple[list[CaseOutcome], list[CaseOutcome], list[int]]] = {}
+    # Paired candidate and baseline outcomes per runner, in the order each runner
+    # first appears. Every runner gets an entry, comparable or not.
+    paired: dict[str, tuple[list[CaseOutcome], list[CaseOutcome]]] = {}
 
     for (skill_name, case_name, runner), arms in _group(report).items():
         candidate, baseline = arms["candidate"], arms["baseline"]
         reason = _exclusion_reason(candidate, baseline)
-        runner_candidate, runner_baseline, runner_count = by_runner.setdefault(
-            runner, ([], [], [0])
-        )
+        runner_candidate, runner_baseline = paired.setdefault(runner, ([], []))
         stats = CaseStats(
             skill_name=skill_name,
             case_name=case_name,
@@ -242,11 +245,8 @@ def build_delta(report: RunReport) -> Delta | None:
         )
         low_signal: list[LowSignalCheck] = []
         if not reason:
-            paired_candidate.extend(candidate)
-            paired_baseline.extend(baseline)
             runner_candidate.extend(candidate)
             runner_baseline.extend(baseline)
-            runner_count[0] += 1
             for evaluator, check_id in _low_signal(candidate, baseline):
                 low_signal.append(
                     LowSignalCheck(
@@ -276,14 +276,19 @@ def build_delta(report: RunReport) -> Delta | None:
         cases.append(stats)
 
     runners = [
-        RunnerDelta(runner=runner, comparable_cases=count[0], **_difference(cand, base))
-        if count[0]
-        else RunnerDelta(runner=runner)
-        for runner, (cand, base, count) in by_runner.items()
+        RunnerDelta(
+            runner=runner,
+            comparable_cases=sum(1 for c in cases if c.runner == runner and c.comparable),
+            **_difference(cand, base),
+        )
+        for runner, (cand, base) in paired.items()
     ]
     return Delta(
         baseline_kind=report.baseline_kind,
-        **_difference(paired_candidate, paired_baseline),
+        **_difference(
+            [o for cand, _ in paired.values() for o in cand],
+            [o for _, base in paired.values() for o in base],
+        ),
         cases=cases,
         low_signal=all_low_signal,
         high_variance=all_high_variance,

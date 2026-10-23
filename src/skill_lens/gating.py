@@ -100,7 +100,7 @@ def evaluate_gate(
                     "a minimum delta was required but no case had a comparable "
                     "baseline, so no improvement could be measured"
                 )
-            elif len(delta.runners) > 1:
+            elif delta.per_runner:
                 # Every runner must meet the bar: an aggregate across runners
                 # lets a strong one hide a regression in another (issue #93),
                 # and a runner with nothing comparable measured nothing.
