@@ -162,7 +162,7 @@ bundle.
 | `trajectory:` | yes — `called`/`forbidden`/`order` name the case's mock tools, as declared, or the product's own tools (e.g. `bash`, `Bash`), spelled as the product spells them and unchecked, since skill-lens cannot list a product's tools; `max_calls` counts every call, the product's own included | same | no — an authoring error |
 | `mode: offered` / `skill_triggered` | yes | yes | no — an authoring error |
 | `budget: max_tokens` (input + cache read + cache write, plus output) | when the trace reports usage; otherwise a failing "not evaluated" check | when the trace reports usage; otherwise a failing "not evaluated" check | failing "not evaluated" check |
-| `budget: max_cost_usd` | failing "not evaluated" check — Copilot bills per premium request (its billing unit: one counted request, not tokens), and the note says how many | yes, at list price (the provider's published per-token price), as the product reports it in `total_cost_usd` | failing "not evaluated" check |
+| `budget: max_cost_usd` | failing "not evaluated" check — Copilot bills per premium request (its billing unit: one counted request, not tokens), and the note says how many | yes, at list price (the provider's published per-token price), as the product reports it in `total_cost_usd`; a `result` event with no number there is a failing "not evaluated" check | failing "not evaluated" check |
 | `budget: max_latency_ms` | yes | yes | yes |
 | `tools:` (mock tools) | yes, through the [MCP bridge](#mock-tools-under-a-product) | yes, through the [MCP bridge](#mock-tools-under-a-product) | no — an authoring error |
 
@@ -197,6 +197,24 @@ tokens, cost, `cost_note` and `usage_note` its trace reported, so a Claude Code 
 by `--max-budget-usd` is errored and still counts what it spent in the report's totals. Only
 those figures and the model are kept; no evaluator reads an errored run, so the case stays
 errored.
+
+A timed-out or cut run's output is still parsed, so a figure its trace reported before the
+stop is kept: Copilot reports tokens in `session.shutdown`, before its `result` event. A
+figure the trace never reached — Claude Code's cost and usage and Copilot's premium-request
+count are on the `result` event — is `0`, but the product ran and may have spent money. Its
+`cost_note` and `usage_note` say so and name how the trace ended: `<product> timed out`,
+`the <product> trace was cut at max_output_bytes`, or `the <product> trace ended` (no
+`result` event, with or without a non-zero exit), as in `claude-code timed out before
+reporting cost`. A Copilot trace with no `result` event says the premium-request count was
+never reported instead of claiming `0`. So the report never reads the run as free.
+
+A product that exits before it reaches the model — a bad flag, a failed login — also has no
+`result` event, and gets the same notes. Its trace cannot show that it spent nothing, so the
+note says the spend is unknown rather than guessing that it was zero.
+
+`cli` reports no spend however its run ends, so a failed `cli` run carries the same notes as
+a passing one. A run that never started a process — a prompt over 100 KiB, an executable
+missing at run time, a skill that cannot be delivered — spent nothing and keeps empty notes.
 
 Preflight checks the executable is on `PATH` and, for the two presets, that it actually
 starts (`--version`); `cli` has no version command, so only the `PATH` lookup applies to it.
@@ -346,7 +364,10 @@ match the rubric is errored, and a pass with no evidence (an empty or missing `e
 recorded as a failure. A product failure — a timeout, a non-zero exit, a reply over
 `max_output_bytes`, a prompt over 100 KiB, an executable that vanished after preflight — is
 errored the same way, and keeps whatever tokens and cost its trace reported as judge
-overhead.
+overhead. A judge run that ended before its trace reported a cost carries the same
+`cost_note` a runner would, such as `claude-code timed out before reporting cost`, on its
+score (`outcomes[].scores[].cost_note` in the JSON report), and the totals line then says
+`Judge overhead: not priced` or `some judge costs not priced`.
 
 **What is read and what is not.** `judge_model` and `judge_temperature` are not read: no
 product exposes a temperature, and a product's model is set with `[runners.<name>] args`.

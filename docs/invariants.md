@@ -1589,7 +1589,9 @@ says, and `RunReport.total_cost_usd` and `total_tokens` read every outcome, so d
 figures would make every total under-count by exactly the runs that cost the most. Only the
 figures change: the case stays errored and no evaluator reads it, so no verdict or exit code
 moves; a judge's figures land on `EvalScore.cost_usd` as judge overhead, never in
-`RunResult`. A run that died before its trace reported any spend has nothing to keep.
+`RunResult`. A run that died before its trace reported any spend has nothing to keep; its
+`cost_note` and `usage_note` say how the trace ended (`claude-code timed out before
+reporting cost`), so its `0` never reads as free.
 
 ### `command` replaces the argv; `args` appends; presets forbid `skills_dir` and `invoke`
 

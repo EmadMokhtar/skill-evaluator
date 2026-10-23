@@ -156,6 +156,21 @@ def test_judge_spend_is_carried_on_the_score_not_the_run():
     assert score.cost_usd == 0.002
 
 
+def test_the_judges_cost_note_is_carried_on_the_score():
+    # Without it, an unpriced judge would read as free overhead in every report.
+    note = "no price data for groq:llama (KeyError)"
+    passing = evaluator(
+        verdict(CheckResult(id="r1", passed=True, evidence="x"), cost_note=note)
+    ).evaluate(judged_case("states the window"), RESULT)
+    errored = evaluator(verdict(error="claude-code timed out after 600s", cost_note=note)).evaluate(
+        judged_case("states the window"), RESULT
+    )
+    mismatched = evaluator(
+        verdict(CheckResult(id="r9", passed=True, evidence="x"), cost_note=note)
+    ).evaluate(judged_case("states the window"), RESULT)
+    assert [s.cost_note for s in (passing, errored, mismatched)] == [note, note, note]
+
+
 def test_a_rubric_with_no_checks_errors_rather_than_passing_vacuously():
     # The case loader rejects this, but the evaluator is a public seam and must
     # not report a pass for a rubric it never checked.

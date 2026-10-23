@@ -275,9 +275,19 @@ def render_console(
     elif pricing_degraded:
         totals_parts.append("Total cost: not priced (see per-case cost_note in the JSON report)")
 
+    # The same rule for the judge's own spend, which is reported apart.
     judge_cost = report.judge_cost_usd
+    judge_degraded = report.judge_pricing_degraded
     if judge_cost:
         totals_parts.append(f"Judge overhead: ${judge_cost:.4f}")
+        if judge_degraded:
+            totals_parts.append(
+                "some judge costs not priced (see scores[].cost_note in the JSON report)"
+            )
+    elif judge_degraded:
+        totals_parts.append(
+            "Judge overhead: not priced (see scores[].cost_note in the JSON report)"
+        )
 
     if total_latency_ms:
         if total_latency_ms >= 1000:

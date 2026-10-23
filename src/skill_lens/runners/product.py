@@ -85,7 +85,8 @@ class Product:
     `argv` holds exactly one element equal to `PROMPT_PLACEHOLDER`, replaced
     as a whole element -- never through a shell. `invoke` is how `mode:
     loaded` asks the product to load the skill (`{name}`, `{task}`);
-    `parse` is None for a generic product, whose stdout is the output.
+    `parse` is None for a generic product, whose stdout is the output; its
+    second argument says how a run the harness stopped ended, or is None.
     `mcp` is how the product takes the stdio MCP server that serves a case's
     `tools:`, or None for a product with no known flag (`cli`, or a preset
     whose `command` names another executable), under which `tools:` stays a
@@ -96,7 +97,7 @@ class Product:
     argv: tuple[str, ...]
     skills_dir: str
     invoke: str
-    parse: Callable[[str], Trace] | None
+    parse: Callable[[str, str | None], Trace] | None
     version_command: tuple[str, ...] | None
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
@@ -274,28 +275,41 @@ def _exit_note(exited: str, stderr: str) -> str:
 
 def read_trace(product: Product, invocation: Invocation) -> Trace:
     """The invocation as a `Trace`: parsed when the product has a parser, else
-    stdout as the output. A failure of any kind is `Trace.error`."""
+    stdout as the output. A failure of any kind is `Trace.error`.
+
+    A process that started may have spent money, so a trace that cannot say
+    what it spent carries notes saying why. One that never started keeps
+    empty notes: its 0.0 is a measurement.
+    """
     if invocation.error is not None:
         return Trace(error=invocation.error)
+    stopped: str | None = None  # the error, when the harness stopped the run
+    ended: str | None = None  # how it stopped, for the notes of an unreported spend
     if invocation.timed_out:
-        return Trace(error=f"{product.name} timed out after {product.timeout_seconds:g}s")
-    if invocation.truncated:
-        return Trace(
-            error=(
-                f"{product.name} output exceeded {product.max_output_bytes} bytes; "
-                f"raise [runners.{product.name}] max_output_bytes"
-            )
+        stopped = f"{product.name} timed out after {product.timeout_seconds:g}s"
+        ended = f"{product.name} timed out"
+    elif invocation.truncated:
+        stopped = (
+            f"{product.name} output exceeded {product.max_output_bytes} bytes; "
+            f"raise [runners.{product.name}] max_output_bytes"
         )
+        ended = f"the {product.name} trace was cut at max_output_bytes"
     exited = f"{product.name} exited with code {invocation.exit_code}"
     if product.parse is None:
-        if invocation.exit_code != 0:
-            return Trace(error=_exit_note(exited, invocation.stderr))
+        if stopped is None and invocation.exit_code != 0:
+            stopped = _exit_note(exited, invocation.stderr)
+        # No trace, so no spend is reported however the run ends.
         return Trace(
             output=invocation.stdout.removesuffix("\n"),
-            usage_note=f"the {product.name} product does not report token usage",
             cost_note=f"the {product.name} product does not report cost",
+            usage_note=f"the {product.name} product does not report token usage",
+            error=stopped,
         )
-    trace = product.parse(invocation.stdout)
+    # What was captured is parsed even when the run was stopped: a figure the
+    # trace reported before the stop is still a measurement.
+    trace = product.parse(invocation.stdout, ended)
+    if stopped is not None:
+        return replace(trace, error=stopped)
     if invocation.exit_code != 0 and (trace.error is None or not trace.complete):
         # A complete trace carrying the product's own error message is the
         # best explanation there is; otherwise the exit code and stderr are.

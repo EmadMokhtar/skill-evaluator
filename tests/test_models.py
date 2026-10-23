@@ -331,6 +331,28 @@ def test_pricing_degraded_is_true_when_any_outcome_in_either_arm_has_a_cost_note
     assert report.pricing_degraded is True
 
 
+def test_judge_pricing_degraded_reads_the_scores_cost_notes():
+    # Judge spend is reported apart from the run's, so is its pricing gap: a
+    # note on the run must not mark the judge overhead, nor the reverse.
+    def report(score_note: str, run_note: str) -> RunReport:
+        return RunReport(
+            outcomes=[
+                CaseOutcome(
+                    skill_name="s",
+                    case_name="c",
+                    runner="fake",
+                    status="errored",
+                    scores=[EvalScore(evaluator="judge", passed=False, cost_note=score_note)],
+                    result=RunResult(cost_note=run_note),
+                )
+            ]
+        )
+
+    assert report("claude-code timed out before reporting cost", "").judge_pricing_degraded
+    assert not report("", "no price data for x (KeyError)").judge_pricing_degraded
+    assert not report("", "").judge_pricing_degraded
+
+
 def test_pricing_degraded_is_false_when_no_result_carries_a_cost_note():
     report = RunReport(
         outcomes=[

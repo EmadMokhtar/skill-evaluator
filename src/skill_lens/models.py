@@ -182,7 +182,9 @@ class EvalScore(BaseModel):
     returning 500, structured output that does not match the rubric). It is not
     an eval signal, so the orchestrator must classify the case errored, never
     failed. `cost_usd` is eval-side spend -- judging is harness overhead and is
-    never charged to the skill's budget.
+    never charged to the skill's budget. `cost_note` is to it what
+    `RunResult.cost_note` is to the run's cost: why it is 0.0 rather than
+    measured, empty when it is a measurement.
     """
 
     evaluator: str
@@ -192,6 +194,7 @@ class EvalScore(BaseModel):
     checks: list[CheckResult] = Field(default_factory=list)
     errored: bool = False
     cost_usd: float = 0.0
+    cost_note: str = ""
 
     @model_validator(mode="after")
     def _errored_is_never_passed(self) -> EvalScore:
@@ -751,6 +754,12 @@ class RunReport(BaseModel):
         those apart, so this flag exists to surface the distinction.
         """
         return any(o.result.cost_note for o in self.outcomes if o.result)
+
+    @property
+    def judge_pricing_degraded(self) -> bool:
+        """`pricing_degraded` for `judge_cost_usd`: True when any score's spend
+        couldn't be priced. Kept apart because the two totals are."""
+        return any(score.cost_note for o in self.outcomes for score in o.scores)
 
     def pass_rate_by_skill(self) -> dict[str, float]:
         """Pass rate per skill name, for per-skill gating and reporting."""

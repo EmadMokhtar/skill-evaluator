@@ -106,6 +106,22 @@ def test_judge_overhead_is_reported_apart_from_run_cost():
     assert "$0.0500" in text
 
 
+def test_judge_overhead_that_was_not_priced_says_so():
+    def report(cost_usd: float) -> RunReport:
+        score = EvalScore(
+            evaluator="judge",
+            passed=False,
+            cost_usd=cost_usd,
+            cost_note="claude-code timed out before reporting cost",
+        )
+        return RunReport(outcomes=[_outcome(scores=[score], result=RunResult(cost_usd=0.05))])
+
+    assert "| Judge overhead | not priced — see the JSON report |" in render_markdown(report(0.0))
+    partly = render_markdown(report(0.02))
+    assert "| Judge overhead | $0.0200 |" in partly
+    assert "| Judge cost note | some judge costs not priced — see the JSON report |" in partly
+
+
 def test_delta_block_renders_when_a_delta_exists():
     report = RunReport(
         outcomes=[

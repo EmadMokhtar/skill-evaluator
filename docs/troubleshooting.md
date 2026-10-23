@@ -226,6 +226,7 @@ The notes you can meet, verbatim:
 | `copilot did not report token usage` | The `copilot` product runner ran, and its trace carried no usage block |
 | `claude-code did not report token usage` | The `claude-code` product runner ran, and its trace carried no usage block |
 | `the cli product does not report token usage` | The `cli` product runner, which reads plain standard output and has no trace to read usage from. `cli` is the runner's name — one of the three fixed names, beside `copilot` and `claude-code`. The `[runners.cli]` table is *keyed* by that name; it does not set it, and you cannot rename it |
+| `<how it ended> before reporting token usage` | A `copilot` or `claude-code` run that ended before its trace said what it used. `<how it ended>` is `<product> timed out`, `the <product> trace was cut at max_output_bytes`, `the claude-code trace ended` or `the copilot trace ended` (no `result` event). A product that exited before reaching the model (a bad flag, a failed login) gets it too: its trace cannot show it spent nothing. The case is **errored**, so no budget check runs; you meet this note in the JSON report |
 
 **What to do.** Remove `max_tokens:` from the `budget:` block for cases you run through that
 product, or run those cases through `pydantic-ai` or `langchain`, which do report a token
@@ -241,8 +242,16 @@ Total cost: not priced (see per-case cost_note in the JSON report)
 ```
 
 or, when only some outcomes were affected, `some costs not priced (see per-case cost_note
-in the JSON report)`. In the JSON report, a `cost_note` on the outcome. Under a declared
-`max_cost_usd`, a failing budget check:
+in the JSON report)`. In the JSON report, a `cost_note` on the outcome. When it is the
+judge's spend that could not be priced, the same line says so for judge overhead:
+
+```
+Judge overhead: not priced (see scores[].cost_note in the JSON report)
+```
+
+or `some judge costs not priced (see scores[].cost_note in the JSON report)`, and the note
+is on the score, `outcomes[].scores[].cost_note`. Under a declared `max_cost_usd`, a failing
+budget check:
 
 ```
         budget: cost budget not evaluated: no price data for groq:llama (KeyError)
@@ -260,6 +269,9 @@ The notes, verbatim:
 | `genai-prices is not installed; cost not calculated` | The pricing package is absent from the environment |
 | `the cli product does not report cost` | The `cli` product runner has no trace to read a cost from |
 | `copilot bills per premium request, not per token; <n> premium request(s)` | The `copilot` product runner. Its billing unit is not tokens, so there is no per-token price to apply. This note is set on **every** copilot run, so `max_cost_usd` always fails under `copilot` |
+| `copilot bills per premium request, not per token; <how it ended> before reporting premium requests` | A `copilot` run whose trace has no `result` event, the only event that carries the count. `<how it ended>` is `copilot timed out`, `the copilot trace was cut at max_output_bytes` or `the copilot trace ended`. The case is **errored** |
+| `<how it ended> before reporting cost` | A `claude-code` run that ended before its trace said what it spent: `claude-code timed out`, `the claude-code trace was cut at max_output_bytes`, or `the claude-code trace ended` (no `result` event, which a product that exited before reaching the model also has). The case is **errored**. The product ran, so it may have spent money: the total is a lower bound, not a sign the run was free |
+| `claude-code did not report cost` | A `claude-code` run whose `result` event has no number in `total_cost_usd`. The case is not errored, so a declared `max_cost_usd` fails as *not evaluated* |
 
 `max_cost_usd` under any of these is a **failing** check, for the same reason `max_tokens`
 is under a `usage_note`: `0.0 <= max_cost_usd` is true for every limit you could write, so

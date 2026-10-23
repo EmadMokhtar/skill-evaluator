@@ -303,6 +303,21 @@ def test_the_console_reports_judge_overhead_apart_from_the_run_cost():
     assert "Judge overhead: $0.0020" in text
 
 
+def test_the_console_says_when_judge_overhead_was_not_priced():
+    note = "claude-code timed out before reporting cost"
+    unpriced = render_console(judged_report(cost_note=note))
+    assert "Judge overhead: not priced (see scores[].cost_note in the JSON report)" in unpriced
+    partly = render_console(judged_report(cost_usd=0.002, cost_note=note))
+    assert "Judge overhead: $0.0020" in partly
+    assert "some judge costs not priced (see scores[].cost_note in the JSON report)" in partly
+
+
+def test_the_json_report_carries_the_judges_cost_note():
+    note = "claude-code timed out before reporting cost"
+    payload = json.loads(render_json(judged_report(cost_note=note)))
+    assert payload["outcomes"][0]["scores"][0]["cost_note"] == note
+
+
 def test_the_json_report_carries_per_check_verdicts_and_judge_cost():
     payload = json.loads(render_json(judged_report(cost_usd=0.002)))
     assert payload["summary"]["judge_cost_usd"] == 0.002
