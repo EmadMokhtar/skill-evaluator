@@ -179,6 +179,13 @@ class RunResult(BaseModel):
 
     `hooks` are the lifecycle hooks a product reported running, in order;
     empty for a runner whose trace has none (every framework runner).
+
+    `skill_triggered_by_session` is each session's own `skill_triggered`, in
+    order, for a `sessions:` case in `mode: offered`; empty otherwise. Set by
+    `sessions.merge_results`, never by a runner. `skill_triggered` is then
+    true when any session loaded the skill, but the trajectory check reads
+    this list, because one flag cannot say both "no session fired" and
+    "every session fired".
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -195,6 +202,7 @@ class RunResult(BaseModel):
     usage_note: str = ""
     model: str = ""
     skill_triggered: bool | None = None
+    skill_triggered_by_session: list[bool | None] = Field(default_factory=list)
     workspace: Path | None = None
     error: str | None = None
 
@@ -562,12 +570,20 @@ class WorkspaceSpec(BaseModel):
 
 
 class EvalCase(BaseModel):
-    """A single eval case: a task prompt, the environment it runs in, and how to score it."""
+    """A single eval case: a task prompt, the environment it runs in, and how to score it.
+
+    A case carries exactly one of `task` and `sessions`. `sessions` is a list
+    of tasks, each sent to a fresh runner call against one shared workspace,
+    and the case is scored once, after the last. The orchestrator hands a
+    runner one session at a time, as a copy whose `task` is that session's
+    text, so a runner only ever reads `task`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    task: str
+    task: str | None = None
+    sessions: list[str] | None = None
     tools: list[ToolSpec] = Field(default_factory=list)
     assertions: list[AssertionSpec] = Field(default_factory=list)
     trajectory: TrajectorySpec | None = None
@@ -576,6 +592,39 @@ class EvalCase(BaseModel):
     judge: JudgeSpec | None = None
     workspace: WorkspaceSpec | None = None
     tags: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _one_prompt(self) -> EvalCase:
+        """`task` or `sessions`, never both and never neither.
+
+        `sessions` needs at least two entries -- one is `task:` spelled
+        longer -- and a workspace, because the workspace is the only thing
+        that carries over from one session to the next. Without one the case
+        would run unrelated tasks and score only the last.
+        """
+        if self.task is not None and self.sessions is not None:
+            raise ValueError(
+                "the case sets both task: and sessions:. Use task: for one session, "
+                "or sessions: for several that share one workspace, not both."
+            )
+        if self.sessions is None:
+            if self.task is None:
+                raise ValueError("the case needs a task: (or sessions: for several sessions)")
+            return self
+        if len(self.sessions) < 2:
+            raise ValueError(
+                "sessions: needs at least two entries; for one session, write task: instead"
+            )
+        for position, text in enumerate(self.sessions, start=1):
+            if not text.strip():
+                raise ValueError(f"session {position} is blank, so it would ask nothing")
+        if self.workspace is None:
+            raise ValueError(
+                "sessions: needs a 'workspace:' block. The workspace is the only thing "
+                "that carries over from one session to the next; without one the "
+                "sessions would be unrelated tasks."
+            )
+        return self
 
     @model_validator(mode="after")
     def _no_seeded_file_produced_glob(self) -> EvalCase:

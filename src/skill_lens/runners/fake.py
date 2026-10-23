@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from skill_lens.models import EvalCase, RunResult, Skill
+from skill_lens.runners.base import refuse_sessions
 from skill_lens.runners.preflight import check_trajectory_names
 from skill_lens.workspace import Workspace
 
@@ -61,6 +62,9 @@ class FakeRunner:
     ) -> RunResult:
         """`scripts` is accepted for protocol symmetry and ignored: a scripted runner runs
         nothing."""
+        refused = refuse_sessions(case)
+        if refused is not None:
+            return refused
         if workspace is not None:
             for name, content in self._scripted_writes(skill, case).items():
                 workspace.write(name, content)

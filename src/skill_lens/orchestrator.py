@@ -37,6 +37,7 @@ from skill_lens.models import (
 )
 from skill_lens.runners.base import Runner
 from skill_lens.scripts import ScriptPolicy, ScriptRuntime, preflight
+from skill_lens.sessions import run_sessions
 from skill_lens.skills.baseline import BaselineUnavailable, resolve_previous
 from skill_lens.workspace import (
     DEFAULT_LIMITS,
@@ -147,7 +148,9 @@ def _run_one(
         # the day someone turns scripts on, at which point a TypeError names
         # the runner that cannot take them.
         extra = {"scripts": runtime} if runtime is not None else {}
-        result = runner.run(skill, case, workspace=workspace, **extra)
+        # One call for a `task:` case; one per session, all against this one
+        # workspace, for a `sessions:` case -- merged into one result.
+        result = run_sessions(runner, skill, case, workspace, extra)
         # Stamped here, not echoed by the runner: an adapter that ignores the
         # parameter then fails loudly on the assertion instead of producing a
         # workspace-less result that looks like a skill problem. Written
