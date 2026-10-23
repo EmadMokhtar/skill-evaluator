@@ -55,12 +55,15 @@ def _delta_block(delta: Delta) -> list[str]:
         lines.append(
             "Low-signal checks (passed with and without the skill — they measure nothing):"
         )
-        lines.extend(f"  - {c.skill_name} :: {c.case_name}: {c.check_id}" for c in delta.low_signal)
+        lines.extend(
+            f"  - {c.skill_name} :: {c.case_name} ({c.runner}): {c.check_id}"
+            for c in delta.low_signal
+        )
     if delta.high_variance:
         lines.append("")
         lines.append("High-variance cases (repetitions disagreed — often ambiguous instructions):")
         lines.extend(
-            f"  - {r.skill_name} :: {r.case_name} ({r.arm}): "
+            f"  - {r.skill_name} :: {r.case_name} ({r.runner}, {r.arm}): "
             f"{r.pass_rate:.0%}, stddev {r.stddev:.2f}"
             for r in delta.high_variance
         )

@@ -29,10 +29,14 @@ class ArmStats(BaseModel):
 
 
 class LowSignalCheck(BaseModel):
-    """A check that passed in both arms: it inflates the score, measuring nothing."""
+    """A check that passed in both arms: it inflates the score, measuring nothing.
+
+    `runner` is what tells two entries apart when one case runs under two
+    runners: the same check id can be low signal under each (issue #98)."""
 
     skill_name: str
     case_name: str
+    runner: str
     evaluator: str
     check_id: str
 
@@ -202,6 +206,7 @@ def build_delta(report: RunReport) -> Delta | None:
                     LowSignalCheck(
                         skill_name=skill_name,
                         case_name=case_name,
+                        runner=runner,
                         evaluator=evaluator,
                         check_id=check_id,
                     )

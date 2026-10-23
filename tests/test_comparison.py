@@ -14,12 +14,21 @@ from skill_lens.models import (
 
 
 def _outcome(
-    status, arm="candidate", index=0, *, case="c", tokens=100, cost=0.001, latency=500, checks=()
+    status,
+    arm="candidate",
+    index=0,
+    *,
+    case="c",
+    runner="fake",
+    tokens=100,
+    cost=0.001,
+    latency=500,
+    checks=(),
 ):
     return CaseOutcome(
         skill_name="pdf",
         case_name=case,
-        runner="fake",
+        runner=runner,
         status=status,
         arm=arm,
         repeat_index=index,
@@ -145,6 +154,29 @@ def test_a_check_that_passes_in_both_arms_is_low_signal():
     delta = build_delta(report)
     assert [c.check_id for c in delta.low_signal] == ["contains[0]"]
     assert delta.cases[0].low_signal == ["contains[0]"]
+
+
+def test_a_low_signal_check_names_its_runner():
+    """With two runners, one case's low-signal check appears once per runner.
+    Without the runner the two entries are identical (issue #98)."""
+    both = (("contains[0]", True),)
+    report = RunReport(
+        baseline_kind="none",
+        outcomes=[
+            _outcome("passed", runner=runner, checks=both)
+            for runner in ("claude-code", "pydantic-ai")
+        ]
+        + [
+            _outcome("failed", arm="baseline", runner=runner, checks=both)
+            for runner in ("claude-code", "pydantic-ai")
+        ],
+    )
+    delta = build_delta(report)
+    assert [(c.runner, c.check_id) for c in delta.low_signal] == [
+        ("claude-code", "contains[0]"),
+        ("pydantic-ai", "contains[0]"),
+    ]
+    assert delta.model_dump(mode="json")["low_signal"][0]["runner"] == "claude-code"
 
 
 def test_a_check_that_fails_anywhere_is_not_low_signal():

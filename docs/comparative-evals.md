@@ -232,6 +232,21 @@ under test, and neither changes the exit code.
   a flaky provider (though a genuinely flaky provider looks identical, which is exactly why
   this is advisory and not a gate).
 
+Each flag line names the runner, the way a case line does, because under two runners the same
+case and check can be flagged once per runner:
+
+```
+Low-signal checks (passed with and without the skill — they measure nothing):
+  - order-support :: refund-request (claude-code): contains[0]
+  - order-support :: refund-request (pydantic-ai): contains[0]
+
+High-variance cases (repetitions disagreed — often ambiguous instructions):
+  - order-support :: refund-request (pydantic-ai, candidate): 60%, stddev 0.49
+```
+
+In the JSON report, every `delta.low_signal[]` and `delta.high_variance[]` entry carries a
+`runner` field; the high-variance entries always had one, and the low-signal entries now do.
+
 Both are reported for visibility so a suite's weak spots are named, but **neither ever fails
 the gate**. A flag that could block a merge for "this assertion is weak" trains people to
 ignore flags, and there is no way to tell a bad skill apart from a flaky provider from the
