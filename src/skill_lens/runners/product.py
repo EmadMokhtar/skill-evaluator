@@ -50,7 +50,7 @@ from skill_lens.runners.mcp import (
     restore_tool_names,
     write_bridge,
 )
-from skill_lens.runners.traces import Trace, parse_claude_code, parse_copilot
+from skill_lens.runners.traces import Trace, parse_claude_code, parse_copilot, spend_unreported
 from skill_lens.skills.loader import SKILL_FILENAME
 from skill_lens.workspace import PathRefused, Workspace, check_relative_path
 
@@ -272,29 +272,53 @@ def _exit_note(exited: str, stderr: str) -> str:
     return f"{exited}: {tail}" if tail else exited
 
 
+def _reports_no_spend(product: Product) -> dict[str, str]:
+    """The notes for a product with no parser: it reports no spend, however
+    its run ends."""
+    return {
+        "cost_note": f"the {product.name} product does not report cost",
+        "usage_note": f"the {product.name} product does not report token usage",
+    }
+
+
+def _ended_early(product: Product, ended: str) -> dict[str, str]:
+    """The notes for a run stopped before its trace was read to the end.
+
+    A product with no parser never reports spend, so how the run ended is not
+    the reason its spend is unknown; its own notes are.
+    """
+    return _reports_no_spend(product) if product.parse is None else spend_unreported(ended)
+
+
 def read_trace(product: Product, invocation: Invocation) -> Trace:
     """The invocation as a `Trace`: parsed when the product has a parser, else
-    stdout as the output. A failure of any kind is `Trace.error`."""
+    stdout as the output. A failure of any kind is `Trace.error`.
+
+    A process that started may have spent money, so a trace that cannot say
+    what it spent carries notes saying why. One that never started keeps
+    empty notes: its 0.0 is a measurement.
+    """
     if invocation.error is not None:
         return Trace(error=invocation.error)
     if invocation.timed_out:
-        return Trace(error=f"{product.name} timed out after {product.timeout_seconds:g}s")
+        return Trace(
+            error=f"{product.name} timed out after {product.timeout_seconds:g}s",
+            **_ended_early(product, f"{product.name} timed out"),
+        )
     if invocation.truncated:
+        # The product's spend is on its last event, past the cut.
         return Trace(
             error=(
                 f"{product.name} output exceeded {product.max_output_bytes} bytes; "
                 f"raise [runners.{product.name}] max_output_bytes"
-            )
+            ),
+            **_ended_early(product, f"the {product.name} trace was cut at max_output_bytes"),
         )
     exited = f"{product.name} exited with code {invocation.exit_code}"
     if product.parse is None:
         if invocation.exit_code != 0:
-            return Trace(error=_exit_note(exited, invocation.stderr))
-        return Trace(
-            output=invocation.stdout.removesuffix("\n"),
-            usage_note=f"the {product.name} product does not report token usage",
-            cost_note=f"the {product.name} product does not report cost",
-        )
+            return Trace(error=_exit_note(exited, invocation.stderr), **_reports_no_spend(product))
+        return Trace(output=invocation.stdout.removesuffix("\n"), **_reports_no_spend(product))
     trace = product.parse(invocation.stdout)
     if invocation.exit_code != 0 and (trace.error is None or not trace.complete):
         # A complete trace carrying the product's own error message is the

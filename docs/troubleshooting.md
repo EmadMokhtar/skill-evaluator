@@ -226,6 +226,7 @@ The notes you can meet, verbatim:
 | `copilot did not report token usage` | The `copilot` product runner ran, and its trace carried no usage block |
 | `claude-code did not report token usage` | The `claude-code` product runner ran, and its trace carried no usage block |
 | `the cli product does not report token usage` | The `cli` product runner, which reads plain standard output and has no trace to read usage from. `cli` is the runner's name — one of the three fixed names, beside `copilot` and `claude-code`. The `[runners.cli]` table is *keyed* by that name; it does not set it, and you cannot rename it |
+| `<how it ended> before reporting token usage` | A `copilot` or `claude-code` run that ended before its trace said what it used. `<how it ended>` is `<product> timed out`, `the <product> trace was cut at max_output_bytes`, or `the claude-code trace ended` (no `result` event). The case is **errored**, so no budget check runs; you meet this note in the JSON report |
 
 **What to do.** Remove `max_tokens:` from the `budget:` block for cases you run through that
 product, or run those cases through `pydantic-ai` or `langchain`, which do report a token
@@ -260,6 +261,8 @@ The notes, verbatim:
 | `genai-prices is not installed; cost not calculated` | The pricing package is absent from the environment |
 | `the cli product does not report cost` | The `cli` product runner has no trace to read a cost from |
 | `copilot bills per premium request, not per token; <n> premium request(s)` | The `copilot` product runner. Its billing unit is not tokens, so there is no per-token price to apply. This note is set on **every** copilot run, so `max_cost_usd` always fails under `copilot` |
+| `copilot bills per premium request, not per token; the trace ended before reporting premium requests` | A `copilot` run whose trace has no `result` event, the only event that carries the count. The case is **errored** |
+| `<how it ended> before reporting cost` | A `copilot` or `claude-code` run that ended before its trace said what it spent: `<product> timed out`, `the <product> trace was cut at max_output_bytes`, or `the claude-code trace ended` (no `result` event). The case is **errored**. The product ran, so it may have spent money: the total is a lower bound, not a sign the run was free |
 
 `max_cost_usd` under any of these is a **failing** check, for the same reason `max_tokens`
 is under a `usage_note`: `0.0 <= max_cost_usd` is true for every limit you could write, so

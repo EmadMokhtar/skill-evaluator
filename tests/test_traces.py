@@ -90,6 +90,16 @@ def test_claude_code_without_a_result_event_is_an_error():
     assert trace.complete is False
 
 
+def test_claude_code_without_a_result_event_says_its_spend_is_unknown():
+    # Cost and usage live on the `result` event only: without it the 0.0 and
+    # the zero tokens are not measurements, and the notes say so.
+    lines = _fixture("claude-code-trigger.jsonl").splitlines()[:-1]
+    trace = parse_claude_code("\n".join(lines))
+    assert trace.cost_usd == 0.0
+    assert trace.cost_note == "the claude-code trace ended before reporting cost"
+    assert trace.usage_note == "the claude-code trace ended before reporting token usage"
+
+
 def test_claude_code_marks_a_trace_with_a_result_event_complete():
     assert parse_claude_code(_fixture("claude-code-trigger.jsonl")).complete is True
     assert parse_claude_code(_fixture("claude-code-error.jsonl")).complete is True
@@ -213,6 +223,18 @@ def test_copilot_without_a_result_event_is_an_error():
     trace = parse_copilot("\n".join(lines))
     assert trace.error == "no result event in the copilot trace"
     assert trace.complete is False
+
+
+def test_copilot_without_a_result_event_claims_no_premium_request_count():
+    # The count lives on the `result` event: without it, "0 premium
+    # request(s)" would be a figure the trace never reported.
+    lines = _fixture("copilot-trigger.jsonl").splitlines()[:-1]
+    trace = parse_copilot("\n".join(lines))
+    assert trace.cost_note == (
+        "copilot bills per premium request, not per token; "
+        "the trace ended before reporting premium requests"
+    )
+    assert trace.usage_note == ""  # the shutdown metrics came before the cut
 
 
 def test_copilot_marks_a_trace_with_a_result_event_complete():

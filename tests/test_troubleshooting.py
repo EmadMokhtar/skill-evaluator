@@ -93,6 +93,7 @@ QUOTED: list[tuple[str, str]] = [
     ("copilot did not report token usage", "runners/traces.py"),
     ("claude-code did not report token usage", "runners/traces.py"),
     (" product does not report token usage", "runners/product.py"),
+    (" before reporting token usage", "runners/traces.py"),
     # A model with no price
     ("Total cost: not priced (see per-case cost_note in the JSON report)", "reporters/console.py"),
     ("some costs not priced (see per-case cost_note in the JSON report)", "reporters/console.py"),
@@ -102,6 +103,8 @@ QUOTED: list[tuple[str, str]] = [
     (" product does not report cost", "runners/product.py"),
     ("copilot bills per premium request, not per token; ", "runners/traces.py"),
     (" premium request(s)", "runners/traces.py"),
+    ("the trace ended before reporting premium requests", "runners/traces.py"),
+    (" before reporting cost", "runners/traces.py"),
     # NO_RESPONSE_SCRIPTED
     ("no response is scripted for ", "runners/tools.py"),
     (" with arguments ", "runners/tools.py"),

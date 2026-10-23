@@ -198,6 +198,17 @@ by `--max-budget-usd` is errored and still counts what it spent in the report's 
 those figures and the model are kept; no evaluator reads an errored run, so the case stays
 errored.
 
+A run that ended before its trace said what it spent — a timeout, a trace cut at
+`max_output_bytes`, a Claude Code trace with no `result` event, with or without a non-zero
+exit — has `cost_usd` `0.0` and zero tokens, but the product ran and may have spent money.
+Its `cost_note` and `usage_note` say so and name the cause, for example `claude-code timed
+out before reporting cost`, so the report never reads the run as free. A Copilot trace with
+no `result` event says the premium-request count was never reported instead of claiming
+`0`. `cli` reports no spend however its run ends, so a failed `cli` run carries the same
+notes as a passing one. A run that never started a process — a prompt over 100 KiB, an
+executable missing at run time, a skill that cannot be delivered — spent nothing and keeps
+empty notes.
+
 Preflight checks the executable is on `PATH` and, for the two presets, that it actually
 starts (`--version`); `cli` has no version command, so only the `PATH` lookup applies to it.
 The report names the product, its executable and — where there is one — its version on every
@@ -346,7 +357,8 @@ match the rubric is errored, and a pass with no evidence (an empty or missing `e
 recorded as a failure. A product failure — a timeout, a non-zero exit, a reply over
 `max_output_bytes`, a prompt over 100 KiB, an executable that vanished after preflight — is
 errored the same way, and keeps whatever tokens and cost its trace reported as judge
-overhead.
+overhead. A judge run that ended before its trace reported a cost carries the same
+`cost_note` a runner would, such as `claude-code timed out before reporting cost`.
 
 **What is read and what is not.** `judge_model` and `judge_temperature` are not read: no
 product exposes a temperature, and a product's model is set with `[runners.<name>] args`.

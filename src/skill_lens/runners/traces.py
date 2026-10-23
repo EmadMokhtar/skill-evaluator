@@ -46,6 +46,19 @@ class Trace:
     error: str | None = None
 
 
+def spend_unreported(ended: str) -> dict[str, str]:
+    """`cost_note` and `usage_note` for a run that ended before its product
+    reported what it spent, `ended` saying how.
+
+    The product ran, so it may have spent: with empty notes, the report's
+    totals would read its 0.0 and zero tokens as a free run.
+    """
+    return {
+        "cost_note": f"{ended} before reporting cost",
+        "usage_note": f"{ended} before reporting token usage",
+    }
+
+
 def parse_lines(text: str) -> list[dict[str, Any]]:
     """Every line that is a JSON object, in order; anything else is skipped.
 
@@ -145,6 +158,13 @@ def parse_copilot(text: str) -> Trace:
         error = f"copilot exited with code {result.get('exitCode')}"
     result_usage = result.get("usage") if result else None
     premium = _int(result_usage.get("premiumRequests")) if isinstance(result_usage, dict) else 0
+    # The count is on the `result` event: without one, a "0" here would be a
+    # figure the trace never reported.
+    requests = (
+        f"{premium} premium request(s)"
+        if result is not None
+        else "the trace ended before reporting premium requests"
+    )
     return Trace(
         output=output,
         tool_calls=tool_calls,
@@ -153,9 +173,7 @@ def parse_copilot(text: str) -> Trace:
         output_tokens=output_tokens,
         model=model,
         cost_usd=0.0,
-        cost_note=(
-            f"copilot bills per premium request, not per token; {premium} premium request(s)"
-        ),
+        cost_note=f"copilot bills per premium request, not per token; {requests}",
         usage_note="" if usage_seen else "copilot did not report token usage",
         invoked_skills=frozenset(invoked),
         complete=result is not None,
@@ -196,6 +214,8 @@ def parse_claude_code(text: str) -> Trace:
             transcript=events,
             model=model,
             invoked_skills=frozenset(invoked),
+            # Cost and usage are on the `result` event only.
+            **spend_unreported("the claude-code trace ended"),
             error="no result event in the claude-code trace",
         )
     usage_seen = isinstance(result.get("usage"), dict)

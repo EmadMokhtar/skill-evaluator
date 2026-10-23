@@ -369,6 +369,24 @@ def test_a_timeout_is_the_verdicts_error(fake, monkeypatch):
     assert verdict.error == "claude-code timed out after 0.5s"
 
 
+def test_a_judge_run_that_ended_before_reporting_its_spend_says_so(fake, monkeypatch):
+    # The judge reads the same trace as the runner, so it gets the same note.
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "sleep")
+    verdict = ProductJudge(_product(timeout_seconds=0.5)).judge(REQUEST)
+    assert verdict.cost_usd == 0.0
+    assert verdict.cost_note == "claude-code timed out before reporting cost"
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "exit3")
+    verdict = ProductJudge(_product()).judge(REQUEST)
+    assert verdict.cost_note == "the claude-code trace ended before reporting cost"
+
+
+def test_a_judge_run_that_started_no_process_keeps_an_empty_note(fake):
+    request = JudgeRequest(
+        task="t", output="x" * (100 * 1024), checks=[RubricCheck(id="c", text="t")]
+    )
+    assert ProductJudge(_product()).judge(request).cost_note == ""
+
+
 def test_an_oversized_prompt_is_refused(fake):
     request = JudgeRequest(
         task="t", output="x" * (100 * 1024), checks=[RubricCheck(id="c", text="t")]
