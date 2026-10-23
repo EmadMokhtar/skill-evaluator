@@ -156,6 +156,14 @@ Under `--baseline none` the baseline arm has no skill directory and gets the bar
 both modes; under `--baseline previous` the previous version is delivered with its own
 bundle.
 
+A case with [`sessions:`](eval-files.md#several-sessions-in-one-workspace) starts the
+product once per session, in the same working directory. Each session's prompt is that
+session's task, invoked by the same rule as above. The skill is delivered again before every
+session: `SKILL.md` and every file the skill ships are written over the old copy, so an edit
+a session made to a delivered file is undone before the next session. Delivery never deletes,
+so a file a session *added* inside the delivered skill directory is still there for the next
+one. The MCP bridge is started fresh for every session too.
+
 **What a product runner can measure.**
 
 | | `copilot` | `claude-code` | `cli` |
@@ -570,6 +578,16 @@ describe themselves.
 after scoring, for inspecting exactly what a run wrote. Every kept directory is printed,
 however keeping was turned on.
 
+**Sessions share it.** A case with [`sessions:`](eval-files.md#several-sessions-in-one-workspace)
+calls the runner once per session, each call a fresh session with no conversation history,
+and every call gets the same workspace. It is created and seeded once, before the first
+session, and deleted once, after the case is scored. Nothing else carries over: each session
+builds its tools again, so a mock tool's `returns:` list starts from its first entry in every
+session. The runner never sees `sessions:` — it is handed one ordinary case per session,
+whose `task` is that session's text — so every runner, a third-party one included, runs
+sessions without a change. Each arm and each `--repeat` repetition still gets a workspace
+of its own.
+
 ## Bundled files and scripts
 
 The Agent Skills layout puts three directories beside `SKILL.md` — `scripts/`,
@@ -833,6 +851,12 @@ The same rule applies to tokens. A runner that cannot count tokens sets `usage_n
 `cost_note`: `0` tokens is not a measurement, and `0 <= max_tokens` would otherwise pass
 every limit. Today that is the `cli` product runner, and `copilot` when its trace reports
 no usage; see [Product runners](#product-runners).
+
+A case with [`sessions:`](eval-files.md#several-sessions-in-one-workspace) is held to one
+budget for all of its sessions: tokens, cost and latency are each summed over every session
+that ran. When one session could not be priced or counted, the total is missing that
+session's share, so its note is kept on the case and `max_cost_usd` or `max_tokens` fails
+as *not evaluated* — the same rule as for one run.
 
 If you are upgrading from a version of `skill-lens` where this budget block previously passed
 some other way, note the change: a repo that runs an unpriced model with a `budget:` block
