@@ -367,3 +367,14 @@ def test_claude_code_keeps_its_temporary_files_under_the_root():
     assert "CLAUDE_TMPDIR" not in env
     copilot = product_environment(_product("copilot"), ROOT, parent=parent, windows=False)
     assert "CLAUDE_CODE_TMPDIR" not in copilot
+
+
+def test_claude_code_keeps_is_sandbox():
+    # Claude Code refuses --dangerously-skip-permissions as root unless
+    # IS_SANDBOX=1 (read in its root check, 2.1.289); a root CI container that
+    # sets it must keep it, or every case errors while preflight passes.
+    parent = {**PARENT, "IS_SANDBOX": "1"}
+    env = product_environment(_product("claude-code"), ROOT, parent=parent, windows=False)
+    assert env["IS_SANDBOX"] == "1"
+    copilot = product_environment(_product("copilot"), ROOT, parent=parent, windows=False)
+    assert "IS_SANDBOX" not in copilot

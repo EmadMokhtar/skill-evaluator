@@ -106,10 +106,12 @@ PRODUCT_ENV: dict[str, ProductEnv] = {
     # defaults to /tmp, which no backend lets it write; every Bash command
     # ends with `pwd -P >| $CLAUDE_CODE_TMPDIR/claude-<id>-cwd` (verified in
     # 2.1.289), so without it every command would report exit 1.
+    # IS_SANDBOX: Claude Code refuses --dangerously-skip-permissions as root
+    # unless it is "1", so a root CI container that sets it keeps it.
     "claude-code": ProductEnv(
         auth=("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"),
         hint="CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY",
-        passed=("ANTHROPIC_BASE_URL",),
+        passed=("ANTHROPIC_BASE_URL", "IS_SANDBOX"),
         fixed=(("DISABLE_AUTOUPDATER", "1"),),
         temporary=("CLAUDE_CODE_TMPDIR",),
     ),
