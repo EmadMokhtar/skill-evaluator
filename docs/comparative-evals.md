@@ -87,12 +87,12 @@ flowchart TD
      from the working copy's;
    - if it declares none, the first commit whose **content** differs from the working copy's.
 
-5. Extract that same commit's `scripts/`, `references/` and `assets/`, from the directory the
-   skill had at that commit (`git archive`, then
+5. Extract the files the skill shipped at that same commit, by the same rule as the
+   candidate's bundle, from the directory the skill had at that commit (`git archive`, then
    `tarfile` with its `data` filter) into a temporary directory that is deleted when the run
    ends, so the previous instructions are paired with the previous bundle — never with the
-   candidate's scripts. A commit with none of the three directories gives the baseline no
-   bundle tools. See [Bundled files and scripts](runners.md#bundled-files-and-scripts).
+   candidate's scripts. A commit that shipped no such file gives the baseline no bundle
+   tools. See [Bundled files and scripts](runners.md#bundled-files-and-scripts).
 
 A declared `version:` is the stronger signal — an edit that did not bump it is still
 considered *this* version, however much prose changed underneath it. Without a declared

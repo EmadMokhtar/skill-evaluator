@@ -140,8 +140,10 @@ Add flags with `[runners.<name>] args` (for example, a model); replace the whole
 **What the product sees.** The eval's working directory (the case's workspace when it
 declares one, a fresh temporary directory otherwise) holds `SKILL.md` **verbatim (its text
 as written; line endings are normalised)** — products honour frontmatter keys skill-lens
-does not model, such as `allowed-tools` — and beside it `scripts/`, `references/` and
-`assets/`, nothing else. The copy stays in a workspace after the run, so `--keep-workspace`
+does not model, such as `allowed-tools` — and beside it every file the skill ships, as an
+install copies it, except the eval files, version control, dependency directories and secret
+files (the list is under [Bundled files and scripts](#bundled-files-and-scripts)). Each file is
+written as a regular file, read through any link; a link is never copied as a link. The copy stays in a workspace after the run, so `--keep-workspace`
 shows exactly what the product saw; a case whose `file:`, `file_glob` or judge artifact would
 read that copy is refused in preflight, because it would check the harness's files.
 
@@ -597,9 +599,10 @@ however keeping was turned on.
 
 ## Bundled files and scripts
 
-The Agent Skills layout puts three directories beside `SKILL.md`: `scripts/`,
-`references/` and `assets/`. When at least one of them exists, a case with a `workspace:`
-block also gets:
+The Agent Skills layout puts three directories beside `SKILL.md` — `scripts/`,
+`references/` and `assets/` — and a skill may ship more, such as `templates/` or a
+`reference.md`. Every file it ships is its **bundle**. When there is at least one, a case with
+a `workspace:` block also gets:
 
 | Tool | Does | Needs |
 | --- | --- | --- |
@@ -607,11 +610,20 @@ block also gets:
 | `read_skill_file` | Read one bundled text file, e.g. `references/style.md` | a bundle |
 | `run_script` | Run a file under `scripts/` with the workspace as its current directory | a file under `scripts/` **and** `allow_scripts` |
 
-Only those three directories are reachable. `SKILL.md` itself, `*.eval.yaml` and `evals/`
-are refused — `refused: 'SKILL.md' is not under scripts/, references/ or assets/; only
-those three directories are readable` — because an eval file holds the expected answers,
-and a tool that could read it would hand the agent its answer key. A binary file under
-`assets/` gets the same `not valid UTF-8 text` message `read_file` gives; copying one into
+Everything the skill ships is reachable except, at any depth and in any letter case:
+`SKILL.md` itself; the eval files (`evals/`, `*.eval.yaml`, `evals.json`); version control
+(`.git`, `.hg`, `.svn`); dependency and cache directories (`node_modules`, `.venv`,
+`__pycache__`); secret files (`.env`, `.env.*`, `.npmrc`, `.netrc`, `.pypirc`); and
+`skill-lens.toml`. A link that resolves onto one of those, or out of the skill's directory,
+is refused too: `refused: 'evals/cases.yaml' is not a file the skill ships; SKILL.md, eval
+files (evals/, *.eval.yaml, evals.json), version control, dependency directories and secret
+files (.env, .npmrc, ...) are never readable`. An eval file holds the expected answers, and a
+tool that could read it would hand the agent its answer key, so keep anything the agent must
+not see — a mock tool library, an expected output — under `evals/`. A skill that ships more
+than 1,000 files or 100 MB is refused: a product runner's preflight exits `2`, and
+`list_skill_files` returns the refusal; that is almost always a `SKILL.md` at a repository
+root, which would otherwise ship the whole repository. A binary
+file gets the same `not valid UTF-8 text` message `read_file` gives; copying one into
 the workspace is not supported yet. The tools describe themselves without naming the skill:
 the instruction to run `scripts/count.py` comes from `SKILL.md`, which is what is under
 measurement, and the workspace preamble is unchanged and still identical in both arms.
@@ -720,12 +732,23 @@ reading that fact is the eval signal. `run_script` never raises. Standard input 
 
 **The OS sandbox**, where one exists (`script_sandbox = "auto"`, the default), is a second
 layer on top. Under either backend a script cannot open a network connection; cannot write
-to the host filesystem outside the workspace and its scratch directory (under `bwrap`,
-writes under the temporary directory and `/dev/shm` land in an in-memory mount that is
-discarded when the script exits — bounded, like output, only by the timeout); and cannot
-read anything under the system temporary directory except the workspace, the scratch
-directory and the skill's own bundle — so under `--concurrency N` a script cannot read the
-baseline arm's workspace or another case's scratch directory.
+to the host filesystem outside the workspace and its scratch directory; and cannot read
+anything under the system temporary directory except the workspace, the scratch directory
+and the skill's own bundle — so under `--concurrency N` a script cannot read the baseline
+arm's workspace or another case's scratch directory. A write elsewhere under the temporary
+directory is refused on both backends. Under `bwrap`, a write anywhere under `/dev`,
+`/dev/shm` included, is not refused: it lands in an in-memory mount that is discarded when
+the script exits, bounded, like output, only by the timeout. `/dev/shm` stays writable
+because POSIX shared memory needs it.
+
+**A script that writes to a fixed temporary path fails.** A bundled script that writes to a
+hard-coded path such as `/tmp/state.json` gets an error on both backends (`Read-only file
+system` under `bwrap`, `Operation not permitted` under `sandbox-exec`), because the path is
+outside the workspace and the scratch directory. Earlier releases let that write appear to
+succeed under `bwrap`: it went to an in-memory mount and was discarded when the script
+exited. So a skill whose Linux evals passed only because of that now fails there, as it
+already did on macOS. Write temporary files with `tempfile`, or under `$TMPDIR`, which
+points at the scratch directory.
 
 One difference between the two: `bwrap`'s `--unshare-net` isolates the network stack only,
 so a Unix-domain socket the CI user can reach through the filesystem —
@@ -739,20 +762,24 @@ those three keep their metadata, so a script can `stat` its workspace's parents:
 `mkdir -p "$PWD/x"` checks every parent on the way down. Listing them stays denied, so the
 names and contents of sibling workspaces stay hidden. One thing does show: a directory's
 metadata includes its entry count and modification time, so a script can tell how many
-entries the temporary directory holds and when that changes, but not what they are. Reads anywhere else are allowed (see below).
+entries the temporary directory holds and when that changes, but not what they are. Reads
+anywhere else are allowed (see below).
 
 | | Backend | How |
 | --- | --- | --- |
 | macOS | `sandbox-exec` | A profile that allows everything, then denies `network*` and `file-write*`, re-allows writes under the workspace and the scratch directory (plus `file-write-data` on `/dev/null`), denies `file-read*` under the temporary directory, then re-allows reads under the workspace, the scratch directory and the bundle. Later rules win. `sandbox-exec` is marked deprecated in Apple's documentation, is present and working on current macOS, and is what Bazel, Chromium and Claude Code use. |
-| Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install. A stock Ubuntu CI image may not ship `bwrap`, or may refuse unprivileged user namespaces; the report's `sandbox:` line says which. `--unshare-net` does not block Unix-domain sockets (see above). |
+| Linux | `bwrap` (bubblewrap) | `--ro-bind / /`, `--dev /dev`, `--proc /proc`, an empty `--tmpfs` over the temporary directory so sibling workspaces vanish, `--bind` for the workspace and the scratch directory, `--ro-bind` for the bundle, `--remount-ro` on the temporary directory so the tmpfs refuses writes (the remount is not recursive, so the binds keep their own modes), then `--unshare-net --unshare-pid --die-with-parent --new-session`. Needs unprivileged user namespaces or a setuid install. A stock Ubuntu CI image may not ship `bwrap`, or may refuse unprivileged user namespaces; the report's `sandbox:` line says which. `--unshare-net` does not block Unix-domain sockets (see above). |
 | Windows | none | The portable guards only. `"required"` refuses to run. |
 
 The probe runs once per run, after discovery and before any case. The backend is *executed*
 — `sandbox-exec -p '(version 1)(allow default)(deny network*)' /usr/bin/true`, or `bwrap
---ro-bind / / --dev /dev --proc /proc --unshare-net --unshare-pid --die-with-parent --
-/bin/true` — not merely found on `PATH`, because present is not the same as working: a stock
-Ubuntu runner may not ship `bwrap` at all, or may refuse unprivileged user namespaces, and
-the first line of that refusal is what the report shows.
+--ro-bind / / --dev /dev --proc /proc --tmpfs <temp dir> --remount-ro <temp dir>
+--unshare-net --unshare-pid --die-with-parent -- /bin/true` — not merely found on `PATH`,
+because present is not the same as working: a stock Ubuntu runner may not ship `bwrap` at
+all, or may refuse unprivileged user namespaces, and the first line of that refusal is what
+the report shows. The `bwrap` probe includes the tmpfs and its read-only remount because
+every script call needs both, so a `bwrap` too old to accept either fails the probe instead
+of failing every script.
 
 The result is on every report that enabled scripts — `scripts: on, sandbox: bwrap`, or
 `scripts: on, sandbox: none (bwrap not found on PATH)` — so you can tell from a log whether
@@ -781,8 +808,8 @@ second layer that limits damage); the `allow_scripts` opt-in is the decision. Do
 scripts for a skill you would not run by hand. See
 [Security](security.md#running-bundled-scripts).
 
-**Under `--baseline previous`**, the previous version's `scripts/`, `references/` and
-`assets/` come from git too, so the old instructions are never paired with the new scripts.
+**Under `--baseline previous`**, the files the previous version shipped come from git too,
+by the same rule, so the old instructions are never paired with the new scripts.
 They are extracted — `git archive`, then `tarfile` with its `data` filter, which is why
 skill-lens requires Python 3.11.4 or later — from the commit that last edited `SKILL.md` at
 the previous version, out of the directory the skill had then (it may have moved since), into
@@ -795,7 +822,7 @@ that `SKILL.md` edit is invisible to the baseline, and a very large historical `
 hit the 10-second git timeout, which is reported as a baseline note (`cannot archive commit
 <sha>`), never an error.
 
-A commit with none of the three directories gives the baseline no bundle tools — never the
+A commit that shipped no file besides `SKILL.md` and its evals gives the baseline no bundle tools — never the
 candidate's. `--baseline none` has no bundle: there is no skill. See [How `previous` is
 resolved](comparative-evals.md#how-previous-is-resolved).
 

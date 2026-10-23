@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -19,7 +20,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from skill_lens.bundle import BUNDLE_DIRS
+from skill_lens.bundle import MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES, withheld
 from skill_lens.models import Skill
 from skill_lens.skills.loader import SKILL_FILENAME, SkillParseError, parse_skill_text
 from skill_lens.workspace import sanitise_label
@@ -154,20 +155,34 @@ def _moved_from(top: Path, sha: str, path: str) -> str | None:
     return None
 
 
+def _link_leaves(relative: str, linkname: str) -> bool:
+    """A symlink member the candidate's bundle would not ship: absolute, out of
+    the skill's directory, or onto a withheld path. Dropped rather than handed
+    to the `data` filter, which would refuse the whole archive over it."""
+    if posixpath.isabs(linkname):
+        return True
+    target = posixpath.normpath(posixpath.join(posixpath.dirname(relative), linkname))
+    return target == ".." or target.startswith("../") or withheld(target)
+
+
 def _materialise_bundle(
     skill: Skill, sha: str, directory: str, top: Path, into: Path
 ) -> Path | None | BaselineUnavailable:
-    """The commit's bundle directories, extracted under `into`.
+    """The files the skill shipped at that commit, extracted under `into`.
 
     `directory` is where the skill lived *at that commit*, relative to the
     repository root -- `""` at the root -- which is not where it lives now if
     the skill has moved since. `git archive <sha> -- <directory>`, run from the
     root, names each member by its full path; the directory prefix is stripped
-    so that filtering on the first component (`scripts/x.py`) works.
+    so that `bundle.withheld` sees the same relative paths the candidate's
+    bundle does, and leaves out exactly what it leaves out for the candidate.
+    A symlink member that is absolute, leaves the skill or lands on a withheld
+    path is dropped, as the candidate's walk drops it, rather than handed to
+    the filter, which would refuse the whole archive over it.
     `filter="data"` is the safe extraction filter: no absolute paths, no `..`,
-    no link escaping the target. A commit with none of the three directories
-    yields None -- the baseline then gets no bundle tools, never the
-    candidate's.
+    no link escaping the target. A commit that shipped no file besides
+    `SKILL.md` and its evals yields None -- the baseline then gets no bundle
+    tools, never the candidate's.
     """
     spec = _literal(directory) if directory else "."
     archive = _git_bytes(["archive", "--format=tar", sha, "--", spec], cwd=top)
@@ -181,12 +196,21 @@ def _materialise_bundle(
                 if not member.name.startswith(prefix):
                     continue
                 relative = member.name[len(prefix) :]
-                if relative.split("/", 1)[0] not in BUNDLE_DIRS:
+                if not relative or member.isdir() or withheld(relative):
+                    continue
+                if member.islnk() or (member.issym() and _link_leaves(relative, member.linkname)):
                     continue
                 member.name = relative
                 members.append(member)
-            if not members:
+            files = [member for member in members if member.isfile()]
+            if not files:
                 return None
+            if len(files) > MAX_BUNDLE_FILES or sum(m.size for m in files) > MAX_BUNDLE_BYTES:
+                return BaselineUnavailable(
+                    skill.name,
+                    f"the bundle at commit {sha[:8]} ships more than {MAX_BUNDLE_FILES:,} "
+                    f"files or {MAX_BUNDLE_BYTES:,} bytes",
+                )
             target = Path(tempfile.mkdtemp(prefix=f"{sanitise_label(skill.name)}-", dir=into))
             try:
                 tar.extractall(target, members=members, filter="data")

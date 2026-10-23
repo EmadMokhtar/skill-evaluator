@@ -899,8 +899,8 @@ whatever the skill did and the second would show the judge one name for two thin
 
 A product runner delivers the skill into the workspace and leaves it there, so
 `--keep-workspace` shows what the product saw. A `file:`, `file_glob` or judge artifact that
-names or matches a delivered file (`runners.product.delivered_paths`: `SKILL.md` and the
-three bundle directories, under the runner's `skills_dir`) would read the harness's copy,
+names or matches a delivered file (`runners.product.delivered_paths`: `SKILL.md` and every
+file the skill ships, under the runner's `skills_dir`) would read the harness's copy,
 not the skill's output, and hold whatever the skill did. `ProductRunner.preflight` refuses
 it (`ProductSetupError`, exit 2, before any spend), per runner, because only the runner
 knows its `skills_dir`.
@@ -966,12 +966,27 @@ on for itself. The action's `allow-scripts` input is unset by default, so the fi
 `pull_request_target`, collaborator-pull-request and self-hosted workflows should pass
 `allow-scripts: false` explicitly. [Security](security.md) and [CI](ci.md) say so.
 
-### The bundle is `scripts/`, `references/`, `assets/` and nothing else
+### The bundle is every file the skill ships, never its eval files or secrets
 
-`SkillBundle` refuses any other first path component, so `*.eval.yaml` and `evals/` — the
-expected answers — are never readable by the agent. `listing()` also leaves out a symbolic
-link whose target resolves outside the root, so it never advertises a file `read` would
-refuse.
+A skill ships more than the three Agent Skills directories — planning-with-files tells the
+agent to copy `templates/task_plan.md` and links `reference.md` — and an install copies all
+of it, so measuring less would measure a different skill (issue #92). `bundle.withheld` is the
+one rule, shared by `SkillBundle`, product delivery and the `--baseline previous` extraction:
+the top-level `SKILL.md`, the `evals/`, `.git`, `.hg`, `.svn`, `node_modules`, `.venv` and `__pycache__` directories, and `*.eval.yaml`, `evals.json`, `.env`, `.env.*`, `.npmrc`, `.netrc`, `.pypirc` and `skill-lens.toml` files — **at any depth, compared case-insensitively** (macOS and Windows find
+`Evals/` as the loader's `evals/`). The expected answers never reach the agent, and neither
+does a secret or a dependency tree a skill at a repository root would otherwise carry.
+`bundle._shipped` is the one walk: withheld directories are pruned, a directory link is never
+descended, and a file counts only when it is a regular file, directly or through a link,
+resolving inside the skill onto a path not withheld itself — so a FIFO is never opened.
+`SkillBundle` checks the path asked for and the path it resolves to; product delivery writes
+exactly the files `delivered_paths` reports, reading through links and never copying one as a
+link, so a link to the skill's own directory delivers nothing; the baseline extraction drops a
+symlink member that is absolute, leaves the skill or lands on a withheld path. Past
+`MAX_BUNDLE_FILES` (1,000) or `MAX_BUNDLE_BYTES` (100 MB) the bundle is `BundleTooLarge`: exit
+2 in product preflight, a refusal the read tool returns, `BaselineUnavailable` for a previous
+bundle. `scripts()` walks only `scripts/`. `bundle.py` spells the eval file names itself
+(importing them would be a cycle) and a test keeps them equal to the loader's. Only
+`scripts/` is runnable.
 
 ### `Skill.bundle_root` defaults to `None`, and only the loader and the baseline resolver set it
 
@@ -1069,16 +1084,20 @@ The macOS profile allows by default, denies `network*` and `file-write*`, re-all
 under the workspace and scratch (and `file-write-data` on `/dev/null`), denies `file-read*`
 under the resolved system temporary directory, then re-allows reads under the workspace,
 scratch and the bundle; `bwrap` mounts an empty `tmpfs` over the temporary directory and
-binds the same three back in (the bundle read-only). The bundle must be re-allowed because a
-`--baseline previous` bundle is extracted *under* the temporary directory. On macOS a last
-rule allows `file-read-metadata` on each directory between the temporary directory and those
-three, as `literal`s, because BSD `mkdir -p "$PWD/x"` stats every parent; it is never
-emitted without a path, since an unfiltered rule would allow metadata everywhere, and it
-never allows a listing. What it does expose, and the docs say so, is the temporary
-directory's entry count and modification time, never a sibling's name or contents. The temp-dir
-denial is a `subpath`, not a regex: an escaped path in a regex literal would silently stop
-matching on any metacharacter — a fail-open the blanket `subpath` cannot have. Reads
-elsewhere are allowed; the docs say so rather than pretend otherwise.
+binds the same three back in (the bundle read-only), then remounts the `tmpfs` read-only. An
+empty `tmpfs` is still writable, so without the remount a write under the temporary
+directory would vanish with the mount instead of being refused, as `sandbox-exec` refuses
+it. The remount is not recursive, so the binds keep their own modes, and it comes after them
+because `bwrap` creates their mount points inside the `tmpfs`. The bundle must be re-allowed
+because a `--baseline previous` bundle is extracted *under* the temporary directory. On
+macOS a last rule allows `file-read-metadata` on each directory between the temporary
+directory and those three, as `literal`s, because BSD `mkdir -p "$PWD/x"` stats every
+parent; it is never emitted without a path, since an unfiltered rule would allow metadata
+everywhere, and it never allows a listing. What it does expose, and the docs say so, is the
+temporary directory's entry count and modification time, never a sibling's name or contents.
+The temp-dir denial is a `subpath`, not a regex: an escaped path in a regex literal would
+silently stop matching on any metacharacter — a fail-open the blanket `subpath` cannot have.
+Reads elsewhere are allowed; the docs say so rather than pretend otherwise.
 
 ### `bwrap` does not block Unix-domain sockets
 
@@ -1092,7 +1111,7 @@ A previous baseline carries its own bundle, extracted with `git archive <sha> --
 :(literal)<dir>` run from the repository root, where `<dir>` is the directory the skill had
 *at that commit* — after a move it no longer exists in the checkout, so there is nowhere to
 run `git archive <sha> -- .` from — and the `<dir>/` prefix stripped from every member
-(verified: `<sha>:./` gives an empty archive). It is then filtered to the three directories, with `tarfile`'s `data` filter — which is why
+(verified: `<sha>:./` gives an empty archive). It is then filtered by `bundle.withheld`, as the candidate's bundle is, with `tarfile`'s `data` filter — which is why
 `requires-python` is `>=3.11.4`, the release that added `filter=`. The commit is the one
 that last edited `SKILL.md` at the previous version — the version is the authority — so a
 bundle-only commit after it is invisible, and a very large historical `assets/` can hit the
@@ -1479,9 +1498,9 @@ newline-preserving read would push `\r\n` into the framework runners' system pro
 the loader stays as it is. Products honour frontmatter keys skill-lens does not model
 (`allowed-tools`, `disable-model-invocation`, `license`); a re-rendering would change the
 product's behaviour and the eval would measure the re-rendering. `deliver_skill` writes it
-with `newline=""` so no further translation changes a byte on the way out, and copies
-`scripts/`, `references/` and `assets/` beside it — those three and nothing else, so an eval
-file beside `SKILL.md` never reaches the product. The `--baseline none` skill has an empty
+with `newline=""` so no further translation changes a byte on the way out, and copies every
+file the skill ships beside it — all but what `bundle.withheld` names, so an eval file never
+reaches the product. The `--baseline none` skill has an empty
 `markdown`, so no directory is written for it: the rule is keyed on emptiness, not on which
 arm is running, the same rule `BASELINE_PREAMBLE` uses, so a runner never has to know which
 arm it is serving.

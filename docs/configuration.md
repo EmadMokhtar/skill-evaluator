@@ -246,7 +246,7 @@ for the judge, and [Security](security.md#product-runners) for what naming one m
 that executes it. It is off by default because a `SKILL.md` under evaluation is, by
 construction, code nobody has vetted, and skill-lens is built to run in CI — running that
 code is a decision the operator of the run states, never something an eval file can turn
-on. Reading the bundle (`references/`, `assets/`, `scripts/`) needs no opt-in.
+on. Reading the rest of what the skill ships (`references/`, `templates/`, …) needs no opt-in.
 
 With execution off, every discovered skill that bundles scripts is named on the report
 (`skill log-triage bundles 1 script; execution is off (allow_scripts = true or

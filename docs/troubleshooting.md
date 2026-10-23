@@ -192,7 +192,7 @@ the note, after the colon in the gate reason. Each one has a different fix.
 | `SKILL.md is not tracked by git` | The file exists but was never committed. Commit it. There is no earlier version until there is a first one. |
 | `cannot read <path>/SKILL.md: <the OS or decoding error>` | The working copy cannot be read: file permissions, or a file that is not UTF-8 text. |
 | `no earlier version of SKILL.md found in the last 50 commits` | Every one of the last 50 commits touching this `SKILL.md` carries the same `version:`, or the same content where there is no `version:`. Bump `version:` in the same commit as the edit. Quote it (`version: "1.2"`), because YAML reads an unquoted `1.20` and `1.2` as the same number — an unquoted two-part version is itself an exit-2 authoring error. |
-| `cannot archive commit <sha>` | `git archive` failed or passed its 10-second limit while fetching the previous version's bundled files. A very large `assets/` directory can do that. |
+| `cannot archive commit <sha>` | `git archive` failed or passed its 10-second limit while fetching the previous version's bundled files. A skill that ships very large files, or a `SKILL.md` at a repository root, can do that. |
 | `cannot extract the bundle at commit <sha>: <error>` | The archive would not unpack: a member failed the safe-extraction filter, or the filesystem refused. |
 
 `<sha>` is the first eight characters of the commit hash. Full detail is in
@@ -435,7 +435,7 @@ The reasons, verbatim:
 | `bwrap not found on PATH` | Linux, and bubblewrap is not installed |
 | `no sandbox backend on <system>` | There is no backend for this platform at all. Windows is the case you will meet |
 | `sandbox-exec probe failed: <detail>` | The backend is installed but would not run. `<detail>` is the first line of its standard error, or `exit <n>` when it printed nothing, or the operating-system error when it could not be started at all |
-| `bwrap probe failed: <detail>` | The same, in the same three shapes. On Linux the usual cause is that unprivileged user namespaces are disabled on the host |
+| `bwrap probe failed: <detail>` | The same, in the same three shapes. On Linux the usual cause is that unprivileged user namespaces are disabled on the host. A `bwrap` too old to accept `--tmpfs` or `--remount-ro` fails here too |
 | `temp directory path contains a double quote, which a sandbox-exec profile cannot express` | The temporary-directory path holds a `"`, which would break the profile's quoting. It fails closed rather than writing a profile it cannot trust |
 
 **What to do.** Pick one, knowingly:

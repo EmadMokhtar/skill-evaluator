@@ -36,7 +36,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from skill_lens.bundle import BUNDLE_DIRS
+from skill_lens.bundle import BundleTooLarge, bundle_files
 from skill_lens.models import ArtifactGlob, EvalCase, ProductStatus, RunResult, Skill
 from skill_lens.paths import glob_entries, glob_matches_path
 from skill_lens.process import group_kwargs, read_capped_handle, reap_and_kill_group
@@ -325,22 +325,25 @@ def delivered_paths(skill: Skill, skills_dir: str) -> list[str]:
     """Every file `deliver_skill` writes for `skill`, relative to the working directory.
 
     The same rule as `deliver_skill`: nothing for a skill with no markdown,
-    else `SKILL.md` and the files of the three bundle directories.
+    else `SKILL.md` and every file the skill ships (`bundle.bundle_files`).
     """
     if not skill.markdown:
         return []
     base = PurePosixPath(skills_dir) / skill.name
-    paths = [(base / SKILL_FILENAME).as_posix()]
-    if skill.bundle_root is not None:
-        for name in BUNDLE_DIRS:
-            source = skill.bundle_root / name
-            if source.is_dir():
-                paths += [
-                    (base / name / item.relative_to(source).as_posix()).as_posix()
-                    for item in sorted(source.rglob("*"))
-                    if item.is_file()
-                ]
-    return paths
+    return [(base / SKILL_FILENAME).as_posix()] + [
+        (base / relative).as_posix() for relative in _shipped_files(skill)
+    ]
+
+
+def _shipped_files(skill: Skill) -> list[str]:
+    """`bundle.bundle_files` for the skill, or `ProductSetupError` past the cap:
+    exit 2 from preflight, `RunResult.error` from a run."""
+    if skill.bundle_root is None:
+        return []
+    try:
+        return bundle_files(skill.bundle_root)
+    except BundleTooLarge as exc:
+        raise ProductSetupError(f"skill {skill.name!r}: {exc}") from exc
 
 
 def _reaches_delivered(case: EvalCase, delivered: list[str]) -> str | None:
@@ -376,10 +379,14 @@ def deliver_skill(skill: Skill, cwd: Path, skills_dir: str) -> bool:
     endings are normalised (the loader reads the file in text mode, so a
     `\\r\\n` in the source is already a bare `\\n` by the time it reaches here)
     -- `newline=""` so no platform's text-mode translation turns that `\\n`
-    back into a `\\r\\n` on the way out; beside it go `scripts/`, `references/`
-    and `assets/` from the bundle -- those three and nothing else, so an eval
-    file beside `SKILL.md` never reaches the product. Symlinks are copied as
-    symlinks, as `git archive` preserved them.
+    back into a `\\r\\n` on the way out; beside it goes every file the skill
+    ships, as an install copies it (issue #92), except what `bundle.withheld`
+    names -- the on-disk `SKILL.md`, the eval files, version control,
+    dependency directories and secret files, at any depth --
+    so an eval file never reaches the product. Exactly the regular files
+    `delivered_paths` reports are written, each read through any link: a link
+    is never copied as a link, so one to the skill's own directory or out of
+    it delivers nothing, and a FIFO is never opened.
 
     `skill.name` is checked here, not trusted from the caller: under
     `--baseline previous` it comes from a historical `SKILL.md`'s
@@ -390,14 +397,14 @@ def deliver_skill(skill: Skill, cwd: Path, skills_dir: str) -> bool:
     if not skill.markdown:
         return False
     _check_skill_name(skill.name)
+    files = _shipped_files(skill)
     target = cwd / skills_dir / skill.name
     target.mkdir(parents=True, exist_ok=True)
     (target / SKILL_FILENAME).write_text(skill.markdown, encoding="utf-8", newline="")
-    if skill.bundle_root is not None:
-        for name in BUNDLE_DIRS:
-            source = skill.bundle_root / name
-            if source.is_dir():
-                shutil.copytree(source, target / name, symlinks=True, dirs_exist_ok=True)
+    for relative in files:
+        destination = target / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(skill.bundle_root / relative, destination)
     return True
 
 

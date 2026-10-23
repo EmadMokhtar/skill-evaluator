@@ -33,8 +33,10 @@ class Skill(BaseModel):
     `variant` says which arm of a comparative run this copy belongs to; the
     orchestrator sets it, and `FakeRunner` scripts against it.
 
-    `bundle_root` is the directory whose `scripts/`, `references/` and `assets/`
-    the agent may read -- None when the skill ships none. Only the skill
+    `bundle_root` is the directory whose files the agent may read -- every file
+    the skill ships except what `bundle.withheld` names (`SKILL.md`, its eval
+    files, version control, dependency directories, secret files) -- None when
+    the skill ships none. Only the skill
     loader and the baseline resolver ever set it, so a Skill built by hand
     and the `--baseline none` skill both carry no bundle by default: keying
     the bundle tools on `path` instead would leak the candidate's scripts into

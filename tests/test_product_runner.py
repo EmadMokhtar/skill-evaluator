@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -18,7 +19,9 @@ from skill_lens.runners.product import (
     Invocation,
     Product,
     ProductRunner,
+    ProductSetupError,
     deliver_skill,
+    delivered_paths,
     read_trace,
 )
 from skill_lens.runners.traces import parse_claude_code, parse_copilot
@@ -137,7 +140,7 @@ def test_the_presets_are_the_verified_spellings():
 # --- delivery ---
 
 
-def test_deliver_skill_writes_the_markdown_verbatim_and_the_three_bundle_dirs_only(tmp_path):
+def test_deliver_skill_writes_the_markdown_verbatim_and_the_bundle(tmp_path):
     skill = _skill(tmp_path, bundle=True)
     cwd = tmp_path / "cwd"
     cwd.mkdir()
@@ -149,6 +152,94 @@ def test_deliver_skill_writes_the_markdown_verbatim_and_the_three_bundle_dirs_on
         "references/notes.md",
         "scripts/count.py",
     ]  # the eval file beside SKILL.md is never delivered
+
+
+def test_deliver_skill_writes_every_shipped_file_but_no_eval_file(tmp_path):
+    """Issue #92: templates/ and reference.md reach the product, as an install
+    copies them; eval files at any depth, .git and the on-disk SKILL.md do not
+    -- SKILL.md is the skill's markdown, which a baseline takes from git."""
+    root = tmp_path / "ping"
+    files = {
+        "SKILL.md": "on disk, not delivered",
+        "reference.md": "ref",
+        "templates/plan.md": "plan",
+        "references/notes.md": "notes",
+        "ping.eval.yaml": "cases: []",
+        "evals/cases.yaml": "cases: []",
+        "references/deep/x.eval.yaml": "cases: []",
+        "assets/evals.json": "{}",
+        ".git/HEAD": "ref: refs/heads/main",
+    }
+    for relative, content in files.items():
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (root / relative).write_text(content, encoding="utf-8")
+    skill = _skill(tmp_path).model_copy(update={"bundle_root": root.resolve()})
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    assert deliver_skill(skill, cwd, ".agents/skills") is True
+    target = cwd / ".agents" / "skills" / "ping"
+    shipped = ["SKILL.md", "reference.md", "references/notes.md", "templates/plan.md"]
+    assert sorted(p.relative_to(target).as_posix() for p in target.rglob("*") if p.is_file()) == (
+        shipped
+    )
+    assert (target / "SKILL.md").read_text(encoding="utf-8") == SKILL_MD
+    assert delivered_paths(skill, ".agents/skills") == [
+        f".agents/skills/ping/{relative}" for relative in shipped
+    ]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks and FIFOs need POSIX")
+def test_deliver_skill_writes_regular_files_only_and_exactly_what_it_reports(tmp_path):
+    """No link is copied as a link: one onto a shipped file is written as that
+    file, one to the skill's own directory or out of it is not delivered, and
+    a FIFO is never opened. So `delivered_paths` is exactly what lands."""
+    import threading
+
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside", encoding="utf-8")
+    root = tmp_path / "ping"
+    (root / "references").mkdir(parents=True)
+    (root / "SKILL.md").write_text("on disk", encoding="utf-8")
+    (root / "reference.md").write_text("ref", encoding="utf-8")
+    (root / "references" / "alias.md").symlink_to(root / "reference.md")
+    (root / "references" / "self").symlink_to(root, target_is_directory=True)
+    (root / "references" / "out.md").symlink_to(outside)
+    (root / "evals").mkdir()
+    (root / "evals" / "cases.yaml").write_text("cases: []", encoding="utf-8")
+    os.mkfifo(root / "pipe")
+    skill = _skill(tmp_path).model_copy(update={"bundle_root": root.resolve()})
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+
+    worker = threading.Thread(target=deliver_skill, args=(skill, cwd, ".agents/skills"))
+    worker.start()
+    worker.join(timeout=10)
+    assert not worker.is_alive(), "delivery blocked on the FIFO"
+
+    target = cwd / ".agents" / "skills" / "ping"
+    written = sorted(
+        p.relative_to(cwd).as_posix() for p in target.rglob("*") if p.is_file() or p.is_symlink()
+    )
+    assert (
+        written
+        == delivered_paths(skill, ".agents/skills")
+        == [
+            ".agents/skills/ping/SKILL.md",
+            ".agents/skills/ping/reference.md",
+            ".agents/skills/ping/references/alias.md",
+        ]
+    )
+    alias = target / "references" / "alias.md"
+    assert not alias.is_symlink() and alias.read_text(encoding="utf-8") == "ref"
+
+
+def test_a_bundle_over_the_cap_fails_product_preflight(tmp_path, monkeypatch):
+    from skill_lens import bundle as bundle_module
+
+    monkeypatch.setattr(bundle_module, "MAX_BUNDLE_FILES", 1)
+    skill = _skill(tmp_path, bundle=True)
+    with pytest.raises(ProductSetupError, match="the cap is 1"):
+        ProductRunner(_product()).preflight([skill], {"ping": []})
 
 
 def test_deliver_skill_writes_nothing_for_a_skill_with_no_markdown(tmp_path):
