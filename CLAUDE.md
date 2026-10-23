@@ -594,6 +594,11 @@ fails if the two drift apart — so a new invariant is added in both places or n
   product-reported failure, truncated trace, over-size prompt, missing executable at run
   time and a delivery `ProductSetupError` are all `RunResult.error`;
   `ProductSetupError` propagates only from `preflight`, where `cli.py` makes it exit 2.
+- **An errored product run keeps the spend its trace reported.** `ProductRunner.run` returns
+  one `spend` mapping (tokens, `cost_usd`, `cost_note`, `usage_note`, model) on an errored
+  result exactly as on a clean one, and `ProductJudge.judge` does the same on a failed judge
+  run: a run stopped by `--max-budget-usd` still spent it, and the report's totals read every
+  outcome. The case stays errored and no evaluator reads it.
 - **`ProductRunner.run` still never raises** once the bridge exists: a bridge directory that
   cannot be written, and a `tools:` case reaching a product with no `mcp` (a caller that
   skipped preflight), are both `RunResult.error`.

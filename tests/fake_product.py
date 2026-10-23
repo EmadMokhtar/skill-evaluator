@@ -12,6 +12,7 @@ says:
   exit3    print "boom" to stderr, exit 3
   garbage  print text that is no JSON at all, exit 0
   huge     print the trace, then FAKE_PRODUCT_BYTES bytes of "x", exit 0
+  failed   print the trace, exit 1 -- how a product ends a run it reports as failed
 
 `--version` as the first argument prints "fake 1.2.3" and exits 0, or exits 1
 when FAKE_PRODUCT_VERSION_FAILS is set. Nothing here touches the network.
@@ -152,7 +153,7 @@ def main(argv: list[str]) -> int:
     sys.stdout.flush()
     if mode == "stall":
         time.sleep(60)
-    return 0
+    return 1 if mode == "failed" else 0
 
 
 if __name__ == "__main__":
