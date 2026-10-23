@@ -25,6 +25,7 @@ from skill_lens.models import (
     AssertionSpec,
     BudgetSpec,
     EvalCase,
+    HookRun,
     JudgeSpec,
     RunResult,
     Skill,
@@ -242,6 +243,23 @@ def test_tool_calls_are_every_sessions_in_order():
         ["a", "b"],
     )
     assert [call.name for call in merged.tool_calls] == ["write_file", "read_file", "list_files"]
+
+
+def test_hooks_are_every_sessions_in_order():
+    # A hook that failed in an earlier session is still part of the case.
+    merged = merge_results(
+        [
+            RunResult(
+                hooks=[HookRun(name="PostToolUse:Write", event="PostToolUse", outcome="error")]
+            ),
+            RunResult(hooks=[HookRun(name="Stop", event="Stop", outcome="success")]),
+        ],
+        ["a", "b"],
+    )
+    assert [(hook.name, hook.outcome) for hook in merged.hooks] == [
+        ("PostToolUse:Write", "error"),
+        ("Stop", "success"),
+    ]
 
 
 def test_the_transcript_marks_where_each_session_starts():

@@ -155,11 +155,14 @@ PRESETS: dict[str, Product] = {
     ),
     "claude-code": Product(
         name="claude-code",
-        # --verbose is what stream-json needs in print mode. --setting-sources
-        # project and --strict-mcp-config keep the user's own hooks, plugins
-        # and MCP servers out of the eval (verified: the project skill is
-        # still discovered and OAuth still works); --no-session-persistence
-        # writes nothing under ~/.claude.
+        # --verbose is what stream-json needs in print mode.
+        # --include-hook-events writes a `hook_response` event for every hook
+        # the skill declares, not only SessionStart's (verified against
+        # 2.1.289: the flag only turns those events on; the `result` event is
+        # unchanged). --setting-sources project and --strict-mcp-config keep
+        # the user's own hooks, plugins and MCP servers out of the eval
+        # (verified: the project skill is still discovered and OAuth still
+        # works); --no-session-persistence writes nothing under ~/.claude.
         argv=(
             "claude",
             "-p",
@@ -167,6 +170,7 @@ PRESETS: dict[str, Product] = {
             "--output-format",
             "stream-json",
             "--verbose",
+            "--include-hook-events",
             "--dangerously-skip-permissions",
             "--setting-sources",
             "project",
@@ -589,7 +593,15 @@ class ProductRunner:
             # Errored, but the product may still have spent: a run stopped by
             # its own budget reports what it cost. Dropping that would make
             # every total under-count by exactly the runs that cost the most.
-            return RunResult(error=trace.error, latency_ms=elapsed(), **spend)
+            # A complete trace keeps its hooks too: a hook that kept blocking
+            # the model is often why the product gave up. A trace that ended
+            # early keeps none, because it is never a partial parse.
+            return RunResult(
+                error=trace.error,
+                latency_ms=elapsed(),
+                hooks=list(trace.hooks) if trace.complete else [],
+                **spend,
+            )
         return RunResult(
             output=trace.output,
             tool_calls=(
@@ -597,6 +609,7 @@ class ProductRunner:
                 if bridge is not None
                 else list(trace.tool_calls)
             ),
+            hooks=list(trace.hooks),
             transcript=list(trace.transcript),
             latency_ms=elapsed(),
             **spend,

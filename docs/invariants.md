@@ -845,7 +845,8 @@ the case, and no later session runs — it would build on a state the case never
 test, and every session is paid for. `sessions.merge_results` names the session
 (`session 2 of 3: ...`) and keeps the spend of every session that ran. The evaluators read
 one merged `RunResult`: the last session's output, every session's tool calls in order (so
-`forbidden:` and `max_calls` cannot miss an earlier session), the summed tokens, cost and
+`forbidden:` and `max_calls` cannot miss an earlier session), every session's hooks in
+order, the summed tokens, cost and
 latency, and every distinct `cost_note` / `usage_note` — one unmeasured session leaves the
 total unmeasured, so a declared limit fails as not evaluated rather than passing on a
 partial sum. `trajectory.skill_triggered` must hold in every session, read from
@@ -1783,3 +1784,20 @@ is built from the same `Product` but never writes a bridge: it grades with no to
 A bridge directory that cannot be written is `OSError` → `RunResult.error`; a runner reached
 with `tools:` and no `mcp` (a caller that skipped preflight) returns an errored result
 rather than running the case without its tools.
+
+### A hook is reported, never judged
+
+`RunResult.hooks` is every `hook_response` event a `claude-code` run reported, in order. The
+`outcome` is the product's own word, kept as written: any word but `success` is a failed
+hook, so a word a later version adds is shown, never refused. `cancelled` is a hook stopped
+by its own timeout or by an interrupted run, never one stopped by a normal end of run
+(verified in the 2.1.289 binary). A `hook_response` with no string name or outcome is
+skipped (the transcript keeps it); a missing event is empty, because the name carries it.
+No evaluator reads `hooks`, so a hook that failed never fails, errors or passes a case by
+itself; it shows in the failure excerpt of a case that is not passing for another reason,
+through `FailureContext`, so the three reporters show it alike. An errored run keeps its
+hooks only when its trace is complete (its `result` event was seen), because a hook that
+kept blocking the model is often why the product gave up; a trace that ended early reports
+none, because a truncated trace is never a partial parse. The preset's
+`--include-hook-events` only turns the `hook_*` events on (verified against Claude Code
+2.1.289); the `result` event the run is read from is unchanged.

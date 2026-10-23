@@ -207,6 +207,20 @@ fact about a failed assertion. Tool-call argument values are cut at 80 character
 list at 20 calls, with a `… +N more calls` count. `--full-output` (or `full_output = true` in
 [`skill-lens.toml`](configuration.md)) lifts the output cap.
 
+Under the `claude-code` runner, a skill's [hooks](runners.md#hooks-under-claude-code) that did
+not report `success` follow, under `failed hooks:` — each with its outcome, its exit code
+when it had one, and its stderr then its stdout, each on one line. A stream is cut at 200
+characters, never silently — the cut states the count, as the output's does — and
+`--full-output` lifts that cap too:
+
+```
+        failed hooks:
+            PostToolUse:Write error (exit code 127): stderr="check-complete.sh: line 4: jq: command not found"
+```
+
+The list stops at 10, with a `… +N more failed hooks` count; a hook that succeeded is not
+listed. The JSON report's `hooks` keeps every hook in full.
+
 Only **non-passing candidate** outcomes are expanded. Passing cases stay one line, and
 baseline outcomes are never expanded — they are not the verdict; the delta block is. The
 Markdown report renders the same excerpt in fenced blocks inside its failures section, and
@@ -249,6 +263,13 @@ JSON even though the console collapses them to one line per case.
 declared no `workspace:` block at all. It is never a path to a directory that has already
 been deleted: the field is cleared at the same moment the directory is, so it can never be
 a stale pointer in the report.
+
+`outcomes[].hooks` lists every lifecycle hook the run reported, in order, each as `{name,
+event, outcome, exit_code, stdout, stderr}` — `exit_code` is `null` when the hook had none.
+Only a `claude-code` run reports hooks, and an errored one only when its trace reached its
+`result` event (see [Hooks under Claude Code](runners.md#hooks-under-claude-code)); every
+other outcome has `[]`. No check reads them,
+so they never change a status or the exit code.
 
 `outcomes[].cost_note` and `outcomes[].usage_note` say why `cost_usd` or a token count is
 `0` rather than measured — an unpriced model, a product that bills per request rather than

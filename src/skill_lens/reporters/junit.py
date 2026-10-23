@@ -18,6 +18,7 @@ from skill_lens.reporters.failure_context import (
     cut_note,
     failure_context,
     more_calls_note,
+    more_hooks_note,
 )
 
 # XML 1.0 forbids most control characters outright -- a document containing one
@@ -50,7 +51,7 @@ def _message(body: str) -> str:
 
 
 def _context_lines(outcome: CaseOutcome, output_limit: int | None) -> list[str]:
-    """The output and tool calls, as plain lines appended to a body."""
+    """The output, tool calls and failed hooks, as plain lines appended to a body."""
     context = failure_context(outcome, limit=output_limit)
     if context is None:
         return []
@@ -62,12 +63,17 @@ def _context_lines(outcome: CaseOutcome, output_limit: int | None) -> list[str]:
         lines.extend(context.tool_calls)
         if context.more_calls:
             lines.append(more_calls_note(context))
+    if context.failed_hooks:
+        lines.append("failed hooks:")
+        lines.extend(context.failed_hooks)
+        if context.more_hooks:
+            lines.append(more_hooks_note(context))
     return lines
 
 
 def _failure_body(outcome: CaseOutcome, output_limit: int | None) -> str:
     """Why this case failed: each failing evaluator, then each failing check,
-    then the agent's output and tool calls.
+    then the agent's output, tool calls and failed hooks.
 
     `no evidence given` matches the console reporter deliberately -- a check
     that passed on nothing is the judge's characteristic failure mode, and a
@@ -89,7 +95,7 @@ def _failure_body(outcome: CaseOutcome, output_limit: int | None) -> str:
 
 def _error_body(outcome: CaseOutcome, output_limit: int | None) -> str:
     """Why this case errored -- from the runner, or from an evaluator --
-    then the agent's output and tool calls.
+    then the agent's output, tool calls and failed hooks.
 
     `errored` covers both: a runner that blew up, and an evaluator that did
     (a judge endpoint returning 500). Only the runner sets `RunResult.error`,

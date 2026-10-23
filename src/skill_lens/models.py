@@ -70,6 +70,34 @@ class ToolCall(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class HookRun(BaseModel):
+    """One lifecycle hook a product ran, as its trace reported it.
+
+    `name` is the product's spelling (`PreToolUse:Write`: the event, then the
+    matcher when the hook declared one); `event` is empty when the product did
+    not report one. `outcome` is the product's own word, kept as written:
+    Claude Code 2.1.289 writes `success`, `error` (any non-zero exit,
+    including a deliberate block with exit code 2) or `cancelled` (the hook
+    was stopped before it finished: its own timeout ran out, or the run was
+    interrupted; never at a normal end of run). A later version may add a
+    word, and a hook that did not report `success` is shown as failed rather
+    than refused. `exit_code` is None when the hook reported none.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    event: str
+    outcome: str
+    exit_code: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+
+    @property
+    def failed(self) -> bool:
+        return self.outcome != "success"
+
+
 class CheckResult(BaseModel):
     """One rubric check's verdict, with the evidence that supports it.
 
@@ -149,6 +177,9 @@ class RunResult(BaseModel):
     tokens what `cost_note` is to cost: `BudgetEvaluator` refuses to evaluate
     `max_tokens` against a zero it knows is not a measurement.
 
+    `hooks` are the lifecycle hooks a product reported running, in order;
+    empty for a runner whose trace has none (every framework runner).
+
     `skill_triggered_by_session` is each session's own `skill_triggered`, in
     order, for a `sessions:` case in `mode: offered`; empty otherwise. Set by
     `sessions.merge_results`, never by a runner. `skill_triggered` is then
@@ -161,6 +192,7 @@ class RunResult(BaseModel):
 
     output: str = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
+    hooks: list[HookRun] = Field(default_factory=list)
     transcript: list[dict[str, Any]] = Field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0

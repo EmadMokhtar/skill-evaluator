@@ -9,6 +9,7 @@ from skill_lens.models import (
     CaseOutcome,
     CheckResult,
     EvalScore,
+    HookRun,
     ProductStatus,
     RunReport,
     RunResult,
@@ -17,6 +18,7 @@ from skill_lens.models import (
     ToolCall,
 )
 from skill_lens.reporters.console import render_console
+from skill_lens.reporters.failure_context import HOOK_LIMIT
 from skill_lens.reporters.json_reporter import render_json
 
 
@@ -890,3 +892,71 @@ def test_json_carries_the_products():
     report = _report().model_copy(update={"products": [_PRODUCT]})
     assert json.loads(render_json(report))["products"] == [_PRODUCT.model_dump()]
     assert json.loads(render_json(_report()))["products"] == []
+
+
+_HOOKS = [
+    HookRun(name="UserPromptSubmit", event="UserPromptSubmit", outcome="success"),
+    HookRun(
+        name="PostToolUse:Write",
+        event="PostToolUse",
+        outcome="error",
+        exit_code=127,
+        stderr="jq: command not found",
+    ),
+]
+
+
+def _hooked_report(hooks):
+    return RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="plan",
+                case_name="writes a plan",
+                runner="claude-code",
+                status="failed",
+                scores=[EvalScore(evaluator="assertion", passed=False, detail="nope")],
+                result=RunResult(output="done", hooks=hooks),
+            )
+        ]
+    )
+
+
+def test_failed_hooks_are_listed_under_the_tool_calls_and_omitted_when_none():
+    text = render_console(_hooked_report(_HOOKS))
+    assert (
+        "        failed hooks:\n"
+        '            PostToolUse:Write error (exit code 127): stderr="jq: command not found"'
+    ) in text
+    assert "UserPromptSubmit" not in text
+    assert "failed hooks:" not in render_console(_hooked_report(_HOOKS[:1]))
+
+
+def test_failed_hooks_beyond_the_cap_are_counted_in_the_console():
+    hooks = [_HOOKS[1]] * (HOOK_LIMIT + 2)
+    assert "            … +2 more failed hooks" in render_console(_hooked_report(hooks))
+
+
+def test_json_carries_every_hook_per_outcome():
+    # Every hook, not only the failed ones: "did the hook fire" is a question
+    # about the ones that succeeded too.
+    data = json.loads(render_json(_hooked_report(_HOOKS)))
+    assert data["outcomes"][0]["hooks"] == [hook.model_dump() for hook in _HOOKS]
+    assert data["outcomes"][0]["hooks"][1] == {
+        "name": "PostToolUse:Write",
+        "event": "PostToolUse",
+        "outcome": "error",
+        "exit_code": 127,
+        "stdout": "",
+        "stderr": "jq: command not found",
+    }
+
+
+def test_json_hooks_are_empty_for_an_outcome_without_a_result():
+    report = RunReport(
+        outcomes=[
+            CaseOutcome(
+                skill_name="pdf", case_name="x", runner="fake", status="errored", result=None
+            )
+        ]
+    )
+    assert json.loads(render_json(report))["outcomes"][0]["hooks"] == []

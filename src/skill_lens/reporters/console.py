@@ -10,6 +10,7 @@ from skill_lens.reporters.failure_context import (
     cut_note,
     failure_context,
     more_calls_note,
+    more_hooks_note,
 )
 
 _MARKS = {"passed": "PASS", "failed": "FAIL", "errored": "ERROR"}
@@ -208,6 +209,11 @@ def _context_lines(outcome: CaseOutcome, output_limit: int | None) -> list[str]:
         lines.extend(f"{_DEEPER}{call}" for call in context.tool_calls)
         if context.more_calls:
             lines.append(f"{_DEEPER}{more_calls_note(context)}")
+    if context.failed_hooks:
+        lines.append(f"{_INDENT}failed hooks:")
+        lines.extend(f"{_DEEPER}{hook}" for hook in context.failed_hooks)
+        if context.more_hooks:
+            lines.append(f"{_DEEPER}{more_hooks_note(context)}")
     return lines
 
 
