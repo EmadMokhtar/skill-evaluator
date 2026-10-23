@@ -174,6 +174,27 @@ def _artifacts(spec: JudgeSpec, result: RunResult) -> dict[str, str]:
     return artifacts
 
 
+def _task_text(case: EvalCase) -> str:
+    """What the judge is told the assistant was asked.
+
+    A `sessions:` case is graded on the last session's response and the files
+    after it, so the judge needs every session's task and the fact that each
+    session started fresh -- otherwise a response that rightly continues
+    earlier work reads as one that ignored its task.
+    """
+    if case.sessions is None:
+        return case.task or ""
+    count = len(case.sessions)
+    sessions = "\n\n".join(
+        f"Session {position}:\n{text}" for position, text in enumerate(case.sessions, start=1)
+    )
+    return (
+        f"This work ran as {count} separate sessions that shared one workspace. Each "
+        f"session started fresh; only the files carried over. The response below is the "
+        f"last session's.\n\n{sessions}"
+    )
+
+
 def build_request(case: EvalCase, result: RunResult) -> JudgeRequest:
     """Turn a case's judge block into a request, numbering the rubric r1..rN.
 
@@ -182,10 +203,11 @@ def build_request(case: EvalCase, result: RunResult) -> JudgeRequest:
     model happened to emit them in.
     """
     spec = case.judge
+    task = _task_text(case)
     if spec is None:
-        return JudgeRequest(task=case.task, output=result.output)
+        return JudgeRequest(task=task, output=result.output)
     return JudgeRequest(
-        task=case.task,
+        task=task,
         output=result.output,
         expected=spec.expected,
         checks=[

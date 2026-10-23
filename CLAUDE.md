@@ -381,6 +381,20 @@ fails if the two drift apart — so a new invariant is added in both places or n
   directory.
 - **Every work item gets its own workspace, and two arms never share one.** `mkdtemp` is
   atomic; a shared directory would let the baseline arm read the candidate's output.
+- **`task:` and `sessions:` are exclusive, and `sessions:` needs a `workspace:` and at least
+  two entries.** `EvalCase._one_prompt`, so a case built in code is refused too; exit 2 at
+  load time. Without a workspace nothing carries over, and the sessions would be unrelated
+  tasks scored on the last.
+- **The sessions of one work item share its workspace, and nothing else carries over.**
+  Created once before the first session, deleted once after scoring; each session is a fresh
+  `Runner.run` with a copy of the case whose `task` is that session's text (fresh tools, the
+  skill delivered again). A runner never sees `sessions:`; a `task:` case makes one call with
+  the case object itself.
+- **A multi-session case is one outcome: an errored session errors it and stops the rest,
+  and every evaluator reads the merged result.** `sessions.merge_results`: the last
+  session's output, every session's tool calls in order, summed spend (kept on error), every
+  distinct `cost_note` / `usage_note`, `skill_triggered` when any session loaded the skill,
+  and `session k of n: ` on the error.
 - **The workspace preamble is byte-identical in both arms and never names the skill** —
   otherwise `--min-delta` measures the preamble instead of the skill.
 - **`RunResult.workspace` is non-null only while the directory exists, and the orchestrator
@@ -488,8 +502,8 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **A sequence repeats its last entry once used up** — the steady state a skill that keeps
   calling should see, with `trajectory.max_calls` as the check for a loop that should have
   stopped. The counter lives in the built tool, never on the runner (`build_mock_tool` keeps
-  a locked counter in a closure), so each arm, attempt and work item starts from the top and
-  parallel calls from one model turn each consume one entry.
+  a locked counter in a closure), so each arm, attempt, session and work item starts from the
+  top and parallel calls from one model turn each consume one entry.
 - **A retried attempt gets fresh tools.** Both keyed adapters build the agent *inside* the
   retried callable, or a transient 429 would hand the retry's first call the second entry.
 - **A lookup entry that could never answer a call is an authoring error** (exit 2, load time,

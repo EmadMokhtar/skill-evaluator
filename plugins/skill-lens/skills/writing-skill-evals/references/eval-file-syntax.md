@@ -9,7 +9,8 @@ vacuously.
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `name` | yes | Case name, shown in reports |
-| `task` | yes | The prompt handed to the runner |
+| `task` | one of the two | The prompt handed to the runner |
+| `sessions` | one of the two | Several prompts, each a fresh session in one shared workspace |
 | `assertions` | no | Output checks; a case with none passes vacuously |
 | `tools` | no | Mock tools the agent may call |
 | `trajectory` | no | Which tools must and must not have been called, in what order, and with what arguments |
@@ -45,6 +46,27 @@ name them like any other tool:
     trajectory:
       called: [read_file, write_file]
 ```
+
+## Sessions
+
+`sessions:` replaces `task:` for a skill that claims a fresh session can pick up from files
+an earlier one wrote. Each entry is a fresh runner call — no conversation history — against
+the same workspace, and the case is scored once, after the last session:
+
+```yaml
+    sessions:
+      - Plan the migration and do the first phase only, then stop.
+      - Continue the migration from where it stopped.
+    workspace: {}
+```
+
+- `task:` and `sessions:` are exclusive. `sessions:` needs at least two entries and a
+  `workspace:` block, or the run stops with exit 2.
+- Assertions and the judge read the last session's output and the files after it.
+  `trajectory:` reads every session's tool calls, in order. `budget:` limits the sum.
+- An errored session errors the case, and the sessions after it do not run.
+- Do not seed the files the skill should have written: a hand-written file tests reading,
+  not resuming.
 
 ## Assertion kinds
 
