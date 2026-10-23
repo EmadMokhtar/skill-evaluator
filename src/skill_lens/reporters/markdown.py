@@ -304,7 +304,8 @@ def _low_signal(delta: Delta) -> str:
         "",
     ]
     body.extend(
-        f"- {_code(c.skill_name)} :: {_code(c.case_name)} ({_code(c.runner)}): {_code(c.check_id)}"
+        f"- {_code(c.skill_name)} :: {_code(c.case_name)} ({_escape(c.runner)}): "
+        f"{_code(c.check_id)}"
         for c in delta.low_signal
     )
     body.extend(["", _ADVISORY])
@@ -316,7 +317,7 @@ def _high_variance(delta: Delta) -> str:
         return ""
     body = ["Repetitions disagreed — often a sign of ambiguous skill instructions.", ""]
     body.extend(
-        f"- {_code(r.skill_name)} :: {_code(r.case_name)} ({_code(r.runner)}, {r.arm}): "
+        f"- {_code(r.skill_name)} :: {_code(r.case_name)} ({_escape(r.runner)}, {r.arm}): "
         f"{r.pass_rate:.0%}, stddev {r.stddev:.2f}"
         for r in delta.high_variance
     )

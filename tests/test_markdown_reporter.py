@@ -204,9 +204,10 @@ def test_markdown_names_the_runner_on_every_flag_line():
         repeat=2,
     )
     text = render_markdown(report, delta=build_delta(report))
+    # Plain text in the parentheses, the way the Markdown case line prints it.
     for runner in ("claude-code", "pydantic-ai"):
-        assert f"- `pdf` :: `extracts` (`{runner}`): `contains:pdf`" in text
-        assert f"- `pdf` :: `extracts` (`{runner}`, candidate): 50%, stddev 0.50" in text
+        assert f"- `pdf` :: `extracts` ({runner}): `contains:pdf`" in text
+        assert f"- `pdf` :: `extracts` ({runner}, candidate): 50%, stddev 0.50" in text
 
 
 def test_high_variance_cases_are_reported():

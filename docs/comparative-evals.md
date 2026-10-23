@@ -245,7 +245,7 @@ High-variance cases (repetitions disagreed — often ambiguous instructions):
 ```
 
 In the JSON report, every `delta.low_signal[]` and `delta.high_variance[]` entry carries a
-`runner` field for the same reason.
+`runner` field; the high-variance entries always had one, and the low-signal entries now do.
 
 Both are reported for visibility so a suite's weak spots are named, but **neither ever fails
 the gate**. A flag that could block a merge for "this assertion is weak" trains people to

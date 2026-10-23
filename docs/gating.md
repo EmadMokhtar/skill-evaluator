@@ -265,7 +265,8 @@ from the run's own cost line.
 
 `delta` is the full comparison object — pass-rate, token, cost and latency deltas, per-case
 stats, low-signal checks, high-variance cases and notes — and is `null` when no baseline arm
-ran. `baseline_notes` lists why a skill's or case's baseline was skipped or unavailable.
+ran. Every `delta.low_signal[]` and `delta.high_variance[]` entry names its `runner`, so one
+case flagged under two runners appears once per runner. `baseline_notes` lists why a skill's or case's baseline was skipped or unavailable.
 `summary.baseline_errored` counts errored baseline repetitions apart from `summary.errored`,
 which is candidate-only, for the same reason the gate itself only reads the candidate arm
 (above): an errored baseline invalidates that case's delta, it does not mean the skill broke.
