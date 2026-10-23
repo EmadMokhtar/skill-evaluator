@@ -83,10 +83,11 @@ reaches it, no new case starts: cases already running finish and are scored, eve
 is reported as not run, and the gate fails. Unset, the default, means no ceiling, so
 upgrading never stops a run on its own. It must be a positive, finite amount; `0`, a negative
 number, `inf` and `nan` are config errors (exit 2), because a ceiling of zero would run
-nothing and one of infinity is no ceiling. Spend that cannot be priced stops the run as well,
-so leave it unset for a provider `genai-prices` cannot price and for `copilot`, which bills
-per premium request rather than in dollars. The whole rule, and how it meets `--concurrency`,
-is in [The spend ceiling](gating.md#the-spend-ceiling).
+nothing and one of infinity is no ceiling. A ceiling must be able to see what is spent, so a
+run with a `copilot` or `cli` runner or judge, or a keyed one whose model has no price, is
+refused before it starts (exit 2), and spend that turns out unpriced during a run stops it.
+The whole rule, and how it meets `--concurrency`, is in
+[The spend ceiling](gating.md#the-spend-ceiling).
 
 ```toml
 max_spend_usd = 5.00

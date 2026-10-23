@@ -45,6 +45,7 @@ This list is complete. It follows `_AUTHORING_ERRORS` and the `typer.BadParamete
 - `--repeat`, `--concurrency` or `--markdown-max-chars` below `1`, or
   `--markdown-max-chars` without `--markdown-output`.
 - `--min-delta` without `--baseline` (see [below](#gating-on-the-delta-min-delta)).
+- A `--max-spend` that is not a positive, finite amount (`0`, negative, `inf`, `nan`).
 - A `--model` or `--judge-model` that resolves to blank, or an invalid `--base-url`.
 - A `--model`, `--base-url` or `--judge-model` that nothing in the run reads (see
   [CLI](cli.md#run)).
@@ -87,6 +88,11 @@ loading and before the first case):
   `mode: offered` under `cli`, the bridge failing its start-up check, `--available-tools`
   in `[runners.copilot]` while a case declares `tools:`, or a tool-selection flag in a
   product judge's `args`.
+
+**A spend ceiling that could never be enforced** (`SpendCeilingError`): `max_spend_usd` or
+`--max-spend` set for a run with a runner or judge whose spend is never priced in US dollars
+— `copilot`, `cli`, or a keyed runner or judge whose model has no price. See
+[The spend ceiling](#the-spend-ceiling).
 
 **Bundled scripts turned on but unable to run** (`ScriptSetupError`): a script's
 interpreter is not on `PATH`, or `script_sandbox = "required"` and no sandbox backend works.
@@ -149,10 +155,11 @@ of these numbers move from what they were before comparative evals existed.
 ## The spend ceiling
 
 `max_spend_usd` in `skill-lens.toml`, or `--max-spend` for one run, caps what a run spends,
-in US dollars. It counts everything the run records: each outcome's `cost_usd` and every
-evaluator's (the judge's), from both arms, errored runs included — an errored product run
-keeps the cost its trace reported, and an errored `pydantic-ai` or `langchain` run keeps the
-cost of every response it received.
+in US dollars. It counts everything the run records: each outcome's `cost_usd`, the
+`retry_cost_usd` of the attempts a retry discarded, and every evaluator's cost (the judge's),
+from both arms, errored runs included — an errored product run keeps the cost its trace
+reported, and an errored `pydantic-ai` or `langchain` run keeps the cost of the responses it
+received.
 
 Before each case starts, skill-lens compares the spend recorded so far with the ceiling.
 Once it has *reached* the ceiling, no new case starts. A case that is already running is
@@ -185,13 +192,18 @@ Gate FAILED:
   - 1 case did not run: the spend ceiling of $0.50 was reached ($0.5300 recorded)
 ```
 
-A ceiling cannot be enforced against spend it cannot see. An outcome whose cost — the run's
-or the judge's — could not be priced carries a `cost_note` and a `cost_usd` of `0.0`, and
-that zero is not free. So once any outcome's spend is unpriced, the run stops starting new
-cases as if the ceiling were reached, and the gate fails with a reason naming the first such
-outcome and its note, even if nothing was left unstarted. Leave the ceiling unset for a
-provider `genai-prices` cannot price, and for `copilot`, which bills per premium request
-rather than in dollars.
+A ceiling cannot be enforced against spend it cannot see, so a run whose spend is known to be
+unpriceable is refused before anything is spent (exit `2`): a `copilot` runner or judge, which
+bills per premium request rather than in dollars, a `cli` one, which reports no cost, and a
+keyed runner or judge whose configured model `genai-prices` has no price for. Leave the
+ceiling unset for those runs.
+
+The rest is caught as it happens. An outcome whose cost — the run's or the judge's — could
+not be priced carries a `cost_note` and a `cost_usd` of `0.0`, and that zero is not free:
+the model the provider served had no price, a provider reported no token usage, or a
+`claude-code` run ended before it reported its cost. So once any outcome's spend is unpriced,
+the run stops starting new cases as if the ceiling were reached, and the gate fails with a
+reason naming the first such outcome and its note, even if nothing was left unstarted.
 
 Under `--baseline`, a case that lost any repetition of either arm to the ceiling is excluded
 from the delta, both arms together, with the exclusion reason saying so: a delta over the
@@ -311,6 +323,12 @@ JSON even though the console collapses them to one line per case.
 declared no `workspace:` block at all. It is never a path to a directory that has already
 been deleted: the field is cleared at the same moment the directory is, so it can never be
 a stale pointer in the report.
+
+`outcomes[].stop_note` is set when the run's framework stopped it at the case's `max_tokens`
+before the agent finished (see
+[Stopping a runaway case](runners.md#stopping-a-runaway-case)), and is `""` for a run that
+finished. `outcomes[].retry_cost_usd` is what the attempts a retry discarded cost; every
+other figure on the outcome is the attempt that produced it.
 
 `outcomes[].cost_note` and `outcomes[].usage_note` say why `cost_usd` or a token count is
 `0` rather than measured — an unpriced model, a product that bills per request rather than

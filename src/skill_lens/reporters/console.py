@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from skill_lens.comparison import ArmStats, CaseStats, Delta, RunnerDelta, format_baseline_notes
-from skill_lens.gating import GateResult, usd
-from skill_lens.models import CaseOutcome, NotRunItem, RunReport
+from skill_lens.gating import GateResult, recorded, usd
+from skill_lens.models import CaseOutcome, RunReport
 from skill_lens.reporters.failure_context import (
     OUTPUT_LIMIT,
     cut_note,
@@ -165,16 +165,6 @@ def _kept_workspaces(report: RunReport) -> list[str]:
     return lines
 
 
-def _not_run_label(item: NotRunItem, repeat: int) -> str:
-    """Which arm and repetition an item was, only where the run had more than one."""
-    detail = [item.runner]
-    if item.arm == "baseline":
-        detail.append("baseline")
-    if repeat > 1:
-        detail.append(f"repeat {item.repeat_index}")
-    return f"{item.skill_name} :: {item.case_name} ({', '.join(detail)})"
-
-
 def _not_run_lines(report: RunReport) -> list[str]:
     """Every work item the spend ceiling kept from starting, in submission order.
 
@@ -185,7 +175,7 @@ def _not_run_lines(report: RunReport) -> list[str]:
     if not report.not_run:
         return []
     lines = ["", "Not run (stopped by the spend ceiling):"]
-    lines.extend(f"  {_not_run_label(item, report.repeat)}" for item in report.not_run)
+    lines.extend(f"  {item.describe(report.repeat)}" for item in report.not_run)
     return lines
 
 
@@ -335,8 +325,7 @@ def render_console(
 
     if report.spend_ceiling is not None:
         totals_parts.append(
-            f"Spend ceiling: {usd(report.spend_ceiling.max_spend_usd)} "
-            f"(${report.spent_usd:.4f} recorded)"
+            f"Spend ceiling: {usd(report.spend_ceiling.max_spend_usd)} ({recorded(report)})"
         )
 
     if total_latency_ms:

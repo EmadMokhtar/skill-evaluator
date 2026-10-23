@@ -235,22 +235,23 @@ fails. See [Budget limits and pricing](runners.md#budget-limits-and-pricing).
 
 ## A case stopped at its token budget
 
-**What you see.** An errored case under `pydantic-ai` or `langchain`:
+**What you see.** A failing case under `pydantic-ai` or `langchain` whose budget detail says
+the run was stopped:
 
 ```
-[ERROR] pdf :: summarises the report (pydantic-ai)
-        error: TokenBudgetExceeded: pydantic-ai stopped the run at 120 tokens, over the case's budget max_tokens of 100
+[FAIL] pdf :: summarises the report (pydantic-ai)
+        budget: used 120 tokens, limit is 100; pydantic-ai stopped the run before the agent finished, at the case's max_tokens
 ```
 
 **What it means.** The case declares `max_tokens:` in its `budget:` block, and the run went
 over it. Under the two framework runners that limit is also handed to the framework, which
 stops the run at the first model response that takes the total over it, instead of letting a
-looping agent spend on. A run cut off mid-loop has no finished answer, so it is not scored:
-the case is **errored**, and it still reports the tokens and cost it spent. See
+looping agent spend on. The case is scored as far as it got, so its output and tool calls are
+what the agent had done when it was stopped, and it **fails** on its budget. See
 [Stopping a runaway case](runners.md#stopping-a-runaway-case).
 
 **What to do.** If the skill really does need more, raise `max_tokens`. If it should not, the
-error is the finding: the skill makes the agent loop or over-explain.
+failure is the finding: the skill makes the agent loop or over-explain.
 
 ## Cases that did not run
 
@@ -283,8 +284,16 @@ it stopped the run rather than treat that cost as zero. See
 [The spend ceiling](gating.md#the-spend-ceiling).
 
 **What to do.** Raise the ceiling, or run fewer cases (`--tag`, `--case`, a smaller
-`--repeat`). For a provider `genai-prices` cannot price, or for `copilot`, which bills per
-premium request rather than in dollars, leave `max_spend_usd` unset.
+`--repeat`). For a provider whose spend cannot be priced, leave `max_spend_usd` unset.
+
+A run that could never price its spend is refused before it starts, with exit code `2`:
+
+```
+max_spend_usd cannot be enforced for runner copilot: copilot bills per premium request, not in US dollars. A ceiling counts spend it can price, and this runner's never is; leave max_spend_usd (and --max-spend) unset for a run that uses it
+```
+
+That is `copilot` or `cli` as the runner or the judge, or a `pydantic-ai` or `langchain`
+runner or judge whose configured model has no price. Leave the ceiling unset for that run.
 
 ## A model with no price
 

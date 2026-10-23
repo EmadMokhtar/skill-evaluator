@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 from skill_lens.comparison import Delta, format_baseline_notes
-from skill_lens.gating import GateResult, usd
+from skill_lens.gating import GateResult, recorded, usd
 from skill_lens.models import CaseOutcome, RunReport
 from skill_lens.reporters.failure_context import (
     OUTPUT_LIMIT,
@@ -189,7 +189,7 @@ def _totals(report: RunReport) -> str:
         rows.append(
             [
                 "Spend ceiling",
-                f"{usd(report.spend_ceiling.max_spend_usd)} (${report.spent_usd:.4f} recorded)",
+                f"{usd(report.spend_ceiling.max_spend_usd)} ({recorded(report)})",
             ]
         )
     rows.append(["Latency", f"{latency / 1000:.2f}s" if latency >= 1000 else f"{latency}ms"])
@@ -335,16 +335,9 @@ def _not_run(report: RunReport) -> str:
     """Every work item the spend ceiling kept from starting, in submission order."""
     if not report.not_run:
         return ""
-    body = []
-    for item in report.not_run:
-        detail = [item.runner]
-        if item.arm == "baseline":
-            detail.append("baseline")
-        if report.repeat > 1:
-            detail.append(f"run {item.repeat_index + 1}/{report.repeat}")
-        body.append(
-            f"- {_code(item.skill_name)} :: {_code(item.case_name)} ({_escape(', '.join(detail))})"
-        )
+    body = [
+        f"- {item.describe(report.repeat, code=_code, plain=_escape)}" for item in report.not_run
+    ]
     return _details(f"Not run ({len(report.not_run)})", body)
 
 

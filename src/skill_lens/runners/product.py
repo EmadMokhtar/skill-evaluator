@@ -116,6 +116,19 @@ class Product:
     # `judge_args`. `ProductJudge.preflight` refuses it.
     tool_flag: str | None = None
     mcp: McpSupport | None = None
+    # Why the product's spend can never be priced in US dollars, for one
+    # whose trace parser is known never to report a cost; see `unpriced`.
+    unpriced_note: str = ""
+
+    def unpriced(self) -> str:
+        """Why this product's spend can never be priced in US dollars, or "".
+
+        A product with no trace parser (`cli`) reports nothing at all; a
+        preset whose trace carries no cost says why in `unpriced_note`.
+        """
+        if self.parse is None:
+            return f"the {self.name} product does not report cost"
+        return self.unpriced_note
 
 
 PRESETS: dict[str, Product] = {
@@ -151,6 +164,7 @@ PRESETS: dict[str, Product] = {
         judge_args=("--available-tools=skill-lens-none",),
         tool_flag="--available-tools",
         mcp=COPILOT_MCP,
+        unpriced_note="copilot bills per premium request, not in US dollars",
     ),
     "claude-code": Product(
         name="claude-code",
@@ -495,6 +509,10 @@ class ProductRunner:
     @property
     def product(self) -> Product:
         return self._product
+
+    def unpriced(self) -> str:
+        """Why this runner's spend can never be priced; see `Product.unpriced`."""
+        return self._product.unpriced()
 
     def run(
         self,

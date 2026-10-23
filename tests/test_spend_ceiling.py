@@ -468,3 +468,172 @@ def test_the_flag_overrides_the_config_file(tmp_path):
 def test_a_flag_that_is_not_a_positive_amount_is_a_user_error(tmp_path, value):
     result = CliRunner().invoke(app, ["run", str(_cli_skill(tmp_path)), "--max-spend", value])
     assert result.exit_code == 2
+
+
+# --- Review follow-ups ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("amount", "spelled"),
+    [
+        (0.5, "$0.50"),
+        (5.0, "$5.00"),
+        (0.30000000000000004, "$0.30"),
+        (0.005, "$0.005"),
+        (1e-07, "$0.0000001"),
+        (4e-07, "$0.0000004"),
+        (1e-12, "$0.000000000001"),
+    ],
+)
+def test_a_dollar_amount_is_spelled_as_set_and_never_as_a_bare_point(amount, spelled):
+    from skill_lens.gating import usd
+
+    assert usd(amount) == spelled
+
+
+def test_every_reporter_labels_a_repetition_not_run_the_same_way():
+    report = RunReport(
+        outcomes=[_outcome("a", cost_usd=0.6)],
+        not_run=[
+            NotRunItem(skill_name="s", case_name="a", runner="fake", repeat_index=1),
+        ],
+        spend_ceiling=SpendCeiling(max_spend_usd=0.5),
+        repeat=2,
+    )
+    gate = evaluate_gate(report)
+    assert "s :: a (fake, run 2/2)" in render_console(report, gate=gate)
+    assert "`s` :: `a` (fake, run 2/2)" in render_markdown(report, gate=gate)
+
+
+def test_the_cost_of_discarded_retries_counts_toward_the_ceiling(tmp_path):
+    runner = _CountingRunner(RunResult(output="ok", cost_usd=0.10, retry_cost_usd=0.45))
+    report = run_evals(_skill(tmp_path), [runner], options=_ceiling(0.50))
+    assert runner.tasks == ["task-0"]
+    assert report.spent_usd == pytest.approx(0.55)
+    assert report.total_cost_usd == pytest.approx(0.55)
+
+
+def test_an_outcomes_spend_is_its_run_its_retries_and_its_judges():
+    outcome = CaseOutcome(
+        skill_name="s",
+        case_name="a",
+        runner="fake",
+        status="passed",
+        result=RunResult(cost_usd=0.1, retry_cost_usd=0.2),
+        scores=[EvalScore(evaluator="judge", passed=True, cost_usd=0.3, cost_note="x")],
+    )
+    assert outcome.spent_usd == pytest.approx(0.6)
+    assert outcome.unpriced_note == "x"
+
+
+class _UnpricedRunner(_CountingRunner):
+    """A runner that knows before it starts that its spend is never priced."""
+
+    def __init__(self) -> None:
+        super().__init__(RunResult(output="ok"))
+
+    def unpriced(self) -> str:
+        return "bills per request, not in US dollars"
+
+
+def test_a_ceiling_a_runner_can_never_price_is_refused_before_any_case(tmp_path):
+    from skill_lens.orchestrator import SpendCeilingError
+
+    runner = _UnpricedRunner()
+    with pytest.raises(SpendCeilingError, match="runner fake: bills per request"):
+        run_evals(_skill(tmp_path), [runner], options=_ceiling(5.0))
+    assert runner.tasks == []
+
+
+def test_a_ceiling_a_judge_can_never_price_is_refused_too(tmp_path):
+    from skill_lens.judges.fake import FakeJudge
+    from skill_lens.orchestrator import SpendCeilingError
+
+    class _UnpricedJudge(FakeJudge):
+        def unpriced(self) -> str:
+            return "no cost reported"
+
+    with pytest.raises(SpendCeilingError, match="judge fake: no cost reported"):
+        run_evals(_skill(tmp_path), [FakeRunner()], judge=_UnpricedJudge(), options=_ceiling(5.0))
+
+
+def test_an_unpriceable_runner_without_a_ceiling_runs(tmp_path):
+    runner = _UnpricedRunner()
+    run_evals(_skill(tmp_path), [runner])
+    assert len(runner.tasks) == 4
+
+
+def test_which_seats_can_never_be_priced():
+    from skill_lens.runners.langchain import LangChainRunner
+    from skill_lens.runners.product import PRESETS, ProductRunner
+    from skill_lens.runners.pydantic_ai import PydanticAIRunner
+
+    assert "premium request" in ProductRunner(PRESETS["copilot"]).unpriced()
+    assert ProductRunner(PRESETS["claude-code"]).unpriced() == ""
+    cli = Config(runners={"cli": {"command": ["agent", "{prompt}"]}}).product("cli")
+    assert "does not report cost" in ProductRunner(cli).unpriced()
+    assert PydanticAIRunner(model="openai:gpt-4o-mini").unpriced() == ""
+    assert "no price data" in PydanticAIRunner(model="ollama:no-such-model").unpriced()
+    assert "no price data" in LangChainRunner(model="ollama:no-such-model").unpriced()
+
+
+def test_the_cli_refuses_a_ceiling_it_could_never_enforce(tmp_path):
+    config = tmp_path / "skill-lens.toml"
+    config.write_text(
+        'judge = "pydantic-ai"\njudge_model = "ollama:no-such-model"\n', encoding="utf-8"
+    )
+    result = CliRunner().invoke(
+        app,
+        ["run", str(_cli_skill(tmp_path)), "--config", str(config), "--max-spend", "1"],
+    )
+    assert result.exit_code == 2
+    assert "max_spend_usd cannot be enforced for judge pydantic-ai" in result.stdout
+
+
+def _looping_model():
+    from pydantic_ai.messages import ModelResponse, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.usage import RequestUsage
+
+    return FunctionModel(
+        lambda messages, info: ModelResponse(
+            parts=[ToolCallPart(tool_name="poll", args={})],
+            usage=RequestUsage(input_tokens=40, output_tokens=20),
+        )
+    )
+
+
+def _budgeted_skill(tmp_path: Path) -> list[Skill]:
+    skill_dir = tmp_path / "budgeted"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: budgeted\ndescription: d\n---\n\nbody\n", encoding="utf-8"
+    )
+    (skill_dir / "budgeted.eval.yaml").write_text(
+        "cases:\n"
+        "  - name: loops\n    task: go\n"
+        "    tools:\n      - name: poll\n"
+        "    budget:\n      max_tokens: 100\n",
+        encoding="utf-8",
+    )
+    return load_skills(skill_dir)
+
+
+def test_a_case_stopped_at_its_budget_fails_and_stays_in_the_delta(tmp_path):
+    from skill_lens.runners.pydantic_ai import PydanticAIRunner
+
+    report = run_evals(
+        _budgeted_skill(tmp_path), [PydanticAIRunner(model=_looping_model())], baseline="none"
+    )
+    # Both arms ran away and were stopped: failed, not errored, so the pair
+    # is still compared rather than dropped as "every repetition errored".
+    assert [(o.arm, o.status) for o in report.outcomes] == [
+        ("candidate", "failed"),
+        ("baseline", "failed"),
+    ]
+    assert report.errored == 0
+    assert report.baseline_errored == 0
+    delta = build_delta(report)
+    assert delta.cases[0].comparable is True
+    evidence = report.outcomes[0].scores[2].checks[0].evidence
+    assert "stopped the run before the agent finished" in evidence

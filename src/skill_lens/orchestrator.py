@@ -329,16 +329,34 @@ def _plan_work(
     return plan
 
 
-def _spend_of(outcome: CaseOutcome) -> tuple[float, str]:
-    """What one outcome cost -- its run and every evaluator -- and the first
-    note saying part of that could not be priced."""
-    cost = sum(score.cost_usd for score in outcome.scores)
-    notes = [score.cost_note for score in outcome.scores if score.cost_note]
-    if outcome.result is not None:
-        cost += outcome.result.cost_usd
-        if outcome.result.cost_note:
-            notes.insert(0, outcome.result.cost_note)
-    return cost, notes[0] if notes else ""
+class SpendCeilingError(Exception):
+    """A spend ceiling was set for a run with a runner or judge whose spend can
+    never be priced. An authoring error (exit 2), raised before any case runs."""
+
+
+def _check_ceiling_is_enforceable(runners: list[Runner], judge: Judge | None) -> None:
+    """Refuse, before any spend, a ceiling a runner or judge could never meet.
+
+    A seat says why its spend can never be priced through an optional
+    `unpriced()` -- `copilot` bills per premium request, `cli` reports no
+    cost, a configured model has no price. Under such a seat the ledger
+    would fail closed after the first case and fail the gate, so the run
+    would spend one case to learn what is known before it starts. A seat
+    with no `unpriced()` is not asked, and the ledger still fails closed on
+    any unpriced outcome it meets.
+    """
+    seats: list[tuple[str, object]] = [("runner", runner) for runner in runners]
+    if judge is not None:
+        seats.append(("judge", judge))
+    for kind, seat in seats:
+        check = getattr(seat, "unpriced", None)
+        note = check() if check is not None else ""
+        if note:
+            raise SpendCeilingError(
+                f"max_spend_usd cannot be enforced for {kind} {getattr(seat, 'name', '?')}: "
+                f"{note}. A ceiling counts spend it can price, and this {kind}'s never is; "
+                "leave max_spend_usd (and --max-spend) unset for a run that uses it"
+            )
 
 
 class _SpendLedger:
@@ -363,7 +381,9 @@ class _SpendLedger:
             return not self._blind and self._spent < self._ceiling
 
     def record(self, outcome: CaseOutcome) -> None:
-        cost, note = _spend_of(outcome)
+        # `CaseOutcome.spent_usd` is the one definition of an outcome's
+        # spend, so this total and `RunReport.spent_usd` cannot disagree.
+        cost, note = outcome.spent_usd, outcome.unpriced_note
         with self._lock:
             self._spent += cost
             self._blind = self._blind or bool(note)
@@ -377,7 +397,7 @@ def _first_unpriced(outcomes: list[CaseOutcome]) -> str:
     between identical runs.
     """
     for outcome in outcomes:
-        _, note = _spend_of(outcome)
+        note = outcome.unpriced_note
         if note:
             runner = outcome.runner if outcome.arm == "candidate" else f"{outcome.runner}, baseline"
             return f"{outcome.skill_name} :: {outcome.case_name} ({runner}): {note}"
@@ -637,7 +657,9 @@ def run_evals(
     scored. The rest land on `RunReport.not_run` in submission order, never in
     `outcomes`, and `spend_ceiling` names the first unpriced outcome, if any.
     The first item always starts, since a ceiling must be a positive, finite
-    amount (a `ValueError` otherwise).
+    amount (a `ValueError` otherwise). A runner or judge whose `unpriced()`
+    says its spend can never be priced makes the ceiling unenforceable, and
+    `SpendCeilingError` is raised before any case runs.
 
     `keep_workspace` and `workspace_limits` are the M6 part 1 spelling of the
     first two `options` fields, kept in the positions they were added in so
@@ -711,6 +733,8 @@ def run_evals(
         # After the script preflight, so a ScriptSetupError and a
         # ProductSetupError cannot race for the exit.
         products, has_product_runner = _preflight_hooks(plan, runners, judge)
+        if ceiling is not None:
+            _check_ceiling_is_enforceable(runners, judge)
         if has_product_runner:
             # The run's answer, like the notes themselves: they cover every
             # discovered skill, filtered out or not (issue #97).

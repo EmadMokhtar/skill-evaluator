@@ -687,26 +687,45 @@ def looping() -> FunctionChatModel:
     return FunctionChatModel(reply=reply)
 
 
+def budgeted(max_tokens: int) -> EvalCase:
+    return case(tools=[ToolSpec(name="poll")], budget=BudgetSpec(max_tokens=max_tokens))
+
+
+def priced_per_input_token(monkeypatch, dollars: float = 0.01) -> None:
+    """Stand in a price, so a cost the tests can read is not the scripted model's unpriced 0.0."""
+    import skill_lens.runners.langchain as adapter
+
+    monkeypatch.setattr(
+        adapter,
+        "_cost",
+        lambda input_tokens, output_tokens, name, configured: (
+            input_tokens * dollars,
+            "",
+        ),
+    )
+
+
 def test_a_case_over_its_token_budget_is_stopped_while_it_spends():
     model = looping()
-    result = LangChainRunner(model=model).run(
-        SKILL, case(tools=[ToolSpec(name="poll")], budget=BudgetSpec(max_tokens=20))
-    )
+    result = LangChainRunner(model=model).run(SKILL, budgeted(20))
     # 15 tokens, then 30: the second turn crosses 20 and the run stops there,
     # rather than looping until LangGraph's recursion limit.
     assert len(model.turns) == 2
-    assert result.errored is True
-    assert "max_tokens of 20" in result.error
-    assert "30 tokens" in result.error
+    assert "max_tokens" in result.stop_note
 
 
-def test_a_stopped_run_keeps_the_spend_it_recorded():
-    result = LangChainRunner(model=looping()).run(
-        SKILL, case(tools=[ToolSpec(name="poll")], budget=BudgetSpec(max_tokens=20))
-    )
+def test_a_stopped_run_is_not_errored_so_its_budget_check_can_fail_it():
+    result = LangChainRunner(model=looping()).run(SKILL, budgeted(20))
+    assert result.errored is False
+
+
+def test_a_stopped_run_keeps_what_it_did_and_what_it_spent():
+    result = LangChainRunner(model=looping()).run(SKILL, budgeted(20))
     # Both turns, the one that crossed the limit included.
     assert result.input_tokens == 20
     assert result.output_tokens == 10
+    assert [call.name for call in result.tool_calls] == ["poll", "poll"]
+    assert result.transcript
     assert result.cost_usd == 0.0
     assert result.cost_note != ""
 
@@ -716,10 +735,13 @@ def test_a_run_within_its_token_budget_is_not_stopped():
         SKILL, case(budget=BudgetSpec(max_tokens=15))
     )
     assert result.errored is False
+    assert result.stop_note == ""
     assert result.output == "done"
 
 
-def test_an_errored_run_keeps_the_spend_of_every_attempt():
+def test_an_errored_run_reports_its_last_attempt_and_what_the_others_cost(monkeypatch):
+    priced_per_input_token(monkeypatch)
+
     # Each attempt is answered once, then fails with a 500 on its second turn.
     def reply(messages, turn):
         if any(isinstance(message, AIMessage) for message in messages):
@@ -735,8 +757,60 @@ def test_an_errored_run_keeps_the_spend_of_every_attempt():
     result = runner.run(SKILL, case(tools=[ToolSpec(name="poll")]))
     assert result.errored is True
     assert result.error == "StatusError: status 500"
+    assert (result.input_tokens, result.output_tokens) == (10, 5)
+    assert result.cost_usd == pytest.approx(0.10)
+    assert result.retry_cost_usd == pytest.approx(0.10)
+
+
+def test_a_run_that_succeeds_on_a_retry_reports_what_the_failed_attempt_cost(monkeypatch):
+    priced_per_input_token(monkeypatch)
+    attempts = {"n": 0}
+
+    def reply(messages, turn):
+        answered = any(isinstance(message, AIMessage) for message in messages)
+        if not answered:
+            attempts["n"] += 1
+            return tool_call("poll", {})
+        if attempts["n"] == 1:
+            raise StatusError(429)
+        return text("done")
+
+    runner = LangChainRunner(
+        model=FunctionChatModel(reply=reply),
+        retries=1,
+        retry_backoff_seconds=0.01,
+        sleep=lambda _: None,
+    )
+    result = runner.run(SKILL, case(tools=[ToolSpec(name="poll")]))
+    assert result.errored is False
+    assert result.output == "done"
     assert result.input_tokens == 20
-    assert result.output_tokens == 10
+    assert result.cost_usd == pytest.approx(0.20)
+    assert result.retry_cost_usd == pytest.approx(0.10)
+
+
+def test_the_token_limit_applies_to_each_attempt_not_to_their_sum():
+    # 15 tokens, then a transient 429; the retry spends 15 and fails for good.
+    # 30 summed is over 20, but neither attempt was, so nothing was stopped.
+    attempts = {"n": 0}
+
+    def reply(messages, turn):
+        if not any(isinstance(message, AIMessage) for message in messages):
+            attempts["n"] += 1
+            return tool_call("poll", {})
+        raise StatusError(429 if attempts["n"] == 1 else 401)
+
+    runner = LangChainRunner(
+        model=FunctionChatModel(reply=reply),
+        retries=1,
+        retry_backoff_seconds=0.01,
+        sleep=lambda _: None,
+    )
+    result = runner.run(SKILL, budgeted(20))
+    assert result.errored is True
+    assert result.error == "StatusError: status 401"
+    assert result.stop_note == ""
+    assert result.tokens == 15
 
 
 def test_a_run_that_failed_before_any_response_spent_nothing():
@@ -744,5 +818,17 @@ def test_a_run_that_failed_before_any_response_spent_nothing():
     assert result.errored is True
     assert result.tokens == 0
     assert result.cost_usd == 0.0
+    assert result.retry_cost_usd == 0.0
     # Nothing was answered, so nothing was billed: a measured zero, not an unpriced one.
     assert result.cost_note == ""
+
+
+def test_a_run_whose_provider_reports_no_usage_says_so():
+    model = FunctionChatModel(reply=lambda messages, turn: AIMessage(content="done"))
+    result = LangChainRunner(model=model).run(SKILL, budgeted(20))
+    assert result.errored is False
+    assert result.tokens == 0
+    # So the budget check fails as not evaluated, and a spend ceiling does
+    # not take the 0.0 for free.
+    assert "no token usage" in result.usage_note
+    assert "no token usage" in result.cost_note

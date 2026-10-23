@@ -829,24 +829,34 @@ with `score`.
 
 Budget checks run after a case finishes, so on their own they cannot stop a case that loops.
 Under `pydantic-ai` and `langchain`, `max_tokens` is therefore also handed to the framework
-itself: the run stops at the first model response that takes its token total over the limit,
-and the case is reported as **errored**, with an error such as
+itself: the run stops at the first model response that takes its token total over the limit.
+The stopped run is not an error. It is scored as far as it got, and its `max_tokens` check
+fails, with evidence that says the run was cut off:
 
 ```
-TokenBudgetExceeded: pydantic-ai stopped the run at 120 tokens, over the case's budget max_tokens of 100
+[FAIL] pdf :: summarises the report (pydantic-ai)
+        budget: used 120 tokens, limit is 100; pydantic-ai stopped the run before the agent finished, at the case's max_tokens
 ```
 
-The case is not scored: a run cut off in the middle of its loop has no finished answer to
-check. A run that ends at or under the limit is not affected, and the budget check still
-scores it as before. If you are upgrading, note that a keyed case that used to end slightly
-over `max_tokens` and fail its budget check is now errored instead. Both fail the gate by
-default; with `min_pass_rate` below `1.0`, the errored case now fails the gate through
-`fail_on_error` where the failed one did not.
+Its output is whatever the last model response said, and its tool calls and transcript are
+the ones it made before it stopped, so the failure shows what the agent was doing when it
+ran away. Going over budget is a fact about the skill, so the case is **failed**, the same
+verdict a run that finished over budget gets — and in a comparative run both arms are
+treated alike, so a baseline that runs away is a failed baseline, not one dropped from the
+delta. A run that ends at or under the limit is not affected.
 
-An errored run still reports what it spent: the tokens, cost and model of every model
-response it received, across every retried attempt, so the totals and the JSON report count
-a stopped run at its real cost. A run that failed before any response arrived spent nothing,
-and its `0` carries no `cost_note`.
+Every figure on a result — tokens, cost, the tool calls — is the run's last attempt, so the
+budget measures one run of the skill. When a transient failure was retried, what the
+discarded attempts cost is reported apart as `retry_cost_usd`: the cost totals and the
+[spend ceiling](gating.md#the-spend-ceiling) count it, the budget does not. The limit applies
+to each attempt on its own, never to their sum. An errored run keeps what its last attempt
+spent too; a run that failed before any response arrived spent nothing, and its `0` carries
+no `cost_note`.
+
+A stop needs the provider to report token usage. One that reports none leaves the counts at
+`0`, which is not a measurement: the run sets `usage_note` and `cost_note` (`pydantic-ai
+received no token usage from the provider`), so `max_tokens` fails as *not evaluated* rather
+than passing on a zero, and the spend ceiling does not take its `$0.00` for free.
 
 Only `max_tokens` is handed over. Neither framework can stop on `max_cost_usd` (PydanticAI
 has no cost limit at the version this project supports; LangChain has none), and

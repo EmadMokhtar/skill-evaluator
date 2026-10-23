@@ -173,39 +173,54 @@ repository running an unpriced model with a `budget:` block that mixes a priced 
 `max_cost_usd` will see those cases turn red on an upgrade to this behavior; the fix is to
 drop `max_cost_usd` for that provider, not to treat the skip as a pass.
 
-### A case's `max_tokens` stops a keyed run while it spends, and the stopped run is `errored`
+### A case's `max_tokens` stops a keyed run while it spends, and the stopped run fails its budget check
 
 `budget:` is scored after a run ends, which is too late for a case that loops: it would
 spend until it hit a framework default first. So `pydantic-ai` hands `max_tokens` to
-PydanticAI as `UsageLimits(total_tokens_limit=...)`, and `langchain` registers a middleware
-that, after every model turn, sums the same `usage_metadata` a finished run is measured by
-and raises once the total is over the limit. Both stop at the first response that takes the
-total *over* `max_tokens`; a run that ends exactly at it is not stopped, because
-`BudgetEvaluator` passes it. The stopped run is `RunResult.error` (`TokenBudgetExceeded:
-pydantic-ai stopped the run at 120 tokens, over the case's budget max_tokens of 100`),
-never raised and never retried, and no evaluator reads it: a run cut off mid-loop has no
-finished answer to score. That choice shows on upgrade: a keyed case that ran a little over
-`max_tokens` used to finish and fail its budget check, and is now `errored` instead. Both
-fail the gate by default, but a run with `min_pass_rate` below 1 and `fail_on_error` on now
-fails for that case where it passed before. `max_cost_usd` is not handed over (PydanticAI
-has no cost limit at the supported version floor, and LangChain has none at all), and no
-other limit is set: PydanticAI keeps its default `request_limit` of 50, and LangGraph's
-`recursion_limit` counts graph steps, which no `budget:` key measures. The limit and the
-stop message live in `runners/limits.py`, which imports no framework, so both adapters stop
-at the same number and report it in the same words.
+PydanticAI as `UsageLimits(total_tokens_limit=...)`, and `langchain` registers an
+`after_model` middleware that adds each reply's `usage_metadata` — what `_usage` measures a
+finished run by — and raises once the attempt's total is over the limit. Both stop at the
+first response that takes the total *over* `max_tokens`; a run that ends exactly at it is not
+stopped, because `BudgetEvaluator` passes it. The stopped run is **not** `errored`: the
+adapter returns it as far as it got — the last response's text as `output`, the tool calls
+and transcript it made (PydanticAI's history via `capture_run_messages`, plus the crossing
+response, which `UsageLimitExceeded` is raised before appending; LangChain's from the
+middleware) — with `RunResult.stop_note` set, and it is never retried. Every evaluator scores
+it, and its `max_tokens` check fails with the note in its evidence. Going over budget is a
+fact about the skill, not the harness, and `errored` would treat the two arms of a
+comparison differently in effect: a baseline that ran away would be dropped from the delta
+as "every repetition errored" instead of counting as the failure it is. So both arms get the
+same verdict, and an over-budget case is `failed` whether it was stopped or finished.
+`max_cost_usd` is not handed over (PydanticAI has no cost limit at the supported version
+floor, and LangChain has none at all), and no other limit is set: PydanticAI keeps its
+default `request_limit` of 50, and LangGraph's `recursion_limit` counts graph steps, which no
+`budget:` key measures. The limit, the stop note and the no-usage notes live in
+`runners/limits.py`, which imports no framework, so both adapters stop at the same number and
+report it in the same words.
 
-### An errored keyed run keeps the spend of every attempt
+### A keyed run's figures are its last attempt's, and what retries discarded is `retry_cost_usd`
 
 Both keyed adapters record every model response as it arrives — PydanticAI through a
-`WrapperModel`, because `UsageLimitExceeded` is raised *before* the response that crossed
-the limit is appended to the message history; LangChain through the same middleware — so an
-errored run reports the input and output tokens, `cost_usd`, `cost_note` and model of every
-attempt it made, as an errored product run does. A run stopped at its budget, or one a
-provider failed twenty turns in, was billed for what it got back, and both
-`RunReport.total_cost_usd` and the spend ceiling read every outcome. A run that no response answered spent
-nothing: its zero is a measurement, so it is not priced and carries no `cost_note`. A
-finished run is unchanged — its figures, and so its `budget:`, are the attempt that
-succeeded.
+`WrapperModel`, LangChain through the same middleware — one meter per attempt. Every figure
+on the result (tokens, `cost_usd`, `cost_note`, model, tool calls) is the attempt that
+produced it, so `budget:` measures one run of the skill and the token limit applies to each
+attempt on its own, never to their sum. What the earlier attempts cost — a transient failure
+retried after it was billed for some turns — is `RunResult.retry_cost_usd`, on a finished run
+as on an errored one. `RunReport.total_cost_usd`, `CaseOutcome.spent_usd` and so the spend
+ceiling add it; `BudgetEvaluator` and the delta's mean cost do not. An errored run keeps its
+last attempt's spend: a run a provider failed twenty turns in was billed for what it got
+back. A run that no response answered spent nothing: its zero is a measurement, so it is not
+priced and carries no `cost_note`.
+
+### A keyed run whose provider reported no token usage says so
+
+A response with no usage leaves the counts at `0`, and `0` is not a measurement: `max_tokens`
+could neither stop the run nor be checked, and its cost could not be priced. When an
+attempt's responses carry no usage at all, the adapter sets `usage_note` and `cost_note` from
+`limits.no_usage_notes` (`pydantic-ai received no token usage from the provider`), so the
+budget check fails as *not evaluated* — exactly as for a product that reports none — and the
+spend ceiling does not take the `0.0` for free. A response with any usage is measured as
+before.
 
 ### Nothing scores a vacuous pass
 
@@ -457,8 +472,9 @@ completion-order results would make output churn between identical runs.
 
 With `max_spend_usd` set, `_run_item` asks `_SpendLedger` before each item starts, at every
 concurrency level, and the ledger refuses once the recorded spend has *reached* the ceiling
-(`>=`). It counts each outcome's `RunResult.cost_usd` and every `EvalScore.cost_usd`, both
-arms, errored runs included — which is why an errored product or keyed run keeps its spend.
+(`>=`). It counts `CaseOutcome.spent_usd` — the run's `cost_usd` and `retry_cost_usd` and
+every `EvalScore.cost_usd` — for both arms, errored runs included, which is why an errored
+product or keyed run keeps its spend; `RunReport.spent_usd` sums the same property.
 The check is made when an item starts, not when it is queued, and an item's spend is recorded
 before `_run_item` returns, so a worker never starts work its own last item already paid the
 ceiling for; a thread pool hands items out in submission order, so the items that ran are
@@ -490,16 +506,30 @@ candidate-only `summary.not_run`, JUnit as a `<skipped>` case for the candidate 
 
 ### A spend ceiling that meets unpriced spend stops the run and fails the gate
 
-An unpriced outcome — a `cost_note` on its `RunResult` or on any `EvalScore` — has a
-`cost_usd` of `0.0` that is not a measurement, so from then on the ledger cannot tell whether
-the ceiling has been crossed, and it fails closed: it refuses new work as if the ceiling were
-reached. The gate fails with a reason naming the first unpriced outcome in submission order
-(`SpendCeiling.unpriced`, read from the finished outcomes rather than from the ledger, which
-learns of them in completion order) and its note, even when nothing was refused. Treating the
-zero as free would let a run whose spend nobody can see pass a ceiling forever — the same
-reason an unpriceable `max_cost_usd` fails its case. Without a ceiling, an unpriced outcome
-changes nothing. The fix for a provider `genai-prices` cannot price, or `copilot`, which
-bills per premium request, is to leave `max_spend_usd` unset.
+An unpriced outcome — `CaseOutcome.unpriced_note`, a `cost_note` on its `RunResult` or on
+any `EvalScore` — has a `cost_usd` of `0.0` that is not a measurement, so from then on the
+ledger cannot tell whether the ceiling has been crossed, and it fails closed: it refuses new
+work as if the ceiling were reached. The gate fails with a reason naming the first unpriced
+outcome in submission order (`SpendCeiling.unpriced`, read from the finished outcomes rather
+than from the ledger, which learns of them in completion order) and its note, even when
+nothing was refused. Treating the zero as free would let a run whose spend nobody can see
+pass a ceiling forever — the same reason an unpriceable `max_cost_usd` fails its case.
+Without a ceiling, an unpriced outcome changes nothing. What remains for this rule is what
+preflight cannot know: a served model with no price, a provider that reported no usage, a
+`claude-code` run that ended before reporting its cost.
+
+### A spend ceiling under a seat that can never price its spend is refused in preflight
+
+Each runner and judge may define `unpriced() -> str`, why its spend can never be priced in US
+dollars: `Product.unpriced()` for a product (`cli` has no trace parser; `copilot`'s preset
+carries `unpriced_note`, since it bills per premium request), and `pricing.unpriced_model`
+for a keyed runner or judge, which prices one token each way for its configured
+`provider:name` and returns the note (a model *object* returns `""`, since its price is
+unknown until it answers). With a ceiling set, `run_evals` asks every runner and the judge
+after the preflight hooks and raises `SpendCeilingError` (exit 2) on the first non-empty
+answer, before any case runs: otherwise the ledger would fail closed after the first case
+and fail the gate, spending a case to learn what was known before the run began. A seat with
+no `unpriced()` is not asked, and the runtime rule above still covers it.
 
 ### Concurrency never turns an authoring error into a case failure, and the surfaced error is deterministic
 

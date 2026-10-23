@@ -19,7 +19,7 @@ from typing import Any
 from skill_lens.judges.prompt import SYSTEM_PROMPT, render_request
 from skill_lens.models import JudgeOutput, JudgeRequest, JudgeVerdict
 from skill_lens.runners.preflight import UnsupportedBaseURL
-from skill_lens.runners.pricing import calculate_cost, provider_of
+from skill_lens.runners.pricing import calculate_cost, provider_of, unpriced_model
 from skill_lens.runners.pydantic_ai import (
     DEFAULT_MODEL,
     _is_transient,
@@ -51,6 +51,10 @@ class PydanticAIJudge:
         self._retry_backoff_seconds = retry_backoff_seconds
         self._sleep = sleep
         self._base_url = base_url
+
+    def unpriced(self) -> str:
+        """Why this judge's model has no price, or ""; see `unpriced_model`."""
+        return unpriced_model(self._model)
 
     def preflight(self) -> None:
         """Refuse a `base_url` the judge's provider cannot take, before any spend.

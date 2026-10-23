@@ -100,13 +100,16 @@ QUOTED: list[tuple[str, str]] = [
     ("the claude-code trace ended", "runners/traces.py"),
     ("the copilot trace ended", "runners/traces.py"),
     # A case stopped at its token budget
-    (" stopped the run at ", "runners/limits.py"),
-    (" tokens, over the case's budget max_tokens of ", "runners/limits.py"),
+    (" stopped the run before the agent finished, at the case's max_tokens", "runners/limits.py"),
+    ("used ", "evaluators/budget.py"),
+    (" tokens, limit is ", "evaluators/budget.py"),
     # Cases that did not run
     ("Not run (stopped by the spend ceiling):", "reporters/console.py"),
     (" did not run", "gating.py"),
     (" could not be enforced: spend was not priced for ", "gating.py"),
     ("the spend ceiling stopped the run", "gating.py"),
+    ("max_spend_usd cannot be enforced for ", "orchestrator.py"),
+    ("copilot bills per premium request, not in US dollars", "runners/product.py"),
     # A model with no price
     ("Total cost: not priced (see per-case cost_note in the JSON report)", "reporters/console.py"),
     ("some costs not priced (see per-case cost_note in the JSON report)", "reporters/console.py"),

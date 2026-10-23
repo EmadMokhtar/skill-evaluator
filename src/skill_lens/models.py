@@ -148,6 +148,17 @@ class RunResult(BaseModel):
     could not count them (a product that reports no token usage). It is to
     tokens what `cost_note` is to cost: `BudgetEvaluator` refuses to evaluate
     `max_tokens` against a zero it knows is not a measurement.
+
+    `stop_note` says why the runner stopped the run before the agent
+    finished -- its framework stopped it at the case's `max_tokens` -- and is
+    empty for a run that finished. A stopped run is not errored: it ran, and
+    it went over its budget, which its `max_tokens` check reports as a
+    failure carrying this note.
+
+    `retry_cost_usd` is what the attempts a retry discarded cost. Every
+    other figure here is the attempt that produced this result, so
+    `budget:` measures one run of the skill; the spend totals and the spend
+    ceiling add this, because the discarded attempts were billed too.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -165,6 +176,8 @@ class RunResult(BaseModel):
     skill_triggered: bool | None = None
     workspace: Path | None = None
     error: str | None = None
+    stop_note: str = ""
+    retry_cost_usd: float = 0.0
 
     @property
     def tokens(self) -> int:
@@ -676,6 +689,24 @@ class CaseOutcome(BaseModel):
     arm: Arm = "candidate"
     repeat_index: int = 0
 
+    @property
+    def spent_usd(self) -> float:
+        """What this outcome cost: its run, the attempts a retry discarded, and
+        every evaluator. The one definition `RunReport.spent_usd` and the
+        spend ceiling both read."""
+        spent = sum(score.cost_usd for score in self.scores)
+        if self.result is not None:
+            spent += self.result.cost_usd + self.result.retry_cost_usd
+        return spent
+
+    @property
+    def unpriced_note(self) -> str:
+        """The first note saying part of `spent_usd` could not be priced -- the
+        run's own, then each evaluator's -- or "" when all of it was."""
+        if self.result is not None and self.result.cost_note:
+            return self.result.cost_note
+        return next((score.cost_note for score in self.scores if score.cost_note), "")
+
 
 class NotRunItem(BaseModel):
     """A work item the spend ceiling kept from starting.
@@ -692,6 +723,23 @@ class NotRunItem(BaseModel):
     runner: str
     arm: Arm = "candidate"
     repeat_index: int = 0
+
+    def describe(
+        self, repeat: int, code: Callable[[str], str] = str, plain: Callable[[str], str] = str
+    ) -> str:
+        """The one wording every reporter prints for this item.
+
+        The arm is named only for a baseline item, and the repetition only
+        when the run had more than one, counted from 1 as JUnit and the
+        Markdown failure list count it. `code` and `plain` format names and
+        prose, as in `ScriptNote.describe`.
+        """
+        detail = [self.runner]
+        if self.arm == "baseline":
+            detail.append("baseline")
+        if repeat > 1:
+            detail.append(f"run {self.repeat_index + 1}/{repeat}")
+        return f"{code(self.skill_name)} :: {code(self.case_name)} ({plain(', '.join(detail))})"
 
 
 class SpendCeiling(BaseModel):
@@ -800,8 +848,9 @@ class RunReport(BaseModel):
 
     @property
     def total_cost_usd(self) -> float:
-        """Cost across **both** arms. See `total_tokens` for why."""
-        return sum(o.result.cost_usd for o in self.outcomes if o.result)
+        """Cost across **both** arms, the attempts a retry discarded included.
+        See `total_tokens` for why."""
+        return sum(o.result.cost_usd + o.result.retry_cost_usd for o in self.outcomes if o.result)
 
     @property
     def total_latency_ms(self) -> int:
@@ -810,9 +859,9 @@ class RunReport(BaseModel):
 
     @property
     def spent_usd(self) -> float:
-        """Everything the run was recorded as spending: every outcome's run
-        cost and every evaluator's, both arms. What `max_spend_usd` reads."""
-        return self.total_cost_usd + self.judge_cost_usd
+        """Everything the run was recorded as spending, both arms: what
+        `max_spend_usd` reads, summed from `CaseOutcome.spent_usd`."""
+        return sum(outcome.spent_usd for outcome in self.outcomes)
 
     @property
     def pricing_degraded(self) -> bool:

@@ -34,7 +34,7 @@ from skill_lens.judges.product import ProductJudge
 from skill_lens.judges.pydantic_ai import PydanticAIJudge
 from skill_lens.mcp_import import McpImportError, parse_tools_list, render_tool_mocks
 from skill_lens.models import Skill
-from skill_lens.orchestrator import RunOptions, run_evals
+from skill_lens.orchestrator import RunOptions, SpendCeilingError, run_evals
 from skill_lens.paths import PatternRefused
 from skill_lens.reporters.console import render_console
 from skill_lens.reporters.failure_context import OUTPUT_LIMIT
@@ -95,6 +95,8 @@ _AUTHORING_ERRORS = (
     # a product runner or judge that cannot run here: executable missing,
     # version probe failed, or a case it cannot serve
     ProductSetupError,
+    # a spend ceiling set for a runner or judge whose spend is never priced
+    SpendCeilingError,
 )
 
 

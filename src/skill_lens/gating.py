@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import math
+from decimal import Decimal
+
 from pydantic import BaseModel, Field
 
 from skill_lens.comparison import Delta
@@ -12,10 +15,22 @@ EXIT_FAILED = 1
 
 
 def usd(amount: float) -> str:
-    """A dollar amount as a person set it: `$0.50`, never `$0.5` or a cent rounded away."""
-    if amount == round(amount, 2):
-        return f"${amount:.2f}"
-    return f"${amount:.6f}".rstrip("0")
+    """A dollar amount as a person set it: `$0.50`, never `$0.5` or a cent rounded away.
+
+    A whole number of cents -- float noise included, so `0.30000000000000004`
+    is `$0.30` -- prints two decimals. Anything finer prints every digit its
+    shortest exact spelling has (`repr`), so `0.005` is `$0.005` and `1e-07`
+    is `$0.0000001`, never a bare `$0.`.
+    """
+    cents = round(amount, 2)
+    if math.isclose(amount, cents, rel_tol=1e-9):
+        return f"${cents:.2f}"
+    return f"${Decimal(repr(amount)):f}"
+
+
+def recorded(report: RunReport) -> str:
+    """The run's recorded spend as every reporter says it beside the ceiling."""
+    return f"${report.spent_usd:.4f} recorded"
 
 
 def spend_ceiling_reasons(report: RunReport) -> list[str]:
@@ -46,7 +61,7 @@ def spend_ceiling_reasons(report: RunReport) -> list[str]:
         if ceiling is not None and not ceiling.unpriced:
             cause = (
                 f"the spend ceiling of {usd(ceiling.max_spend_usd)} was reached "
-                f"(${report.spent_usd:.4f} recorded)"
+                f"({recorded(report)})"
             )
         else:
             cause = "the spend ceiling stopped the run"
