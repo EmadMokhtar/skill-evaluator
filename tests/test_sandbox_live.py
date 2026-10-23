@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -116,6 +118,42 @@ def test_the_bundle_is_read_only(tmp_path):
     )
     _, out, _, _ = _run(tmp_path, source)
     assert out.strip() == "refused"
+
+
+def test_a_write_directly_under_the_temp_root_is_refused(tmp_path):
+    """The write test above targets `tmp_path`, several levels below the temp
+    root. A script that hard-codes `/tmp/x` writes at the top level, where
+    under bwrap only the read-only remount of the tmpfs refuses it.
+    """
+    target = Path(tempfile.gettempdir()).resolve() / f"skill-lens-probe-{uuid.uuid4().hex}"
+    source = (
+        "import pathlib\n"
+        f"try:\n    pathlib.Path({str(target)!r}).write_text('x')\n    print('wrote')\n"
+        "except OSError:\n    print('refused')\n"
+    )
+    try:
+        _, out, err, _ = _run(tmp_path, source)
+        assert out.strip() == "refused", err
+        assert not target.exists()
+    finally:
+        target.unlink(missing_ok=True)
+
+
+def test_the_scratch_directory_stays_writable(tmp_path):
+    """`TMPDIR` is the scratch directory, which sits under the temp root. The
+    read-only remount of the temp root must not reach it, so `tempfile` in a
+    script still works and writes there.
+    """
+    source = (
+        "import os, pathlib, tempfile\n"
+        "fd, name = tempfile.mkstemp()\n"
+        "os.write(fd, b'kept')\n"
+        "os.close(fd)\n"
+        "path = pathlib.Path(name)\n"
+        "print(path.parent == pathlib.Path(os.environ['TMPDIR']), path.read_text())\n"
+    )
+    _, out, err, _ = _run(tmp_path, source)
+    assert out.strip() == "True kept", err
 
 
 def test_a_real_workspace_survives_the_temp_dir_deny(tmp_path):
@@ -298,3 +336,31 @@ def test_the_environment_sysctl_is_a_documented_gap_under_sandbox_exec(tmp_path,
     )
     _, out, err, _ = _run(tmp_path, source, [secret_holder])
     assert out.strip() == "visible", out + err
+
+
+BWRAP_ONLY = pytest.mark.skipif(
+    STATUS.backend != "bwrap", reason="pins the Linux backend's behaviour"
+)
+
+
+@BWRAP_ONLY
+def test_dev_is_a_documented_in_memory_gap_under_bwrap(tmp_path):
+    # This pins a gap, not a guarantee. `--dev /dev` mounts a fresh tmpfs at
+    # `/dev`, with `/dev/shm` a plain directory inside it, and bwrap leaves
+    # it writable: POSIX shared memory and named semaphores (multiprocessing)
+    # need `/dev/shm`. A write anywhere under `/dev` is therefore not
+    # refused; it lands in memory and is discarded when the script exits.
+    # docs/runners.md and docs/security.md say so. If this test starts
+    # failing, those paragraphs are due for an update.
+    name = f"skill-lens-probe-{uuid.uuid4().hex}"
+    paths = (f"/dev/{name}", f"/dev/shm/{name}")
+    source = (
+        "import pathlib\n"
+        f"for path in {paths!r}:\n"
+        "    try:\n        pathlib.Path(path).write_text('x')\n        print(path, 'wrote')\n"
+        "    except OSError:\n        print(path, 'refused')\n"
+    )
+    _, out, err, _ = _run(tmp_path, source)
+    for path in paths:
+        assert f"{path} wrote" in out, out + err
+        assert not Path(path).exists()

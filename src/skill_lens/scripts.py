@@ -270,9 +270,14 @@ def wrap(
     return list(argv)
 
 
-def _bwrap_probe_argv() -> list[str]:
+def _bwrap_probe_argv(tempdir: Path) -> list[str]:
+    """`bwrap_argv`'s mounts and namespaces, minus the per-call binds. The
+    tmpfs and its read-only remount are in it because every real call needs
+    them: a bwrap that rejects either must fail here, not on every script.
+    """
     return [
         "bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+        "--tmpfs", str(tempdir), "--remount-ro", str(tempdir),
         "--unshare-net", "--unshare-pid", "--die-with-parent", "--", "/bin/true",
     ]  # fmt: skip
 
@@ -322,7 +327,7 @@ def probe_sandbox(
     if system == "Linux":
         if which("bwrap") is None:
             return SandboxStatus("none", "bwrap not found on PATH")
-        return _probe("bwrap", _bwrap_probe_argv(), run)
+        return _probe("bwrap", _bwrap_probe_argv(Path(tempfile.gettempdir()).resolve()), run)
     return SandboxStatus("none", f"no sandbox backend on {system}")
 
 

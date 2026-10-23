@@ -247,6 +247,27 @@ def test_linux_with_a_working_bwrap():
     assert status == SandboxStatus(backend="bwrap", detail="bwrap probe succeeded")
 
 
+def test_the_bwrap_probe_tries_the_tmpfs_and_its_read_only_remount():
+    # The real argv depends on --tmpfs and --remount-ro, so the probe tries
+    # both: a bwrap that rejects either must read as "none", not pass the
+    # probe and then fail every script call.
+    seen: dict[str, list[str]] = {}
+
+    def run(argv, **_k):
+        seen["argv"] = argv
+        return _completed(0)
+
+    probe_sandbox("auto", system="Linux", which=lambda _n: "/usr/bin/bwrap", run=run)
+    argv = seen["argv"]
+    tempdir = str(Path(tempfile.gettempdir()).resolve())
+    tmpfs = argv.index("--tmpfs")
+    remount = argv.index("--remount-ro")
+    assert argv[tmpfs + 1] == tempdir
+    assert argv[remount + 1] == tempdir
+    assert tmpfs < remount < argv.index("--")
+    assert argv[-2:] == ["--", "/bin/true"]
+
+
 def test_a_probe_that_cannot_start_is_none_with_the_error():
     def run(*_a, **_k):
         raise OSError("exec format error")

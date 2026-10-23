@@ -706,9 +706,10 @@ reading that fact is the eval signal. `run_script` never raises. Standard input 
 **The OS sandbox**, where one exists (`script_sandbox = "auto"`, the default), is a second
 layer on top. Under either backend a script cannot open a network connection; cannot write
 to the host filesystem outside the workspace and its scratch directory (a write elsewhere
-under the temporary directory is refused on both backends; under `bwrap`, a write to
-`/dev/shm` lands in an in-memory mount that is discarded when the script exits — bounded,
-like output, only by the timeout); and cannot
+under the temporary directory is refused on both backends; under `bwrap`, a write anywhere
+under `/dev`, `/dev/shm` included, lands in an in-memory mount that is discarded when the
+script exits — bounded, like output, only by the timeout — because POSIX shared memory needs
+`/dev/shm` writable); and cannot
 read anything under the system temporary directory except the workspace, the scratch
 directory and the skill's own bundle — so under `--concurrency N` a script cannot read the
 baseline arm's workspace or another case's scratch directory.
@@ -735,10 +736,13 @@ entries the temporary directory holds and when that changes, but not what they a
 
 The probe runs once per run, after discovery and before any case. The backend is *executed*
 — `sandbox-exec -p '(version 1)(allow default)(deny network*)' /usr/bin/true`, or `bwrap
---ro-bind / / --dev /dev --proc /proc --unshare-net --unshare-pid --die-with-parent --
-/bin/true` — not merely found on `PATH`, because present is not the same as working: a stock
-Ubuntu runner may not ship `bwrap` at all, or may refuse unprivileged user namespaces, and
-the first line of that refusal is what the report shows.
+--ro-bind / / --dev /dev --proc /proc --tmpfs <temp dir> --remount-ro <temp dir>
+--unshare-net --unshare-pid --die-with-parent -- /bin/true` — not merely found on `PATH`,
+because present is not the same as working: a stock Ubuntu runner may not ship `bwrap` at
+all, or may refuse unprivileged user namespaces, and the first line of that refusal is what
+the report shows. The `bwrap` probe includes the tmpfs and its read-only remount because
+every script call needs both, so a `bwrap` too old to accept either fails the probe instead
+of failing every script.
 
 The result is on every report that enabled scripts — `scripts: on, sandbox: bwrap`, or
 `scripts: on, sandbox: none (bwrap not found on PATH)` — so you can tell from a log whether
