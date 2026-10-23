@@ -216,7 +216,8 @@ class ProductJudge:
             "model": trace.model,
         }
         if trace.error is not None:
-            return JudgeVerdict(error=trace.error, model=trace.model)
+            # A judge run the product stopped still spent what it reported.
+            return JudgeVerdict(error=trace.error, **spend)
         try:
             raw = extract_json_object(trace.output)
         except AmbiguousReply as exc:

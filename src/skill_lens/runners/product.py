@@ -551,7 +551,19 @@ class ProductRunner:
                 shutil.rmtree(private, ignore_errors=True)
 
         if trace.error is not None:
-            return RunResult(error=trace.error, latency_ms=elapsed(), model=trace.model)
+            # Errored, but the product may still have spent: a run stopped by
+            # its own budget reports what it cost. Dropping that would make
+            # every total under-count by exactly the runs that cost the most.
+            return RunResult(
+                error=trace.error,
+                input_tokens=trace.input_tokens,
+                output_tokens=trace.output_tokens,
+                latency_ms=elapsed(),
+                cost_usd=trace.cost_usd,
+                cost_note=trace.cost_note,
+                usage_note=trace.usage_note,
+                model=trace.model,
+            )
         return RunResult(
             output=trace.output,
             tool_calls=(
