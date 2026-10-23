@@ -192,7 +192,11 @@ as one argument, and Linux caps one at 128 KiB), a missing executable at run tim
 product that ran a case with `tools:` but never asked the [MCP
 bridge](#mock-tools-under-a-product) for them are all **errored** cases — never raised,
 never failed. A complete trace carrying the product's own error message is reported in
-preference to the exit code; a cut trace names the cap to raise.
+preference to the exit code; a cut trace names the cap to raise. An errored case keeps the
+tokens, cost, `cost_note` and `usage_note` its trace reported, so a Claude Code run stopped
+by `--max-budget-usd` is errored and still counts what it spent in the report's totals. Only
+those figures and the model are kept; no evaluator reads an errored run, so the case stays
+errored.
 
 Preflight checks the executable is on `PATH` and, for the two presets, that it actually
 starts (`--version`); `cli` has no version command, so only the `PATH` lookup applies to it.
@@ -341,7 +345,8 @@ From there the verdict is handled as under every judge: a verdict whose check id
 match the rubric is errored, and a pass with no evidence (an empty or missing `evidence`) is
 recorded as a failure. A product failure — a timeout, a non-zero exit, a reply over
 `max_output_bytes`, a prompt over 100 KiB, an executable that vanished after preflight — is
-errored the same way.
+errored the same way, and keeps whatever tokens and cost its trace reported as judge
+overhead.
 
 **What is read and what is not.** `judge_model` and `judge_temperature` are not read: no
 product exposes a temperature, and a product's model is set with `[runners.<name>] args`.

@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from skill_lens.models import EvalCase, Skill, ToolSpec, WorkspaceSpec
+from skill_lens.orchestrator import run_evals
+from skill_lens.reporters.json_reporter import render_json
 from skill_lens.runners.mcp import CLAUDE_CODE_MCP, COPILOT_MCP
 from skill_lens.runners.product import (
     PRESETS,
@@ -303,6 +305,68 @@ def test_the_products_own_failure_is_the_error(tmp_path, fake, monkeypatch):
     assert result.model == "claude-opus-5[1m]"
 
 
+def test_an_errored_run_keeps_the_spend_the_trace_reported(tmp_path, fake, monkeypatch):
+    # A run stopped by `--max-budget-usd` is errored, but it spent money: the
+    # report's totals must count it, not read it as free.
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "claude-code-budget-stop.jsonl"))
+    result = ProductRunner(_product()).run(_skill(tmp_path), _case())
+    assert result.error == "claude-code: error_max_budget_usd"
+    assert result.input_tokens == 12 + 2000 + 1500
+    assert result.output_tokens == 310
+    assert result.cost_usd == pytest.approx(0.0418)
+    assert result.cost_note == ""
+    assert result.usage_note == ""
+
+
+def test_a_failed_exit_with_a_complete_trace_keeps_the_spend(tmp_path, fake, monkeypatch):
+    # Claude Code exits non-zero on an error result. The complete trace is
+    # still the explanation, and its spend is still the run's.
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "claude-code-budget-stop.jsonl"))
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "failed")
+    result = ProductRunner(_product()).run(_skill(tmp_path), _case())
+    assert result.error == "claude-code: error_max_budget_usd"
+    assert result.input_tokens == 12 + 2000 + 1500
+    assert result.output_tokens == 310
+    assert result.cost_usd == pytest.approx(0.0418)
+
+
+def test_the_report_counts_an_errored_runs_spend(tmp_path, fake, monkeypatch):
+    # The point of keeping the spend: the run's totals and the JSON report
+    # include it, while the case stays errored and nothing scores it.
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "claude-code-budget-stop.jsonl"))
+    monkeypatch.setenv("FAKE_PRODUCT_MODE", "failed")
+    skill = _skill(tmp_path)
+    (skill.path / "ping.eval.yaml").write_text(
+        "cases:\n  - name: c\n    task: Please ping.\n"
+        "    assertions:\n      - kind: contains\n        value: PONG-7731\n",
+        encoding="utf-8",
+    )
+    report = run_evals([skill], [ProductRunner(_product())])
+    (outcome,) = report.outcomes
+    assert outcome.status == "errored"
+    assert outcome.scores == []
+    assert report.total_tokens == 12 + 2000 + 1500 + 310
+    assert report.total_cost_usd == pytest.approx(0.0418)
+    payload = json.loads(render_json(report))
+    assert payload["summary"]["total_cost_usd"] == pytest.approx(0.0418)
+    assert payload["outcomes"][0]["cost_usd"] == pytest.approx(0.0418)
+
+
+def test_an_errored_copilot_run_keeps_the_traces_notes(tmp_path, fake, monkeypatch):
+    # Copilot prices per premium request and this trace has no shutdown
+    # metrics: the notes say so on the errored result too, so a 0.0 there is
+    # never read as "this run was free".
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "copilot-error.jsonl"))
+    result = ProductRunner(_product(parse=parse_copilot, name="copilot")).run(
+        _skill(tmp_path), _case()
+    )
+    assert result.error is not None
+    assert result.cost_note == (
+        "copilot bills per premium request, not per token; 0 premium request(s)"
+    )
+    assert result.usage_note == "copilot did not report token usage"
+
+
 def test_a_truncated_trace_is_an_error_naming_the_cap(tmp_path, fake, monkeypatch):
     monkeypatch.setenv("FAKE_PRODUCT_MODE", "huge")
     monkeypatch.setenv("FAKE_PRODUCT_BYTES", "5000")
@@ -494,6 +558,7 @@ def test_a_product_that_never_connects_is_an_error_not_a_failed_trajectory(
     assert result.error is not None
     assert "never listed the case's mock tools" in result.error
     assert "[runners.claude-code] args" in result.error
+    assert result.cost_usd == pytest.approx(0.0271188)  # the product ran, and spent
     assert fake()["mcp"]["ignored"] is True
 
 

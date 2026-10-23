@@ -351,6 +351,18 @@ def test_a_product_failure_is_the_verdicts_error(fake, monkeypatch):
     assert verdict.error == "claude-code exited with code 3: boom"
 
 
+def test_a_failed_judge_run_keeps_the_spend_the_trace_reported(fake, monkeypatch):
+    # The judge's spend is harness overhead, reported apart from the skill's;
+    # a judge run the product stopped still spent it.
+    monkeypatch.setenv("FAKE_PRODUCT_TRACE", str(FIXTURES / "claude-code-budget-stop.jsonl"))
+    verdict = ProductJudge(_product()).judge(REQUEST)
+    assert verdict.error == "claude-code: error_max_budget_usd"
+    assert verdict.input_tokens == 12 + 2000 + 1500
+    assert verdict.output_tokens == 310
+    assert verdict.cost_usd == pytest.approx(0.0418)
+    assert verdict.model == "claude-opus-5[1m]"
+
+
 def test_a_timeout_is_the_verdicts_error(fake, monkeypatch):
     monkeypatch.setenv("FAKE_PRODUCT_MODE", "sleep")
     verdict = ProductJudge(_product(timeout_seconds=0.5)).judge(REQUEST)

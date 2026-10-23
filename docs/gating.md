@@ -247,7 +247,10 @@ a stale pointer in the report.
 `outcomes[].cost_note` and `outcomes[].usage_note` say why `cost_usd` or a token count is
 `0` rather than measured — an unpriced model, a product that bills per request rather than
 per token, or a trace that reported no usage — each empty string when the figure beside it
-is a real measurement.
+is a real measurement. An errored product outcome keeps the notes its trace reported, as it
+keeps the figures (below): an errored Copilot run carries Copilot's premium-request
+`cost_note` like a clean one, so the console and Markdown totals say some costs were not
+priced.
 
 `delta` is the full comparison object — pass-rate, token, cost and latency deltas, per-case
 stats, low-signal checks, high-variance cases and notes — and is `null` when no baseline arm
@@ -258,7 +261,10 @@ which is candidate-only, for the same reason the gate itself only reads the cand
 
 `summary`'s token, cost and latency totals sum **both** arms — money spent is money spent —
 while `summary.passed` / `summary.failed` / `summary.errored` / `summary.pass_rate` stay
-candidate-only, because those are what the gate reads.
+candidate-only, because those are what the gate reads. For the same reason the totals include
+errored outcomes: an errored product run keeps the tokens and cost its trace reported (a
+Claude Code run stopped by `--max-budget-usd`, say), so its `outcomes[]` figures can be
+non-zero. They only add to the totals; the outcome is still `errored`, and no check reads it.
 
 ## JUnit XML
 
