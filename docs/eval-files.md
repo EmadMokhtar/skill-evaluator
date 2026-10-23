@@ -455,7 +455,7 @@ under that runner, never a silent `false` that would pass every negative control
 | `tools:` (mock tools) | yes | yes | yes — through the [MCP bridge](runners.md#mock-tools-under-a-product) | authoring error |
 | `trajectory:` | yes — names must be the case's own tools | yes — names must be the case's own tools | yes — the case's tools by their declared names, or the product's own tool names, unchecked; `max_calls` counts the product's own calls too | authoring error |
 | `mode: offered` | yes | yes | yes | authoring error |
-| `budget:` | yes | yes | see [Product runners](runners.md#product-runners) | latency only |
+| `budget:` | yes | yes — `max_tokens` also [stops the run while it spends](runners.md#stopping-a-runaway-case) | see [Product runners](runners.md#product-runners) | latency only |
 | `workspace:` | yes | yes | yes — the product's working directory | yes |
 | `judge:` | yes | yes | yes | yes |
 

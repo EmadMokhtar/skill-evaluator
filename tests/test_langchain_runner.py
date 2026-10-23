@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from langchain_fakes import (
     FunctionChatModel,
@@ -14,7 +15,7 @@ from langchain_fakes import (
     tool_call,
     tool_results,
 )
-from skill_lens.models import EvalCase, Skill, ToolSpec
+from skill_lens.models import BudgetSpec, EvalCase, Skill, ToolSpec
 from skill_lens.runners.base import Runner
 from skill_lens.runners.langchain import LangChainRunner, _chat_model
 from skill_lens.runners.preflight import UnsupportedBaseURL
@@ -672,3 +673,76 @@ def test_preflight_reports_a_missing_extra_as_the_setup_error_not_a_raw_import_e
     runner = LangChainRunner(model="openai:gpt-4o-mini", base_url=LOCAL)
     with pytest.raises(adapter.RunnerDependencyError):
         runner.preflight([SKILL], {SKILL.name: [case()]})
+
+
+# --- The case's token budget, handed to the framework (issue #94) ------------
+
+
+def looping() -> FunctionChatModel:
+    """A model that calls `poll` on every turn; each turn spends 15 tokens (USAGE)."""
+
+    def reply(messages, turn):
+        return tool_call("poll", {})
+
+    return FunctionChatModel(reply=reply)
+
+
+def test_a_case_over_its_token_budget_is_stopped_while_it_spends():
+    model = looping()
+    result = LangChainRunner(model=model).run(
+        SKILL, case(tools=[ToolSpec(name="poll")], budget=BudgetSpec(max_tokens=20))
+    )
+    # 15 tokens, then 30: the second turn crosses 20 and the run stops there,
+    # rather than looping until LangGraph's recursion limit.
+    assert len(model.turns) == 2
+    assert result.errored is True
+    assert "max_tokens of 20" in result.error
+    assert "30 tokens" in result.error
+
+
+def test_a_stopped_run_keeps_the_spend_it_recorded():
+    result = LangChainRunner(model=looping()).run(
+        SKILL, case(tools=[ToolSpec(name="poll")], budget=BudgetSpec(max_tokens=20))
+    )
+    # Both turns, the one that crossed the limit included.
+    assert result.input_tokens == 20
+    assert result.output_tokens == 10
+    assert result.cost_usd == 0.0
+    assert result.cost_note != ""
+
+
+def test_a_run_within_its_token_budget_is_not_stopped():
+    result = LangChainRunner(model=scripted(text("done"))).run(
+        SKILL, case(budget=BudgetSpec(max_tokens=15))
+    )
+    assert result.errored is False
+    assert result.output == "done"
+
+
+def test_an_errored_run_keeps_the_spend_of_every_attempt():
+    # Each attempt is answered once, then fails with a 500 on its second turn.
+    def reply(messages, turn):
+        if any(isinstance(message, AIMessage) for message in messages):
+            raise StatusError(500)
+        return tool_call("poll", {})
+
+    runner = LangChainRunner(
+        model=FunctionChatModel(reply=reply),
+        retries=1,
+        retry_backoff_seconds=0.01,
+        sleep=lambda _: None,
+    )
+    result = runner.run(SKILL, case(tools=[ToolSpec(name="poll")]))
+    assert result.errored is True
+    assert result.error == "StatusError: status 500"
+    assert result.input_tokens == 20
+    assert result.output_tokens == 10
+
+
+def test_a_run_that_failed_before_any_response_spent_nothing():
+    result = LangChainRunner(model=raising(StatusError(401)), retries=0).run(SKILL, case())
+    assert result.errored is True
+    assert result.tokens == 0
+    assert result.cost_usd == 0.0
+    # Nothing was answered, so nothing was billed: a measured zero, not an unpriced one.
+    assert result.cost_note == ""

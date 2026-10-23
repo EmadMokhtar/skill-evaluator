@@ -147,8 +147,8 @@ keep a per-provider table of variable names. Three rules keep the value honest:
 Agent-framework imports appear in exactly four modules — `runners/pydantic_ai.py`,
 `judges/pydantic_ai.py`, `runners/langchain.py` and `judges/langchain.py`.
 `runners/tools.py` builds framework-neutral mock tools and the adapters wrap them. The
-prompt rules (`runners/prompting.py`) and the retry loop (`runners/retry.py`) import no
-framework, which is what lets both adapters share them. The product runner
+prompt rules (`runners/prompting.py`), the retry loop (`runners/retry.py`) and the token
+stop (`runners/limits.py`) import no framework, which is what lets both adapters share them. The product runner
 (`runners/product.py`), the product judge (`judges/product.py`), the trace parsers
 (`runners/traces.py`) and the MCP bridge's runner side (`runners/mcp.py`) import
 `subprocess` and `json`, not a framework: a product is an executable and a trace grammar,
@@ -172,6 +172,40 @@ entirely, so it neither inflates nor deflates the score the way a false pass wou
 repository running an unpriced model with a `budget:` block that mixes a priced limit with
 `max_cost_usd` will see those cases turn red on an upgrade to this behavior; the fix is to
 drop `max_cost_usd` for that provider, not to treat the skip as a pass.
+
+### A case's `max_tokens` stops a keyed run while it spends, and the stopped run is `errored`
+
+`budget:` is scored after a run ends, which is too late for a case that loops: it would
+spend until it hit a framework default first. So `pydantic-ai` hands `max_tokens` to
+PydanticAI as `UsageLimits(total_tokens_limit=...)`, and `langchain` registers a middleware
+that, after every model turn, sums the same `usage_metadata` a finished run is measured by
+and raises once the total is over the limit. Both stop at the first response that takes the
+total *over* `max_tokens`; a run that ends exactly at it is not stopped, because
+`BudgetEvaluator` passes it. The stopped run is `RunResult.error` (`TokenBudgetExceeded:
+pydantic-ai stopped the run at 120 tokens, over the case's budget max_tokens of 100`),
+never raised and never retried, and no evaluator reads it: a run cut off mid-loop has no
+finished answer to score. That choice shows on upgrade: a keyed case that ran a little over
+`max_tokens` used to finish and fail its budget check, and is now `errored` instead. Both
+fail the gate by default, but a run with `min_pass_rate` below 1 and `fail_on_error` on now
+fails for that case where it passed before. `max_cost_usd` is not handed over (PydanticAI
+has no cost limit at the supported version floor, and LangChain has none at all), and no
+other limit is set: PydanticAI keeps its default `request_limit` of 50, and LangGraph's
+`recursion_limit` counts graph steps, which no `budget:` key measures. The limit and the
+stop message live in `runners/limits.py`, which imports no framework, so both adapters stop
+at the same number and report it in the same words.
+
+### An errored keyed run keeps the spend of every attempt
+
+Both keyed adapters record every model response as it arrives — PydanticAI through a
+`WrapperModel`, because `UsageLimitExceeded` is raised *before* the response that crossed
+the limit is appended to the message history; LangChain through the same middleware — so an
+errored run reports the input and output tokens, `cost_usd`, `cost_note` and model of every
+attempt it made, as an errored product run does. A run stopped at its budget, or one a
+provider failed twenty turns in, was billed for what it got back, and
+`RunReport.total_cost_usd` reads every outcome. A run that no response answered spent
+nothing: its zero is a measurement, so it is not priced and carries no `cost_note`. A
+finished run is unchanged — its figures, and so its `budget:`, are the attempt that
+succeeded.
 
 ### Nothing scores a vacuous pass
 

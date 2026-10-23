@@ -7,6 +7,7 @@ problem (errored) apart from a low score (failed).
 
 from __future__ import annotations
 
+import functools
 import inspect
 import json
 import time
@@ -16,6 +17,7 @@ from typing import Any
 from skill_lens.bundle import SkillBundle
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
 from skill_lens.runners.base import RunnerDependencyError
+from skill_lens.runners.limits import stop_message, token_limit
 from skill_lens.runners.preflight import UnsupportedBaseURL, check_trajectory_names
 from skill_lens.runners.pricing import calculate_cost, provider_of
 from skill_lens.runners.prompting import instructions
@@ -83,6 +85,60 @@ def resolve_model(model: Any, base_url: str) -> Any:
     return infer_model(model, provider_factory=provider)
 
 
+@functools.cache
+def _meter_class() -> type:
+    """A model wrapper that records every response its model returns.
+
+    Built on first use, because the framework is imported lazily. PydanticAI
+    raises `UsageLimitExceeded` *before* it appends the response that crossed
+    the limit to the message history, so the history alone would under-count
+    a stopped run by exactly that response. Every response passes through
+    `request`, which makes `responses` the complete record of what the
+    attempt was billed for -- on an attempt that raised as much as on one
+    that finished.
+    """
+    from pydantic_ai.models.wrapper import WrapperModel
+
+    class Meter(WrapperModel):
+        def __init__(self, wrapped: Any) -> None:
+            super().__init__(wrapped)
+            self.responses: list[Any] = []
+
+        async def request(self, messages: Any, model_settings: Any, parameters: Any) -> Any:
+            response = await super().request(messages, model_settings, parameters)
+            self.responses.append(response)
+            return response
+
+    return Meter
+
+
+def _spend(meters: list[Any], configured: str) -> dict[str, Any]:
+    """What every attempt's responses were billed for, as `RunResult` fields.
+
+    For an errored run only: a finished one reads its own `result.usage`, so
+    its numbers -- and so its `budget:` -- are the attempt that succeeded,
+    exactly as before. No response means nothing was billed, which is a
+    measured zero, so it is not priced and gets no note.
+    """
+    from pydantic_ai.usage import RunUsage
+
+    responses = [response for meter in meters for response in meter.responses]
+    if not responses:
+        return {"model": configured}
+    usage = RunUsage()
+    for response in responses:
+        usage.incr(response.usage)
+    model_name = _model_name(responses, configured)
+    cost_usd, cost_note = calculate_cost(usage, model_name, provider_of(configured))
+    return {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "cost_usd": cost_usd,
+        "cost_note": cost_note,
+        "model": model_name,
+    }
+
+
 def _arguments(args: Any) -> dict[str, Any]:
     """Normalise tool-call arguments to a dict.
 
@@ -133,6 +189,12 @@ def _model_name(messages: list[Any], fallback: str) -> str:
         if isinstance(message, ModelResponse) and message.model_name:
             return message.model_name
     return fallback
+
+
+def _is_usage_limit(exc: Exception) -> bool:
+    from pydantic_ai.exceptions import UsageLimitExceeded
+
+    return isinstance(exc, UsageLimitExceeded)
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -205,23 +267,34 @@ class PydanticAIRunner:
             )
             for agent_tool in built
         ]
+        # Metered, so an attempt that raises still says what it spent; the
+        # agent's `model` is the meter, which is how `run` reads it back.
         return Agent(
-            resolve_model(self._model, self._base_url),
+            _meter_class()(resolve_model(self._model, self._base_url)),
             instructions=instructions(skill, case, workspace is not None),
             tools=tools,
         )
 
-    def _run_with_retries(self, build_agent: Callable[[], Any], task: str) -> Any:
+    def _run_with_retries(self, build_agent: Callable[[], Any], task: str, case: EvalCase) -> Any:
         """Build a fresh agent for every attempt, then run it.
 
         A retry is a new conversation, and its tools must be new too: a mock
         whose `returns:` is consumed in call order keeps its counter in the
         built tool, so an agent reused across attempts would hand the second
         attempt's first call the sequence's second entry.
+
+        The case's `max_tokens` becomes PydanticAI's `total_tokens_limit`,
+        checked after every response, so a runaway case stops as soon as it
+        crosses its budget instead of at its timeout. Every other limit keeps
+        PydanticAI's default, `request_limit=50` included -- the same limits
+        a call with no `usage_limits` gets.
         """
+        from pydantic_ai.usage import UsageLimits
+
         settings = self._model_settings()
+        limits = UsageLimits(total_tokens_limit=token_limit(case))
         return run_with_retries(
-            lambda: build_agent().run_sync(task, model_settings=settings),
+            lambda: build_agent().run_sync(task, model_settings=settings, usage_limits=limits),
             _is_transient,
             self._retries,
             self._retry_backoff_seconds,
@@ -265,11 +338,16 @@ class PydanticAIRunner:
         _require_pydantic_ai()
         configured = self._model if isinstance(self._model, str) else ""
         offered = skill_tool_name(skill.name) if case.mode == "offered" else None
+        meters: list[Any] = []
+
+        def build_agent() -> Any:
+            agent = self._build_agent(skill, case, workspace, scripts)
+            meters.append(agent.model)
+            return agent
+
         started = time.monotonic()
         try:
-            result = self._run_with_retries(
-                lambda: self._build_agent(skill, case, workspace, scripts), case.task
-            )
+            result = self._run_with_retries(build_agent, case.task, case)
             messages = result.all_messages()
             usage = result.usage
             model_name = _model_name(messages, configured)
@@ -290,10 +368,18 @@ class PydanticAIRunner:
                 ),
             )
         except Exception as exc:
+            # The spend of every attempt: a run stopped at its budget, or one
+            # that failed twenty turns in, was billed for what it got back.
+            spend = _spend(meters, configured)
+            error = f"{type(exc).__name__}: {exc}"
+            limit = token_limit(case)
+            tokens = spend.get("input_tokens", 0) + spend.get("output_tokens", 0)
+            if limit is not None and tokens > limit and _is_usage_limit(exc):
+                error = stop_message(self.name, limit, tokens)
             return RunResult(
-                error=f"{type(exc).__name__}: {exc}",
+                error=error,
                 latency_ms=int((time.monotonic() - started) * 1000),
-                model=configured,
+                **spend,
             )
 
         return run_result

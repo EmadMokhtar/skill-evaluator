@@ -7,8 +7,9 @@ import pytest
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.usage import RequestUsage
 
-from skill_lens.models import EvalCase, Skill, ToolSpec
+from skill_lens.models import BudgetSpec, EvalCase, Skill, ToolSpec
 from skill_lens.runners.base import Runner
 from skill_lens.runners.preflight import UnsupportedBaseURL
 from skill_lens.runners.prompting import BASELINE_PREAMBLE, OFFERED_PREAMBLE
@@ -804,3 +805,101 @@ def test_an_unknown_provider_beside_a_base_url_is_refused_in_preflight_not_a_tra
     with pytest.raises(UnsupportedBaseURL, match="runner pydantic-ai") as caught:
         runner.preflight([SKILL], {SKILL.name: [case()]})
     assert "badprovider" in str(caught.value)
+
+
+# --- The case's token budget, handed to the framework (issue #94) ------------
+
+
+def spending(input_tokens: int, output_tokens: int) -> ModelResponse:
+    """A tool call that spends a fixed number of tokens, so a loop of them runs away."""
+    return ModelResponse(
+        parts=[ToolCallPart(tool_name="poll", args={})],
+        usage=RequestUsage(input_tokens=input_tokens, output_tokens=output_tokens),
+    )
+
+
+def looping(response: ModelResponse) -> tuple[FunctionModel, dict[str, int]]:
+    """A model that answers every turn with `response`, and counts the turns."""
+    calls = {"n": 0}
+
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        calls["n"] += 1
+        return response
+
+    return FunctionModel(reply), calls
+
+
+def test_a_case_over_its_token_budget_is_stopped_while_it_spends():
+    model, calls = looping(spending(40, 20))
+    result = PydanticAIRunner(model=model).run(
+        SKILL, case(tools=[ToolSpec(name="poll")], budget=BudgetSpec(max_tokens=100))
+    )
+    # 60 tokens, then 120: the second turn crosses 100 and the run stops there,
+    # rather than looping until PydanticAI's own request_limit of 50.
+    assert calls["n"] == 2
+    assert result.errored is True
+    assert "max_tokens of 100" in result.error
+    assert "120 tokens" in result.error
+
+
+def test_a_stopped_run_keeps_the_spend_it_recorded():
+    model, _ = looping(spending(40, 20))
+    result = PydanticAIRunner(model=model).run(
+        SKILL, case(tools=[ToolSpec(name="poll")], budget=BudgetSpec(max_tokens=100))
+    )
+    # Both turns, the one that crossed the limit included.
+    assert result.input_tokens == 80
+    assert result.output_tokens == 40
+    # FunctionModel has no price, so the 0.0 says why rather than reading as free.
+    assert result.cost_usd == 0.0
+    assert "no price data" in result.cost_note
+    assert result.model.startswith("function:")
+
+
+def test_a_run_within_its_token_budget_is_not_stopped():
+    result = PydanticAIRunner(model=scripted(text("done"))).run(
+        SKILL, case(budget=BudgetSpec(max_tokens=10_000))
+    )
+    assert result.errored is False
+    assert result.output == "done"
+
+
+def test_a_budget_without_max_tokens_sets_no_token_limit():
+    # Only PydanticAI's own default request_limit stops this loop.
+    model, calls = looping(spending(40, 20))
+    result = PydanticAIRunner(model=model).run(
+        SKILL, case(tools=[ToolSpec(name="poll")], budget=BudgetSpec(max_latency_ms=60_000))
+    )
+    assert calls["n"] == 50
+    assert result.errored is True
+    assert "request_limit" in result.error
+
+
+def test_an_errored_run_keeps_the_spend_of_every_attempt():
+    # Each attempt is answered once, then fails with a 500 on its second turn.
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        if any(isinstance(message, ModelResponse) for message in messages):
+            raise ModelHTTPError(status_code=500, model_name="scripted", body=None)
+        return spending(40, 20)
+
+    runner = PydanticAIRunner(
+        model=FunctionModel(reply), retries=1, retry_backoff_seconds=0.01, sleep=lambda _: None
+    )
+    result = runner.run(SKILL, case(tools=[ToolSpec(name="poll")]))
+    assert result.errored is True
+    assert "500" in result.error
+    assert result.input_tokens == 80
+    assert result.output_tokens == 40
+    assert "no price data" in result.cost_note
+
+
+def test_a_run_that_failed_before_any_response_spent_nothing():
+    def explode(messages, info: AgentInfo) -> ModelResponse:
+        raise ModelHTTPError(status_code=401, model_name="scripted", body=None)
+
+    result = PydanticAIRunner(model=FunctionModel(explode), retries=0).run(SKILL, case())
+    assert result.errored is True
+    assert result.tokens == 0
+    assert result.cost_usd == 0.0
+    # Nothing was answered, so nothing was billed: a measured zero, not an unpriced one.
+    assert result.cost_note == ""

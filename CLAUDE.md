@@ -129,8 +129,8 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **Agent-framework imports appear in exactly four modules** —
   `runners/pydantic_ai.py`, `judges/pydantic_ai.py`, `runners/langchain.py`,
   `judges/langchain.py`. `runners/tools.py` builds framework-neutral `AgentTool`s (name +
-  JSON schema + callable); `runners/prompting.py` and `runners/retry.py` hold the prompt and
-  retry rules both adapters share; the adapters wrap them. `runners/product.py`,
+  JSON schema + callable); `runners/prompting.py`, `runners/retry.py` and `runners/limits.py`
+  hold the prompt, retry and token-stop rules both adapters share; the adapters wrap them. `runners/product.py`,
   `judges/product.py` and `runners/traces.py` import `subprocess` and `json`, not a
   framework — a product is an executable and a trace grammar — and `process.py` beneath
   them imports nothing from the project. `tests/test_framework_isolation.py`
@@ -145,6 +145,22 @@ fails if the two drift apart — so a new invariant is added in both places or n
   unpriced model with a budget block that mixes a priced limit and `max_cost_usd` will see
   those cases turn red on upgrade — drop `max_cost_usd` for that provider rather than relying
   on the skip to be silently ignored.
+- **A case's `max_tokens` stops a keyed run while it spends, and the stopped run is
+  `errored`.** `pydantic-ai` passes it as `UsageLimits(total_tokens_limit=...)`; `langchain`
+  registers an `after_model` middleware summing the same `usage_metadata` `_usage` measures.
+  Both stop at the first response taking the total *over* it (exactly at it passes
+  `BudgetEvaluator`, so it is not stopped). The result is `RunResult.error`
+  (`TokenBudgetExceeded: ...`), never raised, never retried, never scored: a run cut off
+  mid-loop has no answer. On upgrade a keyed case a little over `max_tokens` turns from
+  `failed` to `errored`. `max_cost_usd` is not handed over (no PydanticAI cost limit at the
+  2.22 floor, none in LangChain); PydanticAI keeps `request_limit=50`, and LangGraph's
+  `recursion_limit` is not set, since no `budget:` key counts steps. `runners/limits.py`
+  holds the rule and imports no framework.
+- **An errored keyed run keeps the spend of every attempt.** Every response is recorded as it
+  arrives (a `WrapperModel` for PydanticAI, whose history misses the response that crossed
+  the limit; the same middleware for LangChain), so an errored result carries the tokens,
+  `cost_usd`, `cost_note` and model of every attempt. No response answered means a measured
+  zero: not priced, no `cost_note`. A finished run is unchanged — the attempt that succeeded.
 - **Mock tools accept any arguments.** A model hallucinating an argument must not raise, or an
   eval signal would surface as an infra error.
 - **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act;

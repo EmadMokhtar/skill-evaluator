@@ -825,6 +825,38 @@ mixing a priced limit (e.g. `max_tokens`) and `max_cost_usd` will now see those 
 — they always failed to verify the cost limit; only the reporting of `passed` has caught up
 with `score`.
 
+### Stopping a runaway case
+
+Budget checks run after a case finishes, so on their own they cannot stop a case that loops.
+Under `pydantic-ai` and `langchain`, `max_tokens` is therefore also handed to the framework
+itself: the run stops at the first model response that takes its token total over the limit,
+and the case is reported as **errored**, with an error such as
+
+```
+TokenBudgetExceeded: pydantic-ai stopped the run at 120 tokens, over the case's budget max_tokens of 100
+```
+
+The case is not scored: a run cut off in the middle of its loop has no finished answer to
+check. A run that ends at or under the limit is not affected, and the budget check still
+scores it as before. If you are upgrading, note that a keyed case that used to end slightly
+over `max_tokens` and fail its budget check is now errored instead. Both fail the gate by
+default; with `min_pass_rate` below `1.0`, the errored case now fails the gate through
+`fail_on_error` where the failed one did not.
+
+An errored run still reports what it spent: the tokens, cost and model of every model
+response it received, across every retried attempt, so the totals and the JSON report count
+a stopped run at its real cost. A run that failed before any response arrived spent nothing,
+and its `0` carries no `cost_note`.
+
+Only `max_tokens` is handed over. Neither framework can stop on `max_cost_usd` (PydanticAI
+has no cost limit at the version this project supports; LangChain has none), and
+`max_latency_ms` stays a check after the run. Without `max_tokens`, PydanticAI still stops at
+its own default of 50 model requests, while a LangChain run continues until LangGraph's
+recursion limit, which is 10,000 graph steps by default. Product runners are not covered:
+`claude-code` can stop itself on spend with its own flag
+(`args = ["--max-budget-usd", "0.50"]` under `[runners.claude-code]`), reported as errored
+with the spend its trace reported; `copilot` has no such flag.
+
 ## Comparative runs and the baseline arm
 
 Under `--baseline` (see [Comparative evals](comparative-evals.md)), the runner is called

@@ -19,6 +19,7 @@ from typing import Any
 from skill_lens.bundle import SkillBundle
 from skill_lens.models import EvalCase, RunResult, Skill, ToolCall
 from skill_lens.runners.base import RunnerDependencyError
+from skill_lens.runners.limits import TokenBudgetExceeded, token_limit
 from skill_lens.runners.preflight import UnsupportedBaseURL, check_trajectory_names
 from skill_lens.runners.pricing import calculate_cost, provider_of
 from skill_lens.runners.prompting import instructions
@@ -221,6 +222,58 @@ def _cost(
     return calculate_cost(usage, model_name, provider_of(configured))
 
 
+class _TokenMeter:
+    """What one attempt's model turns were billed for, and its budget stop.
+
+    Fed after every model turn with the agent's whole message list, by the
+    middleware `_build_agent` registers. LangChain hands the agent's state
+    back only from a run that finished, so this is what still knows the
+    turns an attempt was answered when it raises -- this meter's own stop,
+    or a provider failure twenty turns in.
+
+    The stop is the case's `max_tokens`, summed by `_usage`, the same
+    function that measures a finished run: LangChain has no token limit of
+    its own, and LangGraph's `recursion_limit` counts graph steps, which no
+    `budget:` key measures.
+    """
+
+    def __init__(self, runner: str, limit: int | None) -> None:
+        self._runner = runner
+        self._limit = limit
+        self.messages: list[Any] = []
+
+    def observe(self, messages: list[Any]) -> None:
+        self.messages = list(messages)
+        if self._limit is None:
+            return
+        tokens = sum(_usage(self.messages))
+        if tokens > self._limit:
+            raise TokenBudgetExceeded(self._runner, self._limit, tokens)
+
+
+def _spend(meters: list[_TokenMeter], configured: str) -> dict[str, Any]:
+    """What every attempt's turns were billed for, as `RunResult` fields.
+
+    For an errored run only: a finished one reads its own messages, so its
+    numbers -- and so its `budget:` -- are the attempt that succeeded,
+    exactly as before. No answered turn means nothing was billed, which is a
+    measured zero, so it is not priced and gets no note.
+    """
+    messages = [message for meter in meters for message in meter.messages]
+    if not _ai_messages(messages):
+        return {"model": configured}
+    input_tokens, output_tokens = _usage(messages)
+    model_name = _model_name(messages, configured)
+    cost_usd, cost_note = _cost(input_tokens, output_tokens, model_name, configured)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "cost_usd": cost_usd,
+        "cost_note": cost_note,
+        "model": model_name,
+    }
+
+
 class LangChainRunner:
     """Runs a case through LangChain's prebuilt agent, behind the protocol."""
 
@@ -249,8 +302,17 @@ class LangChainRunner:
         case: EvalCase,
         workspace: Workspace | None,
         scripts: ScriptRuntime | None,
+        meter: _TokenMeter | None = None,
     ) -> Any:
         from langchain.agents import create_agent
+        from langchain.agents.middleware import after_model
+
+        if meter is None:
+            meter = _TokenMeter(self.name, token_limit(case))
+
+        @after_model
+        def meter_turn(state: Any, runtime: Any) -> None:
+            meter.observe(state["messages"])
 
         built = [build_mock_tool(spec) for spec in case.tools]
         if case.mode == "offered":
@@ -268,6 +330,7 @@ class LangChainRunner:
             _chat_model(self._model, self._temperature, self._base_url),
             tools=_structured_tools(built),
             system_prompt=instructions(skill, case, workspace is not None),
+            middleware=[meter_turn],
         )
 
     def _invoke(self, build_agent: Callable[[], Any], task: str) -> list[Any]:
@@ -310,11 +373,16 @@ class LangChainRunner:
         _require_langchain()
         configured = self._model if isinstance(self._model, str) else ""
         offered = skill_tool_name(skill.name) if case.mode == "offered" else None
+        meters: list[_TokenMeter] = []
+
+        def build_agent() -> Any:
+            meter = _TokenMeter(self.name, token_limit(case))
+            meters.append(meter)
+            return self._build_agent(skill, case, workspace, scripts, meter)
+
         started = time.monotonic()
         try:
-            messages = self._invoke(
-                lambda: self._build_agent(skill, case, workspace, scripts), case.task
-            )
+            messages = self._invoke(build_agent, case.task)
             input_tokens, output_tokens = _usage(messages)
             model_name = _model_name(messages, configured)
             cost_usd, cost_note = _cost(input_tokens, output_tokens, model_name, configured)
@@ -334,8 +402,10 @@ class LangChainRunner:
                 ),
             )
         except Exception as exc:
+            # The spend of every attempt: a run stopped at its budget, or one
+            # that failed twenty turns in, was billed for what it got back.
             return RunResult(
                 error=f"{type(exc).__name__}: {exc}",
                 latency_ms=int((time.monotonic() - started) * 1000),
-                model=configured,
+                **_spend(meters, configured),
             )
