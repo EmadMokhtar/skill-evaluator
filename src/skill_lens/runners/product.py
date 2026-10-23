@@ -550,20 +550,21 @@ class ProductRunner:
             if private is not None:
                 shutil.rmtree(private, ignore_errors=True)
 
+        # One set of spend fields for both results below, so an errored run
+        # and a clean one can never disagree about what the trace reported.
+        spend = {
+            "input_tokens": trace.input_tokens,
+            "output_tokens": trace.output_tokens,
+            "cost_usd": trace.cost_usd,
+            "cost_note": trace.cost_note,
+            "usage_note": trace.usage_note,
+            "model": trace.model,
+        }
         if trace.error is not None:
             # Errored, but the product may still have spent: a run stopped by
             # its own budget reports what it cost. Dropping that would make
             # every total under-count by exactly the runs that cost the most.
-            return RunResult(
-                error=trace.error,
-                input_tokens=trace.input_tokens,
-                output_tokens=trace.output_tokens,
-                latency_ms=elapsed(),
-                cost_usd=trace.cost_usd,
-                cost_note=trace.cost_note,
-                usage_note=trace.usage_note,
-                model=trace.model,
-            )
+            return RunResult(error=trace.error, latency_ms=elapsed(), **spend)
         return RunResult(
             output=trace.output,
             tool_calls=(
@@ -572,13 +573,8 @@ class ProductRunner:
                 else list(trace.tool_calls)
             ),
             transcript=list(trace.transcript),
-            input_tokens=trace.input_tokens,
-            output_tokens=trace.output_tokens,
             latency_ms=elapsed(),
-            cost_usd=trace.cost_usd,
-            cost_note=trace.cost_note,
-            usage_note=trace.usage_note,
-            model=trace.model,
+            **spend,
             # None, not False, for a generic product: with no parser,
             # `trace.invoked_skills` is always empty, so "the skill did not
             # fire" would be a claim the runner has no way to back up.
