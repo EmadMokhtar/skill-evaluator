@@ -884,13 +884,62 @@ A case with [`sessions:`](eval-files.md#several-sessions-in-one-workspace) is he
 budget for all of its sessions: tokens, cost and latency are each summed over every session
 that ran. When one session could not be priced or counted, the total is missing that
 session's share, so its note is kept on the case and `max_cost_usd` or `max_tokens` fails
-as *not evaluated* — the same rule as for one run.
+as *not evaluated* — the same rule as for one run. Under `pydantic-ai` and `langchain`, each
+session is also [stopped](#stopping-a-runaway-case) at what the earlier sessions left of
+`max_tokens`, not at the whole limit again, and a session that was stopped is the last one to
+run: the case is over its budget already.
 
 If you are upgrading from a version of `skill-lens` where this budget block previously passed
 some other way, note the change: a repo that runs an unpriced model with a `budget:` block
 mixing a priced limit (e.g. `max_tokens`) and `max_cost_usd` will now see those cases turn red
 — they always failed to verify the cost limit; only the reporting of `passed` has caught up
 with `score`.
+
+### Stopping a runaway case
+
+Budget checks run after a case finishes, so on their own they cannot stop a case that loops.
+Under `pydantic-ai` and `langchain`, `max_tokens` is therefore also handed to the framework
+itself: the run stops at the first model response that takes its token total over the limit.
+The stopped run is not an error. It is scored as far as it got, and its `max_tokens` check
+fails, with evidence that says the run was cut off:
+
+```
+[FAIL] pdf :: summarises the report (pydantic-ai)
+        budget: used 120 tokens, limit is 100; pydantic-ai stopped the run before the agent finished, at the case's max_tokens
+```
+
+Its output is whatever the last model response said, and its tool calls and transcript are
+the ones it made before it stopped, so the failure shows what the agent was doing when it
+ran away. Going over budget is a fact about the skill, so the case is **failed**, the same
+verdict a run that finished over budget gets — and in a comparative run both arms are
+treated alike, so a baseline that runs away is a failed baseline, not one dropped from the
+delta. A run that ends at or under the limit is not affected.
+
+Every figure on a result — tokens, cost, the tool calls — is the run's last attempt, so the
+budget measures one run of the skill. When a transient failure was retried, what the
+discarded attempts cost is reported apart as `retry_cost_usd`: the cost totals and the
+[spend ceiling](gating.md#the-spend-ceiling) count it, the budget does not. The limit applies
+to each attempt on its own, never to their sum. An errored run keeps what its last attempt
+spent too; a run that failed before any response arrived spent nothing, and its `0` carries
+no `cost_note`.
+
+A stop needs the provider to report token usage. One that reports none leaves the counts at
+`0`, which is not a measurement: the run sets `usage_note` and `cost_note` (`pydantic-ai
+received no token usage from the provider`), so `max_tokens` fails as *not evaluated* rather
+than passing on a zero, and the spend ceiling does not take its `$0.00` for free.
+
+Only `max_tokens` is handed over. Neither framework can stop on `max_cost_usd` (PydanticAI
+has no cost limit at the version this project supports; LangChain has none), and
+`max_latency_ms` stays a check after the run. Without `max_tokens`, PydanticAI still stops at
+its own default of 50 model requests, while a LangChain run continues until LangGraph's
+recursion limit, which is 10,000 graph steps by default. Product runners are not covered:
+`claude-code` can stop itself on spend with its own flag
+(`args = ["--max-budget-usd", "0.50"]` under `[runners.claude-code]`), reported as errored
+with the spend its trace reported; `copilot` has no such flag.
+
+To bound what a whole run spends, across every case and every runner, set `max_spend_usd` in
+`skill-lens.toml` or pass `--max-spend`: once the run has recorded that much, no new case
+starts. See [The spend ceiling](gating.md#the-spend-ceiling).
 
 ## Comparative runs and the baseline arm
 

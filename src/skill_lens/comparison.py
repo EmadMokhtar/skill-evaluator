@@ -229,10 +229,17 @@ def build_delta(report: RunReport) -> Delta | None:
     # Paired candidate and baseline outcomes per runner, in the order each runner
     # first appears. Every runner gets an entry, comparable or not.
     paired: dict[str, tuple[list[CaseOutcome], list[CaseOutcome]]] = {}
+    # A case the spend ceiling cut -- any arm, any repetition -- is
+    # incomplete, and a delta over the half that ran is unmeasured.
+    cut = {(item.skill_name, item.case_name, item.runner) for item in report.not_run}
 
     for (skill_name, case_name, runner), arms in _group(report).items():
         candidate, baseline = arms["candidate"], arms["baseline"]
-        reason = _exclusion_reason(candidate, baseline)
+        reason = (
+            "the spend ceiling stopped the run before every repetition of both arms ran"
+            if (skill_name, case_name, runner) in cut
+            else _exclusion_reason(candidate, baseline)
+        )
         runner_candidate, runner_baseline = paired.setdefault(runner, ([], []))
         stats = CaseStats(
             skill_name=skill_name,

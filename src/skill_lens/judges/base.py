@@ -9,7 +9,12 @@ from skill_lens.models import JudgeRequest, JudgeVerdict
 
 @runtime_checkable
 class Judge(Protocol):
-    """Grades one output against a list of checks."""
+    """Grades one output against a list of checks.
+
+    A judge may also define an optional `preflight()` and an optional
+    `unpriced() -> str`, the second as `Runner` describes it: why its spend
+    can never be priced, asked only under a spend ceiling.
+    """
 
     name: str
 

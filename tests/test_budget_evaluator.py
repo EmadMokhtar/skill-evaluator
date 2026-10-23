@@ -173,3 +173,19 @@ def test_an_unmeasured_token_limit_does_not_dilute_the_measured_ones():
     score = BudgetEvaluator().evaluate(case, result)
     assert score.passed is False  # the skipped limit still fails the case
     assert score.score == 1.0  # the one evaluated limit held
+
+
+def test_a_run_stopped_at_its_token_budget_fails_and_says_it_was_stopped():
+    case = EvalCase(name="c", task="t", budget=BudgetSpec(max_tokens=100))
+    result = RunResult(
+        input_tokens=80,
+        output_tokens=40,
+        stop_note="pydantic-ai stopped the run before the agent finished, at the case's max_tokens",
+    )
+    score = BudgetEvaluator().evaluate(case, result)
+    assert score.passed is False
+    assert score.errored is False
+    check = next(c for c in score.checks if c.id == "max_tokens")
+    assert check.passed is False
+    assert "used 120 tokens, limit is 100" in check.evidence
+    assert "stopped the run before the agent finished" in check.evidence

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from skill_lens.comparison import ArmStats, CaseStats, Delta, RunnerDelta, format_baseline_notes
-from skill_lens.gating import GateResult
+from skill_lens.gating import GateResult, recorded, usd
 from skill_lens.models import CaseOutcome, RunReport
 from skill_lens.reporters.failure_context import (
     OUTPUT_LIMIT,
@@ -166,6 +166,20 @@ def _kept_workspaces(report: RunReport) -> list[str]:
     return lines
 
 
+def _not_run_lines(report: RunReport) -> list[str]:
+    """Every work item the spend ceiling kept from starting, in submission order.
+
+    Listed apart from the outcomes because none of them ran: there is no
+    verdict to mark them with, and the delta view never sees a case none of
+    whose items ran.
+    """
+    if not report.not_run:
+        return []
+    lines = ["", "Not run (stopped by the spend ceiling):"]
+    lines.extend(f"  {item.describe(report.repeat)}" for item in report.not_run)
+    return lines
+
+
 def _failure_lines(outcome: CaseOutcome, output_limit: int | None) -> list[str]:
     """Why a non-passing outcome did not pass, then what the agent actually did.
 
@@ -274,10 +288,15 @@ def render_console(
             f"Skipped (no cases matched --case filter): {', '.join(report.case_filtered_skills)}"
         )
 
+    lines.extend(_not_run_lines(report))
+
+    # The summary counts the candidate arm, like every other number on it.
+    cut = sum(1 for item in report.not_run if item.arm == "candidate")
+    not_run = f", {cut} not run" if cut else ""
     lines.append("")
     lines.append(
         f"{report.passed} passed, {report.failed} failed, "
-        f"{report.errored} errored — pass rate {report.pass_rate:.0%}"
+        f"{report.errored} errored{not_run} — pass rate {report.pass_rate:.0%}"
     )
 
     total_cost = report.total_cost_usd
@@ -308,6 +327,11 @@ def render_console(
     elif judge_degraded:
         totals_parts.append(
             "Judge overhead: not priced (see scores[].cost_note in the JSON report)"
+        )
+
+    if report.spend_ceiling is not None:
+        totals_parts.append(
+            f"Spend ceiling: {usd(report.spend_ceiling.max_spend_usd)} ({recorded(report)})"
         )
 
     if total_latency_ms:

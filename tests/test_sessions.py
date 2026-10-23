@@ -15,6 +15,7 @@ import yaml
 from pydantic import ValidationError
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.usage import RequestUsage
 from typer.testing import CliRunner
 
 from langchain_fakes import scripted, text
@@ -636,3 +637,53 @@ def test_a_mock_sequence_starts_from_the_top_in_every_session(tmp_path):
         workspace.cleanup()
     assert result.errored is False
     assert seen == ["one", "one"]
+
+
+# -- the token budget across sessions (issue #94) ------------------------------
+
+
+def test_the_merged_result_keeps_what_retries_cost_and_why_a_session_stopped():
+    merged = merge_results(
+        [
+            RunResult(output="one", retry_cost_usd=0.1),
+            RunResult(output="two", retry_cost_usd=0.2, stop_note="pydantic-ai stopped the run"),
+        ],
+        ["a", "b", "c"],
+    )
+    assert merged.retry_cost_usd == pytest.approx(0.3)
+    assert merged.stop_note == "session 2 of 3: pydantic-ai stopped the run"
+
+
+def test_no_session_runs_after_one_its_framework_stopped(tmp_path):
+    runner = _Recorder({"start": RunResult(output="cut", stop_note="stopped")})
+    result = run_sessions(runner, _skill(tmp_path), _case(sessions=["start", "continue"]), None, {})
+    # The case is already over its budget; a later session would only spend.
+    assert [task for task, _, _ in runner.calls] == ["start"]
+    assert result.stop_note == "session 1 of 2: stopped"
+
+
+def test_each_session_gets_only_the_tokens_the_earlier_ones_left(tmp_path):
+    runner = _Recorder({"start": RunResult(input_tokens=50, output_tokens=10)})
+    case = _case(sessions=["start", "continue"], budget=BudgetSpec(max_tokens=100))
+    run_sessions(runner, _skill(tmp_path), case, None, {})
+    budgets = [call_case.budget.max_tokens for _, call_case, _ in runner.calls]
+    # `budget:` checks the sessions' sum, so the second session's stop is
+    # what the first one left of it, not the whole limit again.
+    assert budgets == [100, 40]
+
+
+def test_a_real_agent_is_stopped_when_the_sessions_together_cross_the_budget(tmp_path):
+    def reply(messages, info: AgentInfo) -> ModelResponse:
+        return ModelResponse(
+            parts=[TextPart(content="done")],
+            usage=RequestUsage(input_tokens=50, output_tokens=10),
+        )
+
+    runner = PydanticAIRunner(model=FunctionModel(reply))
+    case = _case(sessions=["one", "two", "three"], budget=BudgetSpec(max_tokens=100))
+    result = run_sessions(runner, _skill(tmp_path), case, None, {})
+    # 60, then 60 more against the 40 left: the second session is stopped,
+    # and the third never starts.
+    assert result.tokens == 120
+    assert result.stop_note.startswith("session 2 of 3: ")
+    assert result.errored is False

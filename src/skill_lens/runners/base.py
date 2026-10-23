@@ -21,6 +21,11 @@ class Runner(Protocol):
     report. The framework runners use it to refuse a `trajectory:` naming a
     tool they cannot offer the case (`check_trajectory_names`) and return
     None; `ProductRunner` returns its status.
+
+    A runner may also define an optional `unpriced() -> str`: why its spend
+    can never be priced in US dollars, or "" when it can. The orchestrator
+    asks it only when the run sets a spend ceiling, and refuses the run
+    before any case when the answer is not empty.
     """
 
     name: str

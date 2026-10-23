@@ -177,6 +177,17 @@ class RunResult(BaseModel):
     tokens what `cost_note` is to cost: `BudgetEvaluator` refuses to evaluate
     `max_tokens` against a zero it knows is not a measurement.
 
+    `stop_note` says why the runner stopped the run before the agent
+    finished -- its framework stopped it at the case's `max_tokens` -- and is
+    empty for a run that finished. A stopped run is not errored: it ran, and
+    it went over its budget, which its `max_tokens` check reports as a
+    failure carrying this note.
+
+    `retry_cost_usd` is what the attempts a retry discarded cost. Every
+    other figure here is the attempt that produced this result, so
+    `budget:` measures one run of the skill; the spend totals and the spend
+    ceiling add this, because the discarded attempts were billed too.
+
     `hooks` are the lifecycle hooks a product reported running, in order;
     empty for a runner whose trace has none (every framework runner).
 
@@ -205,6 +216,8 @@ class RunResult(BaseModel):
     skill_triggered_by_session: list[bool | None] = Field(default_factory=list)
     workspace: Path | None = None
     error: str | None = None
+    stop_note: str = ""
+    retry_cost_usd: float = 0.0
 
     @property
     def tokens(self) -> int:
@@ -757,6 +770,71 @@ class CaseOutcome(BaseModel):
     arm: Arm = "candidate"
     repeat_index: int = 0
 
+    @property
+    def spent_usd(self) -> float:
+        """What this outcome cost: its run, the attempts a retry discarded, and
+        every evaluator. The one definition `RunReport.spent_usd` and the
+        spend ceiling both read."""
+        spent = sum(score.cost_usd for score in self.scores)
+        if self.result is not None:
+            spent += self.result.cost_usd + self.result.retry_cost_usd
+        return spent
+
+    @property
+    def unpriced_note(self) -> str:
+        """The first note saying part of `spent_usd` could not be priced -- the
+        run's own, then each evaluator's -- or "" when all of it was."""
+        if self.result is not None and self.result.cost_note:
+            return self.result.cost_note
+        return next((score.cost_note for score in self.scores if score.cost_note), "")
+
+
+class NotRunItem(BaseModel):
+    """A work item the spend ceiling kept from starting.
+
+    Not a `CaseOutcome`, and not a fourth `CaseStatus`: an outcome is a case
+    that ran, with a result and scores, and every aggregate and every JSON
+    consumer reads `status` as one of three verdicts. An item that never
+    started has neither and is a verdict on nothing, so it lives in its own
+    list -- the gate fails on it whatever the pass rate says.
+    """
+
+    skill_name: str
+    case_name: str
+    runner: str
+    arm: Arm = "candidate"
+    repeat_index: int = 0
+
+    def describe(
+        self, repeat: int, code: Callable[[str], str] = str, plain: Callable[[str], str] = str
+    ) -> str:
+        """The one wording every reporter prints for this item.
+
+        The arm is named only for a baseline item, and the repetition only
+        when the run had more than one, counted from 1 as JUnit and the
+        Markdown failure list count it. `code` and `plain` format names and
+        prose, as in `ScriptNote.describe`.
+        """
+        detail = [self.runner]
+        if self.arm == "baseline":
+            detail.append("baseline")
+        if repeat > 1:
+            detail.append(f"run {self.repeat_index + 1}/{repeat}")
+        return f"{code(self.skill_name)} :: {code(self.case_name)} ({plain(', '.join(detail))})"
+
+
+class SpendCeiling(BaseModel):
+    """The run's `max_spend_usd`, and whether it could see every dollar spent.
+
+    `unpriced` names the first outcome, in submission order, whose spend --
+    the run's or a judge's -- could not be priced, with the note saying why;
+    empty when every outcome was priced. An unpriced `0.0` is not free, so a
+    ceiling that met one could not be honoured: the run stopped there.
+    """
+
+    max_spend_usd: float
+    unpriced: str = ""
+
 
 class RunReport(BaseModel):
     """Aggregated results for a whole run.
@@ -765,6 +843,10 @@ class RunReport(BaseModel):
     the skill was unnecessary, not that CI should go red, so baseline outcomes
     are reported but never gated on. With no baseline the two sets are
     identical and none of these numbers move.
+
+    `not_run` is every work item, of either arm and in submission order, that
+    the spend ceiling kept from starting; none of them is in `outcomes`, so
+    no aggregate counts them. `spend_ceiling` is None when the run set none.
     """
 
     outcomes: list[CaseOutcome] = Field(default_factory=list)
@@ -777,6 +859,8 @@ class RunReport(BaseModel):
     scripts: ScriptStatus | None = None
     script_notes: list[ScriptNote] = Field(default_factory=list)
     products: list[ProductStatus] = Field(default_factory=list)
+    not_run: list[NotRunItem] = Field(default_factory=list)
+    spend_ceiling: SpendCeiling | None = None
 
     @property
     def candidate_outcomes(self) -> list[CaseOutcome]:
@@ -845,13 +929,20 @@ class RunReport(BaseModel):
 
     @property
     def total_cost_usd(self) -> float:
-        """Cost across **both** arms. See `total_tokens` for why."""
-        return sum(o.result.cost_usd for o in self.outcomes if o.result)
+        """Cost across **both** arms, the attempts a retry discarded included.
+        See `total_tokens` for why."""
+        return sum(o.result.cost_usd + o.result.retry_cost_usd for o in self.outcomes if o.result)
 
     @property
     def total_latency_ms(self) -> int:
         """Latency across **both** arms. See `total_tokens` for why."""
         return sum(o.result.latency_ms for o in self.outcomes if o.result)
+
+    @property
+    def spent_usd(self) -> float:
+        """Everything the run was recorded as spending, both arms: what
+        `max_spend_usd` reads, summed from `CaseOutcome.spent_usd`."""
+        return sum(outcome.spent_usd for outcome in self.outcomes)
 
     @property
     def pricing_degraded(self) -> bool:

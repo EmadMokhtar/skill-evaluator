@@ -129,8 +129,8 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **Agent-framework imports appear in exactly four modules** —
   `runners/pydantic_ai.py`, `judges/pydantic_ai.py`, `runners/langchain.py`,
   `judges/langchain.py`. `runners/tools.py` builds framework-neutral `AgentTool`s (name +
-  JSON schema + callable); `runners/prompting.py` and `runners/retry.py` hold the prompt and
-  retry rules both adapters share; the adapters wrap them. `runners/product.py`,
+  JSON schema + callable); `runners/prompting.py`, `runners/retry.py` and `runners/limits.py`
+  hold the prompt, retry and token-stop rules both adapters share; the adapters wrap them. `runners/product.py`,
   `judges/product.py` and `runners/traces.py` import `subprocess` and `json`, not a
   framework — a product is an executable and a trace grammar — and `process.py` beneath
   them imports nothing from the project. `tests/test_framework_isolation.py`
@@ -145,6 +145,28 @@ fails if the two drift apart — so a new invariant is added in both places or n
   unpriced model with a budget block that mixes a priced limit and `max_cost_usd` will see
   those cases turn red on upgrade — drop `max_cost_usd` for that provider rather than relying
   on the skip to be silently ignored.
+- **A case's `max_tokens` stops a keyed run while it spends, and the stopped run fails its
+  budget check.** `pydantic-ai` passes `UsageLimits(total_tokens_limit=...)`; `langchain` an
+  `after_model` middleware adding each reply's `usage_metadata`. Both stop at the first
+  response taking the attempt's total *over* it (exactly at it passes `BudgetEvaluator`). The
+  stopped run is **not** errored: returned as far as it got (last response's text, tool calls,
+  transcript — PydanticAI's history plus the crossing response it never appends), with
+  `RunResult.stop_note` set, never retried, scored by every evaluator; its `max_tokens` check
+  fails with the note as evidence. So both arms are treated alike and a runaway baseline is a
+  failed baseline, not one the delta drops. `max_cost_usd` is not handed over (no PydanticAI
+  cost limit at the 2.22 floor, none in LangChain); PydanticAI keeps `request_limit=50`, and
+  `recursion_limit` is not set, since no `budget:` key counts steps. `runners/limits.py`
+  holds the rule and imports no framework.
+- **A keyed run's figures are its last attempt's, and what retries discarded is
+  `retry_cost_usd`.** One meter per attempt (a `WrapperModel` for PydanticAI, the middleware
+  for LangChain). Tokens, cost, notes, model and tool calls are the attempt that produced the
+  result, so `budget:` measures one run and the token limit is per attempt, never summed.
+  Earlier attempts' cost is `retry_cost_usd`, finished or errored; `total_cost_usd`,
+  `CaseOutcome.spent_usd` and the ceiling add it, `BudgetEvaluator` and the delta do not. No
+  response answered means a measured zero: not priced, no `cost_note`.
+- **A keyed run whose provider reported no token usage says so.** Responses with no usage at
+  all set `usage_note` and `cost_note` (`limits.no_usage_notes`), so `max_tokens` fails as
+  not evaluated and the ceiling does not take the `0.0` for free.
 - **Mock tools accept any arguments.** A model hallucinating an argument must not raise, or an
   eval signal would surface as an infra error.
 - **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act;
@@ -240,6 +262,35 @@ fails if the two drift apart — so a new invariant is added in both places or n
   aborts before any case runs.
 - **Outcome order is submission order, never completion order** — at every concurrency level,
   so identical runs do not churn their output.
+- **A spend ceiling stops new work, never work in flight, and a run it cut short fails the
+  gate.** `_run_item` asks the locked `_SpendLedger` as each item starts, at every concurrency;
+  it refuses once recorded spend (`CaseOutcome.spent_usd`: run cost, `retry_cost_usd` and
+  every `EvalScore.cost_usd`, both arms, errored runs included) is `>=` `max_spend_usd`. Spend is recorded before `_run_item`
+  returns, so a worker never starts work its last item paid for; items run are a prefix of the
+  plan. Running items finish and are scored, so a run can end above the ceiling by at most
+  `concurrency` items. A ceiling is positive and finite (`Config`, `--max-spend`, `run_evals`),
+  so the first item always starts. Any refused item, either arm, fails the gate whatever
+  `min_pass_rate`, `per_skill_min` and `fail_on_error` say; a ceiling the last item crossed
+  fails nothing. A case missing any repetition of either arm is excluded from the delta. JUnit
+  adds one `<error>` case with `gating.spend_ceiling_reasons`, or a cut run would render green.
+- **An item the spend ceiling kept from starting is not an outcome.** It is a `NotRunItem` on
+  `RunReport.not_run`, in submission order — never a `CaseOutcome`, never a fourth
+  `CaseStatus`. It enters none of `passed` / `failed` / `errored` / `pass_rate`; the gate fails
+  on it directly. Console and Markdown list it under "Not run", JSON as `not_run` (with a
+  candidate-only `summary.not_run`), JUnit as `<skipped>` for the candidate arm only.
+- **A spend ceiling that meets unpriced spend stops the run and fails the gate.**
+  `CaseOutcome.unpriced_note` (a `cost_note` on the `RunResult` or any `EvalScore`) makes its
+  `0.0` no measurement, so the ledger fails closed and refuses new work. The gate names the
+  first unpriced outcome in submission order (`SpendCeiling.unpriced`, read from the outcomes,
+  not the ledger's completion order), even when nothing was refused. Without a ceiling
+  nothing changes. It covers what preflight cannot know: a served model with no price, no
+  usage reported, a claude-code run that ended before reporting cost.
+- **A spend ceiling under a seat that can never price its spend is refused in preflight.**
+  Runners and judges may define `unpriced() -> str`: `Product.unpriced()` (`cli` has no
+  parser; copilot's `unpriced_note`), `pricing.unpriced_model` for a keyed seat's configured
+  `provider:name` (a model object returns `""`). With a ceiling, `run_evals` asks every
+  runner and the judge after the preflight hooks and raises `SpendCeilingError` (exit 2)
+  before any case; a seat with no `unpriced()` is not asked.
 - **Concurrency never turns an authoring error into a case failure, and the surfaced error is
   deterministic.** Only the futures queued *after* the failure are cancelled, the executor
   always shuts down with `cancel_futures=True` (including when `submit` itself raises), and a
@@ -396,7 +447,9 @@ fails if the two drift apart — so a new invariant is added in both places or n
   error), every distinct `cost_note` / `usage_note`, and `session k of n: ` on the error.
   `trajectory.skill_triggered` must hold in every session (`skill_triggered_by_session`);
   `skill_triggered` only summarises "any session". A runner handed the whole case returns
-  `refuse_sessions`'s error, never None as the prompt.
+  `refuse_sessions`'s error, never None as the prompt. A session with `stop_note` ends the loop
+  too (merged as `session k of n: ...`, `retry_cost_usd` summed), and each session's copy
+  carries only the `max_tokens` the earlier ones left, since `budget:` reads the sum.
 - **The workspace preamble is byte-identical in both arms and never names the skill** —
   otherwise `--min-delta` measures the preamble instead of the skill.
 - **`RunResult.workspace` is non-null only while the directory exists, and the orchestrator

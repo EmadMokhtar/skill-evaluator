@@ -28,6 +28,7 @@ from skill_lens.runners.langchain import (
     _usage,
     check_base_url,
 )
+from skill_lens.runners.pricing import unpriced_model
 from skill_lens.runners.retry import run_with_retries
 
 
@@ -52,6 +53,10 @@ class LangChainJudge:
         self._retry_backoff_seconds = retry_backoff_seconds
         self._sleep = sleep
         self._base_url = base_url
+
+    def unpriced(self) -> str:
+        """Why this judge's model has no price, or ""; see `unpriced_model`."""
+        return unpriced_model(self._model)
 
     def preflight(self) -> None:
         """Refuse a `base_url` the judge's chat model cannot take, before any spend.

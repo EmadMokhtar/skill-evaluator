@@ -269,6 +269,12 @@ It does not change what a run costs. `--baseline` and `--repeat` do: `--baseline
 --repeat 3` is six runs per case, not one. `skill-lens run` prints a ceiling estimate before it
 starts whenever the runner needs an API key.
 
+To cap what a job spends, set `max-spend` (or commit `max_spend_usd`): once the run has
+recorded that many US dollars, no new case starts, the cases left are reported as not run, and
+the gate fails. Cases already running when it is crossed finish, so with `concurrency: 4` a job
+can end above the ceiling by what four cases spend. See
+[The spend ceiling](gating.md#the-spend-ceiling).
+
 Discovery (walking skills, loading eval files, filtering by `--tag`) always finishes, for every
 skill, before any case runs — independent of `--concurrency`. A malformed eval file anywhere
 therefore aborts the whole run before a single provider call is made, rather than after some

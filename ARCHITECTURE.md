@@ -88,8 +88,8 @@ flowchart LR
 | --- | --- |
 | `models.py` | Every Pydantic model in the project. No other module defines a data shape. |
 | `cli.py` | Typer entry point. Wires config → loaders → runner → orchestrator → reporters → gate, and owns the exit-code contract. |
-| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. `RunOptions` bundles the per-run settings (kept workspaces, the workspace caps, the script policy); when scripts are on it runs `scripts.preflight` once between discovery and execution; between discovery and execution it also calls every runner's optional `preflight` hook, once each with the candidate-arm cases planned for it, then the judge's optional `preflight()` (no arguments), and puts what they return on `RunReport.products`, a status already present listed once; and `_BaselineStore` owns the directory previous bundles are extracted into, deleted in a `finally`. |
-| `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. |
+| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. `RunOptions` bundles the per-run settings (kept workspaces, the workspace caps, the script policy, the spend ceiling); with a ceiling, every runner's and the judge's optional `unpriced()` is asked first (`SpendCeilingError` when one can never price its spend), then `_SpendLedger` — locked, the one state the workers share — is checked as each item starts and records each item's spend before its worker moves on, and an item it refuses lands on `RunReport.not_run` instead of `outcomes`; when scripts are on it runs `scripts.preflight` once between discovery and execution; between discovery and execution it also calls every runner's optional `preflight` hook, once each with the candidate-arm cases planned for it, then the judge's optional `preflight()` (no arguments), and puts what they return on `RunReport.products`, a status already present listed once; and `_BaselineStore` owns the directory previous bundles are extracted into, deleted in a `finally`. |
+| `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. `spend_ceiling_reasons` is the ceiling's part, shared with the JUnit reporter. |
 | `config.py` | Loads `skill-lens.toml` by explicit path or upward discovery. Never reads secrets. Owns `ProductSettings` (one `[runners.<name>]` table) and `Config.product`, which turns a preset plus its table into the `Product` a runner starts; `PRODUCT_NAMES` is the list the CLI accepts. |
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
@@ -113,6 +113,7 @@ flowchart LR
 | `runners/fake.py` | A deterministic, offline, scripted runner. The default, and the backbone of the zero-cost test tier. |
 | `runners/prompting.py` | The three preambles and the system-prompt builder every runner calls. Framework-free, so the rules `--min-delta` measures against exist once. |
 | `runners/retry.py` | The transient-retry loop and the HTTP status policy every adapter shares; each adapter supplies its own `is_transient`. |
+| `runners/limits.py` | The case limit both keyed adapters hand their framework (`token_limit`, a case's `budget.max_tokens`), the `stop_note` a stopped run carries, and `no_usage_notes` for a provider that reported no token usage. Framework-free, so the two adapters stop at the same number and say so in the same words. |
 | `runners/pydantic_ai.py` | The PydanticAI runner adapter. **One of the four modules that import an agent framework.** |
 | `runners/langchain.py` | The LangChain runner adapter. **One of the four modules that import an agent framework.** |
 | `runners/traces.py` | The Copilot JSONL and Claude Code `stream-json` parsers, each producing one `Trace`. Pure functions; a structural problem is `Trace.error`, never a raise. |
@@ -120,7 +121,7 @@ flowchart LR
 | `runners/mcp.py` | The runner's side of the MCP bridge: `McpSupport` (each product's config flag, tool spelling, config-entry keys and hiding flags, as verified against the product), `write_bridge` (the spec — each tool's schema and its `returns:` in whichever shape — and the product's config in a fresh directory), `Bridge.connected` (the record's `list` event), `restore_tool_names` (the product's spelling back to the case's) and `probe_bridge` (the once-per-run `--check`). Imports no agent framework. |
 | `runners/tools.py` | Builds framework-neutral `AgentTool`s (name + JSON schema + callable) from a case's `tools:` block — one canned value, a sequence consumed in call order, or a lookup by argument — the built-in workspace tools, and the bundle tools (`list_skill_files`, `read_skill_file`, and `run_script` when the bundle has scripts and the run enabled them). Owns the six-name `BUILTIN_TOOL_NAMES` the case loader reads. |
 | `runners/preflight.py` | What a framework runner verifies before any spend: the provider API key, that every `trajectory:` name is a tool the case will have (`check_trajectory_names`, called from the three framework runners' `preflight`), and the `UnsupportedBaseURL` the two keyed adapters raise for a `base_url` their provider cannot take. |
-| `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. |
+| `runners/pricing.py` | Turns provider usage into USD. Degrades rather than raising. `unpriced_model` says, before a run, whether a configured model has a price, for the spend ceiling's preflight. |
 | `evaluators/base.py` | The `Evaluator` protocol. |
 | `evaluators/assertion.py` | Rule-based scoring of the final output text. |
 | `evaluators/trajectory.py` | Scoring which tools were called, in what order, how many times, and with what arguments. |
@@ -136,7 +137,7 @@ flowchart LR
 | `reporters/console.py` | Human-readable run summary. |
 | `reporters/failure_context.py` | The excerpt a non-passing case shows — output, cut count, tool-call lines, failed-hook lines. One helper for all three reporters; no markup. |
 | `reporters/json_reporter.py` | Machine-readable run report. |
-| `reporters/junit.py` | JUnit XML for CI test panes. `failed`/`errored` map onto `<failure>`/`<error>`, candidate arm only. |
+| `reporters/junit.py` | JUnit XML for CI test panes. `failed`/`errored` map onto `<failure>`/`<error>`, candidate arm only; a case the spend ceiling kept from starting is `<skipped>`, beside one `<error>` case stating the ceiling's reasons. |
 | `reporters/markdown.py` | GitHub-flavored Markdown for step summaries and PR comments, with optional `max_chars` truncation. |
 
 ## Data flow

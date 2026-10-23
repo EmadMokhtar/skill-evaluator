@@ -175,7 +175,10 @@ first session, and deleted once, after scoring.
 
 If a session **errors** — a provider failure, a timeout, a product that crashed — the case
 is **errored**, and the sessions after it do not run. The report says which session
-failed (`session 2 of 3: ...`), and the spend of every session that ran is kept.
+failed (`session 2 of 3: ...`), and the spend of every session that ran is kept. A session
+that a keyed runner [stopped at its token budget](runners.md#stopping-a-runaway-case) is the
+last to run too, though the case is failed on its budget rather than errored; each session's
+stop is what the earlier sessions left of `max_tokens`.
 `--repeat` repeats the whole sequence, each time in a fresh workspace, and the
 [baseline arm](runners.md#comparative-runs-and-the-baseline-arm) runs the same sessions
 without the skill, in a workspace of its own.
@@ -531,7 +534,7 @@ under that runner, never a silent `false` that would pass every negative control
 | `tools:` (mock tools) | yes | yes | yes — through the [MCP bridge](runners.md#mock-tools-under-a-product) | authoring error |
 | `trajectory:` | yes — names must be the case's own tools | yes — names must be the case's own tools | yes — the case's tools by their declared names, or the product's own tool names, unchecked; `max_calls` counts the product's own calls too | authoring error |
 | `mode: offered` | yes | yes | yes | authoring error |
-| `budget:` | yes | yes | see [Product runners](runners.md#product-runners) | latency only |
+| `budget:` | yes | yes — `max_tokens` also [stops the run while it spends](runners.md#stopping-a-runaway-case) | see [Product runners](runners.md#product-runners) | latency only |
 | `workspace:` | yes | yes | yes — the product's working directory | yes |
 | `sessions:` | yes | yes | yes — the skill is delivered again before each session | yes |
 | `judge:` | yes | yes | yes | yes |
