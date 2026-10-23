@@ -135,6 +135,23 @@ def test_the_bwrap_argv_binds_the_two_directories_and_the_bundle_over_a_read_onl
     assert argv[-3:] == ["--", "python3", "x.py"]
 
 
+def test_the_bwrap_tmpfs_is_remounted_read_only_after_the_binds():
+    # An empty tmpfs is still writable: without the remount, a write under the
+    # temp dir lands in the tmpfs and vanishes instead of being refused, as
+    # sandbox-exec refuses it. The remount is not recursive, so the three binds
+    # keep their own modes. It must come after them, because bwrap creates
+    # their mount points inside the tmpfs, and it cannot once it is read-only.
+    argv = bwrap_argv(WS, SCRATCH, TEMPDIR, ["python3", "x.py"], BUNDLE)
+    remount = argv.index("--remount-ro")
+    assert argv[remount + 1] == str(TEMPDIR)
+    binds = [
+        i for i, arg in enumerate(argv) if arg in ("--bind", "--ro-bind") and argv[i + 1] != "/"
+    ]
+    assert len(binds) == 3
+    assert remount > max(binds)
+    assert remount < argv.index("--")
+
+
 def test_wrap_leaves_argv_alone_without_a_backend():
     assert wrap("none", ["python3", "x.py"], WS, SCRATCH, TEMPDIR, BUNDLE) == [
         "python3",
@@ -228,6 +245,27 @@ def test_linux_with_a_working_bwrap():
 
     status = probe_sandbox("auto", system="Linux", which=lambda _n: "/usr/bin/bwrap", run=run)
     assert status == SandboxStatus(backend="bwrap", detail="bwrap probe succeeded")
+
+
+def test_the_bwrap_probe_tries_the_tmpfs_and_its_read_only_remount():
+    # The real argv depends on --tmpfs and --remount-ro, so the probe tries
+    # both: a bwrap that rejects either must read as "none", not pass the
+    # probe and then fail every script call.
+    seen: dict[str, list[str]] = {}
+
+    def run(argv, **_k):
+        seen["argv"] = argv
+        return _completed(0)
+
+    probe_sandbox("auto", system="Linux", which=lambda _n: "/usr/bin/bwrap", run=run)
+    argv = seen["argv"]
+    tempdir = str(Path(tempfile.gettempdir()).resolve())
+    tmpfs = argv.index("--tmpfs")
+    remount = argv.index("--remount-ro")
+    assert argv[tmpfs + 1] == tempdir
+    assert argv[remount + 1] == tempdir
+    assert tmpfs < remount < argv.index("--")
+    assert argv[-2:] == ["--", "/bin/true"]
 
 
 def test_a_probe_that_cannot_start_is_none_with_the_error():
