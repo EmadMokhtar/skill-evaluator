@@ -88,8 +88,8 @@ flowchart LR
 | --- | --- |
 | `models.py` | Every Pydantic model in the project. No other module defines a data shape. |
 | `cli.py` | Typer entry point. Wires config → loaders → runner → orchestrator → reporters → gate, and owns the exit-code contract. |
-| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. `RunOptions` bundles the per-run settings (kept workspaces, the workspace caps, the script policy); when scripts are on it runs `scripts.preflight` once between discovery and execution; between discovery and execution it also calls every runner's optional `preflight` hook, once each with the candidate-arm cases planned for it, then the judge's optional `preflight()` (no arguments), and puts what they return on `RunReport.products`, a status already present listed once; and `_BaselineStore` owns the directory previous bundles are extracted into, deleted in a `finally`. |
-| `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. |
+| `orchestrator.py` | Plans the skill × case × runner × arm × repeat matrix (sequential discovery), then executes it — a plain loop at `concurrency == 1`, a bounded thread pool above it — applying every evaluator to each result. `RunOptions` bundles the per-run settings (kept workspaces, the workspace caps, the script policy, the spend ceiling); with a ceiling, `_SpendLedger` — locked, the one state the workers share — is checked as each item starts and records each item's spend before its worker moves on, and an item it refuses lands on `RunReport.not_run` instead of `outcomes`; when scripts are on it runs `scripts.preflight` once between discovery and execution; between discovery and execution it also calls every runner's optional `preflight` hook, once each with the candidate-arm cases planned for it, then the judge's optional `preflight()` (no arguments), and puts what they return on `RunReport.products`, a status already present listed once; and `_BaselineStore` owns the directory previous bundles are extracted into, deleted in a `finally`. |
+| `gating.py` | Turns a `RunReport` into a pass/fail decision plus reasons and an exit code. `spend_ceiling_reasons` is the ceiling's part, shared with the JUnit reporter. |
 | `config.py` | Loads `skill-lens.toml` by explicit path or upward discovery. Never reads secrets. Owns `ProductSettings` (one `[runners.<name>]` table) and `Config.product`, which turns a preset plus its table into the `Product` a runner starts; `PRODUCT_NAMES` is the list the CLI accepts. |
 | `yaml_loading.py` | A YAML loader that does not treat bare `yes`/`no`/`on`/`off` as booleans. |
 | `skills/loader.py` | Walks a path for `SKILL.md` files and parses them into `Skill` models, via `parse_skill_text` — the shared core both `parse_skill_file` and `skills/baseline.py` parse through, so a blob from git and a file on disk go through one code path. |
@@ -136,7 +136,7 @@ flowchart LR
 | `reporters/console.py` | Human-readable run summary. |
 | `reporters/failure_context.py` | The excerpt a non-passing case shows — output, cut count, tool-call lines. One helper for all three reporters; no markup. |
 | `reporters/json_reporter.py` | Machine-readable run report. |
-| `reporters/junit.py` | JUnit XML for CI test panes. `failed`/`errored` map onto `<failure>`/`<error>`, candidate arm only. |
+| `reporters/junit.py` | JUnit XML for CI test panes. `failed`/`errored` map onto `<failure>`/`<error>`, candidate arm only; a case the spend ceiling kept from starting is `<skipped>`, beside one `<error>` case stating the ceiling's reasons. |
 | `reporters/markdown.py` | GitHub-flavored Markdown for step summaries and PR comments, with optional `max_chars` truncation. |
 
 ## Data flow

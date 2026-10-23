@@ -45,6 +45,7 @@ greeting = 0.9
 | `max_script_output_bytes` | `20000` | — |
 | `script_interpreters` | `{ py = ["python3"], sh = ["bash"] }` | — |
 | `runners` | `{}` | — |
+| `max_spend_usd` | unset (no ceiling) | `--max-spend` |
 
 Resolution order is **CLI flag > config file > built-in default**. API keys come from
 environment variables only and are never read from config.
@@ -76,6 +77,20 @@ network-bound — one provider round trip per case against sub-millisecond of lo
 raising it overlaps waiting, not computation; the practical ceiling is your provider's rate
 limit, not your CPU. Runners and evaluators are shared across threads, so a custom one must
 have no mutable state its `run`/`evaluate` touches.
+
+`max_spend_usd` is the run's spend ceiling in US dollars. Once the spend the run has recorded
+reaches it, no new case starts: cases already running finish and are scored, every case left
+is reported as not run, and the gate fails. Unset, the default, means no ceiling, so
+upgrading never stops a run on its own. It must be a positive, finite amount; `0`, a negative
+number, `inf` and `nan` are config errors (exit 2), because a ceiling of zero would run
+nothing and one of infinity is no ceiling. Spend that cannot be priced stops the run as well,
+so leave it unset for a provider `genai-prices` cannot price and for `copilot`, which bills
+per premium request rather than in dollars. The whole rule, and how it meets `--concurrency`,
+is in [The spend ceiling](gating.md#the-spend-ceiling).
+
+```toml
+max_spend_usd = 5.00
+```
 
 `keep_workspace` keeps each case's temporary directory instead of deleting it after the run,
 so you can inspect what a case actually wrote. `--keep-workspace` / `--no-keep-workspace`

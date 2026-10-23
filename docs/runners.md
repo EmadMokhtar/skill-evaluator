@@ -857,6 +857,10 @@ recursion limit, which is 10,000 graph steps by default. Product runners are not
 (`args = ["--max-budget-usd", "0.50"]` under `[runners.claude-code]`), reported as errored
 with the spend its trace reported; `copilot` has no such flag.
 
+To bound what a whole run spends, across every case and every runner, set `max_spend_usd` in
+`skill-lens.toml` or pass `--max-spend`: once the run has recorded that much, no new case
+starts. See [The spend ceiling](gating.md#the-spend-ceiling).
+
 ## Comparative runs and the baseline arm
 
 Under `--baseline` (see [Comparative evals](comparative-evals.md)), the runner is called

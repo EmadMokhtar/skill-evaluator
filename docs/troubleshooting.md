@@ -233,6 +233,59 @@ product, or run those cases through `pydantic-ai` or `langchain`, which do repor
 split. Do not leave the limit in place expecting it to be ignored — it is not ignored, it
 fails. See [Budget limits and pricing](runners.md#budget-limits-and-pricing).
 
+## A case stopped at its token budget
+
+**What you see.** An errored case under `pydantic-ai` or `langchain`:
+
+```
+[ERROR] pdf :: summarises the report (pydantic-ai)
+        error: TokenBudgetExceeded: pydantic-ai stopped the run at 120 tokens, over the case's budget max_tokens of 100
+```
+
+**What it means.** The case declares `max_tokens:` in its `budget:` block, and the run went
+over it. Under the two framework runners that limit is also handed to the framework, which
+stops the run at the first model response that takes the total over it, instead of letting a
+looping agent spend on. A run cut off mid-loop has no finished answer, so it is not scored:
+the case is **errored**, and it still reports the tokens and cost it spent. See
+[Stopping a runaway case](runners.md#stopping-a-runaway-case).
+
+**What to do.** If the skill really does need more, raise `max_tokens`. If it should not, the
+error is the finding: the skill makes the agent loop or over-explain.
+
+## Cases that did not run
+
+**What you see.** A `Not run` list and a gate reason about the spend ceiling:
+
+```
+Not run (stopped by the spend ceiling):
+  pdf :: handles a scanned page (pydantic-ai)
+
+2 passed, 0 failed, 0 errored, 1 not run — pass rate 100%
+
+Gate FAILED:
+  - 1 case did not run: the spend ceiling of $0.50 was reached ($0.5300 recorded)
+```
+
+Or, when the spend could not be priced:
+
+```
+Gate FAILED:
+  - the spend ceiling of $0.50 could not be enforced: spend was not priced for pdf :: extracts the title (pydantic-ai): no price data for ollama:llama3 (LookupError)
+  - 3 cases did not run: the spend ceiling stopped the run
+```
+
+**What it means.** The run has a spend ceiling — `max_spend_usd` in `skill-lens.toml`, or
+`--max-spend`. Once the spend recorded so far reached it, no new case started; the cases
+already running finished. The gate fails whenever a case was left unstarted, even when every
+case that ran passed, because the run measured less than it was asked to. In the second form,
+an outcome's cost could not be priced, so the ceiling could not tell what had been spent, and
+it stopped the run rather than treat that cost as zero. See
+[The spend ceiling](gating.md#the-spend-ceiling).
+
+**What to do.** Raise the ceiling, or run fewer cases (`--tag`, `--case`, a smaller
+`--repeat`). For a provider `genai-prices` cannot price, or for `copilot`, which bills per
+premium request rather than in dollars, leave `max_spend_usd` unset.
+
 ## A model with no price
 
 **What you see.** In the console totals:

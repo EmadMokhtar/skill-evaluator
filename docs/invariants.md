@@ -201,8 +201,8 @@ Both keyed adapters record every model response as it arrives — PydanticAI thr
 the limit is appended to the message history; LangChain through the same middleware — so an
 errored run reports the input and output tokens, `cost_usd`, `cost_note` and model of every
 attempt it made, as an errored product run does. A run stopped at its budget, or one a
-provider failed twenty turns in, was billed for what it got back, and
-`RunReport.total_cost_usd` reads every outcome. A run that no response answered spent
+provider failed twenty turns in, was billed for what it got back, and both
+`RunReport.total_cost_usd` and the spend ceiling read every outcome. A run that no response answered spent
 nothing: its zero is a measurement, so it is not priced and carries no `cost_note`. A
 finished run is unchanged — its figures, and so its `budget:`, are the attempt that
 succeeded.
@@ -452,6 +452,54 @@ even read.
 
 `render_console` iterates `report.outcomes` and `build_delta` groups by insertion order, so
 completion-order results would make output churn between identical runs.
+
+### A spend ceiling stops new work, never work in flight, and a run it cut short fails the gate
+
+With `max_spend_usd` set, `_run_item` asks `_SpendLedger` before each item starts, at every
+concurrency level, and the ledger refuses once the recorded spend has *reached* the ceiling
+(`>=`). It counts each outcome's `RunResult.cost_usd` and every `EvalScore.cost_usd`, both
+arms, errored runs included — which is why an errored product or keyed run keeps its spend.
+The check is made when an item starts, not when it is queued, and an item's spend is recorded
+before `_run_item` returns, so a worker never starts work its own last item already paid the
+ceiling for; a thread pool hands items out in submission order, so the items that ran are
+always a prefix of the plan and the ones refused the rest. An item already running is never
+interrupted: its spend was committed when it started. So the ceiling bounds when work starts,
+not the total, and a run can end above it by what was in flight — one item at
+`--concurrency 1`, at most `concurrency` above it. The ledger is the one state the workers
+share, so it takes a lock; it is the orchestrator's, and runners, judges and evaluators stay
+stateless. A ceiling must be positive and finite (`Config` field, `--max-spend` and
+`run_evals` alike), so the first item always starts and a ceiling never produces a zero-case
+run. Any refused item, of either arm, fails the gate whatever `min_pass_rate`,
+`per_skill_min` and `fail_on_error` say — the run measured less than it was asked to — while
+a ceiling the last item crossed refused nothing and fails nothing. Under `--baseline`, a case
+that lost any repetition of either arm is excluded from the delta, both arms together, as the
+pairing rule requires. JUnit adds one `<error>` case naming the ceiling's reasons
+(`gating.spend_ceiling_reasons`, the gate's own), for the reason a zero-case run gets one:
+skipped cases beside passing ones would render green against exit code 1.
+
+### An item the spend ceiling kept from starting is not an outcome
+
+It is a `NotRunItem` on `RunReport.not_run`, in submission order, never a `CaseOutcome` and
+never a fourth `CaseStatus`. An outcome is a case that ran, with a result and scores; every
+aggregate, the delta and every JSON consumer reads `status` as one of three verdicts, and
+"errored is not failed" showed what it costs when a status means two things. A not-run item
+is a verdict on nothing, so it enters none of `passed`, `failed`, `errored` or `pass_rate`,
+which keep describing what ran, and the gate fails on it directly instead. The reporters
+list it apart: the console and Markdown under "Not run", JSON as `not_run` with a
+candidate-only `summary.not_run`, JUnit as a `<skipped>` case for the candidate arm only.
+
+### A spend ceiling that meets unpriced spend stops the run and fails the gate
+
+An unpriced outcome — a `cost_note` on its `RunResult` or on any `EvalScore` — has a
+`cost_usd` of `0.0` that is not a measurement, so from then on the ledger cannot tell whether
+the ceiling has been crossed, and it fails closed: it refuses new work as if the ceiling were
+reached. The gate fails with a reason naming the first unpriced outcome in submission order
+(`SpendCeiling.unpriced`, read from the finished outcomes rather than from the ledger, which
+learns of them in completion order) and its note, even when nothing was refused. Treating the
+zero as free would let a run whose spend nobody can see pass a ceiling forever — the same
+reason an unpriceable `max_cost_usd` fails its case. Without a ceiling, an unpriced outcome
+changes nothing. The fix for a provider `genai-prices` cannot price, or `copilot`, which
+bills per premium request, is to leave `max_spend_usd` unset.
 
 ### Concurrency never turns an authoring error into a case failure, and the surfaced error is deterministic
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 
 from skill_lens.comparison import Delta, format_baseline_notes
-from skill_lens.gating import GateResult
+from skill_lens.gating import GateResult, usd
 from skill_lens.models import CaseOutcome, RunReport
 from skill_lens.reporters.failure_context import (
     OUTPUT_LIMIT,
@@ -122,9 +122,12 @@ def _verdict(gate: GateResult | None) -> str:
 
 
 def _summary(report: RunReport) -> str:
+    # Candidate counts, like the rest of the line; said only when some did not run.
+    cut = sum(1 for item in report.not_run if item.arm == "candidate")
+    not_run = f" · {cut} not run" if cut else ""
     return (
         f"**{report.passed}/{report.total} passed** · {report.failed} failed · "
-        f"{report.errored} errored · pass rate {report.pass_rate:.0%}"
+        f"{report.errored} errored{not_run} · pass rate {report.pass_rate:.0%}"
     )
 
 
@@ -182,6 +185,13 @@ def _totals(report: RunReport) -> str:
             rows.append(["Judge cost note", "some judge costs not priced — see the JSON report"])
     elif judge_degraded:
         rows.append(["Judge overhead", "not priced — see the JSON report"])
+    if report.spend_ceiling is not None:
+        rows.append(
+            [
+                "Spend ceiling",
+                f"{usd(report.spend_ceiling.max_spend_usd)} (${report.spent_usd:.4f} recorded)",
+            ]
+        )
     rows.append(["Latency", f"{latency / 1000:.2f}s" if latency >= 1000 else f"{latency}ms"])
     if report.baseline_errored:
         rows.append(["Baseline errored", str(report.baseline_errored)])
@@ -321,6 +331,23 @@ def _failures(report: RunReport, output_limit: int | None) -> str:
     return _details(title, body)
 
 
+def _not_run(report: RunReport) -> str:
+    """Every work item the spend ceiling kept from starting, in submission order."""
+    if not report.not_run:
+        return ""
+    body = []
+    for item in report.not_run:
+        detail = [item.runner]
+        if item.arm == "baseline":
+            detail.append("baseline")
+        if report.repeat > 1:
+            detail.append(f"run {item.repeat_index + 1}/{report.repeat}")
+        body.append(
+            f"- {_code(item.skill_name)} :: {_code(item.case_name)} ({_escape(', '.join(detail))})"
+        )
+    return _details(f"Not run ({len(report.not_run)})", body)
+
+
 def _low_signal(delta: Delta) -> str:
     if not delta.low_signal:
         return ""
@@ -424,6 +451,7 @@ def render_markdown(
         if delta is not None
         else (_no_baseline_block(report) if report.baseline_kind is not None else ""),
         _failures(report, output_limit),
+        _not_run(report),
         _low_signal(delta) if delta is not None else "",
         _high_variance(delta) if delta is not None else "",
         _skipped(report),

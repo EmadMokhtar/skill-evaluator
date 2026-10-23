@@ -677,6 +677,36 @@ class CaseOutcome(BaseModel):
     repeat_index: int = 0
 
 
+class NotRunItem(BaseModel):
+    """A work item the spend ceiling kept from starting.
+
+    Not a `CaseOutcome`, and not a fourth `CaseStatus`: an outcome is a case
+    that ran, with a result and scores, and every aggregate and every JSON
+    consumer reads `status` as one of three verdicts. An item that never
+    started has neither and is a verdict on nothing, so it lives in its own
+    list -- the gate fails on it whatever the pass rate says.
+    """
+
+    skill_name: str
+    case_name: str
+    runner: str
+    arm: Arm = "candidate"
+    repeat_index: int = 0
+
+
+class SpendCeiling(BaseModel):
+    """The run's `max_spend_usd`, and whether it could see every dollar spent.
+
+    `unpriced` names the first outcome, in submission order, whose spend --
+    the run's or a judge's -- could not be priced, with the note saying why;
+    empty when every outcome was priced. An unpriced `0.0` is not free, so a
+    ceiling that met one could not be honoured: the run stopped there.
+    """
+
+    max_spend_usd: float
+    unpriced: str = ""
+
+
 class RunReport(BaseModel):
     """Aggregated results for a whole run.
 
@@ -684,6 +714,10 @@ class RunReport(BaseModel):
     the skill was unnecessary, not that CI should go red, so baseline outcomes
     are reported but never gated on. With no baseline the two sets are
     identical and none of these numbers move.
+
+    `not_run` is every work item, of either arm and in submission order, that
+    the spend ceiling kept from starting; none of them is in `outcomes`, so
+    no aggregate counts them. `spend_ceiling` is None when the run set none.
     """
 
     outcomes: list[CaseOutcome] = Field(default_factory=list)
@@ -696,6 +730,8 @@ class RunReport(BaseModel):
     scripts: ScriptStatus | None = None
     script_notes: list[ScriptNote] = Field(default_factory=list)
     products: list[ProductStatus] = Field(default_factory=list)
+    not_run: list[NotRunItem] = Field(default_factory=list)
+    spend_ceiling: SpendCeiling | None = None
 
     @property
     def candidate_outcomes(self) -> list[CaseOutcome]:
@@ -771,6 +807,12 @@ class RunReport(BaseModel):
     def total_latency_ms(self) -> int:
         """Latency across **both** arms. See `total_tokens` for why."""
         return sum(o.result.latency_ms for o in self.outcomes if o.result)
+
+    @property
+    def spent_usd(self) -> float:
+        """Everything the run was recorded as spending: every outcome's run
+        cost and every evaluator's, both arms. What `max_spend_usd` reads."""
+        return self.total_cost_usd + self.judge_cost_usd
 
     @property
     def pricing_degraded(self) -> bool:

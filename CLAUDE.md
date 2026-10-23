@@ -159,8 +159,9 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **An errored keyed run keeps the spend of every attempt.** Every response is recorded as it
   arrives (a `WrapperModel` for PydanticAI, whose history misses the response that crossed
   the limit; the same middleware for LangChain), so an errored result carries the tokens,
-  `cost_usd`, `cost_note` and model of every attempt. No response answered means a measured
-  zero: not priced, no `cost_note`. A finished run is unchanged — the attempt that succeeded.
+  `cost_usd`, `cost_note` and model of every attempt, which the spend ceiling counts. No
+  response answered means a measured zero: not priced, no `cost_note`. A finished run is
+  unchanged — the attempt that succeeded.
 - **Mock tools accept any arguments.** A model hallucinating an argument must not raise, or an
   eval signal would surface as an infra error.
 - **Cassettes are replay-only and secret-free.** Recording is a deliberate, key-bearing act;
@@ -256,6 +257,28 @@ fails if the two drift apart — so a new invariant is added in both places or n
   aborts before any case runs.
 - **Outcome order is submission order, never completion order** — at every concurrency level,
   so identical runs do not churn their output.
+- **A spend ceiling stops new work, never work in flight, and a run it cut short fails the
+  gate.** `_run_item` asks the locked `_SpendLedger` as each item starts, at every concurrency;
+  it refuses once recorded spend (every `RunResult.cost_usd` and `EvalScore.cost_usd`, both
+  arms, errored runs included) is `>=` `max_spend_usd`. Spend is recorded before `_run_item`
+  returns, so a worker never starts work its last item paid for; items run are a prefix of the
+  plan. Running items finish and are scored, so a run can end above the ceiling by at most
+  `concurrency` items. A ceiling is positive and finite (`Config`, `--max-spend`, `run_evals`),
+  so the first item always starts. Any refused item, either arm, fails the gate whatever
+  `min_pass_rate`, `per_skill_min` and `fail_on_error` say; a ceiling the last item crossed
+  fails nothing. A case missing any repetition of either arm is excluded from the delta. JUnit
+  adds one `<error>` case with `gating.spend_ceiling_reasons`, or a cut run would render green.
+- **An item the spend ceiling kept from starting is not an outcome.** It is a `NotRunItem` on
+  `RunReport.not_run`, in submission order — never a `CaseOutcome`, never a fourth
+  `CaseStatus`. It enters none of `passed` / `failed` / `errored` / `pass_rate`; the gate fails
+  on it directly. Console and Markdown list it under "Not run", JSON as `not_run` (with a
+  candidate-only `summary.not_run`), JUnit as `<skipped>` for the candidate arm only.
+- **A spend ceiling that meets unpriced spend stops the run and fails the gate.** A `cost_note`
+  on a `RunResult` or any `EvalScore` makes its `0.0` no measurement, so the ledger fails
+  closed and refuses new work. The gate names the first unpriced outcome in submission order
+  (`SpendCeiling.unpriced`, read from the outcomes, not the ledger's completion order), even
+  when nothing was refused. Without a ceiling nothing changes; for an unpriced provider or
+  `copilot`, leave `max_spend_usd` unset.
 - **Concurrency never turns an authoring error into a case failure, and the surfaced error is
   deterministic.** Only the futures queued *after* the failure are cancelled, the executor
   always shuts down with `cancel_futures=True` (including when `submit` itself raises), and a

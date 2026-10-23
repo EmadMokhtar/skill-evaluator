@@ -15,7 +15,9 @@ flowchart TD
     AUTH -->|"no: any cause in the exit 2 list"| E2["exit 2 - fix your own setup"]
     AUTH -->|yes| RAN{"Did any candidate case run?"}
     RAN -->|"no: no skills, no cases, --tag or --case matched nothing"| E1["exit 1 - gate failed"]
-    RAN -->|yes| ERR{"Did any candidate case error?"}
+    RAN -->|yes| CEIL{"Did the spend ceiling leave a case unstarted, or meet spend it could not price?"}
+    CEIL -->|yes| E1
+    CEIL -->|no, or no ceiling set| ERR{"Did any candidate case error?"}
     ERR -->|"yes, and fail_on_error is on"| E1
     ERR -->|"no, or fail_on_error is off"| RATE{"Pass rate at or above min_pass_rate, and every per_skill_min met?"}
     RATE -->|no| E1
@@ -144,6 +146,57 @@ zero-cases check never see them — a strong baseline means the skill was unnece
 CI should go red. With no baseline, candidate and baseline are the same (empty) set, so none
 of these numbers move from what they were before comparative evals existed.
 
+## The spend ceiling
+
+`max_spend_usd` in `skill-lens.toml`, or `--max-spend` for one run, caps what a run spends,
+in US dollars. It counts everything the run records: each outcome's `cost_usd` and every
+evaluator's (the judge's), from both arms, errored runs included — an errored product run
+keeps the cost its trace reported, and an errored `pydantic-ai` or `langchain` run keeps the
+cost of every response it received.
+
+Before each case starts, skill-lens compares the spend recorded so far with the ceiling.
+Once it has *reached* the ceiling, no new case starts. A case that is already running is
+never interrupted: it finishes, is scored, and its spend is added. So the ceiling bounds when
+new work starts, not the total — a run can end above it by what was in flight when it was
+crossed: at most the one case that crossed it at `--concurrency 1`, and at most
+`--concurrency` cases above that. The first case always starts.
+
+Every case the ceiling kept from starting is reported as **not run**, in the order it would
+have run. A not-run case is not `failed` and not `errored` — it has no result to judge — so
+it is listed apart from the outcomes and counted in none of `passed`, `failed`, `errored` or
+the pass rate, which describe the cases that ran. Instead, **any not-run case fails the
+gate**, of either arm, whatever `min_pass_rate`, `per_skill_min` and `fail_on_error` say: the
+run measured less than it was asked to. The summary line counts the candidate arm, as it does
+for everything else; the gate reason counts both arms, and says how they split when a
+baseline run was among them (`4 cases did not run (2 candidate, 2 baseline)`). A ceiling crossed by the very last case left nothing
+unstarted, and does not fail the gate.
+
+```
+[PASS] pdf :: extracts the title (pydantic-ai)
+[PASS] pdf :: keeps the tables (pydantic-ai)
+
+Not run (stopped by the spend ceiling):
+  pdf :: handles a scanned page (pydantic-ai)
+
+2 passed, 0 failed, 0 errored, 1 not run — pass rate 100%
+Total cost: $0.5300 | Spend ceiling: $0.50 ($0.5300 recorded)
+
+Gate FAILED:
+  - 1 case did not run: the spend ceiling of $0.50 was reached ($0.5300 recorded)
+```
+
+A ceiling cannot be enforced against spend it cannot see. An outcome whose cost — the run's
+or the judge's — could not be priced carries a `cost_note` and a `cost_usd` of `0.0`, and
+that zero is not free. So once any outcome's spend is unpriced, the run stops starting new
+cases as if the ceiling were reached, and the gate fails with a reason naming the first such
+outcome and its note, even if nothing was left unstarted. Leave the ceiling unset for a
+provider `genai-prices` cannot price, and for `copilot`, which bills per premium request
+rather than in dollars.
+
+Under `--baseline`, a case that lost any repetition of either arm to the ceiling is excluded
+from the delta, both arms together, with the exclusion reason saying so: a delta over the
+half that ran would be an unmeasured comparison.
+
 ## More than one runner
 
 When a run names several runners, every candidate `(skill, case, runner)` outcome counts
@@ -234,6 +287,15 @@ judge-only product delivers no skill, so it has no bundle for that sentence's re
 scripts clause to reach; empty when no product ran), and the `gate` decision with its
 reasons.
 
+The spend ceiling adds three fields. `not_run` lists every case the ceiling kept from
+starting, in the order it would have run, each as `{skill_name, case_name, runner, arm,
+repeat_index}`; none of them is in `outcomes`. `summary.not_run` counts the candidate-arm
+ones, like every other count in `summary`. `spend_ceiling` is `null` when no ceiling was set,
+else `{max_spend_usd, spent_usd, unpriced}`: `spent_usd` is everything the run recorded
+spending (`summary.total_cost_usd` plus `summary.judge_cost_usd`), and `unpriced` names the
+first outcome whose spend could not be priced, with its note, or is `""`. See
+[The spend ceiling](#the-spend-ceiling).
+
 Comparative evals changed this document additively, not by rewriting what was already there:
 every field that existed before them still means what it meant, and the comparison adds
 fields alongside them — `arm` and `repeat_index` on each outcome, `baseline_errored` in
@@ -298,6 +360,7 @@ Buildkite all ingest natively.
 | `failed` | `<testcase>` with `<failure>` |
 | `errored` | `<testcase>` with `<error>` |
 | a skill with no cases | `<testcase>` with `<skipped>` |
+| a candidate case the spend ceiling kept from starting | `<testcase>` with `<skipped>` |
 
 The `failed`/`errored` split is the same one the exit code and the JSON report use: a
 `<failure>` means the case ran and scored below bar, an `<error>` means the runner or an
@@ -310,6 +373,11 @@ skill working.
 A run with no eval cases emits a single `<testcase>` carrying an `<error>` that repeats the
 gate's reasons. An empty `tests="0"` file renders green in most CI UIs, which would contradict
 the exit code of 1.
+
+For the same reason, a run the [spend ceiling](#the-spend-ceiling) failed gets one more
+`<testcase name="spend ceiling">`, in a suite named `skill-lens`, carrying an `<error>` with
+the gate's ceiling reasons. Otherwise a run whose every case that ran passed would render as
+green and skipped against exit code 1.
 
 When scripts were enabled, every `<testsuite>` — a skill that ran, a skipped or filtered
 skill, and the synthetic zero-case error suite alike — carries `<properties>` as its first

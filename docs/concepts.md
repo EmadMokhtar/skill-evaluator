@@ -266,6 +266,10 @@ actually happen.
         trajectory: lookup_order was never called
 ```
 
+A case that a [spend ceiling](gating.md#the-spend-ceiling) kept from starting is in none of
+the three states: it never ran, so there is nothing to judge. It is reported as **not run**,
+listed apart from the outcomes, and fails the gate on its own.
+
 See [Gating and exit codes](gating.md).
 
 ## Arm, baseline and delta
@@ -315,6 +319,10 @@ otherwise a mistyped path would report success forever. The reason names the cau
 found, every skill skipped for having no cases, or every case filtered out by `--tag` or
 `--case`.
 
+**So does a run that a spend ceiling cut short.** With `max_spend_usd` set, no new case
+starts once the run has spent that much, and any case left unstarted fails the gate, even if
+every case that ran passed: the run measured less than it was asked to.
+
 See [Gating and exit codes](gating.md).
 
 ## Glossary
@@ -340,12 +348,14 @@ See [Gating and exit codes](gating.md).
 | `loaded` / `offered` | Whether the agent is handed the skill, or left to reach for it. |
 | `--min-delta` | The smallest delta the gate will accept. The one gate rule that reads both arms, so it requires `--baseline`. |
 | Mock tool | A tool whose answer you write yourself, so a case is deterministic and free. |
+| Not run | A case the spend ceiling kept from starting. Not an outcome; it fails the gate. |
 | Outcome | The result of one (skill, case, runner, arm, repetition): passed, failed or errored. |
 | Preflight | Checks run once before any case, so a run refuses what it cannot serve before spending. |
 | Product runner | An installed agent product driven as the runner: GitHub Copilot CLI, Claude Code, or a command you name yourself. |
 | Rubric | The list of `judge:` checks a judge grades the output against. |
 | Runner | The thing that actually runs a case and returns a result. |
 | Skill | Short for Agent Skill: the directory under test. |
+| Spend ceiling | `max_spend_usd`: the most a whole run may spend before no new case starts. |
 | Tool library | A YAML file of mock tools, imported by several eval files with `tool_libraries:`. |
 | Trajectory | Which tools were called, in what order, how many times, and with what arguments. |
 | Workspace | The temporary directory a case gets, so it can produce and check real files. |

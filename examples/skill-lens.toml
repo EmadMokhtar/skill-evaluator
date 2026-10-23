@@ -70,6 +70,12 @@ min_pass_rate = 1.0
 # provider's rate limit, not your CPU.
 concurrency = 4
 
+# A ceiling on what one run spends, in US dollars: once the run has recorded
+# this much (runs and judge, both arms), no new case starts, the rest are
+# reported as not run and the gate fails. Unpriced spend stops it too, so
+# leave it unset for a provider genai-prices cannot price.
+# max_spend_usd = 5.00
+
 # Keep each case's temporary directory for inspection. Every kept directory
 # is printed, so this is safe to commit.
 # keep_workspace = false
