@@ -6,19 +6,23 @@ publishes to PyPI. Nobody types a release command.
 
 ## What happens on a merge to main
 
+The same pipeline also runs when you start it by hand — see
+[Starting a release by hand](#starting-a-release-by-hand).
+
 | Job | Does | Runs when |
 | --- | --- | --- |
 | `verify` | ruff (including the `S` security rules), format check, the full offline suite, `uv audit` on the lockfile | every push to `main` |
-| `release` | `cz bump`, push the commit and its tag, verify the tag reached `origin`, write the release notes, `uv build`, export the SBOM, upload the artifacts — or, when nothing is released, check every release tag against PyPI and rebuild one that was stranded past its re-run window | `verify` passed |
+| `release` | check every release tag against PyPI, then `cz bump`, push the commit and its tag, verify the tag reached `origin`, write the release notes, `uv build`, export the SBOM, upload the artifacts — or, instead of the bump, rebuild a tag that was stranded past its re-run window | `verify` passed |
 | `publish` | download the artifact, upload to PyPI with attestations | a version was cut *and* its commit and tag reached `origin`, or a stranded tag was verified and rebuilt |
 | `github-release` | download the three artifacts and hand them to `gh`: create the GitHub Release for the tag with the notes; attach the wheel, the sdist and the SBOM. No checkout, no install | `publish` succeeded |
 
 A merge whose commits do not warrant a release is a no-op: `cz bump` exits `21` or `3`, the
 job records "nothing to release" in its summary, and `publish` is skipped. So is a merge whose
-run `main` outran — see [Two merges close together](#two-merges-close-together). Before a
-no-op run ends it checks every release tag on `origin` against PyPI, and fails for one PyPI
-does not have — or, when that tag's run can no longer be re-run, verifies and rebuilds it and
-sends the result through `publish` — see
+run `main` outran — see [Two merges close together](#two-merges-close-together). Before every
+bump the job checks every release tag on `origin` against PyPI, and fails for one PyPI does not
+have, so a release never goes out past a missing one and leaves a gap in the versions users
+see. When that tag's run can no longer be re-run, the job instead verifies and rebuilds it,
+sends the result through `publish`, and cuts no version of its own — see
 [A tag that never reached PyPI](#a-tag-that-never-reached-pypi).
 
 `verify` re-runs the dependency audit on the commit being released rather than trusting the
@@ -63,18 +67,28 @@ moved, which is the next section.
 
 ### Two merges close together
 
-Two pull requests merged a few minutes apart each start a release run, and the second can
-finish before the first. The workflow's `concurrency` group only promises that a run in
-progress is never *cancelled* (a cancelled release could leave a tag pushed and nothing built);
-it does not keep one run alone from start to finish. GitHub checks the group when a *job*
-starts, so a run that is between its `verify` and `release` jobs can be overtaken by the next
-run, which then goes all the way to PyPI first. And even with the runs perfectly serialised,
-a merge that lands while `verify` is running has already moved `main`.
+Two pull requests merged a few minutes apart each start a release run. The workflow's
+`concurrency` group holds a whole run, `publish`'s wait for approval included, so two runs never
+overlap, and a run in progress is never *cancelled* (a cancelled release could leave a tag
+pushed and nothing built).
 
-Whichever way it happens, the earlier run's `release` job then finds itself on a commit that is
-no longer the tip of `main`. Its `cz bump` rests on that commit, and the `--atomic` push of the
-bump commit and tag is rejected as a non-fast-forward (the remote branch holds commits the job's
-branch does not). Nothing landed: no tag, no bump commit.
+The group keeps only **one** run waiting, though. When a newer merge queues, GitHub cancels the
+run that was waiting, whatever `cancel-in-progress` says. So a release whose `publish` waits
+hours for its approval leaves a row of cancelled runs behind it, one for every merge in that
+time but the last. That loses nothing. The last run's `cz bump` reads **every commit since the
+last tag**, the cancelled runs' commits included, and releases them all as one version. A
+cancelled release run needs no action. **Do not re-run it.** It releases nothing, and while a
+newer run is waiting it does harm: the re-run joins the group as the waiting run, so GitHub
+cancels the newer one, whose commits then wait for the next merge or a run
+[started by hand](#starting-a-release-by-hand) — see
+[A run that starts behind `main`](#a-run-that-starts-behind-main).
+
+A run that has started can still find `main` moved: a merge that lands while it runs moves
+`main` all the same. The run's `release` job then finds itself on a commit that is no longer the
+tip of `main`. When the merge landed before the job started, the tip step finds it (see the
+same section). When it landed after, the job's `cz bump` rests on the old commit, and the
+`--atomic` push of the bump commit and tag is rejected as a non-fast-forward (the remote branch
+holds commits the job's branch does not). Nothing landed: no tag, no bump commit.
 
 The run is not a failure, and the job says so. The push step fetches `main`, and if this run's
 commit is a strict ancestor of the new tip — `main` moved *past* it, rather than away from it —
@@ -103,7 +117,9 @@ a failed lookup prints nothing, exactly like a missing tag, so treating "no outp
 signal would report a missing tag for one that is very likely present. If you ever see the
 "is not on origin" message, it means the bump commit reached `main` but its tag did not: the
 release is not reproducible from a tag, and the fix is to re-tag and re-push by hand rather
-than re-run the job (which would try to bump again).
+than re-run the job: a re-run finds `main` past its commit and releases nothing, and its green
+conclusion would make the tag check read the re-tagged version as published, and so as
+spent.
 
 The check asks what the tag **points at**, not only whether it exists. `--follow-tags` sends
 only the annotated tags origin does not already have, so a tag of the release's name that is
@@ -116,11 +132,57 @@ pushed. If you see the "exists on origin but points at" message, the bump commit
 under a tag that means something else, and nothing in this workflow created that tag. Treat the
 version as spent, exactly as in
 [Recovering a failure after the tag but before the artifact](#recovering-a-failure-after-the-tag-but-before-the-artifact):
-the next merge that warrants a release computes its increment from the commits after the tag,
 `pip install` never sees `X.Y.Z`, and the tag is left where its author put it rather than moved.
 Find out who pushed it; a hand-pushed tag in the release's namespace is the thing to stop.
-Record the tag in `scripts/spent-tags.txt` with the reason, or the
-[tag check](#a-tag-that-never-reached-pypi) reports it on every no-op run and every week.
+Record the tag in `scripts/spent-tags.txt` with the reason. Until you do, the
+[tag check](#a-tag-that-never-reached-pypi) fails every release run on it, and every week;
+after that, the next merge that warrants a release computes its increment from the commits
+after the tag and goes out normally.
+
+### A run that starts behind `main`
+
+A re-run checks out the run's own commit again, not `main`. Re-running a run that a newer run
+has already released — one GitHub cancelled while it waited, or one that finished — would
+otherwise cut that version a second time. Its `cz bump` reads the old commit's `pyproject.toml`
+and computes the version the newer run already tagged. The tag is already in the job's clone
+(it fetches every tag), so `cz bump` fails on `fatal: tag 'v0.25.0' already exists` with exit
+`7`, before the push step can call it a no-op.
+
+So the `release` job checks before the bump. Its tip step fetches `main`. When this run's commit
+is a strict ancestor of the tip, it writes "Nothing released: main is at `<sha>`, past this run's
+commit `<sha>`" to the summary and skips the bump. If no run on `main`'s tip has run or is
+waiting — the case where a re-run cancelled it — start one by hand. With no `bumped` written, the tag check, the
+push, the recover step and `publish` are skipped too, and the run is green. This is the push
+step's test, made earlier, and it refuses the same things: `main` at this commit goes on to the
+bump; `main` rewritten to a history without it also goes on, and the push step fails it; a
+fetch that fails fails the job. The same step also catches a merge that landed after this run's
+`verify` started and before its `release` job did, which would otherwise cut a version only to
+have its push rejected.
+
+`verify` still runs first, on the old commit, and can still fail there. Those are that commit's
+own tests, and a bug a later commit fixed is still in it. A red `verify` on a re-run of an older
+run says that commit was broken, not that a release is.
+
+One run behind `main` is not a no-op: **the run that cut a release**, re-run. Its own bump
+commit is the first commit after its commit on `main` and carries a release tag, and the tip
+step fails it instead: "This run already cut `vX.Y.Z` at `<sha>`, right after its commit `<sha>`, so
+its release job cannot release anything again." A green re-run would change that run's
+conclusion to `success`, and the [tag check](#a-tag-that-never-reached-pypi) reads a run that
+succeeded as one that published its version. A tag PyPI lacks would then be called spent —
+never re-run, never recovered — and, since the check runs before every bump, every later
+release would stop on it until someone recorded it in `scripts/spent-tags.txt`. Failing keeps
+the run's conclusion `failure`, so the tag stays something to re-run or to recover.
+
+A release tag here is a tag spelled with the `[tool.commitizen] tag_format` prefix and then a
+digit (`v[0-9]*`), on whatever commit it sits. Another tag on that commit, such as a
+`docs-snapshot` marker, is not one, and the re-run is the ordinary no-op. A tag that only looks
+like a release, pushed by hand, still fails it: the tag check finds a release tag's run through
+the tag commit's parent, whatever the commit is.
+
+To retry a `publish` that failed or never got its approval, re-run that run's *failed jobs*, as
+[Recovering a failed publish](#recovering-a-failed-publish) says, not all of them: when its
+`release` job succeeded, that re-runs `publish` alone. Re-running all jobs re-runs `release`
+too, which the tip step fails as above.
 
 ### A pin that stops matching aborts the bump
 
@@ -267,9 +329,13 @@ release whose files were all deleted is listed but cannot be installed, so it co
 missing. It runs in two places, spelled identically (`tests/test_security_checks.py` requires
 it):
 
-- in `release`, right after `cz bump`, **only when the run released nothing**. A release in
-  flight is never failed over an older tag — the `publish` job that follows a bump is exactly
-  what the check waits for.
+- in `release`, right **before** `cz bump`, on every run that is on `main`'s tip. A tag PyPI
+  does not have fails the job before a version is cut: with `0.21.0` tagged and never
+  published, `0.22.0` does not go out, so PyPI never jumps from `0.20.0` to `0.22.0`. It
+  cannot fail over a release still on its way to PyPI: this run's own tag does not exist yet,
+  and the concurrency group keeps every other run, its `publish` included, from running at the
+  same time. A PyPI that cannot be read also stops the release (exit `2`, "nothing verified"),
+  since a missing tag cannot be ruled out; re-run the job once PyPI answers.
 - in the **Security** workflow, on its weekly schedule and on `workflow_dispatch`, so a tag
   stranded on a quiet week is found without a merge. Not on pull requests or pushes: a
   stranded tag says nothing about the change under review.
@@ -283,32 +349,41 @@ and whether it can still be re-run:
 ```
 Tag v0.21.0 is on origin, but 0.21.0 is not on PyPI (skill-lens).
   The run that should have published it: https://github.com/EmadMokhtar/skill-evaluator/actions/runs/37301857121 (started 2026-10-05, failure).
-  Re-run its failed jobs; GitHub allows that until 2026-11-04 (30 days after the run started).
+  If its `release` job succeeded and only `publish` failed or was never approved, re-run its failed jobs: that retries `publish`. GitHub allows it until 2026-11-04 (30 days after the run started).
+  If its `release` job failed after pushing the tag, re-running it cannot publish anything. The release workflow rebuilds the tag from its commit once that window closes.
   Otherwise record the tag in scripts/spent-tags.txt with the reason. See docs/releasing.md, "A tag that never reached PyPI".
 ```
 
-**While the window is open, re-run the failed jobs of that run** from the Actions tab. That
-re-runs `publish` — which downloads the `dist` artifact its own `release` job built and
+The check does not look up which job failed; the run's page shows it, and it decides what a
+re-run can do. If `release` failed after pushing the tag, no re-run can publish: see
+[Recovering a failure after the tag but before the artifact](#recovering-a-failure-after-the-tag-but-before-the-artifact).
+
+**While the window is open, and `release` succeeded, re-run the failed jobs of that run** from
+the Actions tab. That re-runs `publish` — which downloads the `dist` artifact its own `release` job built and
 `verify` tested, so nothing unverified ships, and whose attestation names the run that pushed
 the tag — and then `github-release`. The approval is requested again; this time, answer it. Do
-not start a fresh run or run `cz bump` by hand: a fresh run finds the tag already on `HEAD`
-and reports nothing to release, exactly as
+not start a fresh run or run `cz bump` by hand: a fresh run's tag check fails on this same tag,
+and a local bump makes a second stranded tag, as
 [There is no manual path to PyPI](#there-is-no-manual-path-to-pypi) describes. Afterwards,
 run the Security workflow by hand (**Actions → Security → Run workflow**) to see the check
-go green.
+go green. Until then every release run fails at the check, so nothing newer goes out past the
+missing version. The commits merged meanwhile are released by the next run once the tag is on
+PyPI: merge again, or [start a release by hand](#starting-a-release-by-hand).
 
 **Once the window has closed, or when no release run pushed the tag, the release workflow
 recovers it on its own.** The message changes accordingly:
 
 ```
-  Re-running it is no longer possible: GitHub's 30-day window closed on 2026-11-04. The next merge to main that releases nothing rebuilds it from its commit and publishes it through the release workflow.
+  Re-running it is no longer possible: GitHub's 30-day window closed on 2026-11-04. The next run of the release workflow on main rebuilds it from its commit and publishes it, before it releases anything else.
 ```
 
-Any merge to `main` that releases nothing — a `docs:` or `chore:` commit will do — starts a
-run whose `release` job, finding nothing to bump, runs the check with `RECOVERY_PLAN` set.
-The check then hands that one tag to the next step instead of failing (its line reads "This
-run rebuilds it from its commit and publishes it"), and the **Verify and build a stranded
-tag** step does the rest:
+The next run of the release workflow on `main` — any merge, or a run
+[started by hand](#starting-a-release-by-hand) — runs the check with `RECOVERY_PLAN` set. The
+check then hands that one tag on instead of failing (its line reads "This run rebuilds it from
+its commit and publishes it"). The bump sees the plan and cuts no version: one run publishes
+one version, so the stranded one goes first and this run's own commits wait for the next run,
+which finds every tag on PyPI and releases them. The **Verify and build a stranded tag** step
+does the rest:
 
 1. It fetches the tag from `origin` and requires it to point at the commit the check saw. A
    tag that moved since is refused. The tag is only ever read: nothing in the step creates,
@@ -337,8 +412,8 @@ tag** step does the rest:
 
 One tag per run, the oldest first; a second stranded tag is reported as waiting and does not
 fail the run. Nothing before the upload is irreversible — no tag pushed, no commit — so a
-recovery that fails spends nothing: the run goes red with the reason, and the next
-no-release merge tries again. If `publish` is again left unapproved, the same.
+recovery that fails spends nothing: the run goes red with the reason, and the next run
+tries again. If `publish` is again left unapproved, the same.
 
 Some tags are still **spent**, and the check says so rather than recovering them:
 
@@ -378,6 +453,53 @@ false "missing" or a silent pass. So is a PyPI response without its release list
 `origin` that lists no release tag at all while PyPI has releases — a wrong or empty remote,
 not a clean bill. Exit `1` is a finding; exit `0` is every tag accounted for.
 
+## Starting a release by hand
+
+**Actions → Release → Run workflow**, with `main` selected, runs the same pipeline a merge
+does: `verify`, the tag check, the bump, and `publish` behind the same approval. It is a
+`workflow_dispatch` trigger (a manual start of a workflow from the Actions tab or the API).
+Its one input, `increment`, becomes a `cz bump` flag:
+
+| Value | Becomes |
+| --- | --- |
+| `auto` (default) | no flag: the commits choose the increment, as on a merge |
+| `PATCH`, `MINOR` | `--increment PATCH` or `--increment MINOR`, whatever the commit types say |
+
+Use it to release the commits a [stranded-tag recovery](#a-tag-that-never-reached-pypi) held
+back, without waiting for another merge, or to force a patch or a minor where the commit types
+would choose otherwise — a release of `docs:`-only commits, say. With `auto` it behaves exactly
+as a merge does, so it is also a way to run the tag check and a recovery on demand.
+
+The rules:
+
+- **`main` only.** The workflow can be started on any branch, but the push step pushes
+  `HEAD:main`, so a branch that contains `main` would move `main` onto commits no pull request
+  reviewed. The tip step refuses any other ref before anything is fetched: "A release is cut
+  from main only, and this run is on `refs/heads/<branch>`."
+- **No `MAJOR`.** `[tool.commitizen] major_version_zero = true` keeps the project in `0.x` on
+  purpose. Leaving `0.x` is a change to that setting, in a pull request of its own, not a
+  button.
+- **The value is checked.** GitHub checks a `choice` input against its options, and the bump
+  step checks again: any other value exits `2` with nothing bumped, and never reaches the
+  command line. The input reaches the script as an environment variable, never as a `${{ }}`
+  expression inside it.
+- **A forced increment needs at least one commit.** It overrides what the commit types say,
+  but the changelog the bump writes still needs a commit since the last tag. With none,
+  Commitizen exits `3` and the run is the ordinary "nothing to release" no-op.
+- **An increment that cannot be applied is announced.** A `PATCH` or `MINOR` run that turns
+  out to be behind `main`, or that a [recovery](#a-tag-that-never-reached-pypi) goes ahead of,
+  bumps nothing and stays green. It shows an "Increment not applied" warning on the run, and the
+  summary says "The requested increment `MINOR` was not applied". Start the workflow again on
+  `main`; otherwise the next run bumps as its commits say.
+- **No pre-release.** Commitizen finishes a pre-release on the next bump of any kind, so
+  after a `0.26.0rc0` the next merge — a Dependabot update would do — publishes `0.26.0`
+  before anyone has tried the rc. Meanwhile `version_files` would point the docs site and
+  `action.yml` at the rc. A pre-release input would need a rule that stops ordinary merges
+  from bumping past it first.
+
+A manual run takes its turn in the same concurrency group as merges, so it never overlaps a
+release, and a merge that lands while it waits cancels it like any other waiting run.
+
 ## There is no manual path to PyPI
 
 Do not run `cz bump` locally to release. It will tag a version without publishing it, and the
@@ -395,15 +517,15 @@ Running `cz bump` locally and pushing the commit and its tag starts **no run at 
 `bump_message` ends in `[skip ci]`, and GitHub creates no workflow run for a push whose head
 commit carries that marker. Nothing downstream ever hears about the version you just cut.
 
-And a run started some other way would not save you either. Its `release` job would find the
-tag it wants to create already sitting on `HEAD`, since you just pushed it; `cz bump` sees no
-commit since that tag warranting a release, exits `3` or `21` (both a no-op, not an error), and
-the run records "nothing to release": no build, no artifact, no `publish`. Either way you are
-left with a real, permanent tag and no published package behind it, which is worse than doing
-nothing — the tag cannot simply be re-cut, since `vX.Y.Z` would then mean two different things
-depending on which push you ask about. The [tag check](#a-tag-that-never-reached-pypi) reports
-it, and since the run on its parent commit — `main`'s previous tip — succeeded, it is spent
-rather than recovered: record it in `scripts/spent-tags.txt`.
+And a run started afterwards would not save you either. Its [tag
+check](#a-tag-that-never-reached-pypi) finds your tag on `origin` and not on PyPI, and since
+the run on its parent commit — `main`'s previous tip — succeeded, the tag is spent rather than
+recovered: the check fails, and every release after it fails the same way, until you record
+the tag in `scripts/spent-tags.txt`. Either way you are left with a real, permanent tag and no
+published package behind it, which is worse than doing nothing — the tag cannot simply be
+re-cut, since `vX.Y.Z` would then mean two different things depending on which push you ask
+about. To release without waiting for a merge, use
+[Starting a release by hand](#starting-a-release-by-hand) instead: it is this same pipeline.
 
 ### Recovering a failed GitHub Release
 
@@ -429,8 +551,10 @@ environment's approval, within GitHub's 30-day window — the case
 [A tag that never reached PyPI](#a-tag-that-never-reached-pypi) exists to report. The publish step sets `skip-existing: true`, so a retry after a *partial* upload — the
 wheel landed, the sdist did not — uploads what is missing instead of dying on "File already
 exists". Starting a fresh run instead, or re-running `release`, is not a substitute: a fresh
-run's `release` job faces the same already-tagged `HEAD` as the local `cz bump` case above and
-reports nothing to release.
+run's tag check fails on this same tag, and a re-run of `release` fails at its tip step, because
+the commit right after its own carries the tag it cut (see
+[A run that starts behind `main`](#a-run-that-starts-behind-main)). Use "Re-run failed jobs",
+never "Re-run all jobs".
 
 ### Recovering a failure *after* the tag but *before* the artifact
 
@@ -438,18 +562,23 @@ There is one state with no re-run at all. If anything between the tag and the ar
 fails once the tag has already reached origin — writing the release notes, `uv build`, the
 SBOM export, or any of the three artifact uploads — `main` carries a permanent tag `vX.Y.Z`, `publish` was never
 eligible (`needs.release.outputs.bumped` never reached it), so there is no `publish` job to
-re-run, and a fresh run's `cz bump` exits `3` — nothing to release — for the same
-already-tagged-`HEAD` reason as above. Version `X.Y.Z` is spent: it exists as a tag and will
-never exist on PyPI.
+re-run, and re-running `release` fails at its tip step, because the commit right after its own
+carries the tag it cut. Nothing can publish `X.Y.Z` from this run.
 
-This is self-healing, and the right response is to fix the cause and move on. The next merge
-that warrants a release computes its increment from the commits after `vX.Y.Z` and publishes
-`X.Y.Z+1` (or whatever the history warrants) normally. The
-[tag check](#a-tag-that-never-reached-pypi) reports `vX.Y.Z` meanwhile. Its "re-run its
-failed jobs" advice does not help here — re-running `release` runs `cz bump` again on an
-already-tagged tree, and `publish` never existed to re-run — but the tag's tree is complete,
-so once the 30-day window closes the next no-release merge rebuilds it from the tag and
-publishes `X.Y.Z` after all. Until then the version sequence has a gap, which is a cosmetic
-cost, not a broken repository. Do not try to
+The tag's tree is complete, so the release workflow rebuilds it, but only once the 30-day
+re-run window has closed. Until then the [tag check](#a-tag-that-never-reached-pypi) fails
+every release run on `vX.Y.Z`, so nothing newer goes out and PyPI shows no gap. The check
+names the run and gives both cases: re-running its failed jobs helps only when `release`
+succeeded, and this is the other case, where `release` itself failed after pushing the tag.
+Fix the cause, then choose:
+
+- **Wait.** Once the window closes, the next run rebuilds `vX.Y.Z` from the tag and publishes
+  it; the run after that releases what was merged meanwhile. No gap, at the cost of up to 30
+  days without a release.
+- **Accept the gap.** Record the tag in `scripts/spent-tags.txt` with the reason. The check
+  then passes, and the next release goes out as `X.Y.Z+1` (or whatever the history warrants);
+  `X.Y.Z` never exists on PyPI. A spent entry is permanent: the list only grows.
+
+Do not try to
 reclaim `vX.Y.Z` by deleting and re-pushing the tag: a tag that once existed publicly and later
 points at different code is the failure mode this whole section exists to avoid.

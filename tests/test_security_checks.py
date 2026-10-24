@@ -190,10 +190,10 @@ def test_the_build_backend_is_in_the_audited_lockfile(pyproject):
 
 # --- A tagged version that never reached PyPI ---------------------------------
 #
-# release.yml checks every release tag against PyPI when a merge releases
-# nothing. A tag stranded by an approval that never came, with no merge after
-# it, would wait for the next merge to be noticed; the scheduled run here is
-# what finds it on a quiet week (issue #103, v0.21.0).
+# release.yml checks every release tag against PyPI before every bump. A tag
+# stranded by an approval that never came, with no merge after it, would wait
+# for the next merge to be noticed; the scheduled run here is what finds it on
+# a quiet week (issue #103, v0.21.0).
 
 
 def test_a_stranded_tag_is_found_on_the_schedule_even_when_nothing_merges(workflow):

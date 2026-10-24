@@ -1,9 +1,10 @@
 # Release tags that exist on origin and will never be on PyPI.
 #
-# scripts/check_tags_published.py fails the release workflow's no-release path
-# and the weekly Security run for every release tag whose version PyPI does not
-# have -- unless the release workflow can rebuild it from its commit, which it
-# does once the tag's run can no longer be re-run. A tag listed here is
+# scripts/check_tags_published.py runs before every version the release
+# workflow cuts, and in the weekly Security run, and fails for every release
+# tag whose version PyPI does not have -- so while one is missing, nothing newer
+# is released -- unless the release workflow can rebuild it from its commit,
+# which it does once the tag's run can no longer be re-run. A tag listed here is
 # accepted instead and never rebuilt: the version is spent, and the docs say
 # when that is so (docs/releasing.md, "A tag that never reached PyPI"). One
 # tag per line, with the date and the reason after a `#`:

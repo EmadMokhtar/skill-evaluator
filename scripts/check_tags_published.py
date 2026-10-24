@@ -11,7 +11,7 @@ It reads the tags on origin (`git ls-remote`), PyPI's release list (no
 credentials) and scripts/spent-tags.txt, the one list of tags acknowledged
 as never going to be published. A tag that is on origin, not on PyPI with at
 least one file, and not spent is a finding, reported with the release run
-that should have published it so a maintainer can re-run its failed jobs.
+that should have published it and whether a re-run of it can still publish.
 
 When the environment variable RECOVERY_PLAN names a file, one finding whose
 run can no longer be re-run (GitHub's 30-day window closed, or no release run
@@ -340,7 +340,9 @@ def lookup_run(repo: str | None, tag: ReleaseTag, now: datetime) -> RunInfo:
         parent = str(parents[0]["sha"])
         # The bump commit sits on top of the pushed commit, so the run that
         # pushed the tag is the one whose head is the tag commit's parent.
-        listing = fetch_github(f"/repos/{repo}/actions/runs?head_sha={parent}&event=push")
+        # No `event=` filter: a release run is a `push` or a manual
+        # `workflow_dispatch`, and the workflow's path is what names it.
+        listing = fetch_github(f"/repos/{repo}/actions/runs?head_sha={parent}&per_page=100")
         runs = [r for r in listing.get("workflow_runs") or [] if r.get("path") == RELEASE_WORKFLOW]
         if not runs:
             return RunInfo("no_run", parent=parent)
@@ -367,8 +369,8 @@ def lookup_run(repo: str | None, tag: ReleaseTag, now: datetime) -> RunInfo:
 # How a recoverable tag will be recovered, by who is reading the message.
 THIS_RUN = "This run rebuilds it from its commit and publishes it."
 NEXT_MERGE = (
-    "The next merge to main that releases nothing rebuilds it from its commit and publishes "
-    "it through the release workflow."
+    "The next run of the release workflow on main rebuilds it from its commit and publishes "
+    "it, before it releases anything else."
 )
 
 
@@ -406,9 +408,18 @@ def describe_run(info: RunInfo, recovery: str) -> list[str]:
         f"(started {info.started:%Y-%m-%d}, {info.conclusion})."
     ]
     if info.status == "open":
+        # Which job failed decides what a re-run can do, and the run's page
+        # shows it: `publish` re-runs on its own, but a `release` job that
+        # failed after its push fails again at the tip step, by design.
         lines.append(
-            f"  Re-run its failed jobs; GitHub allows that until {info.deadline:%Y-%m-%d} "
-            f"({RERUN_WINDOW.days} days after the run started)."
+            "  If its `release` job succeeded and only `publish` failed or was never approved, "
+            "re-run its failed jobs: that retries `publish`. GitHub allows it until "
+            f"{info.deadline:%Y-%m-%d} ({RERUN_WINDOW.days} days after the run started)."
+        )
+        lines.append(
+            "  If its `release` job failed after pushing the tag, re-running it cannot publish "
+            "anything. The release workflow rebuilds the tag from its commit once that window "
+            "closes."
         )
     else:
         lines.append(
