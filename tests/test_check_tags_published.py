@@ -262,6 +262,19 @@ def test_every_tag_published_exits_zero_and_writes_the_summary(
     assert verdict in summary.read_text(encoding="utf-8")
 
 
+# What a re-run can and cannot do depends on which job failed, which the run's
+# page shows and the check does not look up: `publish` re-runs on its own, but
+# a `release` job that failed after its push fails again at the tip step.
+RE_RUN_PUBLISH = (
+    "If its `release` job succeeded and only `publish` failed or was never approved, "
+    "re-run its failed jobs: that retries `publish`. GitHub allows it until 2026-11-04"
+)
+RE_RUN_RELEASE = (
+    "If its `release` job failed after pushing the tag, re-running it cannot publish "
+    "anything. The release workflow rebuilds the tag from its commit once that window closes."
+)
+
+
 def test_a_missing_tag_is_a_finding_that_names_the_run_and_the_window(harness, monkeypatch, capsys):
     monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
 
@@ -270,7 +283,8 @@ def test_a_missing_tag_is_a_finding_that_names_the_run_and_the_window(harness, m
     err = capsys.readouterr().err
     assert "Tag v0.21.0 is on origin, but 0.21.0 is not on PyPI (skill-lens)." in err
     assert f"The run that should have published it: {RUN_URL} (started 2026-10-05, failure)." in err
-    assert "Re-run its failed jobs; GitHub allows that until 2026-11-04" in err
+    assert RE_RUN_PUBLISH in err
+    assert RE_RUN_RELEASE in err
     assert "30 days after the run started" in err
     assert "record the tag in scripts/spent-tags.txt with the reason. See docs/releasing.md" in err
     assert "v0.20.0" not in err
@@ -301,7 +315,7 @@ def test_a_tag_cut_by_a_manual_run_is_found_by_that_run(harness, monkeypatch, ca
 
     err = capsys.readouterr().err
     assert f"The run that should have published it: {RUN_URL}" in err
-    assert "Re-run its failed jobs; GitHub allows that until 2026-11-04" in err
+    assert RE_RUN_PUBLISH in err
 
 
 LATER = datetime(2026, 12, 1, tzinfo=UTC)  # the 30-day window closed on 2026-11-04
@@ -324,7 +338,8 @@ def test_a_run_older_than_thirty_days_says_the_window_closed(harness, monkeypatc
         "Re-running it is no longer possible: GitHub's 30-day window closed on 2026-11-04." in err
     )
     assert NEXT_MERGE in err
-    assert "Re-run its failed jobs" not in err
+    assert "re-run its failed jobs" not in err
+    assert RE_RUN_RELEASE not in err
     assert THIS_RUN not in err
 
 
@@ -401,7 +416,7 @@ def test_with_a_plan_a_tag_still_within_its_window_is_reported_for_a_re_run(
 
     assert not plan.exists()
     err = capsys.readouterr().err
-    assert "Re-run its failed jobs; GitHub allows that until 2026-11-04" in err
+    assert RE_RUN_PUBLISH in err
     assert THIS_RUN not in err
 
 

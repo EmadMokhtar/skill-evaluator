@@ -164,14 +164,20 @@ own tests, and a bug a later commit fixed is still in it. A red `verify` on a re
 run says that commit was broken, not that a release is.
 
 One run behind `main` is not a no-op: **the run that cut a release**, re-run. Its own bump
-commit is the first commit after its commit on `main` and carries the tag, and the tip step
-fails it instead: "This run already cut `vX.Y.Z` at `<sha>`, right after its commit `<sha>`, so
+commit is the first commit after its commit on `main` and carries a release tag, and the tip
+step fails it instead: "This run already cut `vX.Y.Z` at `<sha>`, right after its commit `<sha>`, so
 its release job cannot release anything again." A green re-run would change that run's
 conclusion to `success`, and the [tag check](#a-tag-that-never-reached-pypi) reads a run that
 succeeded as one that published its version. A tag PyPI lacks would then be called spent —
 never re-run, never recovered — and, since the check runs before every bump, every later
 release would stop on it until someone recorded it in `scripts/spent-tags.txt`. Failing keeps
 the run's conclusion `failure`, so the tag stays something to re-run or to recover.
+
+A release tag here is a tag spelled with the `[tool.commitizen] tag_format` prefix and then a
+digit (`v[0-9]*`), on whatever commit it sits. Another tag on that commit, such as a
+`docs-snapshot` marker, is not one, and the re-run is the ordinary no-op. A tag that only looks
+like a release, pushed by hand, still fails it: the tag check finds a release tag's run through
+the tag commit's parent, whatever the commit is.
 
 To retry a `publish` that failed or never got its approval, re-run that run's *failed jobs*, as
 [Recovering a failed publish](#recovering-a-failed-publish) says, not all of them: when its
@@ -343,12 +349,17 @@ and whether it can still be re-run:
 ```
 Tag v0.21.0 is on origin, but 0.21.0 is not on PyPI (skill-lens).
   The run that should have published it: https://github.com/EmadMokhtar/skill-evaluator/actions/runs/37301857121 (started 2026-10-05, failure).
-  Re-run its failed jobs; GitHub allows that until 2026-11-04 (30 days after the run started).
+  If its `release` job succeeded and only `publish` failed or was never approved, re-run its failed jobs: that retries `publish`. GitHub allows it until 2026-11-04 (30 days after the run started).
+  If its `release` job failed after pushing the tag, re-running it cannot publish anything. The release workflow rebuilds the tag from its commit once that window closes.
   Otherwise record the tag in scripts/spent-tags.txt with the reason. See docs/releasing.md, "A tag that never reached PyPI".
 ```
 
-**While the window is open, re-run the failed jobs of that run** from the Actions tab. That
-re-runs `publish` — which downloads the `dist` artifact its own `release` job built and
+The check does not look up which job failed; the run's page shows it, and it decides what a
+re-run can do. If `release` failed after pushing the tag, no re-run can publish: see
+[Recovering a failure after the tag but before the artifact](#recovering-a-failure-after-the-tag-but-before-the-artifact).
+
+**While the window is open, and `release` succeeded, re-run the failed jobs of that run** from
+the Actions tab. That re-runs `publish` — which downloads the `dist` artifact its own `release` job built and
 `verify` tested, so nothing unverified ships, and whose attestation names the run that pushed
 the tag — and then `github-release`. The approval is requested again; this time, answer it. Do
 not start a fresh run or run `cz bump` by hand: a fresh run's tag check fails on this same tag,
@@ -475,6 +486,11 @@ The rules:
 - **A forced increment needs at least one commit.** It overrides what the commit types say,
   but the changelog the bump writes still needs a commit since the last tag. With none,
   Commitizen exits `3` and the run is the ordinary "nothing to release" no-op.
+- **An increment that cannot be applied is announced.** A `PATCH` or `MINOR` run that turns
+  out to be behind `main`, or that a [recovery](#a-tag-that-never-reached-pypi) goes ahead of,
+  bumps nothing and stays green. It shows an "Increment not applied" warning on the run, and the
+  summary says "The requested increment `MINOR` was not applied". Start the workflow again on
+  `main`; otherwise the next run bumps as its commits say.
 - **No pre-release.** Commitizen finishes a pre-release on the next bump of any kind, so
   after a `0.26.0rc0` the next merge — a Dependabot update would do — publishes `0.26.0`
   before anyone has tried the rc. Meanwhile `version_files` would point the docs site and
@@ -535,8 +551,10 @@ environment's approval, within GitHub's 30-day window — the case
 [A tag that never reached PyPI](#a-tag-that-never-reached-pypi) exists to report. The publish step sets `skip-existing: true`, so a retry after a *partial* upload — the
 wheel landed, the sdist did not — uploads what is missing instead of dying on "File already
 exists". Starting a fresh run instead, or re-running `release`, is not a substitute: a fresh
-run's tag check fails on this same tag, and a re-run of `release` finds `main` past its commit
-and releases nothing.
+run's tag check fails on this same tag, and a re-run of `release` fails at its tip step, because
+the commit right after its own carries the tag it cut (see
+[A run that starts behind `main`](#a-run-that-starts-behind-main)). Use "Re-run failed jobs",
+never "Re-run all jobs".
 
 ### Recovering a failure *after* the tag but *before* the artifact
 
@@ -544,13 +562,14 @@ There is one state with no re-run at all. If anything between the tag and the ar
 fails once the tag has already reached origin — writing the release notes, `uv build`, the
 SBOM export, or any of the three artifact uploads — `main` carries a permanent tag `vX.Y.Z`, `publish` was never
 eligible (`needs.release.outputs.bumped` never reached it), so there is no `publish` job to
-re-run, and re-running `release` finds `main` already past its commit and releases nothing.
-Nothing can publish `X.Y.Z` from this run.
+re-run, and re-running `release` fails at its tip step, because the commit right after its own
+carries the tag it cut. Nothing can publish `X.Y.Z` from this run.
 
 The tag's tree is complete, so the release workflow rebuilds it, but only once the 30-day
 re-run window has closed. Until then the [tag check](#a-tag-that-never-reached-pypi) fails
-every release run on `vX.Y.Z`, so nothing newer goes out and PyPI shows no gap. Its "re-run its
-failed jobs" advice does not help in this one state, because `publish` never existed to re-run.
+every release run on `vX.Y.Z`, so nothing newer goes out and PyPI shows no gap. The check
+names the run and gives both cases: re-running its failed jobs helps only when `release`
+succeeded, and this is the other case, where `release` itself failed after pushing the tag.
 Fix the cause, then choose:
 
 - **Wait.** Once the window closes, the next run rebuilds `vX.Y.Z` from the tag and publishes

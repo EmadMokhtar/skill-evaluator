@@ -86,8 +86,9 @@ jobs:
       # `bumped` is read from the push step, not the bump step: a run that
       # main outran cuts a version it never pushes, and `publish` must not
       # hear about it. The one other way an artifact comes to exist is the
-      # recover step, which rebuilds a stranded tag on the no-release path;
-      # it sets `recovered` only after that tag's tree was verified and built.
+      # recover step, which rebuilds a stranded tag when the tag check hands
+      # it one instead of a bump; it sets `recovered` only after that tag's
+      # tree was verified and built.
       bumped: ${{ steps.push.outputs.pushed == 'true' || steps.recover.outputs.recovered == 'true' }}
       version: ${{ steps.bump.outputs.version || steps.recover.outputs.version }}
     steps:
@@ -135,7 +136,15 @@ jobs:
         # nothing fetched: the push step pushes HEAD:main, so a branch that
         # contains main would move main onto commits no pull request reviewed.
         # `on.push` is limited to main; `workflow_dispatch` is not.
+        #
+        # A manual run that asked for PATCH or MINOR and turns out to be
+        # behind main cannot apply it: the run on main's tip bumps as its
+        # commits say. It stays the green no-op, with a warning naming the
+        # increment, so whoever asked for it starts the run again.
         shell: bash
+        env:
+          # Empty on a push; through the environment, as in the bump step.
+          INCREMENT: ${{ inputs.increment }}
         run: |
           set -eu
           if [ "$GITHUB_REF" != "refs/heads/main" ]; then
@@ -150,15 +159,19 @@ jobs:
           if [ "$tip" != "$GITHUB_SHA" ] && git merge-base --is-ancestor "$GITHUB_SHA" "$tip"; then
             # Except the run that cut the release right after its own commit:
             # its bump commit is the first commit after GITHUB_SHA on main and
-            # carries a tag (the checkout fetched every tag). A green re-run of
-            # it would set the run's conclusion to `success`, which the tag
-            # check reads as "this run published the version": a tag PyPI
-            # lacks would then be called spent, never re-run or recovered, and
-            # block every later release. So it fails, and stays failed.
+            # carries a release tag (the checkout fetched every tag). A green
+            # re-run of it would set the run's conclusion to `success`, which
+            # the tag check reads as "this run published the version": a tag
+            # PyPI lacks would then be called spent, never re-run or recovered,
+            # and block every later release. So it fails, and stays failed.
+            # Only a tag spelled like a release tag (`[tool.commitizen]
+            # tag_format`'s prefix, then a digit) counts, on any commit: the
+            # tag check finds a release tag's run through its commit's parent,
+            # whatever that commit is, and reads no other tag.
             after="$(git rev-list --first-parent --reverse "$GITHUB_SHA..$tip")"
             next="${after%%$'\n'*}"
             if [ "$(git rev-parse "$next^")" = "$GITHUB_SHA" ]; then
-              tags="$(git tag --points-at "$next")"
+              tags="$(git tag --list 'v[0-9]*' --points-at "$next")"
               if [ -n "$tags" ]; then
                 echo "This run already cut ${tags//$'\n'/, } at ${next:0:7}, right after its commit ${GITHUB_SHA:0:7}, so its release job cannot release anything again. If this job succeeded before and only publish failed or was never approved, re-run only the failed jobs: that retries publish without running this job. Otherwise see 'A tag that never reached PyPI' in docs/releasing.md. This run is left failed on purpose: a green run would tell the tag check the version was published." >&2
                 exit 1
@@ -166,6 +179,12 @@ jobs:
             fi
             echo "current=false" >> "$GITHUB_OUTPUT"
             echo "Nothing released: main is at ${tip:0:7}, past this run's commit ${GITHUB_SHA:0:7}. A run on main's tip releases every commit since the last tag, this one included. If none has run or is waiting, start the release workflow by hand." >> "$GITHUB_STEP_SUMMARY"
+            case "$INCREMENT" in
+              PATCH|MINOR)
+                echo "::warning title=Increment not applied::This run was started with increment $INCREMENT, but main moved past its commit, so nothing was bumped. Start the release workflow again on main to release with $INCREMENT."
+                echo "The requested increment $INCREMENT was not applied. Start the release workflow again on main to release with it." >> "$GITHUB_STEP_SUMMARY"
+                ;;
+            esac
             exit 0
           fi
           echo "current=true" >> "$GITHUB_OUTPUT"
@@ -226,11 +245,19 @@ jobs:
           # A stranded tag the check handed to recovery goes first. One run
           # publishes one version, so this run cuts none: `bumped=false` sends
           # the job to the recover step, and this run's own commits wait for
-          # the next run, which finds every tag on PyPI and releases them.
+          # the next run, which finds every tag on PyPI and releases them. A
+          # manual PATCH or MINOR is not applied either: a warning names it,
+          # and the step stays green so the recover step still runs.
           if [ -s "$RECOVERY_PLAN" ]; then
             stranded="$(sed -n 's/^tag=//p' "$RECOVERY_PLAN")"
             echo "bumped=false" >> "$GITHUB_OUTPUT"
             echo "No version cut: $stranded is not on PyPI and is rebuilt first. The next run of this workflow on main releases this run's commits; start it by hand once $stranded is on PyPI, or merge again." >> "$GITHUB_STEP_SUMMARY"
+            case "$INCREMENT" in
+              PATCH|MINOR)
+                echo "::warning title=Increment not applied::This run was started with increment $INCREMENT, but it rebuilds $stranded instead, so nothing was bumped. Start the release workflow again on main once $stranded is on PyPI."
+                echo "The requested increment $INCREMENT was not applied. Start the release workflow again on main once $stranded is on PyPI." >> "$GITHUB_STEP_SUMMARY"
+                ;;
+            esac
             exit 0
           fi
           # The manual run's input, checked here rather than trusted to the

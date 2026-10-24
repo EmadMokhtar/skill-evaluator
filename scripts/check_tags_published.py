@@ -11,7 +11,7 @@ It reads the tags on origin (`git ls-remote`), PyPI's release list (no
 credentials) and scripts/spent-tags.txt, the one list of tags acknowledged
 as never going to be published. A tag that is on origin, not on PyPI with at
 least one file, and not spent is a finding, reported with the release run
-that should have published it so a maintainer can re-run its failed jobs.
+that should have published it and whether a re-run of it can still publish.
 
 When the environment variable RECOVERY_PLAN names a file, one finding whose
 run can no longer be re-run (GitHub's 30-day window closed, or no release run
@@ -408,9 +408,18 @@ def describe_run(info: RunInfo, recovery: str) -> list[str]:
         f"(started {info.started:%Y-%m-%d}, {info.conclusion})."
     ]
     if info.status == "open":
+        # Which job failed decides what a re-run can do, and the run's page
+        # shows it: `publish` re-runs on its own, but a `release` job that
+        # failed after its push fails again at the tip step, by design.
         lines.append(
-            f"  Re-run its failed jobs; GitHub allows that until {info.deadline:%Y-%m-%d} "
-            f"({RERUN_WINDOW.days} days after the run started)."
+            "  If its `release` job succeeded and only `publish` failed or was never approved, "
+            "re-run its failed jobs: that retries `publish`. GitHub allows it until "
+            f"{info.deadline:%Y-%m-%d} ({RERUN_WINDOW.days} days after the run started)."
+        )
+        lines.append(
+            "  If its `release` job failed after pushing the tag, re-running it cannot publish "
+            "anything. The release workflow rebuilds the tag from its commit once that window "
+            "closes."
         )
     else:
         lines.append(

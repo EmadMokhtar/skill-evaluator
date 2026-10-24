@@ -686,7 +686,9 @@ behind `main` fails instead of passing: a re-run of the run that cut a release, 
 bump commit is the first commit after its own on `main`. A green re-run would set that run's
 conclusion to `success`, which the tag check reads as "this run published its version"; a tag
 PyPI lacks would be called spent, never re-run or recovered, and would stop every later
-release. The
+release. Only a release tag counts (the `tag_format` prefix then a digit, `v[0-9]*`), on any
+commit, because the tag check finds a release tag's run through its commit's parent whatever
+that commit is; any other tag leaves the re-run the plain no-op. The
 push step makes the same test after a rejected `--atomic` push, for a merge that landed after
 the tip step looked: it records `pushed=false` and exits `0`, naming the commit that overtook
 it in the summary. Both are the same no-op as cz's exit `21` and `3`. That is sound because
@@ -720,7 +722,10 @@ one on the next bump of any kind, so the next Dependabot merge would publish the
 version before anyone tried the rc, and `version_files` would point the docs and
 `action.yml` at the rc meanwhile. A forced increment overrides the commit types but still
 needs a commit since the last tag, because the changelog the bump writes does: with none,
-Commitizen exits `3` and the run is the ordinary no-op. The tag check's run lookup asks GitHub
+Commitizen exits `3` and the run is the ordinary no-op. A `PATCH` or `MINOR` the run cannot
+apply — `main` moved past its commit, or a recovery goes first — is never lost in silence: the
+run stays green (the recover step must still run) and shows an "Increment not applied"
+warning naming it, in the tip step or the bump step. The tag check's run lookup asks GitHub
 for every event, not only `push`: "no release run pushed it" makes a tag recoverable at once,
 so a lookup that missed a manual run would rebuild a tag whose own run could still be
 re-run. `tests/test_release_workflow.py` runs the tip and bump steps' scripts verbatim for

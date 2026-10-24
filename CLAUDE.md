@@ -355,8 +355,9 @@ fails if the two drift apart — so a new invariant is added in both places or n
   *strict ancestor* of the tip it writes `current=false`: the tag check and the bump are
   skipped, and with no `bumped` the push and the recover step too. One run behind `main` fails
   instead: a re-run of the run that cut a release (its tagged bump commit is the first commit
-  after its own on `main`), because a green conclusion would make the tag check read that
-  version as published, and so as spent. The push step makes
+  after its own on `main`; only a `v[0-9]*` release tag counts, on any commit), because a
+  green conclusion would make the tag check read that version as published, and so as spent.
+  The push step makes
   the same test after a rejected `--atomic` push, for a merge after the tip step looked, and
   records `pushed=false` and exits 0. Any other rejected push (`main` unmoved, or rewritten
   without this commit) still fails, and so does a fetch that fails in either step. Every later
@@ -373,7 +374,9 @@ fails if the two drift apart — so a new invariant is added in both places or n
   and passed through `env`, never `${{ }}` in the script. No `MAJOR`: `major_version_zero =
   true` is deliberate. No pre-release: cz finishes one on the next bump of any kind,
   Dependabot's included. A forced increment still needs a commit since the last tag (the
-  changelog exits 3 otherwise). The tag check's run lookup takes every event, or a manual
+  changelog exits 3 otherwise); one the run cannot apply (`main` moved past, or a recovery
+  goes first) is an "Increment not applied" warning on a green run, never a silence. The tag
+  check's run lookup takes every event, or a manual
   run's tag would read as "no release run" and be rebuilt while it could still be re-run.
 - **The pushed release tag is annotated, and the job proves the tag on `origin` is this
   run's.** `git push --follow-tags` pushes only annotated tags, so

@@ -475,9 +475,15 @@ def _tip_step(workflow: dict) -> dict:
 
 
 def _run_tip_step(
-    workflow: dict, work: Path, github_sha: str, tmp_path: Path, ref: str = "refs/heads/main"
+    workflow: dict,
+    work: Path,
+    github_sha: str,
+    tmp_path: Path,
+    ref: str = "refs/heads/main",
+    **inputs: str,
 ) -> tuple[subprocess.CompletedProcess, str, str]:
-    """Run the tip step's script the way `shell: bash` does."""
+    """Run the tip step's script the way `shell: bash` does. `inputs` stands in
+    for the environment the step maps from `inputs.*`, empty on a push."""
     step = _tip_step(workflow)
     assert step.get("shell") == "bash"
     output = tmp_path / "tip_output"
@@ -490,6 +496,8 @@ def _run_tip_step(
         "GITHUB_SHA": github_sha,
         "GITHUB_OUTPUT": str(output),
         "GITHUB_STEP_SUMMARY": str(summary),
+        "INCREMENT": "",
+        **inputs,
     }
     proc = subprocess.run(
         ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
@@ -573,6 +581,78 @@ def test_a_re_run_of_the_run_that_cut_the_tag_stays_failed(workflow, tmp_path):
     assert "v9.9.9" in proc.stderr, proc.stderr
     assert bump[:7] in proc.stderr, proc.stderr
     assert "re-run only" in proc.stderr, proc.stderr
+
+
+def test_a_tag_that_is_not_a_release_tag_does_not_fail_a_stale_re_run(workflow, tmp_path):
+    """Only a release tag says this run cut a release. The tag check reads a
+    release tag's run through the tag commit's parent, whatever the commit is,
+    so any tag spelled like one keeps the re-run red; a marker such as
+    `docs-snapshot` is no release, and the run is the plain no-op."""
+    origin, work, github_sha = _checkout(tmp_path)
+    other = _clone(origin, tmp_path / "other")
+    _commit(other, "docs: a merge someone marked")
+    _git("tag", "-a", "docs-snapshot", "-m", "marker", cwd=other)
+    _git("push", "-q", "--follow-tags", "origin", "HEAD:main", cwd=other)
+    _git("fetch", "-q", "--tags", "origin", cwd=work)
+
+    proc, output, summary = _run_tip_step(workflow, work, github_sha, tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    assert output == "current=false\n"
+    assert "since the last tag" in summary, summary
+
+
+def test_the_tip_step_spells_a_release_tag_the_way_commitizen_does(workflow):
+    """The tip step lists the release tags on the next commit by a pattern
+    built from the prefix. Like the verification step's spelling, it is a copy
+    of `[tool.commitizen] tag_format`, so changing the format must change it
+    too -- or a re-run of the run that cut a release would turn green."""
+    tag_format = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["tool"]["commitizen"][
+        "tag_format"
+    ]
+    prefix, _, _ = tag_format.partition("$version")
+    expected = f"--list '{prefix}[0-9]*'"
+    assert expected in _tip_step(workflow)["run"], (
+        f"tag_format is {tag_format!r}, so the tip step must list tags with {expected!r}"
+    )
+
+
+def test_a_forced_increment_a_stale_run_cannot_apply_is_announced(workflow, tmp_path):
+    """A manual MINOR on a run that main outran is not lost in silence: the
+    run is still the green no-op, but a warning and the summary say the MINOR
+    was not applied, so whoever asked for it starts the run again."""
+    origin, work, github_sha = _checkout(tmp_path)
+    other = _clone(origin, tmp_path / "other")
+    _commit(other, "fix: a merge after the manual run started")
+    _git("push", "-q", "origin", "HEAD:main", cwd=other)
+
+    proc, output, summary = _run_tip_step(workflow, work, github_sha, tmp_path, INCREMENT="MINOR")
+
+    assert proc.returncode == 0, proc.stderr
+    assert output == "current=false\n"
+    assert "::warning" in proc.stdout, proc.stdout
+    assert "MINOR" in proc.stdout, proc.stdout
+    assert "MINOR was not applied" in summary, summary
+
+
+@pytest.mark.parametrize("increment", ["", "auto"])
+def test_a_stale_run_with_no_forced_increment_warns_of_nothing(workflow, tmp_path, increment):
+    origin, work, github_sha = _checkout(tmp_path)
+    other = _clone(origin, tmp_path / "other")
+    _commit(other, "fix: a later merge")
+    _git("push", "-q", "origin", "HEAD:main", cwd=other)
+
+    proc, output, summary = _run_tip_step(workflow, work, github_sha, tmp_path, INCREMENT=increment)
+
+    assert proc.returncode == 0, proc.stderr
+    assert output == "current=false\n"
+    assert "::warning" not in proc.stdout, proc.stdout
+    assert "not applied" not in summary, summary
+
+
+def test_the_increment_reaches_the_tip_step_through_its_environment(workflow):
+    step = _tip_step(workflow)
+    assert step["env"]["INCREMENT"] == "${{ inputs.increment }}"
 
 
 def test_a_rewritten_main_still_goes_on_to_the_bump(workflow, tmp_path):
@@ -1220,6 +1300,22 @@ def test_a_planned_recovery_cuts_no_version(workflow, tmp_path):
     assert output == "bumped=false\n"
     assert "v9.9.8" in summary, summary
     assert "next run" in summary, summary
+    assert "::warning" not in proc.stdout, proc.stdout
+
+
+def test_a_forced_increment_a_recovery_stands_aside_for_is_announced(workflow, tmp_path):
+    """The recovery goes first and the step stays green, so the recover step
+    still runs; the MINOR it could not apply is a warning, not a silence."""
+    proc, output, summary, calls = _run_bump_step(
+        workflow, tmp_path, plan="tag=v9.9.8\nversion=9.9.8\ncommit=abc\n", INCREMENT="MINOR"
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert calls == []
+    assert output == "bumped=false\n"
+    assert "::warning" in proc.stdout, proc.stdout
+    assert "MINOR" in proc.stdout, proc.stdout
+    assert "MINOR was not applied" in summary, summary
 
 
 def test_a_manual_run_passes_its_increment_to_the_bump(workflow, tmp_path):
