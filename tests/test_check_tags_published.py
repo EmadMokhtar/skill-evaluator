@@ -276,10 +276,38 @@ def test_a_missing_tag_is_a_finding_that_names_the_run_and_the_window(harness, m
     assert "v0.20.0" not in err
 
 
+def test_a_tag_cut_by_a_manual_run_is_found_by_that_run(harness, monkeypatch, capsys):
+    """release.yml also runs on `workflow_dispatch`. A lookup that asked
+    GitHub for push runs only would find none for a tag a manual run cut, and
+    "no release run pushed it" makes a tag recoverable at once -- rebuilt
+    while its own run could still be re-run. The fake filters by `event=` the
+    way the API does, so a query that names one event is caught."""
+    dispatched = {**RELEASE_RUN, "event": "workflow_dispatch"}
+
+    def fetch(path: str):
+        if "/commits/" in path:
+            return {"parents": [{"sha": PARENT}]}
+        assert f"head_sha={PARENT}" in path, path
+        runs = [CI_RUN, dispatched]
+        if "event=" in path:
+            wanted = path.split("event=", 1)[1].split("&", 1)[0]
+            runs = [run for run in runs if run.get("event") == wanted]
+        return {"workflow_runs": runs}
+
+    monkeypatch.setattr(check, "fetch_github", fetch)
+    monkeypatch.setattr(check, "fetch_pypi", lambda name: _payload("0.20.0"))
+
+    assert check.main([], now=NOW) == 1
+
+    err = capsys.readouterr().err
+    assert f"The run that should have published it: {RUN_URL}" in err
+    assert "Re-run its failed jobs; GitHub allows that until 2026-11-04" in err
+
+
 LATER = datetime(2026, 12, 1, tzinfo=UTC)  # the 30-day window closed on 2026-11-04
 NEXT_MERGE = (
-    "The next merge to main that releases nothing rebuilds it from its commit and publishes "
-    "it through the release workflow."
+    "The next run of the release workflow on main rebuilds it from its commit and publishes "
+    "it, before it releases anything else."
 )
 THIS_RUN = "This run rebuilds it from its commit and publishes it."
 

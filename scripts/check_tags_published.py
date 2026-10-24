@@ -340,7 +340,9 @@ def lookup_run(repo: str | None, tag: ReleaseTag, now: datetime) -> RunInfo:
         parent = str(parents[0]["sha"])
         # The bump commit sits on top of the pushed commit, so the run that
         # pushed the tag is the one whose head is the tag commit's parent.
-        listing = fetch_github(f"/repos/{repo}/actions/runs?head_sha={parent}&event=push")
+        # No `event=` filter: a release run is a `push` or a manual
+        # `workflow_dispatch`, and the workflow's path is what names it.
+        listing = fetch_github(f"/repos/{repo}/actions/runs?head_sha={parent}&per_page=100")
         runs = [r for r in listing.get("workflow_runs") or [] if r.get("path") == RELEASE_WORKFLOW]
         if not runs:
             return RunInfo("no_run", parent=parent)
@@ -367,8 +369,8 @@ def lookup_run(repo: str | None, tag: ReleaseTag, now: datetime) -> RunInfo:
 # How a recoverable tag will be recovered, by who is reading the message.
 THIS_RUN = "This run rebuilds it from its commit and publishes it."
 NEXT_MERGE = (
-    "The next merge to main that releases nothing rebuilds it from its commit and publishes "
-    "it through the release workflow."
+    "The next run of the release workflow on main rebuilds it from its commit and publishes "
+    "it, before it releases anything else."
 )
 
 

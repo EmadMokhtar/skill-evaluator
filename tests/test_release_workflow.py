@@ -304,15 +304,14 @@ def test_the_release_builds_with_the_audited_backend(workflow):
 # --- A run that main outran -------------------------------------------------
 #
 # Two merges close together each start a release run. The concurrency group
-# keeps a run from being cancelled; it does not keep one from being overtaken
-# between its jobs, and a merge that lands during `verify` moves main just
-# the same. The earlier run's `cz bump` then rests on a commit that is no
-# longer main's tip, and its push is rejected as a non-fast-forward. The
-# later push has a run of its own whose `cz bump` reads every commit since
-# the last tag -- the earlier commit included -- so the earlier run has
-# nothing left to release: the same no-op as cz's exit 21 and 3, not a
-# failure. The push step's script decides this, so these tests run that
-# script, as GitHub would, against a local bare origin.
+# keeps the runs from overlapping, but a merge that lands while a run is in
+# progress moves main all the same. The earlier run's `cz bump` then rests on
+# a commit that is no longer main's tip, and its push is rejected as a
+# non-fast-forward. The later push has a run of its own whose `cz bump` reads
+# every commit since the last tag -- the earlier commit included -- so the
+# earlier run has nothing left to release: the same no-op as cz's exit 21 and
+# 3, not a failure. The push step's script decides this, so these tests run
+# that script, as GitHub would, against a local bare origin.
 
 
 def _git(*args: str, cwd: Path) -> str:
@@ -336,16 +335,22 @@ def _commit(repo: Path, message: str) -> str:
     return _git("rev-parse", "HEAD", cwd=repo)
 
 
-def _runner(tmp_path: Path) -> tuple[Path, Path, str]:
-    """The release job's checkout after `cz bump`: main at the pushed commit
-    (`GITHUB_SHA`), the bump commit on top of it, and an annotated tag."""
+def _checkout(tmp_path: Path) -> tuple[Path, Path, str]:
+    """The release job's checkout before `cz bump`: HEAD and main's tip are both
+    the pushed commit (`GITHUB_SHA`)."""
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)
     seed = _clone(origin, tmp_path / "seed")
     _commit(seed, "feat: the merge this run is for")
     _git("push", "-q", "origin", "HEAD:main", cwd=seed)
     work = _clone(origin, tmp_path / "work")
-    github_sha = _git("rev-parse", "HEAD", cwd=work)
+    return origin, work, _git("rev-parse", "HEAD", cwd=work)
+
+
+def _runner(tmp_path: Path) -> tuple[Path, Path, str]:
+    """The release job's checkout after `cz bump`: main at the pushed commit
+    (`GITHUB_SHA`), the bump commit on top of it, and an annotated tag."""
+    origin, work, github_sha = _checkout(tmp_path)
     _commit(work, "bump: version 0.0.0 → 9.9.9 [skip ci]")
     _git("tag", "-a", "v9.9.9", "-m", "9.9.9", cwd=work)
     return origin, work, github_sha
@@ -449,6 +454,173 @@ def test_a_rewritten_main_is_not_a_run_that_was_outrun(workflow, tmp_path):
 
     assert proc.returncode != 0
     assert "pushed=" not in output
+
+
+# --- A run that starts behind main --------------------------------------------
+#
+# The push step catches a merge that lands while `release` runs. A run can also
+# reach `release` already behind main. GitHub keeps one run waiting per
+# concurrency group and cancels it when a newer merge queues, so a release
+# waiting hours for its `pypi` approval leaves a row of cancelled runs behind
+# it; the newest one releases all their commits. Re-running one of those runs
+# checks out its old commit again. Its `cz bump` reads that commit's
+# pyproject.toml, computes the version the newer run already tagged, and fails
+# on `tag 'v0.25.0' already exists` (exit 7) before the push step can call it a
+# no-op. So the job asks, before the bump, whether main has moved past this
+# run's commit -- the push step's test, made earlier.
+
+
+def _tip_step(workflow: dict) -> dict:
+    return next(step for step in workflow["jobs"]["release"]["steps"] if step.get("id") == "tip")
+
+
+def _run_tip_step(
+    workflow: dict, work: Path, github_sha: str, tmp_path: Path, ref: str = "refs/heads/main"
+) -> tuple[subprocess.CompletedProcess, str, str]:
+    """Run the tip step's script the way `shell: bash` does."""
+    step = _tip_step(workflow)
+    assert step.get("shell") == "bash"
+    output = tmp_path / "tip_output"
+    summary = tmp_path / "tip_summary"
+    output.touch()
+    summary.touch()
+    env = {
+        **os.environ,
+        "GITHUB_REF": ref,
+        "GITHUB_SHA": github_sha,
+        "GITHUB_OUTPUT": str(output),
+        "GITHUB_STEP_SUMMARY": str(summary),
+    }
+    proc = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+        cwd=work,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    return proc, output.read_text(encoding="utf-8"), summary.read_text(encoding="utf-8")
+
+
+def test_the_bump_runs_only_while_this_runs_commit_is_mains_tip(workflow):
+    """The tag check and the bump both wait for the tip step. A skipped bump
+    writes no `bumped`, and the push and the recover step compare `bumped`
+    with a value, so neither runs on that path either: a run behind main ends
+    with nothing pushed and nothing published, exactly as the push step's
+    no-op does."""
+    steps = workflow["jobs"]["release"]["steps"]
+    tip = _tip_step(workflow)
+    assert steps.index(tip) < _step_index(steps, id="check") < _step_index(steps, id="bump")
+    assert "${{" not in tip["run"], tip["run"]
+    for step_id in ("check", "bump"):
+        assert steps[_step_index(steps, id=step_id)]["if"] == "steps.tip.outputs.current == 'true'"
+    for step_id in ("push", "recover"):
+        assert "steps.bump.outputs.bumped ==" in steps[_step_index(steps, id=step_id)]["if"]
+
+
+def test_a_run_on_mains_tip_goes_on_to_the_bump(workflow, tmp_path):
+    _, work, github_sha = _checkout(tmp_path)
+
+    proc, output, summary = _run_tip_step(workflow, work, github_sha, tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    assert output == "current=true\n"
+    assert summary == ""
+
+
+def test_a_re_run_behind_a_release_main_already_made_is_a_no_op(workflow, tmp_path):
+    """The failure this guards against: v0.24.3's `publish` waited four hours
+    for approval, six merges queued behind it and each cancelled the one before,
+    and the last released all of them as v0.25.0. Re-running the cancelled runs
+    turned each one red on `tag 'v0.25.0' already exists`."""
+    origin, work, github_sha = _checkout(tmp_path)
+    other = _clone(origin, tmp_path / "other")
+    _commit(other, "feat: the merge whose run released this one")
+    released = _commit(other, "bump: version 0.0.0 → 9.9.9 [skip ci]")
+    _git("tag", "-a", "v9.9.9", "-m", "9.9.9", cwd=other)
+    _git("push", "-q", "--follow-tags", "origin", "HEAD:main", cwd=other)
+
+    proc, output, summary = _run_tip_step(workflow, work, github_sha, tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    assert output == "current=false\n"
+    assert released[:7] in summary, summary
+    assert github_sha[:7] in summary, summary
+    assert "since the last tag" in summary, summary
+    assert _git("rev-parse", "main", cwd=origin) == released
+
+
+def test_a_re_run_of_the_run_that_cut_the_tag_stays_failed(workflow, tmp_path):
+    """The one run behind main that must not turn green: the run whose own
+    bump commit sits right after its commit. Its release is already tagged,
+    and a green re-run would change the run's conclusion to `success` -- which
+    the tag check reads as "this run published the version", so a tag PyPI
+    lacks would be called spent instead of re-run or recovered, and every
+    later release would stop at the check."""
+    origin, work, github_sha = _checkout(tmp_path)
+    other = _clone(origin, tmp_path / "other")
+    bump = _commit(other, "bump: version 0.0.0 → 9.9.9 [skip ci]")
+    _git("tag", "-a", "v9.9.9", "-m", "9.9.9", cwd=other)
+    _commit(other, "feat: a later merge")
+    _git("push", "-q", "--follow-tags", "origin", "HEAD:main", cwd=other)
+    # The re-run's checkout has every tag (`fetch-depth: 0`).
+    _git("fetch", "-q", "--tags", "origin", cwd=work)
+
+    proc, output, summary = _run_tip_step(workflow, work, github_sha, tmp_path)
+
+    assert proc.returncode != 0
+    assert "current=" not in output
+    assert summary == ""
+    assert "v9.9.9" in proc.stderr, proc.stderr
+    assert bump[:7] in proc.stderr, proc.stderr
+    assert "re-run only" in proc.stderr, proc.stderr
+
+
+def test_a_rewritten_main_still_goes_on_to_the_bump(workflow, tmp_path):
+    """main moved, but not past this run's commit. No later run is known to
+    carry it, so this is not the no-op; the run goes on, and the push step
+    fails it (`test_a_rewritten_main_is_not_a_run_that_was_outrun`)."""
+    origin, work, github_sha = _checkout(tmp_path)
+    other = _clone(origin, tmp_path / "other")
+    _git("checkout", "-q", "--orphan", "rewritten", cwd=other)
+    _commit(other, "chore: a history without this run's commit")
+    _git("push", "-q", "--force", "origin", "HEAD:main", cwd=other)
+
+    proc, output, _ = _run_tip_step(workflow, work, github_sha, tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    assert output == "current=true\n"
+
+
+def test_a_manual_run_on_another_branch_is_refused(workflow, tmp_path):
+    """`workflow_dispatch` runs on whatever branch the button names, and the
+    push step pushes `HEAD:main`: a branch that contains main would
+    fast-forward main onto commits no pull request reviewed. `on.push` is
+    limited to main; a manual run has to be refused by hand."""
+    _, work, github_sha = _checkout(tmp_path)
+
+    proc, output, summary = _run_tip_step(
+        workflow, work, github_sha, tmp_path, ref="refs/heads/feature"
+    )
+
+    assert proc.returncode != 0
+    assert output == ""
+    assert summary == ""
+    assert "refs/heads/feature" in proc.stderr, proc.stderr
+    assert "main only" in proc.stderr, proc.stderr
+
+
+def test_a_fetch_that_fails_is_not_read_as_a_no_op(workflow, tmp_path):
+    """Whether main moved is unknown, so neither answer is written: a green
+    no-op here could leave a releasable commit unreleased in silence."""
+    _, work, github_sha = _checkout(tmp_path)
+    _git("remote", "set-url", "origin", str(tmp_path / "gone.git"), cwd=work)
+
+    proc, output, summary = _run_tip_step(workflow, work, github_sha, tmp_path)
+
+    assert proc.returncode != 0
+    assert "current=" not in output
+    assert "unknown" in proc.stderr, proc.stderr
+    assert summary == ""
 
 
 PUSHED = "steps.push.outputs.pushed == 'true'"
@@ -588,10 +760,13 @@ def test_a_lookup_that_fails_is_reported_as_unknown_not_as_missing(workflow, tmp
 #
 # `publish` waits for a reviewer inside the `pypi` environment. If that approval
 # never comes, the run ends with the tag on main and nothing on PyPI, and every
-# later run reads only the commits since that tag (issue #103, v0.21.0). The
-# release job therefore checks every release tag against PyPI -- but only when
-# it released nothing itself: a release in flight must never fail over an older
-# tag, and security.yml's weekly job covers that case.
+# later run reads only the commits since that tag (issue #103, v0.21.0). A
+# release cut after it would leave a gap users can see: 0.21.0 missing between
+# 0.20.0 and 0.22.0. So the release job checks every release tag against PyPI
+# before the bump, on every run, and a missing tag fails the job before a
+# version is cut. It runs before this run's own tag exists, and the concurrency
+# group keeps any other run's release from being in flight, so it never fails
+# over a release that is still on its way to PyPI.
 
 
 def _step_index(steps: list[dict], **match: str) -> int:
@@ -599,12 +774,12 @@ def _step_index(steps: list[dict], **match: str) -> int:
     return next(i for i, step in enumerate(steps) if step.get(key) == value)
 
 
-def test_a_merge_with_nothing_to_release_checks_every_tag_against_pypi(workflow):
+def test_every_run_checks_every_tag_against_pypi_before_the_bump(workflow):
     steps = workflow["jobs"]["release"]["steps"]
     check = next(step for step in steps if "check_tags_published" in str(step.get("run", "")))
     assert check.get("id") == "check", "the recover step reads this step's plan file"
-    assert check["if"] == "steps.bump.outputs.bumped == 'false'"
-    assert _step_index(steps, id="bump") < steps.index(check) < _step_index(steps, id="push")
+    assert check["if"] == "steps.tip.outputs.current == 'true'"
+    assert _step_index(steps, id="tip") < steps.index(check) < _step_index(steps, id="bump")
     assert check["run"].strip() == "python3 scripts/check_tags_published.py"
     assert "${{" not in check["run"]
     # The expression that resolves to the token on the runner, not a token (S105).
@@ -633,19 +808,21 @@ def _script_lines(step: dict) -> list[str]:
 
 
 def test_a_stranded_tag_is_recovered_on_the_path_that_found_it(workflow):
-    """The recover step runs under the check's own condition, reads the plan
-    file the check wrote, and sits right before the uploads, which is where
-    its artifacts are read from. Nothing reaches it through `${{ }}`: the
-    tests below run its script verbatim."""
+    """The bump reads the plan file the check wrote and stands aside for it;
+    the recover step runs whenever the bump released nothing, reads the same
+    file, and sits right before the uploads, which is where its artifacts are
+    read from. Nothing reaches it through `${{ }}`: the tests below run its
+    script verbatim."""
     steps = workflow["jobs"]["release"]["steps"]
     check = steps[_step_index(steps, id="check")]
+    bump = steps[_step_index(steps, id="bump")]
     recover = _recover_step(workflow)
-    assert recover["if"] == check["if"] == "steps.bump.outputs.bumped == 'false'"
+    assert recover["if"] == "steps.bump.outputs.bumped == 'false'"
     assert recover["shell"] == "bash"
     assert "${{" not in recover["run"]
     plan = check["env"]["RECOVERY_PLAN"]
     assert plan and "/" not in plan, "the plan lives in the workspace, under a bare name"
-    assert recover["env"]["RECOVERY_PLAN"] == plan
+    assert recover["env"]["RECOVERY_PLAN"] == bump["env"]["RECOVERY_PLAN"] == plan
     uploads = [i for i, step in enumerate(steps) if "upload-artifact" in str(step.get("uses", ""))]
     assert steps.index(check) < steps.index(recover) < min(uploads)
 
@@ -955,3 +1132,146 @@ def test_the_release_job_may_read_workflow_runs(workflow):
     it is refused on that endpoint, and an unauthenticated call from a shared
     runner address is rate-limited."""
     assert workflow["jobs"]["release"]["permissions"] == {"contents": "write", "actions": "read"}
+
+
+# --- The bump: a planned recovery, and a release started by hand ---------------
+#
+# The tag check runs before the bump, so a stranded tag it hands to recovery is
+# known before a version is cut. One run publishes one version, so the bump
+# stands aside: it writes `bumped=false`, the recover step rebuilds the old tag,
+# and this run's own commits wait for the next run, which finds every tag on
+# PyPI and releases them with no gap. A run started by hand passes the
+# increment it was given to `cz bump`; on a push it is empty and the commits
+# decide, as before. These tests run the bump step's
+# script verbatim, with the fake `uv` above standing in for Commitizen.
+
+
+def _bump_step(workflow: dict) -> dict:
+    steps = workflow["jobs"]["release"]["steps"]
+    return steps[_step_index(steps, id="bump")]
+
+
+def _run_bump_step(
+    workflow: dict, tmp_path: Path, plan: str | None = None, **inputs: str
+) -> tuple[subprocess.CompletedProcess, str, str, list[str]]:
+    """Run the bump step's script the way `shell: bash` does. `inputs` stands
+    in for the environment the step maps from `inputs.*`; on a push it is an
+    empty string, which is what GitHub sets."""
+    step = _bump_step(workflow)
+    assert step.get("shell") == "bash"
+    work = tmp_path / "work"
+    work.mkdir()
+    if plan is not None:
+        (work / step["env"]["RECOVERY_PLAN"]).write_text(plan, encoding="utf-8")
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    uv = fake_bin / "uv"
+    uv.write_text(FAKE_UV, encoding="utf-8")
+    uv.chmod(0o755)
+    log = tmp_path / "uv.log"
+    log.touch()
+    output = tmp_path / "bump_output"
+    summary = tmp_path / "bump_summary"
+    output.touch()
+    summary.touch()
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "FAKE_UV_LOG": str(log),
+        "GITHUB_OUTPUT": str(output),
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "RECOVERY_PLAN": step["env"]["RECOVERY_PLAN"],
+        "INCREMENT": "",
+        **inputs,
+    }
+    proc = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+        cwd=work,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    calls = [line for line in log.read_text(encoding="utf-8").splitlines() if line]
+    return proc, output.read_text(encoding="utf-8"), summary.read_text(encoding="utf-8"), calls
+
+
+BUMP = "run cz bump --yes --check-consistency"
+
+
+def test_a_push_lets_the_commits_choose_the_version(workflow, tmp_path):
+    proc, output, _, calls = _run_bump_step(workflow, tmp_path)
+
+    assert proc.returncode == 0, proc.stderr
+    assert calls[0] == BUMP
+    assert "bumped=true" in output
+    assert "version=9.9.9" in output
+
+
+def test_a_planned_recovery_cuts_no_version(workflow, tmp_path):
+    """Two versions in one run would reach `publish` as one upload and
+    `github-release` as one tag. The stranded one goes first; the gap closes
+    before anything newer is cut."""
+    proc, output, summary, calls = _run_bump_step(
+        workflow, tmp_path, plan="tag=v9.9.8\nversion=9.9.8\ncommit=abc\n"
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert calls == []
+    assert output == "bumped=false\n"
+    assert "v9.9.8" in summary, summary
+    assert "next run" in summary, summary
+
+
+def test_a_manual_run_passes_its_increment_to_the_bump(workflow, tmp_path):
+    proc, output, _, calls = _run_bump_step(workflow, tmp_path, INCREMENT="PATCH")
+
+    assert proc.returncode == 0, proc.stderr
+    assert calls[0] == f"{BUMP} --increment PATCH"
+    assert "bumped=true" in output
+
+
+def test_a_manual_run_on_the_default_bumps_as_a_push_does(workflow, tmp_path):
+    proc, _, _, calls = _run_bump_step(workflow, tmp_path, INCREMENT="auto")
+
+    assert proc.returncode == 0, proc.stderr
+    assert calls[0] == BUMP
+
+
+@pytest.mark.parametrize("value", ["MAJOR", "PATCH --yes", "MINOR --prerelease rc", "patch"])
+def test_an_increment_the_form_does_not_offer_is_refused(workflow, tmp_path, value):
+    """GitHub checks a `choice` input against its options, but the step does
+    not lean on that: a value it does not know never reaches the command
+    line, and nothing is bumped."""
+    proc, output, _, calls = _run_bump_step(workflow, tmp_path, INCREMENT=value)
+
+    assert proc.returncode != 0
+    assert calls == []
+    assert "bumped=" not in output
+    assert value in proc.stderr, proc.stderr
+
+
+def test_a_release_can_be_started_by_hand(workflow):
+    """MAJOR is not offered: `major_version_zero = true` keeps the project in
+    0.x on purpose, and leaving it is a change to that setting in a pull
+    request of its own, not a button. Nor is a pre-release: Commitizen
+    finishes one on the next bump of any kind, so the next Dependabot merge
+    would publish the final version before anyone tried the rc."""
+    triggers = workflow["on"]
+    assert triggers["push"] == {"branches": ["main"]}
+    inputs = triggers["workflow_dispatch"]["inputs"]
+    assert set(inputs) == {"increment"}
+    assert inputs["increment"]["type"] == "choice"
+    assert inputs["increment"]["options"] == ["auto", "PATCH", "MINOR"]
+    assert inputs["increment"]["default"] == "auto"
+
+
+def test_the_increment_reaches_the_bump_through_its_environment(workflow):
+    """An input in a `${{ }}` expression inside the script would be pasted
+    into it before bash parses it: an injection surface. The step maps it to
+    a variable instead and checks its value itself."""
+    step = _bump_step(workflow)
+    assert "${{" not in step["run"], step["run"]
+    assert step["env"]["INCREMENT"] == "${{ inputs.increment }}"
+    assert "inputs." not in str(workflow["jobs"]["release"]["steps"]).replace(
+        "${{ inputs.increment }}", ""
+    )
