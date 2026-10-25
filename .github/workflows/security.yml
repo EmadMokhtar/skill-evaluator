@@ -52,9 +52,9 @@ jobs:
     # A version can be tagged and never published: release.yml's `publish`
     # waits for a reviewer inside the `pypi` environment, and if that approval
     # never comes the run ends with the tag on main and nothing on PyPI. The
-    # release workflow checks for that whenever a merge releases nothing, but
-    # a stranded tag with no merge after it would wait for the next merge to
-    # be noticed (issue #103, v0.21.0). The schedule is what finds it then.
+    # release workflow checks for that before every bump, but a stranded tag
+    # with no merge after it would wait for the next merge to be noticed
+    # (issue #103, v0.21.0). The schedule is what finds it then.
     #
     # Only on the schedule and on demand. A stranded tag says nothing about
     # the pull request under review, and a push to main already runs the

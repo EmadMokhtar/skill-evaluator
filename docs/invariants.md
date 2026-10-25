@@ -575,8 +575,9 @@ also gives the property worth having — `publish` is unreachable except through
 `verify`, and it uploads the artifact `release` built rather than rebuilding, so the bytes
 that ship are the bytes that were tested. Publishing is irreversible: PyPI refuses a
 re-upload of a version that already exists, which is why every gate here fails closed. The
-corollary is that there is **no manual path to PyPI**; a locally bumped and pushed tag
-produces a run with nothing to release.
+corollary is that there is **no manual path to PyPI** outside this pipeline: a locally
+bumped and pushed tag starts no run (`[skip ci]`), and the next run's tag check finds it spent.
+Starting `release.yml` by hand is not such a path — it is the same pipeline, `verify` first.
 
 The one artifact `verify` did not test is a recovered stranded tag (the next two invariants):
 that run's `verify` ran on `main`'s tip, and the tag's own run verified the tag's commit in
@@ -592,23 +593,27 @@ suite or a red audit on the tag's lockfile builds nothing. The alternative — a
 variable checkout in front of every ordinary release to protect the rare one; the design and
 the trade is in `docs/superpowers/specs/2026-10-20-skill-lens-stranded-tag-recovery-design.md`.
 
-### A merge with no releasable commit cuts no version, and fails only for a tag PyPI does not have that this run cannot recover
+### No version is cut past a tag PyPI does not have, and a merge with no releasable commit cuts none
 
 `cz bump` signals "nothing to release" through its exit code — `21` (`NoneIncrementExit`)
 and `3` (`NoCommitsFoundError`) — so the bump step deliberately runs without `set -e`, which
 would discard the code before it could be read, and checks every other command by hand
-instead. That no-op is where one more check runs. A version can be tagged and never
-published: `publish` waits for a reviewer inside the `pypi` environment, and if the approval
-never comes the run ends with the tag on `main` and nothing on PyPI; every later run reads
-only the commits since that tag, so nothing else would notice (issue #103, `v0.21.0`).
+instead. A version can be tagged and never published: `publish` waits for a reviewer
+inside the `pypi` environment, and if the approval never comes the run ends with the tag on
+`main` and nothing on PyPI; every later run reads only the commits since that tag, so
+nothing else would notice (issue #103, `v0.21.0`), and the next release leaves a gap users
+see — PyPI went from `0.20.0` straight to `0.22.0`.
 `scripts/check_tags_published.py` reads every release tag on `origin` (`git ls-remote`, its
 exit status checked apart from its output) against PyPI's release list, with no credentials,
 and fails for a tag whose version PyPI does not list with at least one file — naming the
 release run that should have published it (the `release.yml` run on the tag commit's
-parent) and whether GitHub's 30-day re-run window is still open. It runs only when this run
-released nothing, so a release in flight is never failed over an older tag; `security.yml`
-runs the same command, spelled byte for byte alike, on its weekly schedule and on demand, so
-a stranded tag is found even when nothing merges. A PyPI or `origin` the check cannot read
+parent, a `push` or a `workflow_dispatch` run alike) and whether GitHub's 30-day re-run
+window is still open. It runs **before the bump**, on every run on `main`'s tip, so a missing
+tag fails the job before a version is cut and nothing newer goes out past it. It cannot fail
+over a release still on its way to PyPI: this run's own tag does not exist yet, and the
+concurrency group keeps every other run, its `publish` included, from running at the same
+time. `security.yml` runs the same command, spelled byte for byte alike, on its weekly
+schedule and on demand, so a stranded tag is found even when nothing merges. A PyPI or `origin` the check cannot read
 is "could not check", exit `2` — never "missing", and never a silent pass; a tag PyPI has is
 never re-uploaded. `scripts/spent-tags.txt` is the one exception list: a tag acknowledged as
 never going to be published, with its reason. It only grows, by a reviewed commit, and an
@@ -617,12 +622,15 @@ exists.
 
 A missing tag whose run can no longer be re-run is not only reported. In `release.yml` the
 check step sets `RECOVERY_PLAN`, a file path, and the script writes one such tag to it —
-`tag=`, `version=`, `commit=` — and passes; the recover step that follows rebuilds it (next
-invariant), so the no-release path can still end in a publish, of a version that was cut
-long before. The command line is unchanged, so the two workflows stay spelled alike; the
+`tag=`, `version=`, `commit=` — and passes. The bump step sees the plan and cuts no version
+(`bumped=false`), and the recover step rebuilds the tag (next invariant), so the run ends in a
+publish of a version that was cut long before; this run's own commits wait for the next run,
+which finds every tag on PyPI. One run publishes one version, and the stranded one goes
+first, so the gap closes before anything newer is cut. The command line is unchanged, so the two workflows stay spelled alike; the
 behaviour differs by environment alone, as it already does for `GITHUB_TOKEN`, and
 `security.yml` — which has no `publish` to hand anything to — leaves the variable unset and
-fails as before, its message naming the next no-release merge as what will recover the tag.
+fails as before, its message naming the next release run on `main` as what will recover
+the tag.
 One tag per run, the oldest first, because a run builds one version and the job has one
 `version` output; a second recoverable tag is reported as waiting and is not a failure, or
 the first would never be recovered. The file is written only when the check otherwise
@@ -652,8 +660,7 @@ requires that commit to be an ancestor of `GITHUB_SHA`, so a tag at a branch, or
 --project` in the worktree to print the version being recovered, so a tag at the wrong commit
 cannot build and upload some other version — one PyPI may already list. The tag is only ever
 read; nothing in the step creates, moves or deletes one, and nothing before `publish`'s
-upload is irreversible, so a failed recovery spends nothing and the next no-release merge
-tries again. The three uploads and the job's `bumped` output accept either path — the push
+upload is irreversible, so a failed recovery spends nothing and the next run tries again. The three uploads and the job's `bumped` output accept either path — the push
 step's `pushed` or the recover step's `recovered` — and never the bump step's own output, so
 a version cut and never pushed is still never published; `publish` and `github-release` are
 unchanged, and `--verify-tag` finds the tag where it has been all along.
@@ -662,24 +669,67 @@ for each refusal.
 
 ### A run that `main` outran publishes nothing and fails nothing
 
-Two merges a few minutes apart each start a release run, and the `concurrency` group does
-not keep one alone from start to finish — GitHub checks the group when a *job* starts, so a
-run between its `verify` and `release` jobs can be overtaken; and a merge that lands during
-`verify` has moved `main` regardless. The earlier run's `cz bump` then rests on a commit
-that is no longer the tip, and its `--atomic` push is rejected as a non-fast-forward with
-nothing landed. The push step treats that as the same no-op as cz's exit `21` and `3`: it
-fetches `main`, and if this run's commit is a *strict ancestor* of the new tip it records
-`pushed=false` and exits `0`, naming the commit that overtook it in the summary. That is
-sound because the later push has a run of its own whose `cz bump` reads every commit since
-the last tag, the earlier commit included. The ancestor test is what keeps it from being a
-vacuous pass: `main` unmoved but the push refused, or `main` rewritten to a history without
-this commit, still fail with the push's own exit code, because no later run is known to
-carry the commit. Every step after the push, and the `bumped` output `publish` reads, gate
+The `concurrency` group holds a whole run, so two runs never overlap, but it keeps only one
+run waiting: GitHub cancels the waiting run when a newer merge queues, whatever
+`cancel-in-progress` says. A release whose `publish` waited four hours for approval left six
+cancelled runs behind it, and the last run released all their commits as `v0.25.0`. A run
+can still find `main` past its commit two ways: a merge that lands while it runs, or a
+re-run of an older run, which checks out that run's old commit again. Re-running those runs
+turned them red: each one whose `verify` passed went on to `cz bump`, which read the old
+`pyproject.toml`, computed `0.25.0` again, and failed on `tag 'v0.25.0' already exists`
+(exit `7`) before any push.
+
+So the check is made twice. The tip step, before the bump, fetches `main`; when this run's
+commit is a *strict ancestor* of the tip it writes `current=false`: the tag check and the
+bump are skipped, and with no `bumped` written the push and the recover step too. One run
+behind `main` fails instead of passing: a re-run of the run that cut a release, whose tagged
+bump commit is the first commit after its own on `main`. A green re-run would set that run's
+conclusion to `success`, which the tag check reads as "this run published its version"; a tag
+PyPI lacks would be called spent, never re-run or recovered, and would stop every later
+release. Only a release tag counts (the `tag_format` prefix then a digit, `v[0-9]*`), on any
+commit, because the tag check finds a release tag's run through its commit's parent whatever
+that commit is; any other tag leaves the re-run the plain no-op. The
+push step makes the same test after a rejected `--atomic` push, for a merge that landed after
+the tip step looked: it records `pushed=false` and exits `0`, naming the commit that overtook
+it in the summary. Both are the same no-op as cz's exit `21` and `3`. That is sound because
+the later push has a run of its own whose `cz bump` reads every commit since the last tag,
+the earlier commit included — or, on a re-run, already did. The ancestor test is what keeps
+it from being a vacuous pass: `main` unmoved but the push refused, or `main` rewritten to a
+history without this commit, still fail with the push's own exit code, because no later run
+is known to carry the commit; a fetch that fails, in either step, fails the job. Every step
+after the push, and the `bumped` output `publish` reads, gate
 on the push step's `pushed` rather than on the bump step's `bumped`, so a version that was
 cut but never pushed is never verified, built or published. `tests/test_release_workflow.py`
 runs the step's script verbatim against a local bare origin for each of these cases, which
 is also why the version reaches the script as an environment variable rather than a `${{ }}`
 expression.
+
+### A release started by hand runs the same pipeline, from `main` only, with an increment from a closed list
+
+`workflow_dispatch` is a second trigger of `release.yml`, not a second pipeline: `verify`, the
+tag check, the bump and `publish` behind the `pypi` approval, in the one concurrency group
+merges use. The workflow can be started on any branch, and the push step pushes `HEAD:main`,
+so a branch that contains `main` would move `main` onto commits no pull request reviewed. The
+tip step therefore refuses any `GITHUB_REF` but `refs/heads/main`, first and before it fetches
+anything; `on.push` is already limited to `main`. The one input, `increment`, is a
+`choice` of `auto`/`PATCH`/`MINOR`, and the bump step checks it again rather than trusting
+the form: any other value exits `2` with nothing bumped and never reaches `cz bump`'s command
+line. It arrives as an environment variable, never as `${{ }}` inside the script, where an
+input would be pasted in before bash parses it.
+`MAJOR` is not offered: `major_version_zero = true` keeps the project in `0.x` on purpose,
+and a button would undo that setting by accident. Nor is a pre-release: Commitizen finishes
+one on the next bump of any kind, so the next Dependabot merge would publish the final
+version before anyone tried the rc, and `version_files` would point the docs and
+`action.yml` at the rc meanwhile. A forced increment overrides the commit types but still
+needs a commit since the last tag, because the changelog the bump writes does: with none,
+Commitizen exits `3` and the run is the ordinary no-op. A `PATCH` or `MINOR` the run cannot
+apply — `main` moved past its commit, or a recovery goes first — is never lost in silence: the
+run stays green (the recover step must still run) and shows an "Increment not applied"
+warning naming it, in the tip step or the bump step. The tag check's run lookup asks GitHub
+for every event, not only `push`: "no release run pushed it" makes a tag recoverable at once,
+so a lookup that missed a manual run would rebuild a tag whose own run could still be
+re-run. `tests/test_release_workflow.py` runs the tip and bump steps' scripts verbatim for
+each case.
 
 ### The pushed release tag is annotated, and the job proves the tag on `origin` is this run's
 
