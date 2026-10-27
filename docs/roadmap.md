@@ -44,6 +44,14 @@ Nothing here is committed to a date.
 - **Flagging checks that fail in *both* arms.** A check that *passes* in both is already
   flagged as low signal. One that fails in both is reported as "no change", which is true
   and unhelpful.
+- **Live progress while a run executes.** After the `Plan:` line, `run` prints nothing until
+  the last case is scored, which under a product runner, `--repeat` or `--baseline` can be
+  many minutes of a silent terminal. One line on stderr per finished item — `[7/24] FAIL
+  greeting :: says-hello (claude-code) 41.2s, $0.84 of $5.00` — would show that the run is
+  alive, what has failed so far, and the spend against the ceiling. Only those lines would
+  arrive in completion order; the report stays on stdout in submission order, so identical
+  runs still print identical reports. Ctrl-C could then end the run with the report so far
+  and a failed gate, where today it exits 130 with no report at all.
 
 ## Not planned
 
