@@ -432,7 +432,11 @@ def discover_eval_paths(skill: Skill) -> list[Path]:
 
 
 def load_cases_for_skill(skill: Skill, evals_path: Path | None = None) -> list[EvalCase]:
-    """Load a skill's eval cases, honouring an explicit override path."""
+    """Load a skill's eval cases, honouring an explicit override path.
+
+    Every file is parsed before any name is compared, so a case name repeated
+    in two files is refused naming both (`_reject_repeated_names`).
+    """
     if evals_path is not None:
         evals_path = Path(evals_path)
         if not evals_path.exists():
@@ -444,7 +448,36 @@ def load_cases_for_skill(skill: Skill, evals_path: Path | None = None) -> list[E
         )
     else:
         paths = discover_eval_paths(skill)
-    cases: list[EvalCase] = []
-    for path in paths:
-        cases.extend(parse_cases_file(path, skill))
-    return cases
+    located = [
+        (f"{path} case #{position}", case)
+        for path in paths
+        for position, case in enumerate(parse_cases_file(path, skill), start=1)
+    ]
+    _reject_repeated_names(skill, located)
+    return [case for _, case in located]
+
+
+def _reject_repeated_names(skill: Skill, located: list[tuple[str, EvalCase]]) -> None:
+    """Refuse two cases of one skill whose names are equal, ignoring letter case.
+
+    A report names each outcome by (skill, case, runner), so two cases sharing
+    a name would be merged as repetitions of one case: wrong pass counts, a
+    false high-variance flag, a hidden low-signal flag. Checked here, once
+    every file is parsed, because a repeat can span files -- a YAML case named
+    `eval-1` beside an `evals.json` with `"id": 1`. Letter case is ignored
+    because `--case` ignores it, and could never select one of the two alone.
+    """
+    seen: dict[str, tuple[str, str]] = {}
+    for where, case in located:
+        folded = case.name.casefold()
+        if folded not in seen:
+            seen[folded] = (case.name, where)
+            continue
+        first_name, first_where = seen[folded]
+        names = repr(first_name) if first_name == case.name else f"{first_name!r} and {case.name!r}"
+        raise CaseParseError(
+            f"skill {skill.name!r} has two cases named {names}: {first_where} and {where}. "
+            f"Case names must be unique within a skill, ignoring letter case: a report "
+            f"names each outcome by its skill, case and runner, so the two would be "
+            f"merged as repetitions of one case. Rename one of them."
+        )

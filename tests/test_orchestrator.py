@@ -29,7 +29,7 @@ from skill_lens.orchestrator import RunOptions, _execute, _WorkItem, run_evals
 from skill_lens.runners.fake import FakeRunner
 from skill_lens.runners.preflight import UndeclaredTool
 from skill_lens.scripts import ScriptPolicy, ScriptRuntime, ScriptSetupError
-from skill_lens.skills.loader import load_skills
+from skill_lens.skills.loader import SkillParseError, load_skills
 from skill_lens.workspace import DEFAULT_LIMITS, Workspace, WorkspaceLimits
 
 CASES_YAML = """cases:
@@ -1454,3 +1454,11 @@ def test_a_run_that_starts_two_plans_fails_a_file_glob(tmp_path):
     )
     report = run_evals([_skill(tmp_path)], [runner], evals_path=_evals(tmp_path, case))
     assert report.failed == 1
+
+
+def test_two_skills_passed_in_with_one_name_are_refused(tmp_path):
+    # A library caller builds its own list, so `load_skills` is not the only way in.
+    one = _skill_with_cases(tmp_path / "one", name="demo")
+    two = _skill_with_cases(tmp_path / "two", name="demo")
+    with pytest.raises(SkillParseError, match="two skills are named 'demo': "):
+        run_evals([one, two], [_runner()])

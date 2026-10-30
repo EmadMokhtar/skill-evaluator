@@ -81,6 +81,22 @@ message names the field rather than its type. Enforcing this in the loader rathe
 generator makes it unconditional: hand-written stubs get it too, and no CI configuration can
 opt out of it.
 
+### Case names are unique within a skill, and skill names within a run, ignoring letter case
+
+A report names each outcome by `(skill_name, case_name, runner)`, and the per-skill pass
+rate by skill name alone. A repeated name therefore merged different cases as repetitions of
+one (issue #133): wrong counts in the delta view, a high-variance flag on two deterministic
+cases, a hidden low-signal flag (check ids are `{kind}[{index}]`, so one case's
+`contains[0]` paired with the other's), two JUnit test cases with one class and name, and one
+`per_skill_min` for two skills. Both repeats are authoring errors (exit 2) at load time,
+before any case runs, and `skill-lens list` reports them. `cases/loader._reject_repeated_names`
+compares a skill's cases once every eval file is parsed, so a repeat across files — a YAML
+`eval-1` beside an `evals.json` `"id": 1` — names both files.
+`skills/loader.check_unique_skill_names` runs in `load_skills`, so batch `init` refuses too,
+and again in `run_evals` for a library caller that built its own list. Names compare by
+`str.casefold()`, the way `--case` matches: it could never select `Greet` without `greet`.
+A rule relaxed later breaks no suite; one tightened later would break suites a second time.
+
 ### `extra="forbid"` on every user-authored model
 
 `EvalCase`, `AssertionSpec`, `ToolSpec`, `TrajectorySpec`, `BudgetSpec`, `Config`. Without

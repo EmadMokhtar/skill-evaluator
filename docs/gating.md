@@ -56,15 +56,17 @@ credential, or an empty `default_runner`), or a `cli` runner or judge with no
 `[runners.cli] command`. See [Configuration](configuration.md).
 
 **A skill that cannot be read** (`SkillParseError`): a path that does not exist, an
-unreadable `SKILL.md`, malformed frontmatter, or a `version:` that YAML does not read as text
-(see [the invariant](invariants.md#a-version-that-yaml-does-not-parse-as-a-string-is-an-authoring-error)).
+unreadable `SKILL.md`, malformed frontmatter, a `version:` that YAML does not read as text
+(see [the invariant](invariants.md#a-version-that-yaml-does-not-parse-as-a-string-is-an-authoring-error)),
+or two skills with one name (see [Names are unique](eval-files.md#names-are-unique)).
 
 **An eval file that cannot be used** (`CaseParseError`), including a tool library it
 imports: malformed YAML, an unknown key, an unknown assertion `kind:`, a leftover
 `TODO(skill-lens)`, `file:` or
 `judge.artifacts` without a `workspace:` block, a rubric entry phrased against a mock
 tool's `returns:`, an invalid `input_schema`, a `when:` entry that could never answer a
-call, or a `ref:` that cannot be resolved. See [Eval files](eval-files.md).
+call, a `ref:` that cannot be resolved, or two cases of one skill with one name. See
+[Eval files](eval-files.md).
 
 **An assertion that cannot be checked** (`InvalidAssertionValue`): a malformed regex. It is
 found when the assertion runs, not when the file loads, so `skill-lens list` does not catch

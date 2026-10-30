@@ -10,7 +10,7 @@ which has no `cases:` list and is strict at every level — see [Reading
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `name` | yes | Case name, shown in reports |
+| `name` | yes | Case name, shown in reports. Unique among the skill's cases, ignoring letter case — see [Names are unique](#names-are-unique) |
 | `task` | one of `task` / `sessions` | The prompt handed to the runner |
 | `sessions` | one of `task` / `sessions` | Several prompts, each a fresh session in one shared workspace — see [Several sessions in one workspace](#several-sessions-in-one-workspace) |
 | `assertions` | no | Scoring rules; a case with none passes |
@@ -719,7 +719,7 @@ skill-lens run ./my-skill
 | `evals.json` | Becomes | Rule |
 | --- | --- | --- |
 | `skill_name` | — | Optional. When present it must equal the skill's `name`. |
-| `id` | the case name `eval-<id>` | Required. An integer or a non-empty string, never a boolean, unique in the file. |
+| `id` | the case name `eval-<id>` | Required. An integer or a non-empty string, never a boolean, unique in the file. `eval-<id>` may not repeat the name of a case in the skill's other eval files either — see [Names are unique](#names-are-unique). |
 | `prompt` | `task` | Required, non-empty. |
 | `assertions` or `expectations` | `judge.rubric` | A list of non-empty strings. The guide says `assertions`; `skill-creator` says `expectations`. Both in one eval is an error. |
 | `expected_output` | `judge.expected` | Context for the judge. With no statements it becomes the single check `The output satisfies: <expected_output>`. |
@@ -765,3 +765,26 @@ files are reported as **skipped** — visible in the output, never silently igno
 
 A `tool_libraries:` entry resolves against the eval file's own directory whichever way the
 file was found, so `--evals` does not change where a library is looked for.
+
+### Names are unique
+
+A case name is unique among one skill's cases, across every eval file found for it. A skill
+name is unique among the skills one run discovers. Both comparisons ignore letter case, so
+`Greet` and `greet` count as one name — the same way `--case` matches, which could never
+select one of the two without the other.
+
+The reason is the report. It names each outcome by its skill, its case and its runner, so
+two cases sharing a name would be merged as if they were repetitions of one case. That
+gives wrong pass counts, a high-variance flag on two cases that never varied, a hidden
+low-signal flag, and two JUnit test cases nobody can tell apart. Two skills sharing a name
+would also share one `per_skill_min` rate.
+
+A repeated name is an authoring error (exit 2), found when the files load, before any case
+runs; `skill-lens list` reports it too. The message names both places:
+
+- **Two cases.** Both files and both positions, even when they are in one file. A repeat can
+  cross formats: a YAML case named `eval-1` beside an `evals.json` with `"id": 1` is one.
+  Rename one of the two cases.
+- **Two skills.** Both directories. A skill with no `name:` takes its directory's name, so
+  `a/review/SKILL.md` and `b/review/SKILL.md` with no `name:` repeat too. Rename one in its
+  `SKILL.md`, or run skill-lens on each directory separately.

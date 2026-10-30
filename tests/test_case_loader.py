@@ -1680,3 +1680,74 @@ def test_a_one_entry_file_glob_list_is_refused_at_load(tmp_path):
     path = _glob_case(tmp_path, "      - kind: file-produced\n        file_glob: ['*.md']\n")
     with pytest.raises(CaseParseError, match="at least two"):
         parse_cases_file(path)
+
+
+# Case names are unique within a skill (issue #133). A report names each
+# outcome by (skill, case, runner), so two cases sharing a name would be
+# merged as repetitions of one case: wrong counts, a false high-variance flag,
+# a hidden low-signal flag, and two JUnit test cases nobody can tell apart.
+
+
+def _named_cases(*names: str) -> str:
+    entries = "".join(
+        f"  - name: {name}\n    task: Say hello.\n    assertions:\n"
+        "      - kind: contains\n        value: hello\n"
+        for name in names
+    )
+    return f"cases:\n{entries}"
+
+
+def test_two_eval_files_with_a_case_of_one_name_are_refused_naming_both(tmp_path):
+    skill = _skill(tmp_path, "demo")
+    evals = skill.path / "evals"
+    evals.mkdir()
+    (evals / "a.eval.yaml").write_text(_named_cases("same"))
+    (evals / "b.eval.yaml").write_text(_named_cases("other", "same"))
+    with pytest.raises(CaseParseError) as excinfo:
+        load_cases_for_skill(skill)
+    message = str(excinfo.value)
+    assert "skill 'demo' has two cases named 'same': " in message
+    assert f"{evals / 'a.eval.yaml'} case #1 and {evals / 'b.eval.yaml'} case #2" in message
+
+
+def test_one_eval_file_with_two_cases_of_one_name_is_refused_naming_both_positions(tmp_path):
+    skill = _skill(tmp_path)
+    path = skill.path / "pdf.eval.yaml"
+    path.write_text(_named_cases("same", "other", "same"))
+    with pytest.raises(CaseParseError) as excinfo:
+        load_cases_for_skill(skill)
+    assert f"{path} case #1 and {path} case #3" in str(excinfo.value)
+
+
+def test_case_names_that_differ_only_in_letter_case_are_refused(tmp_path):
+    # `--case` matches case-insensitively, so it could never select one of the two alone.
+    skill = _skill(tmp_path)
+    (skill.path / "pdf.eval.yaml").write_text(_named_cases("Greet", "greet"))
+    with pytest.raises(CaseParseError, match="two cases named 'Greet' and 'greet': "):
+        load_cases_for_skill(skill)
+
+
+def test_a_yaml_case_spelling_an_evals_json_case_name_is_refused(tmp_path):
+    # `evals_json` refuses a repeated id within one file; only the loader sees both files.
+    skill = _json_skill(tmp_path)
+    (skill.path / "evals" / "basic.yaml").write_text(_named_cases("eval-1"))
+    with pytest.raises(CaseParseError, match="two cases named 'eval-1': "):
+        load_cases_for_skill(skill)
+
+
+def test_an_explicit_evals_directory_is_checked_across_its_files(tmp_path):
+    skill = _skill(tmp_path)
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    (other / "a.yaml").write_text(_named_cases("same"))
+    (other / "b.yaml").write_text(_named_cases("same"))
+    with pytest.raises(CaseParseError, match="two cases named 'same': "):
+        load_cases_for_skill(skill, evals_path=other)
+
+
+def test_two_skills_may_each_have_a_case_of_one_name(tmp_path):
+    # Unique within a skill, not within a run: the skill is part of the key.
+    for name in ("pdf", "xlsx"):
+        skill = _skill(tmp_path, name)
+        (skill.path / f"{name}.eval.yaml").write_text(_named_cases("same"))
+        assert [case.name for case in load_cases_for_skill(skill)] == ["same"]
