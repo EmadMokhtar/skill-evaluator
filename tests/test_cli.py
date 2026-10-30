@@ -1637,3 +1637,34 @@ def test_every_product_shares_one_decision(tmp_path, monkeypatch):
     )
     assert [r.sandbox for r in seen["runners"]] == [the_decision, the_decision]
     assert seen["judge"]._sandbox is the_decision
+
+
+DUPLICATE_CASE_YAML = """cases:
+  - name: same
+    task: anything
+    assertions:
+      - kind: contains
+        value: pdf
+  - name: same
+    task: anything
+    assertions:
+      - kind: contains
+        value: definitely-not-in-output
+"""
+
+
+@pytest.mark.parametrize("command", ["run", "list"])
+def test_two_cases_of_one_name_exit_2(tmp_path, command):
+    _make_skill(tmp_path, cases=DUPLICATE_CASE_YAML)
+    result = runner.invoke(app, [command, str(tmp_path)])
+    assert result.exit_code == 2
+    assert "skill 'pdf' has two cases named 'same': " in result.stdout
+
+
+@pytest.mark.parametrize("command", ["run", "list"])
+def test_two_skills_of_one_name_exit_2(tmp_path, command):
+    _make_skill(tmp_path / "one")
+    _make_skill(tmp_path / "two")
+    result = runner.invoke(app, [command, str(tmp_path)])
+    assert result.exit_code == 2
+    assert "two skills are named 'pdf': " in result.stdout

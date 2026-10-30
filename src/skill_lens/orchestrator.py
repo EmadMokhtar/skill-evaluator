@@ -43,6 +43,7 @@ from skill_lens.runners.base import Runner
 from skill_lens.scripts import ScriptPolicy, ScriptRuntime, preflight
 from skill_lens.sessions import run_sessions
 from skill_lens.skills.baseline import BaselineUnavailable, resolve_previous
+from skill_lens.skills.loader import check_unique_skill_names
 from skill_lens.workspace import (
     DEFAULT_LIMITS,
     WorkspaceError,
@@ -688,6 +689,9 @@ def run_evals(
         raise ValueError(f"repeat must be at least 1, got {repeat}")
     if concurrency < 1:
         raise ValueError(f"concurrency must be at least 1, got {concurrency}")
+    # An authoring error, not a ValueError: `load_skills` refuses it too, so
+    # the CLI never reaches here with one, but a library caller can.
+    check_unique_skill_names(skills)
     evaluators = (
         evaluators
         if evaluators is not None

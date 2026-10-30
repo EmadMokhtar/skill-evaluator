@@ -115,4 +115,34 @@ def load_skills(path: Path) -> list[Skill]:
     if (path / SKILL_FILENAME).is_file():
         return [parse_skill_file(path / SKILL_FILENAME)]
     skills = [parse_skill_file(md) for md in sorted(path.rglob(SKILL_FILENAME))]
+    check_unique_skill_names(skills)
     return sorted(skills, key=lambda s: s.name)
+
+
+def check_unique_skill_names(skills: list[Skill]) -> None:
+    """Refuse two skills whose names are equal, ignoring letter case.
+
+    A report names each outcome by (skill, case, runner), and the per-skill
+    pass rate by skill alone, so two skills sharing a name would have their
+    cases merged as one skill's. `load_skills` calls this at discovery, so
+    `list` and `init` refuse it too; `run_evals` calls it again for a library
+    caller that built its own list. Letter case is ignored by the same rule
+    as case names, so one sentence describes both.
+    """
+    seen: dict[str, Skill] = {}
+    for skill in skills:
+        folded = skill.name.casefold()
+        if folded not in seen:
+            seen[folded] = skill
+            continue
+        first = seen[folded]
+        names = (
+            repr(first.name) if first.name == skill.name else f"{first.name!r} and {skill.name!r}"
+        )
+        raise SkillParseError(
+            f"two skills are named {names}: {first.path} and {skill.path}. Skill names "
+            f"must be unique within a run, ignoring letter case: a report names each "
+            f"outcome by its skill, case and runner, so their cases would be merged as "
+            f"one skill's. Rename one in its {SKILL_FILENAME}, or run skill-lens on each "
+            f"directory separately."
+        )

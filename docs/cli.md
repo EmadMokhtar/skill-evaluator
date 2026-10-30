@@ -107,6 +107,9 @@ validates every eval file without calling a runner — free, and no API key requ
 that depends on the runner is not `list`'s to apply: a `trajectory:` name must be one of the
 case's tools under `fake`, `pydantic-ai` or `langchain`, but is the product's own under
 `copilot` or `claude-code`, so `run` checks it in preflight and `list` accepts any name.
+A rule that does not depend on the runner is applied as `run` applies it: two cases of one
+skill, or two skills, with one name exit `2` (see
+[Names are unique](eval-files.md#names-are-unique)).
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
@@ -164,7 +167,7 @@ Fill in every TODO(skill-lens), then run: skill-lens list skills
 
 Exit `0` on success, including when every skill already had a suite (`Nothing to do`).
 Exit `2` when the path holds no `SKILL.md` anywhere under it, when a `SKILL.md` is
-malformed, when a target file exists and `--force` was not given (one skill), when `--force`
+malformed, when two skills under it have one name, when a target file exists and `--force` was not given (one skill), when `--force`
 is given for a directory of skills, or when a file cannot be written.
 
 ## `mcp-import`

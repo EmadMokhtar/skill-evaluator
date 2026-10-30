@@ -242,3 +242,33 @@ def test_the_skill_carries_its_file_text_verbatim(tmp_path):
     _write_skill(tmp_path, "pdf", body)
     (skill,) = load_skills(tmp_path / "pdf")
     assert skill.markdown == body
+
+
+# Skill names are unique within a run (issue #133). A report names each
+# outcome by (skill, case, runner), so two skills sharing a name would have
+# their cases merged as one skill's, and share one per-skill pass rate.
+
+
+def test_two_skills_with_one_name_are_refused_naming_both_directories(tmp_path):
+    one = _write_skill(tmp_path, "one", SKILL_MD.replace("name: pdf", "name: demo"))
+    two = _write_skill(tmp_path, "two", SKILL_MD.replace("name: pdf", "name: demo"))
+    with pytest.raises(SkillParseError) as excinfo:
+        load_skills(tmp_path)
+    message = str(excinfo.value)
+    assert "two skills are named 'demo': " in message
+    assert f"{one} and {two}" in message
+
+
+def test_two_skills_falling_back_to_one_directory_name_are_refused(tmp_path):
+    # No `name:` in either frontmatter, so both take their directory's name.
+    _write_skill(tmp_path / "a", "demo", "Plain instructions.\n")
+    _write_skill(tmp_path / "b", "demo", "Plain instructions.\n")
+    with pytest.raises(SkillParseError, match="two skills are named 'demo': "):
+        load_skills(tmp_path)
+
+
+def test_skill_names_that_differ_only_in_letter_case_are_refused(tmp_path):
+    _write_skill(tmp_path, "one", SKILL_MD.replace("name: pdf", "name: Demo"))
+    _write_skill(tmp_path, "two", SKILL_MD.replace("name: pdf", "name: demo"))
+    with pytest.raises(SkillParseError, match="two skills are named 'Demo' and 'demo': "):
+        load_skills(tmp_path)

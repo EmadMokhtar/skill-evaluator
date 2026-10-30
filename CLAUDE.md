@@ -90,6 +90,14 @@ fails if the two drift apart — so a new invariant is added in both places or n
 - **An unfilled scaffold is an authoring error, not a failure.** A case still containing
   `TODO(skill-lens)` aborts the run (exit 2), checked in `cases/loader.py` before validation
   so the message names the field. The rule is the loader's, so hand-written stubs get it too.
+- **Case names are unique within a skill, and skill names within a run, ignoring letter case.**
+  The report key is `(skill, case, runner)`, so a repeat merged two cases as repetitions of
+  one: wrong counts, a false high-variance flag, a hidden low-signal flag, twin JUnit names,
+  one `per_skill_min` for two skills (issue #133). Exit 2 at load time, `list` too.
+  `cases/loader._reject_repeated_names` runs once every file is parsed (a YAML `eval-1`
+  beside an `evals.json` `"id": 1` repeats); `skills/loader.check_unique_skill_names` runs in
+  `load_skills` (so batch `init` too) and again in `run_evals`. Compared by `casefold()`, as
+  `--case` matches.
 - **`extra="forbid"` on every user-authored model.** `EvalCase` / `AssertionSpec` / `ToolSpec`
   / `TrajectorySpec` / `BudgetSpec` / `Config` / `RunResult`. Without it a typo like
   `assertion:` yields a vacuously-passing case. On `RunResult` it also makes writing the

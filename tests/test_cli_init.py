@@ -248,3 +248,15 @@ def test_single_init_writes_beside_an_evals_json_and_leaves_it_alone(tmp_path):
     assert result.exit_code == 0, result.output
     assert (path / "evals" / "order-support.eval.yaml").is_file()
     assert (path / "evals" / "evals.json").read_text(encoding="utf-8") == original
+
+
+def test_batch_init_refuses_two_skills_with_one_name(tmp_path):
+    # Discovery refuses it, so the two scaffolds could never run together anyway.
+    for parent in ("one", "two"):
+        directory = tmp_path / parent / "demo"
+        directory.mkdir(parents=True)
+        (directory / "SKILL.md").write_text("Plain instructions.\n", encoding="utf-8")
+    result = runner.invoke(app, ["init", str(tmp_path)])
+    assert result.exit_code == 2
+    assert "two skills are named 'demo': " in result.stdout
+    assert not list(tmp_path.rglob("*.eval.yaml"))

@@ -56,6 +56,11 @@ QUOTED: list[tuple[str, str]] = [
     (": tool #", "cases/tool_libraries.py"),
     (" still has the scaffold placeholder ", "cases/tool_libraries.py"),
     (". Fill it in -- an unfinished mock cannot stand in for anything.", "cases/tool_libraries.py"),
+    # Two cases of one skill, or two skills, with one name
+    (" has two cases named ", "cases/loader.py"),
+    (". Case names must be unique within a skill, ignoring letter case: ", "cases/loader.py"),
+    ("two skills are named ", "skills/loader.py"),
+    (". Skill names must be unique within a run, ignoring letter case: ", "skills/loader.py"),
     # Other things that exit 2
     (" is not set, and model ", "runners/preflight.py"),
     (
