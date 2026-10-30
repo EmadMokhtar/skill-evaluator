@@ -1,3 +1,15 @@
+## v0.26.0 (2026-10-30)
+
+### BREAKING CHANGE
+
+- a suite where two cases of one skill share a name (across
+all of its eval files, including a YAML eval-1 beside an evals.json id 1),
+or where two skills in one run share a name, now exits 2 instead of running.
+
+### Fix
+
+- refuse repeated case names in a skill and repeated skill names in a run (#134)
+
 ## v0.25.0 (2026-10-23)
 
 ### Feat
